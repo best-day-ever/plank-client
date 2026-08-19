@@ -305,6 +305,25 @@ void FFmpegVideoDecoder::reset()
 bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool useAlternateFrontend)
 {
     if (useAlternateFrontend) {
+#ifdef HAVE_EGL
+        // Identity GBR relies on importing the packed Y410 VAAPI surface as
+        // XR30. libplacebo treats Y410 as YUV and cannot preserve that channel
+        // alias, while the DRM HDR frontend is unnecessary for this SDR mode.
+        if (params->enableIdentityGbr && m_BackendRenderer->canExportEGL()) {
+            m_FrontendRenderer = new EGLRenderer(m_BackendRenderer);
+            if (m_FrontendRenderer->initialize(params)) {
+                return true;
+            }
+            delete m_FrontendRenderer;
+            m_FrontendRenderer = nullptr;
+        }
+#endif
+
+        // Do not silently route identity GBR through a color-managed frontend.
+        if (params->enableIdentityGbr) {
+            return false;
+        }
+
         if (params->videoFormat & VIDEO_FORMAT_MASK_10BIT) {
 #if defined(HAVE_LIBPLACEBO_VULKAN) && !defined(VULKAN_IS_SLOW)
             // The Vulkan renderer can also handle HDR with a supported compositor. We prefer
