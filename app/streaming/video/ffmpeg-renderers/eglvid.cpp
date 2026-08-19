@@ -186,6 +186,16 @@ AVPixelFormat EGLRenderer::getPreferredPixelFormat(int videoFormat)
     return m_Backend->getPreferredPixelFormat(videoFormat);
 }
 
+int EGLRenderer::getDecoderColorspace()
+{
+    return m_Backend->getDecoderColorspace();
+}
+
+int EGLRenderer::getDecoderColorRange()
+{
+    return m_Backend->getDecoderColorRange();
+}
+
 void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, int viewportHeight)
 {
     // Do nothing if this overlay is disabled
@@ -413,9 +423,13 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     // This renderer doesn't support HDR, so pick a different one.
     // HACK: This avoids a deadlock in SDL_CreateRenderer() if
     // Vulkan was used before and SDL is trying to load EGL.
-    if (params->videoFormat & VIDEO_FORMAT_MASK_10BIT) {
+    if ((params->videoFormat & VIDEO_FORMAT_MASK_10BIT) && !params->enableIdentityGbr) {
         EGL_LOG(Info, "EGL doesn't support HDR rendering");
         return false;
+    }
+
+    if (params->enableIdentityGbr) {
+        EGL_LOG(Info, "Enabling 10-bit identity GBR presentation");
     }
 
     // HACK: Work around bug where renderer will repeatedly fail with:

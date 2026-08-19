@@ -250,11 +250,13 @@ ssize_t EglImageFactory::exportVAImages(AVFrame *frame, VADRMPRIMESurfaceDescrip
 
     for (size_t i = 0; i < vaFrame->num_layers; ++i) {
         const auto &layer = vaFrame->layers[i];
+        const uint32_t importFormat = m_Renderer->getEGLImportFormat(layer.drm_format);
+        const bool identityGbr = m_Renderer->getFrameColorspace(frame) == COLORSPACE_IDENTITY_GBR;
 
         // Max 33 attributes (1 key + 1 value for each)
         const int EGL_ATTRIB_COUNT = 33 * 2;
         EGLAttrib attribs[EGL_ATTRIB_COUNT] = {
-            EGL_LINUX_DRM_FOURCC_EXT, (EGLAttrib)layer.drm_format,
+            EGL_LINUX_DRM_FOURCC_EXT, (EGLAttrib)importFormat,
             EGL_WIDTH, i == 0 ? frame->width : frame->width / 2,
             EGL_HEIGHT, i == 0 ? frame->height : frame->height / 2,
             EGL_IMAGE_PRESERVED_KHR, EGL_TRUE,
@@ -331,7 +333,7 @@ ssize_t EglImageFactory::exportVAImages(AVFrame *frame, VADRMPRIMESurfaceDescrip
         }
 
         // For composed exports, add the YUV metadata
-        if (vaFrame->num_layers == 1) {
+        if (vaFrame->num_layers == 1 && !identityGbr) {
             // Add colorspace metadata
             switch (m_Renderer->getFrameColorspace(frame)) {
             case COLORSPACE_REC_601:

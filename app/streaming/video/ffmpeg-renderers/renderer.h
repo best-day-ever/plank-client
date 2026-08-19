@@ -288,6 +288,13 @@ public:
         return AV_PIX_FMT_NONE;
     }
 
+    // Some packed video surfaces are bit-compatible with RGB formats. Backends
+    // may override the import FourCC when the negotiated transport defines that
+    // mapping explicitly.
+    virtual uint32_t getEGLImportFormat(uint32_t drmFormat) {
+        return drmFormat;
+    }
+
     virtual bool initializeEGL(EGLDisplay,
                                const EGLExtensions &) {
         return false;

@@ -1,0 +1,25 @@
+From: StationConnect Engineering <engineering@stationconnect.invalid>
+Subject: [PATCH] avcodec/hevc: enable hardware formats for identity GBR
+
+HEVC matrix_coeffs=0 changes the software pixel format for 10-bit 4:4:4
+streams from YUV444P10 to GBRP10. The coded surface layout and hardware
+profile remain Main 4:4:4 10, so offer the same hardware accelerators.
+
+---
+ libavcodec/hevc/hevcdec.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/libavcodec/hevc/hevcdec.c b/libavcodec/hevc/hevcdec.c
+index 8a845f5..349e0f3 100644
+--- a/libavcodec/hevc/hevcdec.c
++++ b/libavcodec/hevc/hevcdec.c
+@@ -678,6 +678,7 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
+         *fmt++ = AV_PIX_FMT_CUDA;
+ #endif
+         break;
++    case AV_PIX_FMT_GBRP10:
+     case AV_PIX_FMT_YUV444P10:
+ #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
+         *fmt++ = AV_PIX_FMT_VIDEOTOOLBOX;
+-- 
+2.50.1

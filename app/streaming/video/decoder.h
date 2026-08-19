@@ -42,6 +42,7 @@ typedef struct _DECODER_PARAMETERS {
     int frameRate;
     bool enableVsync;
     bool enableFramePacing;
+    bool enableIdentityGbr;
     bool testOnly;
 } DECODER_PARAMETERS, *PDECODER_PARAMETERS;
 

@@ -21,6 +21,7 @@ VAAPIRenderer::VAAPIRenderer(int decoderSelectionPass)
       m_HwContext(nullptr),
       m_BlacklistedForDirectRendering(false),
       m_RequiresExplicitPixelFormat(false),
+      m_IdentityGbr(false),
       m_OverlayMutex(nullptr)
 #ifdef HAVE_EGL
     , m_EglExportType(EglExportType::Unknown),
@@ -209,6 +210,7 @@ VAAPIRenderer::initialize(PDECODER_PARAMETERS params)
 
     m_Window = params->window;
     m_VideoFormat = params->videoFormat;
+    m_IdentityGbr = params->enableIdentityGbr;
 
     m_HwContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
     if (!m_HwContext) {
@@ -583,9 +585,18 @@ VAAPIRenderer::isDirectRenderingSupported()
 
 int VAAPIRenderer::getDecoderColorspace()
 {
+    if (m_IdentityGbr) {
+        return COLORSPACE_IDENTITY_GBR;
+    }
+
     // Gallium drivers don't support Rec 709 yet - https://gitlab.freedesktop.org/mesa/mesa/issues/1915
     // Intel-vaapi-driver defaults to Rec 601 - https://github.com/intel/intel-vaapi-driver/blob/021bcb79d1bd873bbd9fbca55f40320344bab866/src/i965_output_dri.c#L186
     return COLORSPACE_REC_601;
+}
+
+int VAAPIRenderer::getDecoderColorRange()
+{
+    return m_IdentityGbr ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
 }
 
 int VAAPIRenderer::getDecoderCapabilities()
@@ -1015,6 +1026,24 @@ AVPixelFormat VAAPIRenderer::getEGLImagePixelFormat() {
     return AV_PIX_FMT_NONE;
 }
 
+uint32_t VAAPIRenderer::getEGLImportFormat(uint32_t drmFormat) {
+#ifndef DRM_FORMAT_Y410
+#define DRM_FORMAT_Y410 VA_FOURCC('Y', '4', '1', '0')
+#endif
+#ifndef DRM_FORMAT_XRGB2101010
+#define DRM_FORMAT_XRGB2101010 VA_FOURCC('X', 'R', '3', '0')
+#endif
+
+    // Y410 stores U, Y, and V in the same bit positions that XR30 uses for
+    // B, G, and R. The identity transport defines U=B, Y=G, V=R, so importing
+    // this surface as XR30 reverses the mapping without a color conversion.
+    if (m_IdentityGbr && drmFormat == DRM_FORMAT_Y410) {
+        return DRM_FORMAT_XRGB2101010;
+    }
+
+    return drmFormat;
+}
+
 bool
 VAAPIRenderer::initializeEGL(EGLDisplay dpy,
                              const EGLExtensions &ext) {
@@ -1026,33 +1055,62 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
 
     // Prefer exporting composed images absent a user override or lack of support for exporting or importing
     if (qgetenv("VAAPI_EGL_SEPARATE_LAYERS") == "1") {
+        if (m_IdentityGbr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Identity GBR requires composed VAAPI layers");
+            return false;
+        }
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Exporting separate layers due to environment variable override");
         m_EglExportType = EglExportType::Separate;
     }
     else if (!canExportSurfaceHandle(VA_EXPORT_SURFACE_COMPOSED_LAYERS, &descriptor)) {
+        if (m_IdentityGbr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Identity GBR requires composed VAAPI layer export");
+            return false;
+        }
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Exporting separate layers due to lack of support for VA_EXPORT_SURFACE_COMPOSED_LAYERS");
         m_EglExportType = EglExportType::Separate;
     }
-    else if (!m_EglImageFactory.supportsImportingFormat(dpy, descriptor.layers[0].drm_format)) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Exporting separate layers due to lack of support for importing format: %08x", descriptor.layers[0].drm_format);
-        m_EglExportType = EglExportType::Separate;
-    }
-    else if (!m_EglImageFactory.supportsImportingModifier(dpy, descriptor.layers[0].drm_format, descriptor.objects[0].drm_format_modifier)) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Exporting separate layers due to lack of support for importing format and modifier: %08x %016" PRIx64,
-                    descriptor.layers[0].drm_format,
-                    descriptor.objects[0].drm_format_modifier);
-        m_EglExportType = EglExportType::Separate;
-    }
     else {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Exporting composed layers with format and modifier: %08x %016" PRIx64,
-                    descriptor.layers[0].drm_format,
-                    descriptor.objects[0].drm_format_modifier);
-        m_EglExportType = EglExportType::Composed;
+        const uint32_t importFormat = getEGLImportFormat(descriptor.layers[0].drm_format);
+        if (m_IdentityGbr && importFormat == descriptor.layers[0].drm_format) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Identity GBR requires a Y410 VAAPI surface");
+            return false;
+        }
+        else if (!m_EglImageFactory.supportsImportingFormat(dpy, importFormat)) {
+            if (m_IdentityGbr) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                             "EGL cannot import the XR30 identity surface");
+                return false;
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Exporting separate layers due to lack of support for importing format: %08x", importFormat);
+            m_EglExportType = EglExportType::Separate;
+        }
+        else if (!m_EglImageFactory.supportsImportingModifier(dpy, importFormat, descriptor.objects[0].drm_format_modifier)) {
+            if (m_IdentityGbr) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                             "EGL cannot import the XR30 identity surface modifier");
+                return false;
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Exporting separate layers due to lack of support for importing format and modifier: %08x %016" PRIx64,
+                        importFormat,
+                        descriptor.objects[0].drm_format_modifier);
+            m_EglExportType = EglExportType::Separate;
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Exporting composed layers with source/import format and modifier: %08x/%08x %016" PRIx64,
+                        descriptor.layers[0].drm_format,
+                        importFormat,
+                        descriptor.objects[0].drm_format_modifier);
+            m_EglExportType = EglExportType::Composed;
+        }
     }
 
     // Let's probe for EGL import support on separate layers too, but only warn if it's not supported

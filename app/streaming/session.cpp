@@ -261,7 +261,8 @@ void Session::clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                             SDL_Window* window, int videoFormat, int width, int height,
-                            int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly, IVideoDecoder*& chosenDecoder)
+                            int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly,
+                            IVideoDecoder*& chosenDecoder, bool enableIdentityGbr)
 {
     DECODER_PARAMETERS params;
 
@@ -277,6 +278,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     params.window = window;
     params.enableVsync = enableVsync;
     params.enableFramePacing = enableFramePacing;
+    params.enableIdentityGbr = enableIdentityGbr;
     params.testOnly = testOnly;
     params.vds = vds;
 
@@ -320,6 +322,14 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
 
     // If we reach this, we didn't initialize any decoders successfully
     return false;
+}
+
+bool Session::isIdentityGbrEnabledForFormat(int videoFormat) const
+{
+    return videoFormat == VIDEO_FORMAT_H265_REXT10_444 &&
+           !m_Preferences->enableHdr &&
+           m_Preferences->enableYUV444 &&
+           (m_Computer->serverCodecModeSupport & SCM_IDENTITY_GBR_444);
 }
 
 int Session::drSetup(int videoFormat, int width, int height, int frameRate, void *, int)
@@ -466,11 +476,13 @@ void Session::getDecoderInfo(SDL_Window* window,
 Session::DecoderAvailability
 Session::getDecoderAvailability(SDL_Window* window,
                                 StreamingPreferences::VideoDecoderSelection vds,
-                                int videoFormat, int width, int height, int frameRate)
+                                int videoFormat, int width, int height, int frameRate,
+                                bool enableIdentityGbr)
 {
     IVideoDecoder* decoder;
 
-    if (!chooseDecoder(vds, window, videoFormat, width, height, frameRate, false, false, true, decoder)) {
+    if (!chooseDecoder(vds, window, videoFormat, width, height, frameRate,
+                       false, false, true, decoder, enableIdentityGbr)) {
         return DecoderAvailability::None;
     }
 
@@ -491,7 +503,8 @@ bool Session::populateDecoderProperties(SDL_Window* window)
                        m_StreamConfig.width,
                        m_StreamConfig.height,
                        m_StreamConfig.fps,
-                       false, false, true, decoder)) {
+                       false, false, true, decoder,
+                       isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()))) {
         return false;
     }
 
@@ -716,14 +729,16 @@ bool Session::initialize()
         // H.264 is already the lowest priority codec, so we don't need to do
         // any probing for deprioritization for it here.
 
+        const bool identityGbr = isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444);
         auto hevcDA = getDecoderAvailability(testWindow,
                                              m_Preferences->videoDecoderSelection,
                                              m_Preferences->enableYUV444 ?
-                                                 (m_Preferences->enableHdr ? VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_REXT8_444) :
+                                                 ((m_Preferences->enableHdr || identityGbr) ? VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_REXT8_444) :
                                                  (m_Preferences->enableHdr ? VIDEO_FORMAT_H265_MAIN10 : VIDEO_FORMAT_H265),
                                              m_StreamConfig.width,
                                              m_StreamConfig.height,
-                                             m_StreamConfig.fps);
+                                             m_StreamConfig.fps,
+                                             identityGbr);
         if (hevcDA == DecoderAvailability::None && m_Preferences->enableHdr) {
             // Remove all 10-bit HEVC profiles
             m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265 & VIDEO_FORMAT_MASK_10BIT);
@@ -837,9 +852,17 @@ bool Session::initialize()
         m_SupportedVideoFormats.deprioritizeByMask(~VIDEO_FORMAT_MASK_YUV444);
     }
 
-    // Mask off 10-bit codecs if HDR is not enabled
+    // Identity GBR carries 8-bit SDR source values losslessly in a 10-bit 4:4:4
+    // HEVC stream. Keep that single 10-bit format available without enabling HDR.
     if (!m_Preferences->enableHdr) {
-        m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
+        if (isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444) &&
+            m_SupportedVideoFormats.contains(VIDEO_FORMAT_H265_REXT10_444)) {
+            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
+            m_SupportedVideoFormats.prepend(VIDEO_FORMAT_H265_REXT10_444);
+        }
+        else {
+            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
+        }
     }
     else {
         // Deprioritize 8-bit codecs if HDR is enabled
@@ -1099,7 +1122,8 @@ bool Session::validateLaunch(SDL_Window* testWindow)
                                               m_SupportedVideoFormats.front(),
                                               m_StreamConfig.width,
                                               m_StreamConfig.height,
-                                              m_StreamConfig.fps) != DecoderAvailability::Hardware) {
+                                              m_StreamConfig.fps,
+                                              isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.front())) != DecoderAvailability::Hardware) {
                     if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_HARDWARE) {
                         m_SupportedVideoFormats.removeFirst();
                     }
@@ -2212,7 +2236,8 @@ void Session::execInternal()
                                    enableVsync,
                                    enableVsync && m_Preferences->framePacing,
                                    false,
-                                   s_ActiveSession->m_VideoDecoder)) {
+                                   s_ActiveSession->m_VideoDecoder,
+                                   isIdentityGbrEnabledForFormat(m_ActiveVideoFormat))) {
                     SDL_AtomicUnlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");
@@ -2363,4 +2388,3 @@ DispatchDeferredCleanup:
     // reference.
     QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
 }
-

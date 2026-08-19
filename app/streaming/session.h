@@ -61,6 +61,9 @@ public:
     {
         int mask = 0;
 
+        // Feature-only flags don't map to a video format.
+        serverCodecModes &= ~SCM_IDENTITY_GBR_444;
+
         const QMap<int, int> mapping = {
             {SCM_H264, VIDEO_FORMAT_H264},
             {SCM_H264_HIGH8_444, VIDEO_FORMAT_H264_HIGH8_444},
@@ -181,14 +184,18 @@ private:
     static
     DecoderAvailability getDecoderAvailability(SDL_Window* window,
                                                StreamingPreferences::VideoDecoderSelection vds,
-                                               int videoFormat, int width, int height, int frameRate);
+                                               int videoFormat, int width, int height, int frameRate,
+                                               bool enableIdentityGbr = false);
 
     static
     bool chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                        SDL_Window* window, int videoFormat, int width, int height,
                        int frameRate, bool enableVsync, bool enableFramePacing,
                        bool testOnly,
-                       IVideoDecoder*& chosenDecoder);
+                       IVideoDecoder*& chosenDecoder,
+                       bool enableIdentityGbr = false);
+
+    bool isIdentityGbrEnabledForFormat(int videoFormat) const;
 
     static
     void clStageStarting(int stage);
