@@ -229,11 +229,12 @@ void Pacer::handleVsync(int timeUntilNextVsyncMillis)
 
     // Catch up if we're several frames ahead
     while (m_PacingQueue.count() > frameDropTarget) {
+        int queueDepth = m_PacingQueue.count();
         AVFrame* frame = m_PacingQueue.dequeue();
 
         // Drop the lock while we call av_frame_free()
         m_FrameQueueLock.unlock();
-        m_VideoStats->pacerDroppedFrames++;
+        recordFrameDrop(DropReason::PacingCatchUp, frame, queueDepth, frameDropTarget);
         av_frame_free(&frame);
         m_FrameQueueLock.lock();
     }
@@ -375,11 +376,12 @@ void Pacer::renderFrame(AVFrame* frame)
 
     // Catch up if we're several frames ahead
     while (m_RenderQueue.count() > frameDropTarget) {
+        int queueDepth = m_RenderQueue.count();
         AVFrame* frame = m_RenderQueue.dequeue();
 
         // Drop the lock while we call av_frame_free()
         m_FrameQueueLock.unlock();
-        m_VideoStats->pacerDroppedFrames++;
+        recordFrameDrop(DropReason::RenderCatchUp, frame, queueDepth, frameDropTarget);
         av_frame_free(&frame);
         m_FrameQueueLock.lock();
     }
@@ -387,11 +389,41 @@ void Pacer::renderFrame(AVFrame* frame)
     m_FrameQueueLock.unlock();
 }
 
+void Pacer::recordFrameDrop(DropReason reason, AVFrame* frame, int queueDepth, int targetDepth)
+{
+    const char* reasonName = "unknown";
+
+    m_VideoStats->pacerDroppedFrames++;
+    switch (reason) {
+    case DropReason::PacingCatchUp:
+        m_VideoStats->pacingQueueDroppedFrames++;
+        reasonName = "pacing-catch-up";
+        break;
+    case DropReason::RenderCatchUp:
+        m_VideoStats->renderQueueDroppedFrames++;
+        reasonName = "render-catch-up";
+        break;
+    case DropReason::QueueOverflow:
+        m_VideoStats->queueOverflowDroppedFrames++;
+        reasonName = "queue-overflow";
+        break;
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Client pacer dropped frame: reason=%s age=%u ms queue=%d target=%d total=%u",
+                reasonName,
+                SDL_GetTicks() - (Uint32)frame->pkt_dts,
+                queueDepth,
+                targetDepth,
+                m_VideoStats->pacerDroppedFrames);
+}
+
 void Pacer::dropFrameForEnqueue(QQueue<AVFrame*>& queue)
 {
     SDL_assert(queue.size() <= MAX_QUEUED_FRAMES);
     if (queue.size() == MAX_QUEUED_FRAMES) {
         AVFrame* frame = queue.dequeue();
+        recordFrameDrop(DropReason::QueueOverflow, frame, queue.size() + 1, MAX_QUEUED_FRAMES);
         av_frame_free(&frame);
     }
 }

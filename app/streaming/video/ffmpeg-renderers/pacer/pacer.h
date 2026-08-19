@@ -48,6 +48,14 @@ private:
 
     void renderFrame(AVFrame* frame);
 
+    enum class DropReason {
+        PacingCatchUp,
+        RenderCatchUp,
+        QueueOverflow,
+    };
+
+    void recordFrameDrop(DropReason reason, AVFrame* frame, int queueDepth, int targetDepth);
+
     void dropFrameForEnqueue(QQueue<AVFrame*>& queue);
 
     QQueue<AVFrame*> m_RenderQueue;
