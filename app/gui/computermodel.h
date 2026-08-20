@@ -48,6 +48,8 @@ public:
 
     Q_INVOKABLE Session* createSessionForCurrentGame(int computerIndex);
 
+    Q_INVOKABLE Session* createSessionForStationConnectDesktop(int computerIndex);
+
 signals:
     void pairingCompleted(QVariant error);
     void authenticationCompleted(QVariant error);

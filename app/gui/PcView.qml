@@ -64,12 +64,34 @@ CenteredGridView {
 
     function authenticationComplete(error)
     {
+        var pcIndex = loginDialog.pcIndex
         loginDialog.close()
         if (error !== undefined) {
             errorDialog.text = error
             errorDialog.helpText = ""
             errorDialog.open()
+        } else {
+            launchStationConnectDesktop(pcIndex)
         }
+    }
+
+    function launchStationConnectDesktop(pcIndex)
+    {
+        var session = computerModel.createSessionForStationConnectDesktop(pcIndex)
+        if (session === null) {
+            errorDialog.text = qsTr("The workstation did not provide its Desktop session.")
+            errorDialog.helpText = ""
+            errorDialog.open()
+            return
+        }
+
+        var component = Qt.createComponent("StreamSegue.qml")
+        var segue = component.createObject(stackView, {
+                                               "appName": qsTr("Desktop"),
+                                               "session": session,
+                                               "isResume": false
+                                           })
+        stackView.push(segue)
     }
 
     function addComplete(success, detectedPortBlocking)
@@ -192,7 +214,7 @@ CenteredGridView {
                         var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name, "showHiddenGames": true})
                         stackView.push(appView)
                     }
-                    visible: model.online && model.paired
+                    visible: model.online && model.paired && !model.stationConnectAuthentication
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
@@ -246,10 +268,15 @@ CenteredGridView {
                     errorDialog.open()
                 }
                 else if (model.paired) {
-                    // go to game view
-                    var component = Qt.createComponent("AppView.qml")
-                    var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name})
-                    stackView.push(appView)
+                    if (model.stationConnectAuthentication) {
+                        launchStationConnectDesktop(index)
+                    }
+                    else {
+                        // go to game view
+                        var component = Qt.createComponent("AppView.qml")
+                        var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name})
+                        stackView.push(appView)
+                    }
                 }
                 else {
                     if (model.stationConnectAuthentication) {

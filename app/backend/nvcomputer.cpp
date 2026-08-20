@@ -558,7 +558,13 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(activeHttpsPort);
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(stationConnectAuthentication);
-    if (!stationConnectAuthentication || sessionToken.isEmpty()) {
+    if (stationConnectAuthentication && sessionToken.isEmpty()) {
+        if (pairState != PS_NOT_PAIRED) {
+            pairState = PS_NOT_PAIRED;
+            changed = true;
+        }
+    }
+    else {
         ASSIGN_IF_CHANGED(pairState);
     }
     ASSIGN_IF_CHANGED(serverCodecModeSupport);

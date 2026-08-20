@@ -141,6 +141,21 @@ Session* ComputerModel::createSessionForCurrentGame(int computerIndex)
     return nullptr;
 }
 
+Session* ComputerModel::createSessionForStationConnectDesktop(int computerIndex)
+{
+    Q_ASSERT(computerIndex < m_Computers.count());
+
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    for (NvApp& app : computer->appList) {
+        if (app.name == QStringLiteral("Desktop")) {
+            return new Session(computer, app);
+        }
+    }
+
+    return nullptr;
+}
+
 void ComputerModel::deleteComputer(int computerIndex)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
