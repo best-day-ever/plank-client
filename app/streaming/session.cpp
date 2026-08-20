@@ -326,7 +326,9 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
 
 bool Session::isIdentityGbrEnabledForFormat(int videoFormat) const
 {
-    return videoFormat == VIDEO_FORMAT_H265_REXT10_444 &&
+    return (videoFormat == VIDEO_FORMAT_H264_HIGH8_444 ||
+            videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ||
+            videoFormat == VIDEO_FORMAT_H265_REXT10_444) &&
            !m_Preferences->enableHdr &&
            m_Preferences->enableYUV444 &&
            (m_Computer->serverCodecModeSupport & SCM_IDENTITY_GBR_444);
@@ -346,9 +348,17 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Video stream is %dx%dx%d (format 0x%x)",
                 width, height, frameRate, videoFormat);
     if (s_ActiveSession->isIdentityGbrEnabledForFormat(videoFormat)) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Video precision: 8-bit-source/up-converted -> "
-                    "10-bit HEVC 4:4:4 -> 10-bit RGB identity presentation");
+        if (videoFormat == VIDEO_FORMAT_H264_HIGH8_444) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Video precision: native 8-bit RGB -> "
+                        "8-bit H.264 4:4:4 -> 8-bit RGB identity presentation");
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Video precision: 8-bit-source/up-converted -> "
+                        "10-bit %s 4:4:4 -> 10-bit RGB identity presentation",
+                        videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
+        }
     }
 
     return 0;
@@ -721,6 +731,7 @@ bool Session::initialize()
     m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_MAIN8);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT8_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_H265);
+    m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH10_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH8_444);
     m_SupportedVideoFormats.append(VIDEO_FORMAT_H264);
 
@@ -857,16 +868,21 @@ bool Session::initialize()
         m_SupportedVideoFormats.deprioritizeByMask(~VIDEO_FORMAT_MASK_YUV444);
     }
 
-    // Identity GBR carries 8-bit SDR source values losslessly in a 10-bit 4:4:4
-    // HEVC stream. Keep that single 10-bit format available without enabling HDR.
+    // Identity GBR carries SDR source values losslessly in 10-bit 4:4:4 streams.
+    // Keep the StationConnect H.264 and HEVC identity modes without enabling HDR.
     if (!m_Preferences->enableHdr) {
-        if (isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444) &&
-            m_SupportedVideoFormats.contains(VIDEO_FORMAT_H265_REXT10_444)) {
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
+        const bool h264Identity10 = m_Preferences->identityGbrBitDepth == 10 &&
+                                    isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H264_HIGH10_444) &&
+                                    m_SupportedVideoFormats.contains(VIDEO_FORMAT_H264_HIGH10_444);
+        const bool hevcIdentity10 = m_Preferences->identityGbrBitDepth == 10 &&
+                                    isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444) &&
+                                    m_SupportedVideoFormats.contains(VIDEO_FORMAT_H265_REXT10_444);
+        m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
+        if (hevcIdentity10) {
             m_SupportedVideoFormats.prepend(VIDEO_FORMAT_H265_REXT10_444);
         }
-        else {
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
+        if (h264Identity10) {
+            m_SupportedVideoFormats.prepend(VIDEO_FORMAT_H264_HIGH10_444);
         }
     }
     else {

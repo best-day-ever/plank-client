@@ -202,6 +202,8 @@ public:
         case AVCOL_SPC_BT2020_NCL:
         case AVCOL_SPC_BT2020_CL:
             return COLORSPACE_REC_2020;
+        case AVCOL_SPC_RGB:
+            return COLORSPACE_IDENTITY_GBR;
         default:
             // If the colorspace is not populated, assume the encoder
             // is sending the colorspace that we requested.

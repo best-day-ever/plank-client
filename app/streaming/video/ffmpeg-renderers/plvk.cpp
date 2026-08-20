@@ -992,6 +992,7 @@ bool PlVkRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFo
                 switch (pixelFormat) {
                 case AV_PIX_FMT_P410:
                 case AV_PIX_FMT_YUV444P10:
+                case AV_PIX_FMT_GBRP10:
                     return true;
                 default:
                     return false;
@@ -1003,6 +1004,7 @@ bool PlVkRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFo
                 case AV_PIX_FMT_NV42:
                 case AV_PIX_FMT_YUV444P:
                 case AV_PIX_FMT_YUVJ444P:
+                case AV_PIX_FMT_GBRP:
                     return true;
                 default:
                     return false;

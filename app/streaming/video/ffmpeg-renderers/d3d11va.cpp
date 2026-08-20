@@ -1054,6 +1054,7 @@ bool D3D11VARenderer::checkDecoderSupport(IDXGIAdapter* adapter)
         break;
 
     case VIDEO_FORMAT_H264_HIGH8_444:
+    case VIDEO_FORMAT_H264_HIGH10_444:
         // Unsupported by DXVA
         return false;
 

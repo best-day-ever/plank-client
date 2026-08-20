@@ -158,12 +158,14 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
 
 int FFmpegVideoDecoder::getDecoderColorspace()
 {
-    return m_FrontendRenderer->getDecoderColorspace();
+    return m_IdentityGbrEnabled ? COLORSPACE_IDENTITY_GBR :
+                                  m_FrontendRenderer->getDecoderColorspace();
 }
 
 int FFmpegVideoDecoder::getDecoderColorRange()
 {
-    return m_FrontendRenderer->getDecoderColorRange();
+    return m_IdentityGbrEnabled ? COLOR_RANGE_FULL :
+                                  m_FrontendRenderer->getDecoderColorRange();
 }
 
 QSize FFmpegVideoDecoder::getDecoderMaxResolution()
@@ -563,6 +565,10 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             m_Pkt->data = (uint8_t*)k_h264High_444TestFrame;
             m_Pkt->size = sizeof(k_h264High_444TestFrame);
             break;
+        case VIDEO_FORMAT_H264_HIGH10_444:
+            m_Pkt->data = (uint8_t*)k_h264High10_444TestFrame;
+            m_Pkt->size = sizeof(k_h264High10_444TestFrame);
+            break;
         case VIDEO_FORMAT_H265_REXT8_444:
             m_Pkt->data = (uint8_t*)k_HEVCRExt8_444TestFrame;
             m_Pkt->size = sizeof(k_HEVCRExt8_444TestFrame);
@@ -747,6 +753,10 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         codecString = "H.264 4:4:4";
         break;
 
+    case VIDEO_FORMAT_H264_HIGH10_444:
+        codecString = "H.264 10-bit SDR 4:4:4";
+        break;
+
     case VIDEO_FORMAT_H265:
         codecString = "HEVC";
         break;
@@ -823,11 +833,21 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         }
 
         if (m_IdentityGbrEnabled) {
-            ret = snprintf(&output[offset],
-                           length - offset,
-                           "Source precision: 8-bit-source/up-converted\n"
-                           "Codec precision: 10-bit HEVC 4:4:4\n"
-                           "Presentation precision: 10-bit RGB identity\n");
+            if (m_VideoFormat == VIDEO_FORMAT_H264_HIGH8_444) {
+                ret = snprintf(&output[offset],
+                               length - offset,
+                               "Source precision: native 8-bit RGB\n"
+                               "Codec precision: 8-bit H.264 4:4:4\n"
+                               "Presentation precision: 8-bit RGB identity\n");
+            }
+            else {
+                ret = snprintf(&output[offset],
+                               length - offset,
+                               "Source precision: 8-bit-source/up-converted\n"
+                               "Codec precision: 10-bit %s 4:4:4\n"
+                               "Presentation precision: 10-bit RGB identity\n",
+                               m_VideoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
+            }
             if (ret < 0 || ret >= length - offset) {
                 SDL_assert(false);
                 return;

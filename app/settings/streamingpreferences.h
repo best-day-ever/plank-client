@@ -174,6 +174,7 @@ public:
     VideoCodecConfig videoCodecConfig;
     bool enableHdr;
     bool enableYUV444;
+    int identityGbrBitDepth;
     VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
@@ -223,4 +224,3 @@ private:
 
     QQmlEngine* m_QmlEngine;
 };
-

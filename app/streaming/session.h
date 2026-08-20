@@ -67,6 +67,7 @@ public:
         const QMap<int, int> mapping = {
             {SCM_H264, VIDEO_FORMAT_H264},
             {SCM_H264_HIGH8_444, VIDEO_FORMAT_H264_HIGH8_444},
+            {SCM_H264_HIGH10_444, VIDEO_FORMAT_H264_HIGH10_444},
             {SCM_HEVC, VIDEO_FORMAT_H265},
             {SCM_HEVC_MAIN10, VIDEO_FORMAT_H265_MAIN10},
             {SCM_HEVC_REXT8_444, VIDEO_FORMAT_H265_REXT8_444},
