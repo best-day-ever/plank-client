@@ -1,7 +1,10 @@
 #include "nvcomputer.h"
 #include <Limelight.h>
 
+#include <utility>
+
 #include <QDebug>
+#include <QDateTime>
 #include <QUuid>
 #include <QtNetwork/QNetworkReply>
 #include <QEventLoop>
@@ -9,14 +12,54 @@
 #include <QXmlStreamReader>
 #include <QSslKey>
 #include <QImageReader>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QtEndian>
+#include <QNetworkInterface>
 #include <QNetworkProxy>
+#include <QTcpSocket>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
 #define LAUNCH_TIMEOUT_MS 120000
 #define RESUME_TIMEOUT_MS 30000
 #define QUIT_TIMEOUT_MS 30000
+
+namespace {
+class SecureStringGuard
+{
+public:
+    explicit SecureStringGuard(QString& value) : m_Value(value) {}
+    ~SecureStringGuard()
+    {
+        m_Value.fill(QChar('\0'));
+        m_Value.clear();
+    }
+
+private:
+    QString& m_Value;
+};
+
+bool isStationConnectCertificate(const QSslCertificate& certificate)
+{
+    const auto alternativeNames = certificate.subjectAlternativeNames();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    return !certificate.isNull() && certificate.isSelfSigned() &&
+            certificate.publicKey().algorithm() == QSsl::Rsa &&
+            certificate.publicKey().length() >= 3072 &&
+            !alternativeNames.values(QSsl::DnsEntry).isEmpty() &&
+            alternativeNames.values(QSsl::IpAddressEntry).isEmpty() &&
+            certificate.effectiveDate() <= now && certificate.expiryDate() > now;
+}
+
+QSslConfiguration stationConnectSslConfiguration()
+{
+    QSslConfiguration configuration = QSslConfiguration::defaultConfiguration();
+    configuration.setProtocol(QSsl::TlsV1_3OrLater);
+    return configuration;
+}
+}
 
 NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert) :
     m_ServerCert(serverCert)
@@ -37,7 +80,8 @@ NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert
 NvHTTP::NvHTTP(NvComputer* computer) :
     NvHTTP(computer->activeAddress, computer->activeHttpsPort, computer->serverCert)
 {
-
+    setStationConnectAuthentication(computer->stationConnectAuthentication,
+                                    computer->sessionToken);
 }
 
 void NvHTTP::setServerCert(QSslCertificate serverCert)
@@ -60,6 +104,48 @@ void NvHTTP::setAddress(NvAddress address)
 void NvHTTP::setHttpsPort(uint16_t port)
 {
     m_BaseUrlHttps.setPort(port);
+}
+
+void NvHTTP::setStationConnectAuthentication(bool enabled, QString sessionToken)
+{
+    m_StationConnectAuthentication = enabled;
+    m_SessionToken = std::move(sessionToken);
+}
+
+bool NvHTTP::isApprovedStationConnectRoute() const
+{
+    QTcpSocket socket;
+    socket.setProxy(QNetworkProxy::NoProxy);
+    socket.connectToHost(m_Address.address(), m_BaseUrlHttps.port());
+    if (!socket.waitForConnected(3000)) {
+        return false;
+    }
+    if (socket.localAddress().isLoopback()) {
+        return true;
+    }
+    for (const QNetworkInterface& interface : QNetworkInterface::allInterfaces()) {
+        if ((interface.flags() & QNetworkInterface::IsUp) == 0) {
+            continue;
+        }
+        bool ownsAddress = false;
+        for (const QNetworkAddressEntry& address : interface.addressEntries()) {
+            if (address.ip() == socket.localAddress()) {
+                ownsAddress = true;
+                break;
+            }
+        }
+        if (!ownsAddress) {
+            continue;
+        }
+        const QString configuredInterface =
+                qEnvironmentVariable("STATIONCONNECT_VPN_INTERFACE");
+        if (!configuredInterface.isEmpty()) {
+            return interface.name() == configuredInterface;
+        }
+        return interface.name().startsWith("zt") ||
+               interface.humanReadableName().startsWith("ZeroTier");
+    }
+    return false;
 }
 
 NvAddress NvHTTP::address()
@@ -126,7 +212,7 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
     QString serverInfo;
 
     // Check if we have a pinned cert and HTTPS port for this host yet
-    if (!m_ServerCert.isNull() && httpsPort() != 0)
+    if ((m_StationConnectAuthentication || !m_ServerCert.isNull()) && httpsPort() != 0)
     {
         try
         {
@@ -142,6 +228,9 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
         }
         catch (const GfeHttpResponseException& e)
         {
+            if (m_StationConnectAuthentication) {
+                throw;
+            }
             if (e.getStatusCode() == 401)
             {
                 // Certificate validation error, fallback to HTTP
@@ -178,7 +267,7 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
 
         // If we just needed to determine the HTTPS port, we'll try again over
         // HTTPS now that we have the port number
-        if (!m_ServerCert.isNull()) {
+        if (m_StationConnectAuthentication || !m_ServerCert.isNull()) {
             return getServerInfo(logLevel, fastFail);
         }
     }
@@ -418,6 +507,42 @@ NvHTTP::getXmlString(QString xml,
 
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
+    if (m_StationConnectAuthentication) {
+        if (!isApprovedStationConnectRoute()) {
+            qWarning() << "Rejecting StationConnect TLS certificate outside the approved VPN route";
+            return;
+        }
+        const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
+        if (!isStationConnectCertificate(certificate)) {
+            const auto alternativeNames = certificate.subjectAlternativeNames();
+            qWarning() << "Rejecting a TLS certificate outside the StationConnect profile"
+                       << "null" << certificate.isNull()
+                       << "selfSigned" << certificate.isSelfSigned()
+                       << "keyAlgorithm" << certificate.publicKey().algorithm()
+                       << "keyBits" << certificate.publicKey().length()
+                       << "dnsSans" << alternativeNames.values(QSsl::DnsEntry).size()
+                       << "ipSans" << alternativeNames.values(QSsl::IpAddressEntry).size()
+                       << "effective" << certificate.effectiveDate()
+                       << "expiry" << certificate.expiryDate();
+            return;
+        }
+
+        for (const QSslError& error : errors) {
+            switch (error.error()) {
+            case QSslError::SelfSignedCertificate:
+            case QSslError::CertificateUntrusted:
+            case QSslError::UnableToGetLocalIssuerCertificate:
+            case QSslError::UnableToVerifyFirstCertificate:
+            case QSslError::HostNameMismatch:
+                break;
+            default:
+                return;
+            }
+        }
+        reply->ignoreSslErrors(errors);
+        return;
+    }
+
     bool ignoreErrors = true;
 
     if (m_ServerCert.isNull()) {
@@ -462,6 +587,98 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
     return ret;
 }
 
+QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& body)
+{
+    if (!m_StationConnectAuthentication || !m_SessionToken.isEmpty()) {
+        throw GfeHttpResponseException(400, "Invalid StationConnect authentication state");
+    }
+
+    QUrl url(m_BaseUrlHttps);
+    url.setPath("/stationconnect/auth/" + command);
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setSslConfiguration(stationConnectSslConfiguration());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+
+    QNetworkReply* reply = m_Nam.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    QEventLoop loop;
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+            &loop, &QEventLoop::quit);
+    QTimer::singleShot(REQUEST_TIMEOUT_MS, &loop, &QEventLoop::quit);
+    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!reply->isFinished()) {
+        reply->abort();
+    }
+    m_Nam.clearAccessCache();
+    if (reply->error() != QNetworkReply::NoError) {
+        const QString message = reply->errorString();
+        delete reply;
+        throw QtNetworkReplyException(QNetworkReply::UnknownNetworkError, message);
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
+    delete reply;
+    if (!document.isObject()) {
+        throw GfeHttpResponseException(400, "Malformed StationConnect authentication response");
+    }
+    return document.object();
+}
+
+QString NvHTTP::authenticate(QString username, QString password)
+{
+    SecureStringGuard passwordGuard(password);
+    if (!m_StationConnectAuthentication || !m_SessionToken.isEmpty() ||
+            username.isEmpty() || !isApprovedStationConnectRoute()) {
+        throw GfeHttpResponseException(403, "StationConnect requires an approved VPN route");
+    }
+
+    QJsonObject result = postStationConnectJson("start", {{"username", username}});
+    for (int round = 0; round < 16; ++round) {
+        const QString state = result.value("state").toString();
+        if (state == "authenticated") {
+            m_SessionToken = result.value("session_token").toString();
+            if (m_SessionToken.isEmpty()) {
+                throw GfeHttpResponseException(401, "Authentication returned no session token");
+            }
+            return m_SessionToken;
+        }
+        if (state == "denied") {
+            throw GfeHttpResponseException(401, "Operating-system authentication failed");
+        }
+        if (state != "challenge" || !result.value("messages").isArray()) {
+            throw GfeHttpResponseException(400, "Invalid PAM conversation response");
+        }
+
+        QJsonArray responses;
+        const QJsonArray messages = result.value("messages").toArray();
+        for (const QJsonValue& value : messages) {
+            const QJsonObject message = value.toObject();
+            switch (message.value("style").toInt()) {
+            case 1: // PAM_PROMPT_ECHO_OFF
+                responses.append(password);
+                break;
+            case 2: // PAM_PROMPT_ECHO_ON
+                responses.append(username);
+                break;
+            case 3: // PAM_ERROR_MSG
+            case 4: // PAM_TEXT_INFO
+                responses.append(QString());
+                break;
+            default:
+                throw GfeHttpResponseException(400, "Unsupported PAM prompt style");
+            }
+        }
+        result = postStationConnectJson("respond", {
+            {"conversation_id", result.value("conversation_id").toString()},
+            {"responses", responses},
+        });
+    }
+
+    throw GfeHttpResponseException(400, "PAM conversation exceeded the round limit");
+}
+
 QNetworkReply*
 NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
@@ -485,8 +702,16 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     QNetworkRequest request(url);
 
-    // Add our client certificate
-    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    if (!m_StationConnectAuthentication) {
+        // Legacy GameStream pairing authenticates with a persistent client certificate.
+        request.setSslConfiguration(IdentityManager::get()->getSslConfig());
+    }
+    else {
+        request.setSslConfiguration(stationConnectSslConfiguration());
+        if (!m_SessionToken.isEmpty()) {
+            request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toUtf8());
+        }
+    }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     // Disable HTTP/2 (GFE 3.22 doesn't like it) and Qt 6 enables it by default
@@ -552,6 +777,24 @@ NvHTTP::openConnection(QUrl baseUrl,
             delete reply;
             throw exception;
         }
+    }
+
+    const bool stationConnectTls = m_StationConnectAuthentication &&
+            baseUrl.scheme() == "https";
+    const bool approvedRoute = !stationConnectTls ||
+            isApprovedStationConnectRoute();
+    const bool approvedCertificate = !stationConnectTls ||
+            isStationConnectCertificate(reply->sslConfiguration().peerCertificate());
+    const bool approvedProtocol = !stationConnectTls ||
+            reply->sslConfiguration().sessionProtocol() == QSsl::TlsV1_3;
+    if (!approvedRoute || !approvedCertificate || !approvedProtocol) {
+        qWarning() << "Rejecting StationConnect TLS session"
+                   << "route" << approvedRoute
+                   << "certificate" << approvedCertificate
+                   << "tls13" << approvedProtocol;
+        GfeHttpResponseException exception(401, "Invalid StationConnect TLS session");
+        delete reply;
+        throw exception;
     }
 
     return reply;

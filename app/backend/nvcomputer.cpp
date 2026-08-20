@@ -63,6 +63,8 @@ NvComputer::NvComputer(QSettings& settings)
     this->isSupportedServerVersion = true;
     this->externalPort = this->remoteAddress.port();
     this->activeHttpsPort = 0;
+    this->stationConnectAuthentication = false;
+    this->sessionToken.clear();
 }
 
 void NvComputer::setRemoteAddress(QHostAddress address)
@@ -201,6 +203,8 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     // some assumptions about Nvidia hardware that don't apply to Sunshine hosts.
     this->isNvidiaServerSoftware = NvHTTP::getXmlString(serverInfo, "state").contains("MJOLNIR");
 
+    this->stationConnectAuthentication =
+            NvHTTP::getXmlString(serverInfo, "StationConnectAuth") == "1";
     this->pairState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
                 PS_PAIRED : PS_NOT_PAIRED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
@@ -553,7 +557,10 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED_AND_NONNULL(manualAddress);
     ASSIGN_IF_CHANGED(activeHttpsPort);
     ASSIGN_IF_CHANGED(externalPort);
-    ASSIGN_IF_CHANGED(pairState);
+    ASSIGN_IF_CHANGED(stationConnectAuthentication);
+    if (!stationConnectAuthentication || sessionToken.isEmpty()) {
+        ASSIGN_IF_CHANGED(pairState);
+    }
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
     ASSIGN_IF_CHANGED(currentGameId);
     ASSIGN_IF_CHANGED(activeAddress);

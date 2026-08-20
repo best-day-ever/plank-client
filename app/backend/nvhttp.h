@@ -9,6 +9,7 @@
 #include <QUrl>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QJsonObject>
 
 class NvComputer;
 
@@ -146,6 +147,12 @@ public:
     void setAddress(NvAddress address);
     void setHttpsPort(uint16_t port);
 
+    void setStationConnectAuthentication(bool enabled, QString sessionToken = QString());
+
+    QString authenticate(QString username, QString password);
+
+    bool isApprovedStationConnectRoute() const;
+
     NvAddress address();
 
     QSslCertificate serverCert();
@@ -195,7 +202,11 @@ private:
                    int timeoutMs,
                    NvLogLevel logLevel);
 
+    QJsonObject postStationConnectJson(QString command, const QJsonObject& body);
+
     NvAddress m_Address;
     QNetworkAccessManager m_Nam;
     QSslCertificate m_ServerCert;
+    bool m_StationConnectAuthentication = false;
+    QString m_SessionToken;
 };

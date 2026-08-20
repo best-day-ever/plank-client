@@ -62,6 +62,16 @@ CenteredGridView {
         }
     }
 
+    function authenticationComplete(error)
+    {
+        loginDialog.close()
+        if (error !== undefined) {
+            errorDialog.text = error
+            errorDialog.helpText = ""
+            errorDialog.open()
+        }
+    }
+
     function addComplete(success, detectedPortBlocking)
     {
         if (!success) {
@@ -83,6 +93,7 @@ CenteredGridView {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
         model.pairingCompleted.connect(pairingComplete)
+        model.authenticationCompleted.connect(authenticationComplete)
         model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
         return model
     }
@@ -241,14 +252,20 @@ CenteredGridView {
                     stackView.push(appView)
                 }
                 else {
-                    var pin = computerModel.generatePinString()
+                    if (model.stationConnectAuthentication) {
+                        loginDialog.pcIndex = index
+                        loginDialog.open()
+                    }
+                    else {
+                        var pin = computerModel.generatePinString()
 
-                    // Kick off pairing in the background
-                    computerModel.pairComputer(index, pin)
+                        // Kick off pairing in the background
+                        computerModel.pairComputer(index, pin)
 
-                    // Display the pairing dialog
-                    pairDialog.pin = pin
-                    pairDialog.open()
+                        // Display the pairing dialog
+                        pairDialog.pin = pin
+                        pairDialog.open()
+                    }
                 }
             } else if (!model.online) {
                 // Using open() here because it may be activated by keyboard
@@ -311,6 +328,49 @@ CenteredGridView {
         standardButtons: Dialog.Cancel
         onRejected: {
             // FIXME: We should interrupt pairing here
+        }
+    }
+
+    NavigableDialog {
+        id: loginDialog
+        property int pcIndex: -1
+        title: qsTr("Sign in to workstation")
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        onOpened: usernameField.forceActiveFocus()
+        onClosed: {
+            usernameField.clear()
+            passwordField.clear()
+        }
+        onAccepted: {
+            if (usernameField.text && passwordField.text) {
+                computerModel.authenticateComputer(pcIndex, usernameField.text,
+                                                   passwordField.text)
+            }
+        }
+
+        ColumnLayout {
+            Label {
+                text: qsTr("Use your workstation operating-system account.")
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            TextField {
+                id: usernameField
+                placeholderText: qsTr("Username")
+                Layout.fillWidth: true
+                focus: true
+            }
+            TextField {
+                id: passwordField
+                placeholderText: qsTr("Password")
+                echoMode: TextInput.Password
+                Layout.fillWidth: true
+                Keys.onReturnPressed: loginDialog.accept()
+                Keys.onEnterPressed: loginDialog.accept()
+            }
         }
     }
 

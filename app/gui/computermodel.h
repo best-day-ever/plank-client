@@ -16,6 +16,7 @@ class ComputerModel : public QAbstractListModel
         WakeableRole,
         StatusUnknownRole,
         ServerSupportedRole,
+        StationConnectAuthenticationRole,
         DetailsRole
     };
 
@@ -37,6 +38,8 @@ public:
 
     Q_INVOKABLE void pairComputer(int computerIndex, QString pin);
 
+    Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
+
     Q_INVOKABLE void testConnectionForComputer(int computerIndex);
 
     Q_INVOKABLE void wakeComputer(int computerIndex);
@@ -47,12 +50,14 @@ public:
 
 signals:
     void pairingCompleted(QVariant error);
+    void authenticationCompleted(QVariant error);
     void connectionTestCompleted(int result, QString blockedPorts);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);
 
     void handlePairingCompleted(NvComputer* computer, QString error);
+    void handleAuthenticationCompleted(NvComputer* computer, QString error);
 
 private:
     QVector<NvComputer*> m_Computers;

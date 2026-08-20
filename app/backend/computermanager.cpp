@@ -11,6 +11,7 @@
 #include <QCoreApplication>
 
 #include <random>
+#include <utility>
 
 #define SER_HOSTS "hosts"
 #define SER_HOSTS_BACKUP "hostsbackup"
@@ -32,13 +33,47 @@ public:
 private:
     bool tryPollComputer(NvAddress address, bool& changed)
     {
-        NvHTTP http(address, 0, m_Computer->serverCert);
+        QSslCertificate serverCert;
+        bool stationConnectAuthentication;
+        QString sessionToken;
+        {
+            QReadLocker lock(&m_Computer->lock);
+            serverCert = m_Computer->serverCert;
+            stationConnectAuthentication = m_Computer->stationConnectAuthentication;
+            sessionToken = m_Computer->sessionToken;
+        }
+        NvHTTP http(address, 0, serverCert);
+        http.setStationConnectAuthentication(stationConnectAuthentication, sessionToken);
 
         QString serverInfo;
         try {
             serverInfo = http.getServerInfo(NvHTTP::NvLogLevel::NVLL_NONE, true);
         } catch (...) {
-            return false;
+            if (stationConnectAuthentication) {
+                return false;
+            }
+
+            // StationConnect state is deliberately not persisted. If a host
+            // switched from pairing since the last client run, rediscover the
+            // mode from minimal HTTP serverinfo and require the approved route
+            // before updating any in-memory trust state.
+            try {
+                NvHTTP discoveryHttp(address, 0, QSslCertificate());
+                const QString discoveryInfo = discoveryHttp.getServerInfo(
+                            NvHTTP::NvLogLevel::NVLL_NONE, true);
+                NvComputer discoveredState(discoveryHttp, discoveryInfo);
+                discoveryHttp.setStationConnectAuthentication(
+                            discoveredState.stationConnectAuthentication);
+                if (!discoveredState.stationConnectAuthentication ||
+                        !discoveryHttp.isApprovedStationConnectRoute() ||
+                        m_Computer->uuid != discoveredState.uuid) {
+                    return false;
+                }
+                changed = m_Computer->update(discoveredState);
+                return true;
+            } catch (...) {
+                return false;
+            }
         }
 
         NvComputer newState(http, serverInfo);
@@ -623,6 +658,73 @@ void ComputerManager::pairHost(NvComputer* computer, QString pin)
     QThreadPool::globalInstance()->start(pairing);
 }
 
+class PendingAuthenticationTask : public QObject, public QRunnable
+{
+    Q_OBJECT
+
+public:
+    PendingAuthenticationTask(ComputerManager* computerManager, NvComputer* computer,
+                              QString username, QString password)
+        : m_ComputerManager(computerManager),
+          m_Computer(computer),
+          m_Username(std::move(username)),
+          m_Password(std::move(password))
+    {
+        connect(this, &PendingAuthenticationTask::authenticationCompleted,
+                computerManager, &ComputerManager::authenticationCompleted);
+    }
+
+    ~PendingAuthenticationTask()
+    {
+        m_Password.fill(QChar('\0'));
+        m_Password.clear();
+    }
+
+signals:
+    void authenticationCompleted(NvComputer* computer, QString error);
+
+private:
+    void run()
+    {
+        try {
+            NvHTTP http(m_Computer);
+            const QString token = http.authenticate(m_Username, m_Password);
+            m_Password.fill(QChar('\0'));
+            m_Password.clear();
+            const QVector<NvApp> apps = http.getAppList();
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->sessionToken = token;
+                m_Computer->pairState = NvComputer::PS_PAIRED;
+                m_Computer->updateAppList(apps);
+            }
+            m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+            emit authenticationCompleted(m_Computer, nullptr);
+        } catch (const GfeHttpResponseException& error) {
+            m_Password.fill(QChar('\0'));
+            m_Password.clear();
+            emit authenticationCompleted(m_Computer, error.toQString());
+        } catch (const QtNetworkReplyException& error) {
+            m_Password.fill(QChar('\0'));
+            m_Password.clear();
+            emit authenticationCompleted(m_Computer, error.toQString());
+        }
+    }
+
+    ComputerManager* m_ComputerManager;
+    NvComputer* m_Computer;
+    QString m_Username;
+    QString m_Password;
+};
+
+void ComputerManager::authenticateHost(NvComputer* computer, QString username,
+                                       QString password)
+{
+    PendingAuthenticationTask* authentication = new PendingAuthenticationTask(
+        this, computer, std::move(username), std::move(password));
+    QThreadPool::globalInstance()->start(authentication);
+}
+
 class PendingQuitTask : public QObject, public QRunnable
 {
     Q_OBJECT
@@ -825,13 +927,25 @@ private:
         {
             QReadLocker lock(&m_ComputerManager->m_Lock);
             existingComputer = m_ComputerManager->m_KnownHosts.value(newComputer->uuid);
-            if (existingComputer != nullptr) {
+            if (existingComputer != nullptr && !newComputer->stationConnectAuthentication) {
                 http.setServerCert(existingComputer->serverCert);
+            }
+            else if (newComputer->stationConnectAuthentication) {
+                QString token;
+                if (existingComputer != nullptr) {
+                    QReadLocker computerLock(&existingComputer->lock);
+                    token = existingComputer->sessionToken;
+                }
+                newComputer->sessionToken = token;
+                if (!token.isEmpty()) {
+                    newComputer->pairState = NvComputer::PS_PAIRED;
+                }
+                http.setStationConnectAuthentication(true, token);
             }
         }
 
         // Fetch serverinfo again over HTTPS with the pinned cert
-        if (existingComputer != nullptr) {
+        if (existingComputer != nullptr || newComputer->stationConnectAuthentication) {
             Q_ASSERT(http.httpsPort() != 0);
             serverInfo = fetchServerInfo(http);
             if (serverInfo.isEmpty()) {

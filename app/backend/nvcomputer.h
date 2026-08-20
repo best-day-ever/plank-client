@@ -23,6 +23,7 @@ class NvComputer
     friend class PcMonitorThread;
     friend class ComputerManager;
     friend class PendingQuitTask;
+    friend class PendingAuthenticationTask;
 
 private:
     void sortAppList();
@@ -100,6 +101,8 @@ public:
     int serverCodecModeSupport;
     QString gpuModel;
     bool isSupportedServerVersion;
+    bool stationConnectAuthentication = false;
+    QString sessionToken;
 
     // Persisted traits
     NvAddress localAddress;

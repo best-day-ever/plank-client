@@ -2,6 +2,8 @@
 
 #include <QThreadPool>
 
+#include <utility>
+
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
 
@@ -12,6 +14,8 @@ void ComputerModel::initialize(ComputerManager* computerManager)
             this, &ComputerModel::handleComputerStateChanged);
     connect(m_ComputerManager, &ComputerManager::pairingCompleted,
             this, &ComputerModel::handlePairingCompleted);
+    connect(m_ComputerManager, &ComputerManager::authenticationCompleted,
+            this, &ComputerModel::handleAuthenticationCompleted);
 
     m_Computers = m_ComputerManager->getComputers();
 }
@@ -42,6 +46,8 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->state == NvComputer::CS_UNKNOWN;
     case ServerSupportedRole:
         return computer->isSupportedServerVersion;
+    case StationConnectAuthenticationRole:
+        return computer->stationConnectAuthentication;
     case DetailsRole: {
         QString state, pairState;
 
@@ -109,6 +115,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[WakeableRole] = "wakeable";
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
+    names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
     names[DetailsRole] = "details";
 
     return names;
@@ -220,9 +227,22 @@ void ComputerModel::pairComputer(int computerIndex, QString pin)
     m_ComputerManager->pairHost(m_Computers[computerIndex], pin);
 }
 
+void ComputerModel::authenticateComputer(int computerIndex, QString username,
+                                         QString password)
+{
+    Q_ASSERT(computerIndex < m_Computers.count());
+    m_ComputerManager->authenticateHost(m_Computers[computerIndex],
+                                        std::move(username), std::move(password));
+}
+
 void ComputerModel::handlePairingCompleted(NvComputer*, QString error)
 {
     emit pairingCompleted(error.isEmpty() ? QVariant() : error);
+}
+
+void ComputerModel::handleAuthenticationCompleted(NvComputer*, QString error)
+{
+    emit authenticationCompleted(error.isEmpty() ? QVariant() : error);
 }
 
 void ComputerModel::handleComputerStateChanged(NvComputer* computer)

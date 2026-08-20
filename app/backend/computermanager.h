@@ -234,6 +234,8 @@ public:
 
     void pairHost(NvComputer* computer, QString pin);
 
+    void authenticateHost(NvComputer* computer, QString username, QString password);
+
     void quitRunningApp(NvComputer* computer);
 
     QVector<NvComputer*> getComputers();
@@ -249,6 +251,8 @@ signals:
     void computerStateChanged(NvComputer* computer);
 
     void pairingCompleted(NvComputer* computer, QString error);
+
+    void authenticationCompleted(NvComputer* computer, QString error);
 
     void computerAddCompleted(QVariant success, QVariant detectedPortBlocking);
 
