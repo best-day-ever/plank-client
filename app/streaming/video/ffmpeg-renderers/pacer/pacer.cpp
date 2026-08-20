@@ -263,6 +263,13 @@ bool Pacer::initialize(SDL_Window* window, int maxVideoFps, bool enablePacing)
     m_DisplayFps = StreamUtils::getDisplayRefreshRate(window);
     m_RendererAttributes = m_VsyncRenderer->getRendererAttributes();
 
+    // The render queue is empty before the first frame arrives. Seed that
+    // state so the startup burst gets the same 500 ms grace period as a queue
+    // that drains during steady-state playback. Without this entry, an empty
+    // history selects a target depth of zero and can discard a single queued
+    // frame before the history has had a chance to observe an empty queue.
+    m_RenderQueueHistory.enqueue(0);
+
     if (enablePacing) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Frame pacing: target %d Hz with %d FPS stream",
