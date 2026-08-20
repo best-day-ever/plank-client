@@ -147,6 +147,12 @@ unix:if(!macx|disable-prebuilts) {
         }
     }
 }
+
+linux:packagesExist(libinput):packagesExist(libudev) {
+    DEFINES += HAVE_LIBINPUT_TABLET
+    PKGCONFIG += libinput libudev
+}
+
 win32 {
     LIBS += -llibssl -llibcrypto -lSDL2 -lSDL2_ttf -lavcodec -lavutil -lswscale -lopus -ldxgi -ld3d11 -llibplacebo
     CONFIG += ffmpeg libplacebo
@@ -242,6 +248,11 @@ HEADERS += \
     gui/sdlgamepadkeynavigation.h \
     streaming/video/overlaymanager.h \
     backend/systemproperties.h
+
+contains(DEFINES, HAVE_LIBINPUT_TABLET) {
+    SOURCES += streaming/input/linuxwacom.cpp
+    HEADERS += streaming/input/linuxwacom.h
+}
 
 # Platform-specific renderers and decoders
 ffmpeg {

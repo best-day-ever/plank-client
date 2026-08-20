@@ -5,6 +5,11 @@
 
 #include <SDL.h>
 
+#ifdef HAVE_LIBINPUT_TABLET
+#include <memory>
+class LinuxWacomInput;
+#endif
+
 struct GamepadState {
     SDL_GameController* controller;
     SDL_JoystickID jsId;
@@ -104,6 +109,8 @@ public:
     void notifyMouseLeave();
 
     void notifyFocusLost();
+
+    void notifyFocusGained();
 
     bool isCaptureActive();
 
@@ -210,6 +217,10 @@ private:
     SDL_TimerID m_DragTimer;
     char m_DragButton;
     int m_NumFingersDown;
+
+#ifdef HAVE_LIBINPUT_TABLET
+    std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;
+#endif
 
     static const int k_ButtonMap[];
 };

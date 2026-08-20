@@ -5,6 +5,10 @@
 #include "path.h"
 #include "utils.h"
 
+#ifdef HAVE_LIBINPUT_TABLET
+#include "streaming/input/linuxwacom.h"
+#endif
+
 #include <QtGlobal>
 #include <QDir>
 #include <QGuiApplication>
@@ -194,6 +198,10 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 
 SdlInputHandler::~SdlInputHandler()
 {
+#ifdef HAVE_LIBINPUT_TABLET
+    m_LinuxWacomInput.reset();
+#endif
+
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].mouseEmulationTimer != 0) {
             Session::get()->notifyMouseEmulationMode(false);
@@ -244,6 +252,13 @@ SdlInputHandler::~SdlInputHandler()
 void SdlInputHandler::setWindow(SDL_Window *window)
 {
     m_Window = window;
+#ifdef HAVE_LIBINPUT_TABLET
+    if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
+        m_LinuxWacomInput.reset(new LinuxWacomInput());
+        m_LinuxWacomInput->setActive(
+            (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
+#endif
 }
 
 void SdlInputHandler::raiseAllKeys()
@@ -285,6 +300,12 @@ void SdlInputHandler::notifyMouseLeave()
 
 void SdlInputHandler::notifyFocusLost()
 {
+#ifdef HAVE_LIBINPUT_TABLET
+    if (m_LinuxWacomInput) {
+        m_LinuxWacomInput->setActive(false);
+    }
+#endif
+
     // Release mouse cursor when another window is activated (e.g. by using ALT+TAB).
     // This lets user to interact with our window's title bar and with the buttons in it.
     // Doing this while the window is full-screen breaks the transition out of FS
@@ -296,6 +317,15 @@ void SdlInputHandler::notifyFocusLost()
     // Raise all keys that are currently pressed. If we don't do this, certain keys
     // used in shortcuts that cause focus loss (such as Alt+Tab) may get stuck down.
     raiseAllKeys();
+}
+
+void SdlInputHandler::notifyFocusGained()
+{
+#ifdef HAVE_LIBINPUT_TABLET
+    if (m_LinuxWacomInput) {
+        m_LinuxWacomInput->setActive(true);
+    }
+#endif
 }
 
 bool SdlInputHandler::isCaptureActive()
