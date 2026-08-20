@@ -594,6 +594,22 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0)
 {
+    if (m_Computer->stationConnectAuthentication) {
+        // StationConnect is a qualified workstation protocol, not a generic
+        // game-streaming profile. Enforce its current single-display baseline
+        // even if legacy Moonlight settings still contain the 720p defaults.
+        m_Preferences->width = 3840;
+        m_Preferences->height = 2160;
+        m_Preferences->fps = 60;
+        m_Preferences->bitrateKbps = 100000;
+        m_Preferences->enableYUV444 = true;
+        m_Preferences->enableHdr = false;
+        m_Preferences->identityGbrBitDepth = 10;
+        m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
+        // Intel Gen12 does not hardware-decode H.264 High 4:4:4 Predictive.
+        // The qualified x264 paths use FFmpeg software decoding on this NUC.
+        m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;
+    }
 }
 
 bool Session::initialize()
