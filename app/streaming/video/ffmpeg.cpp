@@ -223,6 +223,7 @@ FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
       m_LastFrameNumber(0),
       m_StreamFps(0),
       m_VideoFormat(0),
+      m_IdentityGbrEnabled(false),
       m_NeedsSpsFixup(false),
       m_TestOnly(testOnly),
       m_DecoderThread(nullptr)
@@ -458,6 +459,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     m_RequiredPixelFormat = requiredFormat;
     m_StreamFps = params->frameRate;
     m_VideoFormat = params->videoFormat;
+    m_IdentityGbrEnabled = params->enableIdentityGbr;
 
     // Don't bother initializing Pacer if we're not actually going to render
     if (!testFrame) {
@@ -820,6 +822,20 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
             offset += ret;
         }
 
+        if (m_IdentityGbrEnabled) {
+            ret = snprintf(&output[offset],
+                           length - offset,
+                           "Source precision: 8-bit-source/up-converted\n"
+                           "Codec precision: 10-bit HEVC 4:4:4\n"
+                           "Presentation precision: 10-bit RGB identity\n");
+            if (ret < 0 || ret >= length - offset) {
+                SDL_assert(false);
+                return;
+            }
+
+            offset += ret;
+        }
+
         ret = snprintf(&output[offset],
                        length - offset,
                        "Incoming frame rate from network: %.2f FPS\n"
@@ -891,7 +907,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 void FFmpegVideoDecoder::logVideoStats(VIDEO_STATS& stats, const char* title)
 {
     if (stats.renderedFps > 0 || stats.renderedFrames != 0) {
-        char videoStatsStr[512];
+        char videoStatsStr[768];
         stringifyVideoStats(stats, videoStatsStr, sizeof(videoStatsStr));
 
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

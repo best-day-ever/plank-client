@@ -345,6 +345,11 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Video stream is %dx%dx%d (format 0x%x)",
                 width, height, frameRate, videoFormat);
+    if (s_ActiveSession->isIdentityGbrEnabledForFormat(videoFormat)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Video precision: 8-bit-source/up-converted -> "
+                    "10-bit HEVC 4:4:4 -> 10-bit RGB identity presentation");
+    }
 
     return 0;
 }
