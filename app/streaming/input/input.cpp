@@ -253,7 +253,11 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 {
     m_Window = window;
 #ifdef HAVE_LIBINPUT_TABLET
-    if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
+    if (qEnvironmentVariableIntValue("STATIONCONNECT_EXTERNAL_WACOM_BRIDGE") != 0) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                    "Normalized Wacom capture disabled for external raw-HID qualification");
+    }
+    else if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
         m_LinuxWacomInput.reset(new LinuxWacomInput());
         m_LinuxWacomInput->setActive(
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
