@@ -69,6 +69,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clRumbleTriggers,
     Session::clSetMotionEventState,
     Session::clSetControllerLED,
+    Session::clRawHidControl,
 };
 
 Session* Session::s_ActiveSession;
@@ -257,6 +258,13 @@ void Session::clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g
     setControllerLEDEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
     setControllerLEDEvent.user.data2 = (void*)(uintptr_t)(r << 16 | g << 8 | b);
     SDL_PushEvent(&setControllerLEDEvent);
+}
+
+void Session::clRawHidControl(const unsigned char* data, unsigned int length)
+{
+    if (s_ActiveSession != nullptr && s_ActiveSession->m_InputHandler != nullptr) {
+        s_ActiveSession->m_InputHandler->handleRawHidControl(data, length);
+    }
 }
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,

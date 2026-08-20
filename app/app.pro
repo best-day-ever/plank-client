@@ -252,6 +252,8 @@ HEADERS += \
 contains(DEFINES, HAVE_LIBINPUT_TABLET) {
     SOURCES += streaming/input/linuxwacom.cpp
     HEADERS += streaming/input/linuxwacom.h
+    SOURCES += streaming/input/linuxrawwacom.cpp
+    HEADERS += streaming/input/linuxrawwacom.h
 }
 
 # Platform-specific renderers and decoders

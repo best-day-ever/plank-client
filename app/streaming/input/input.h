@@ -8,6 +8,7 @@
 #ifdef HAVE_LIBINPUT_TABLET
 #include <memory>
 class LinuxWacomInput;
+class LinuxRawWacomInput;
 #endif
 
 struct GamepadState {
@@ -99,6 +100,8 @@ public:
     void setMotionEventState(uint16_t controllerNumber, uint8_t motionType, uint16_t reportRateHz);
 
     void setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
+
+    void handleRawHidControl(const unsigned char* data, unsigned int length);
 
     void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
 
@@ -220,6 +223,7 @@ private:
 
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;
+    std::unique_ptr<LinuxRawWacomInput> m_LinuxRawWacomInput;
 #endif
 
     static const int k_ButtonMap[];

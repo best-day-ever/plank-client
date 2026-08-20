@@ -7,6 +7,7 @@
 
 #ifdef HAVE_LIBINPUT_TABLET
 #include "streaming/input/linuxwacom.h"
+#include "streaming/input/linuxrawwacom.h"
 #endif
 
 #include <QtGlobal>
@@ -200,6 +201,7 @@ SdlInputHandler::~SdlInputHandler()
 {
 #ifdef HAVE_LIBINPUT_TABLET
     m_LinuxWacomInput.reset();
+    m_LinuxRawWacomInput.reset();
 #endif
 
     for (int i = 0; i < MAX_GAMEPADS; i++) {
@@ -257,6 +259,11 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                     "Normalized Wacom capture disabled for external raw-HID qualification");
     }
+    else if ((LiGetHostFeatureFlags() & LI_FF_RAW_HID_TABLET) != 0) {
+        m_LinuxRawWacomInput.reset(new LinuxRawWacomInput());
+        m_LinuxRawWacomInput->setActive(
+            (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
     else if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
         m_LinuxWacomInput.reset(new LinuxWacomInput());
         m_LinuxWacomInput->setActive(
@@ -308,6 +315,9 @@ void SdlInputHandler::notifyFocusLost()
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(false);
     }
+    if (m_LinuxRawWacomInput) {
+        m_LinuxRawWacomInput->setActive(false);
+    }
 #endif
 
     // Release mouse cursor when another window is activated (e.g. by using ALT+TAB).
@@ -329,6 +339,22 @@ void SdlInputHandler::notifyFocusGained()
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(true);
     }
+    if (m_LinuxRawWacomInput) {
+        m_LinuxRawWacomInput->setActive(true);
+    }
+#endif
+}
+
+void SdlInputHandler::handleRawHidControl(const unsigned char* data,
+                                          unsigned int length)
+{
+#ifdef HAVE_LIBINPUT_TABLET
+    if (m_LinuxRawWacomInput) {
+        m_LinuxRawWacomInput->handleControl(data, length);
+    }
+#else
+    Q_UNUSED(data);
+    Q_UNUSED(length);
 #endif
 }
 
