@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <QQueue>
 
 #include "decoder.h"
@@ -40,6 +43,8 @@ private:
     void stringifyVideoStats(VIDEO_STATS& stats, char* output, int length);
 
     void logVideoStats(VIDEO_STATS& stats, const char* title);
+
+    uint16_t getHostProcessingLatencyPercentile(unsigned int percentile) const;
 
     void addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
 
@@ -99,6 +104,8 @@ private:
     VIDEO_STATS m_ActiveWndVideoStats;
     VIDEO_STATS m_LastWndVideoStats;
     VIDEO_STATS m_GlobalVideoStats;
+    std::array<uint32_t, std::numeric_limits<uint16_t>::max() + 1>
+        m_HostProcessingLatencyHistogram {};
 
     int m_FramesIn;
     int m_FramesOut;

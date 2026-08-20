@@ -899,7 +899,36 @@ void FFmpegVideoDecoder::logVideoStats(VIDEO_STATS& stats, const char* title)
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "----------------------------------------------------------\n%s",
                     videoStatsStr);
+        if (stats.framesWithHostProcessingLatency > 0) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Host processing latency p95: %.1f ms",
+                        (float)getHostProcessingLatencyPercentile(95) / 10);
+        }
     }
+}
+
+uint16_t FFmpegVideoDecoder::getHostProcessingLatencyPercentile(unsigned int percentile) const
+{
+    uint64_t sampleCount = 0;
+    for (uint32_t count : m_HostProcessingLatencyHistogram) {
+        sampleCount += count;
+    }
+
+    if (sampleCount == 0 || percentile == 0 || percentile > 100) {
+        return 0;
+    }
+
+    const uint64_t targetRank = (sampleCount * percentile + 99) / 100;
+    uint64_t cumulativeSamples = 0;
+    for (size_t latency = 0; latency < m_HostProcessingLatencyHistogram.size(); latency++) {
+        cumulativeSamples += m_HostProcessingLatencyHistogram[latency];
+        if (cumulativeSamples >= targetRank) {
+            return static_cast<uint16_t>(latency);
+        }
+    }
+
+    SDL_assert(false);
+    return 0;
 }
 
 IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig* hwDecodeCfg, int pass)
@@ -1815,6 +1844,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
             m_ActiveWndVideoStats.minHostProcessingLatency = du->frameHostProcessingLatency;
         }
         m_ActiveWndVideoStats.framesWithHostProcessingLatency += 1;
+        m_HostProcessingLatencyHistogram[du->frameHostProcessingLatency] += 1;
     }
     m_ActiveWndVideoStats.maxHostProcessingLatency = qMax(m_ActiveWndVideoStats.maxHostProcessingLatency, du->frameHostProcessingLatency);
     m_ActiveWndVideoStats.totalHostProcessingLatency += du->frameHostProcessingLatency;
