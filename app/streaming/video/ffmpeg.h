@@ -46,6 +46,8 @@ private:
 
     uint16_t getHostProcessingLatencyPercentile(unsigned int percentile) const;
 
+    uint16_t getDecodeLatencyPercentile(unsigned int percentile) const;
+
     void addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
 
     bool createFrontendRenderer(PDECODER_PARAMETERS params, bool useAlternateFrontend);
@@ -106,6 +108,8 @@ private:
     VIDEO_STATS m_GlobalVideoStats;
     std::array<uint32_t, std::numeric_limits<uint16_t>::max() + 1>
         m_HostProcessingLatencyHistogram {};
+    std::array<uint32_t, 1001> m_DecodeLatencyHistogram {};
+    uint32_t m_MaxDecodeLatencyMs = 0;
 
     int m_FramesIn;
     int m_FramesOut;

@@ -3,6 +3,7 @@
 #include "../../decoder.h"
 #include "../renderer.h"
 
+#include <array>
 #include <QQueue>
 #include <QMutex>
 #include <QWaitCondition>
@@ -76,4 +77,8 @@ private:
     int m_DisplayFps;
     PVIDEO_STATS m_VideoStats;
     int m_RendererAttributes;
+    std::array<uint32_t, 1001> m_QueueLatencyHistogram {};
+    std::array<uint32_t, 1001> m_RendererCallLatencyHistogram {};
+    uint32_t m_MaxQueueLatencyMs = 0;
+    uint32_t m_MaxRendererCallLatencyMs = 0;
 };

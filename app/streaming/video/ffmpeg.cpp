@@ -940,6 +940,13 @@ void FFmpegVideoDecoder::logVideoStats(VIDEO_STATS& stats, const char* title)
                         "Host processing latency p95: %.1f ms",
                         (float)getHostProcessingLatencyPercentile(95) / 10);
         }
+        if (stats.decodedFrames > 0) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Client decode completion latency p95/p99/max: %u/%u/%u ms",
+                        getDecodeLatencyPercentile(95),
+                        getDecodeLatencyPercentile(99),
+                        m_MaxDecodeLatencyMs);
+        }
     }
 }
 
@@ -958,6 +965,30 @@ uint16_t FFmpegVideoDecoder::getHostProcessingLatencyPercentile(unsigned int per
     uint64_t cumulativeSamples = 0;
     for (size_t latency = 0; latency < m_HostProcessingLatencyHistogram.size(); latency++) {
         cumulativeSamples += m_HostProcessingLatencyHistogram[latency];
+        if (cumulativeSamples >= targetRank) {
+            return static_cast<uint16_t>(latency);
+        }
+    }
+
+    SDL_assert(false);
+    return 0;
+}
+
+uint16_t FFmpegVideoDecoder::getDecodeLatencyPercentile(unsigned int percentile) const
+{
+    uint64_t sampleCount = 0;
+    for (uint32_t count : m_DecodeLatencyHistogram) {
+        sampleCount += count;
+    }
+
+    if (sampleCount == 0 || percentile == 0 || percentile > 100) {
+        return 0;
+    }
+
+    const uint64_t targetRank = (sampleCount * percentile + 99) / 100;
+    uint64_t cumulativeSamples = 0;
+    for (size_t latency = 0; latency < m_DecodeLatencyHistogram.size(); latency++) {
+        cumulativeSamples += m_DecodeLatencyHistogram[latency];
         if (cumulativeSamples >= targetRank) {
             return static_cast<uint16_t>(latency);
         }
@@ -1763,7 +1794,12 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         // Count time in avcodec_send_packet() and avcodec_receive_frame()
                         // as time spent decoding. Also count time spent in the decode unit
                         // queue because that's directly caused by decoder latency.
-                        m_ActiveWndVideoStats.totalDecodeTime += LiGetMillis() - du.enqueueTimeMs;
+                        const uint32_t decodeLatencyMs = LiGetMillis() - du.enqueueTimeMs;
+                        m_ActiveWndVideoStats.totalDecodeTime += decodeLatencyMs;
+                        m_DecodeLatencyHistogram[std::min<uint32_t>(
+                            decodeLatencyMs,
+                            m_DecodeLatencyHistogram.size() - 1)]++;
+                        m_MaxDecodeLatencyMs = std::max(m_MaxDecodeLatencyMs, decodeLatencyMs);
 
                         // Store the presentation time
                         frame->pts = du.presentationTimeMs;

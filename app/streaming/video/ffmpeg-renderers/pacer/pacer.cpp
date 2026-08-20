@@ -13,6 +13,7 @@
 #endif
 
 #include <SDL_syswm.h>
+#include <algorithm>
 
 // Limit the number of queued frames to prevent excessive memory consumption
 // if the V-Sync source or renderer is blocked for a while. It's important
@@ -27,6 +28,42 @@
 // to do the render itself, so we can't render right before
 // V-sync happens.
 #define TIMER_SLACK_MS 3
+
+namespace {
+uint32_t histogramPercentile(const std::array<uint32_t, 1001>& histogram,
+                             unsigned int percentile)
+{
+    uint64_t sampleCount = 0;
+    for (uint32_t count : histogram) {
+        sampleCount += count;
+    }
+
+    if (sampleCount == 0 || percentile == 0 || percentile > 100) {
+        return 0;
+    }
+
+    const uint64_t targetRank = (sampleCount * percentile + 99) / 100;
+    uint64_t cumulativeSamples = 0;
+    for (size_t latency = 0; latency < histogram.size(); latency++) {
+        cumulativeSamples += histogram[latency];
+        if (cumulativeSamples >= targetRank) {
+            return latency;
+        }
+    }
+
+    SDL_assert(false);
+    return 0;
+}
+
+uint64_t histogramSampleCount(const std::array<uint32_t, 1001>& histogram)
+{
+    uint64_t sampleCount = 0;
+    for (uint32_t count : histogram) {
+        sampleCount += count;
+    }
+    return sampleCount;
+}
+}
 
 Pacer::Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats) :
     m_RenderThread(nullptr),
@@ -75,6 +112,21 @@ Pacer::~Pacer()
     while (!m_PacingQueue.isEmpty()) {
         AVFrame* frame = m_PacingQueue.dequeue();
         av_frame_free(&frame);
+    }
+
+    if (histogramSampleCount(m_QueueLatencyHistogram) >= 60) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Client pacer queue latency p95/p99/max: %u/%u/%u ms",
+                    histogramPercentile(m_QueueLatencyHistogram, 95),
+                    histogramPercentile(m_QueueLatencyHistogram, 99),
+                    m_MaxQueueLatencyMs);
+    }
+    if (histogramSampleCount(m_RendererCallLatencyHistogram) >= 60) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Client renderer call latency p95/p99/max: %u/%u/%u ms",
+                    histogramPercentile(m_RendererCallLatencyHistogram, 95),
+                    histogramPercentile(m_RendererCallLatencyHistogram, 99),
+                    m_MaxRendererCallLatencyMs);
     }
 }
 
@@ -342,13 +394,23 @@ void Pacer::renderFrame(AVFrame* frame)
 {
     // Count time spent in Pacer's queues
     Uint32 beforeRender = SDL_GetTicks();
-    m_VideoStats->totalPacerTime += beforeRender - frame->pkt_dts;
+    const uint32_t queueLatencyMs = beforeRender - frame->pkt_dts;
+    m_VideoStats->totalPacerTime += queueLatencyMs;
+    m_QueueLatencyHistogram[std::min<uint32_t>(
+        queueLatencyMs,
+        m_QueueLatencyHistogram.size() - 1)]++;
+    m_MaxQueueLatencyMs = std::max(m_MaxQueueLatencyMs, queueLatencyMs);
 
     // Render it
     m_VsyncRenderer->renderFrame(frame);
     Uint32 afterRender = SDL_GetTicks();
 
-    m_VideoStats->totalRenderTime += afterRender - beforeRender;
+    const uint32_t rendererCallLatencyMs = afterRender - beforeRender;
+    m_VideoStats->totalRenderTime += rendererCallLatencyMs;
+    m_RendererCallLatencyHistogram[std::min<uint32_t>(
+        rendererCallLatencyMs,
+        m_RendererCallLatencyHistogram.size() - 1)]++;
+    m_MaxRendererCallLatencyMs = std::max(m_MaxRendererCallLatencyMs, rendererCallLatencyMs);
     m_VideoStats->renderedFrames++;
     av_frame_free(&frame);
 
