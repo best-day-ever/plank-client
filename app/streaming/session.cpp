@@ -1220,11 +1220,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         emitLaunchWarning(tr("Failed to open audio device. Audio will be unavailable during this session."));
     }
 
-    // Check for unmapped gamepads
-    if (!SdlInputHandler::getUnmappedGamepads().isEmpty()) {
-        emitLaunchWarning(tr("An attached gamepad has no mapping and won't be usable. Visit the Moonlight help to resolve this."));
-    }
-
     // If we removed all codecs with the checks above, use H.264 as the codec of last resort.
     if (m_SupportedVideoFormats.empty()) {
         m_SupportedVideoFormats.append(VIDEO_FORMAT_H264);

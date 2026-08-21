@@ -58,10 +58,6 @@ ApplicationWindow {
             }
         }
 
-        if (SystemProperties.unmappedGamepads) {
-            unmappedGamepadDialog.unmappedGamepads = SystemProperties.unmappedGamepads
-            unmappedGamepadDialog.open()
-        }
     }
   
     // This configures the maximum width of the singleton attached QML ToolTip. If left unconstrained,
@@ -440,15 +436,6 @@ ApplicationWindow {
         onAccepted: {
             Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-qt/releases");
         }
-    }
-
-    ErrorMessageDialog {
-        id: unmappedGamepadDialog
-        property string unmappedGamepads : ""
-        text: qsTr("Moonlight detected gamepads without a mapping:") + "\n" + unmappedGamepads
-        helpTextSeparator: "\n\n"
-        helpText: qsTr("Click the Help button for information on how to map your gamepads.")
-        helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Gamepad-Mapping"
     }
 
     // This dialog appears when quitting via keyboard or gamepad button
