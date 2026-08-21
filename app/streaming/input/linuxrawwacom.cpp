@@ -24,6 +24,17 @@
 namespace {
 
 const unsigned int kWacomVendorId = 0x056a;
+std::atomic<std::uint32_t> s_NextGeneration(0);
+
+std::uint16_t nextGeneration()
+{
+    std::uint16_t generation;
+    do {
+        generation = static_cast<std::uint16_t>(
+            s_NextGeneration.fetch_add(1, std::memory_order_relaxed) + 1);
+    } while (generation == 0);
+    return generation;
+}
 
 std::string usbParentPath(udev_device* device)
 {
@@ -115,7 +126,14 @@ LinuxRawWacomInput::~LinuxRawWacomInput()
 
 void LinuxRawWacomInput::setActive(bool active)
 {
-    if (m_Active.exchange(active) != active && active) {
+    if (!active) {
+        m_Active.store(false);
+        std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+        release(true);
+        return;
+    }
+
+    if (!m_Active.exchange(true)) {
         m_AttachFailed.store(false);
     }
 }
@@ -136,16 +154,25 @@ void LinuxRawWacomInput::run()
             continue;
         }
 
+        bool delayRetry = false;
         {
             std::lock_guard<std::recursive_mutex> lock(m_Mutex);
-            if (m_Interfaces.empty() && !m_AttachFailed.load()) {
-                if (!discover() || !sendAttach()) {
+            if (m_Interfaces.empty()) {
+                if (m_AttachFailed.exchange(false)) {
+                    delayRetry = true;
+                }
+                else if (!discover() || !sendAttach()) {
                     SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                                "Unable to attach exact Wacom device; check hidraw and input permissions");
+                                "Unable to attach exact Wacom device; will retry after checking hidraw and input permissions");
                     release(false);
                     m_AttachFailed.store(true);
                 }
             }
+        }
+
+        if (delayRetry) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
         }
 
         handlePhysicalReports();
@@ -301,10 +328,7 @@ bool LinuxRawWacomInput::sendAttach()
             static_cast<std::uint32_t>(inputIdentity.version));
     }
 
-    ++m_Generation;
-    if (m_Generation == 0) {
-        ++m_Generation;
-    }
+    m_Generation = nextGeneration();
     m_InputSequence = 0;
     if (!sendFrame(SC_RAW_HID_DEVICE, 0, 0,
                    reinterpret_cast<const unsigned char*>(&device),
