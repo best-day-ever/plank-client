@@ -22,14 +22,17 @@ class Launcher : public QObject
 public:
     explicit Launcher(QString computer, QString app,
                       StreamingPreferences* preferences,
+                      QString stationConnectUsername = QString(),
+                      QString stationConnectPassword = QString(),
                       QObject *parent = nullptr);
-    ~Launcher();
+    ~Launcher() override;
     Q_INVOKABLE void execute(ComputerManager *manager);
     Q_INVOKABLE void quitRunningApp();
     Q_INVOKABLE bool isExecuted() const;
 
 signals:
     void searchingComputer();
+    void authenticatingComputer();
     void searchingApp();
     void sessionCreated(QString appName, Session *session);
     void failed(QString text);
@@ -38,6 +41,7 @@ signals:
 private slots:
     void onComputerFound(NvComputer *computer);
     void onComputerUpdated(NvComputer *computer);
+    void onAuthenticationCompleted(NvComputer *computer, QString error);
     void onTimeout();
     void onQuitAppCompleted(QVariant error);
 

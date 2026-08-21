@@ -15,6 +15,7 @@ namespace CliStartStream
 enum State {
     StateInit,
     StateSeekComputer,
+    StateAuthenticate,
     StateSeekApp,
     StateStartSession,
     StateFailure,
@@ -26,6 +27,7 @@ public:
     enum Type {
         AppQuitCompleted,
         AppQuitRequested,
+        AuthenticationCompleted,
         ComputerFound,
         ComputerUpdated,
         Executed,
@@ -70,6 +72,8 @@ public:
 
                 q->connect(m_ComputerManager, &ComputerManager::computerStateChanged,
                            q, &Launcher::onComputerUpdated);
+                q->connect(m_ComputerManager, &ComputerManager::authenticationCompleted,
+                           q, &Launcher::onAuthenticationCompleted);
                 q->connect(m_ComputerManager, &ComputerManager::quitAppCompleted,
                            q, &Launcher::onQuitAppCompleted);
 
@@ -80,16 +84,41 @@ public:
         case Event::ComputerFound:
             if (m_State == StateSeekComputer) {
                 if (event.computer->pairState == NvComputer::PS_PAIRED) {
-                    m_State = StateSeekApp;
+                    beginAppLookup(event.computer);
+                } else if (event.computer->stationConnectAuthentication &&
+                           !m_StationConnectUsername.isEmpty() &&
+                           !m_StationConnectPassword.isEmpty()) {
+                    m_State = StateAuthenticate;
                     m_Computer = event.computer;
-                    m_TimeoutTimer->start(APP_SEEK_TIMEOUT);
-                    emit q->searchingApp();
+                    m_ComputerManager->authenticateHost(
+                            m_Computer, m_StationConnectUsername,
+                            std::move(m_StationConnectPassword));
+                    m_StationConnectPassword.clear();
+                    emit q->authenticatingComputer();
                 } else {
                     m_State = StateFailure;
-                    QString msg = QObject::tr("Computer %1 has not been paired. "
-                                              "Please open Moonlight to pair before streaming.")
-                            .arg(event.computer->name);
+                    QString msg;
+                    if (event.computer->stationConnectAuthentication) {
+                        msg = QObject::tr("Computer %1 requires StationConnect credentials. "
+                                          "Use --stationconnect-user with "
+                                          "--stationconnect-password-stdin.")
+                                .arg(event.computer->name);
+                    } else {
+                        msg = QObject::tr("Computer %1 has not been paired. "
+                                          "Please open Moonlight to pair before streaming.")
+                                .arg(event.computer->name);
+                    }
                     emit q->failed(msg);
+                }
+            }
+            break;
+        case Event::AuthenticationCompleted:
+            if (m_State == StateAuthenticate && event.computer == m_Computer) {
+                if (event.errorMessage.isEmpty()) {
+                    beginAppLookup(event.computer);
+                } else {
+                    m_State = StateFailure;
+                    emit q->failed(event.errorMessage);
                 }
             }
             break;
@@ -151,6 +180,19 @@ public:
         return -1;
     }
 
+    void beginAppLookup(NvComputer *computer)
+    {
+        Q_Q(Launcher);
+        m_State = StateSeekApp;
+        m_Computer = computer;
+        m_TimeoutTimer->start(APP_SEEK_TIMEOUT);
+        emit q->searchingApp();
+
+        Event event(Event::ComputerUpdated);
+        event.computer = computer;
+        handleEvent(event);
+    }
+
     bool isNotStreaming() const
     {
         return m_Computer->currentGameId == 0;
@@ -174,6 +216,8 @@ public:
     Launcher *q_ptr;
     QString m_ComputerName;
     QString m_AppName;
+    QString m_StationConnectUsername;
+    QString m_StationConnectPassword;
     StreamingPreferences *m_Preferences;
     ComputerManager *m_ComputerManager;
     ComputerSeeker *m_ComputerSeeker;
@@ -183,13 +227,18 @@ public:
 };
 
 Launcher::Launcher(QString computer, QString app,
-                   StreamingPreferences* preferences, QObject *parent)
+                   StreamingPreferences* preferences,
+                   QString stationConnectUsername,
+                   QString stationConnectPassword,
+                   QObject *parent)
     : QObject(parent),
       m_DPtr(new LauncherPrivate(this))
 {
     Q_D(Launcher);
     d->m_ComputerName = computer;
     d->m_AppName = app;
+    d->m_StationConnectUsername = std::move(stationConnectUsername);
+    d->m_StationConnectPassword = std::move(stationConnectPassword);
     d->m_Preferences = preferences;
     d->m_State = StateInit;
     d->m_TimeoutTimer = new QTimer(this);
@@ -200,6 +249,9 @@ Launcher::Launcher(QString computer, QString app,
 
 Launcher::~Launcher()
 {
+    Q_D(Launcher);
+    d->m_StationConnectPassword.fill(QChar('\0'));
+    d->m_StationConnectPassword.clear();
 }
 
 void Launcher::execute(ComputerManager *manager)
@@ -236,6 +288,15 @@ void Launcher::onComputerUpdated(NvComputer *computer)
     Q_D(Launcher);
     Event event(Event::ComputerUpdated);
     event.computer = computer;
+    d->handleEvent(event);
+}
+
+void Launcher::onAuthenticationCompleted(NvComputer *computer, QString error)
+{
+    Q_D(Launcher);
+    Event event(Event::AuthenticationCompleted);
+    event.computer = computer;
+    event.errorMessage = std::move(error);
     d->handleEvent(event);
 }
 

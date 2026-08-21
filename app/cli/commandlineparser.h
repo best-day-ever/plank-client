@@ -63,10 +63,14 @@ public:
 
     QString getHost() const;
     QString getAppName() const;
+    QString getStationConnectUsername() const;
+    QString takeStationConnectPassword();
 
 private:
     QString m_Host;
     QString m_AppName;
+    QString m_StationConnectUsername;
+    QString m_StationConnectPassword;
     QMap<QString, StreamingPreferences::WindowMode> m_WindowModeMap;
     QMap<QString, StreamingPreferences::AudioConfig> m_AudioConfigMap;
     QMap<QString, StreamingPreferences::VideoCodecConfig> m_VideoCodecMap;

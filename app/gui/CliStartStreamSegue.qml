@@ -13,6 +13,10 @@ Item {
         stageLabel.text = qsTr("Loading app list...")
     }
 
+    function onAuthenticatingComputer() {
+        stageLabel.text = qsTr("Signing in to workstation...")
+    }
+
     function onSessionCreated(appName, session) {
         var component = Qt.createComponent("StreamSegue.qml")
         var segue = component.createObject(stackView, {
@@ -43,6 +47,7 @@ Item {
             SdlGamepadKeyNavigation.enable()
 
             launcher.searchingComputer.connect(onSearchingComputer)
+            launcher.authenticatingComputer.connect(onAuthenticatingComputer)
             launcher.searchingApp.connect(onSearchingApp)
             launcher.sessionCreated.connect(onSessionCreated)
             launcher.failed.connect(onLaunchFailed)

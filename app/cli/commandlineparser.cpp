@@ -1,11 +1,61 @@
 #include "commandlineparser.h"
 
 #include <QCommandLineParser>
+#include <QFile>
 #include <QRegularExpression>
 
 #if defined(Q_OS_WIN)
 #include <qt_windows.h>
+#elif defined(Q_OS_UNIX)
+#include <termios.h>
+#include <unistd.h>
 #endif
+
+class StdinEchoGuard
+{
+public:
+    StdinEchoGuard()
+    {
+#if defined(Q_OS_WIN)
+        m_StdinHandle = GetStdHandle(STD_INPUT_HANDLE);
+        if (m_StdinHandle != INVALID_HANDLE_VALUE &&
+                GetConsoleMode(m_StdinHandle, &m_OriginalMode) &&
+                SetConsoleMode(m_StdinHandle, m_OriginalMode & ~ENABLE_ECHO_INPUT)) {
+            m_Disabled = true;
+        }
+#elif defined(Q_OS_UNIX)
+        if (isatty(fileno(stdin)) && tcgetattr(fileno(stdin), &m_OriginalMode) == 0) {
+            struct termios noEchoMode = m_OriginalMode;
+            noEchoMode.c_lflag &= ~ECHO;
+            if (tcsetattr(fileno(stdin), TCSAFLUSH, &noEchoMode) == 0) {
+                m_Disabled = true;
+            }
+        }
+#endif
+    }
+
+    ~StdinEchoGuard()
+    {
+        if (!m_Disabled) {
+            return;
+        }
+#if defined(Q_OS_WIN)
+        SetConsoleMode(m_StdinHandle, m_OriginalMode);
+#elif defined(Q_OS_UNIX)
+        tcsetattr(fileno(stdin), TCSAFLUSH, &m_OriginalMode);
+#endif
+        fputc('\n', stderr);
+    }
+
+private:
+    bool m_Disabled = false;
+#if defined(Q_OS_WIN)
+    HANDLE m_StdinHandle = INVALID_HANDLE_VALUE;
+    DWORD m_OriginalMode = 0;
+#elif defined(Q_OS_UNIX)
+    struct termios m_OriginalMode {};
+#endif
+};
 
 static bool inRange(int value, int min, int max)
 {
@@ -332,6 +382,8 @@ StreamCommandLineParser::StreamCommandLineParser()
 
 StreamCommandLineParser::~StreamCommandLineParser()
 {
+    m_StationConnectPassword.fill(QChar('\0'));
+    m_StationConnectPassword.clear();
 }
 
 void StreamCommandLineParser::parse(const QStringList &args, StreamingPreferences *preferences)
@@ -379,6 +431,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
     parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
     parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
+    parser.addValueOption("stationconnect-user", "StationConnect workstation username");
+    parser.addFlagOption("stationconnect-password-stdin",
+                         "StationConnect password read from standard input");
 
     if (!parser.parse(args)) {
         parser.showError(parser.errorText());
@@ -391,6 +446,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     QStringList resoOptions = parser.optionNames().filter(resolutionRexExp);
     bool displaySet = !resoOptions.isEmpty();
     if (displaySet) {
+        preferences->stationConnectAutoResolution = false;
         QString name = resoOptions.last();
         if (name == "720") {
             preferences->width  = 1280;
@@ -518,6 +574,40 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->videoDecoderSelection = mapValue(m_VideoDecoderMap, parser.getChoiceOptionValue("video-decoder"));
     }
 
+    const bool hasStationConnectUser = parser.isSet("stationconnect-user");
+    const bool hasStationConnectPassword = parser.isSet("stationconnect-password-stdin");
+    if (hasStationConnectUser != hasStationConnectPassword) {
+        parser.showError("--stationconnect-user and --stationconnect-password-stdin must be used together");
+    }
+    if (hasStationConnectUser) {
+        m_StationConnectUsername = parser.value("stationconnect-user");
+        if (m_StationConnectUsername.isEmpty()) {
+            parser.showError("StationConnect username must not be empty");
+        }
+
+        QFile passwordInput;
+        if (!passwordInput.open(stdin, QIODevice::ReadOnly)) {
+            parser.showError("Unable to read the StationConnect password from standard input");
+        }
+        QByteArray passwordBytes;
+        {
+            StdinEchoGuard echoGuard;
+            passwordBytes = passwordInput.readLine(4098);
+        }
+        if (passwordBytes.endsWith('\n')) {
+            passwordBytes.chop(1);
+        }
+        if (passwordBytes.endsWith('\r')) {
+            passwordBytes.chop(1);
+        }
+        if (passwordBytes.isEmpty() || passwordBytes.size() > 4096) {
+            passwordBytes.fill('\0');
+            parser.showError("StationConnect password must contain between 1 and 4096 bytes");
+        }
+        m_StationConnectPassword = QString::fromUtf8(passwordBytes);
+        passwordBytes.fill('\0');
+    }
+
     // This method will not return and terminates the process if --version or
     // --help is specified
     parser.handleHelpAndVersionOptions();
@@ -543,6 +633,16 @@ QString StreamCommandLineParser::getHost() const
 QString StreamCommandLineParser::getAppName() const
 {
     return m_AppName;
+}
+
+QString StreamCommandLineParser::getStationConnectUsername() const
+{
+    return m_StationConnectUsername;
+}
+
+QString StreamCommandLineParser::takeStationConnectPassword()
+{
+    return std::move(m_StationConnectPassword);
 }
 
 ListCommandLineParser::ListCommandLineParser()
