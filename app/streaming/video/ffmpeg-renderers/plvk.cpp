@@ -504,17 +504,53 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
         vkDeviceContext->nb_enabled_inst_extensions = m_PlVkInstance->num_extensions;
         vkDeviceContext->enabled_dev_extensions = m_Vulkan->extensions;
         vkDeviceContext->nb_enabled_dev_extensions = m_Vulkan->num_extensions;
+#if LIBAVUTIL_VERSION_MAJOR >= 61
+        auto addQueueFamily = [vkDeviceContext](int index, int count, VkQueueFlagBits flags) {
+            for (int i = 0; i < vkDeviceContext->nb_qf; i++) {
+                if (vkDeviceContext->qf[i].idx == index) {
+                    vkDeviceContext->qf[i].flags = static_cast<VkQueueFlagBits>(
+                            vkDeviceContext->qf[i].flags | flags);
+                    return;
+                }
+            }
+
+            SDL_assert(vkDeviceContext->nb_qf < static_cast<int>(SDL_arraysize(vkDeviceContext->qf)));
+            auto& queueFamily = vkDeviceContext->qf[vkDeviceContext->nb_qf++];
+            queueFamily.idx = index;
+            queueFamily.num = count;
+            queueFamily.flags = flags;
+            queueFamily.video_caps = VK_VIDEO_CODEC_OPERATION_NONE_KHR;
+        };
+
+        addQueueFamily(m_Vulkan->queue_graphics.index, m_Vulkan->queue_graphics.count,
+                       VK_QUEUE_GRAPHICS_BIT);
+        addQueueFamily(m_Vulkan->queue_transfer.index, m_Vulkan->queue_transfer.count,
+                       VK_QUEUE_TRANSFER_BIT);
+        addQueueFamily(m_Vulkan->queue_compute.index, m_Vulkan->queue_compute.count,
+                       VK_QUEUE_COMPUTE_BIT);
+#else
         vkDeviceContext->queue_family_index = m_Vulkan->queue_graphics.index;
         vkDeviceContext->nb_graphics_queues = m_Vulkan->queue_graphics.count;
         vkDeviceContext->queue_family_tx_index = m_Vulkan->queue_transfer.index;
         vkDeviceContext->nb_tx_queues = m_Vulkan->queue_transfer.count;
         vkDeviceContext->queue_family_comp_index = m_Vulkan->queue_compute.index;
         vkDeviceContext->nb_comp_queues = m_Vulkan->queue_compute.count;
+#endif
 #if LIBAVUTIL_VERSION_INT > AV_VERSION_INT(58, 9, 100)
         vkDeviceContext->lock_queue = lockQueue;
         vkDeviceContext->unlock_queue = unlockQueue;
 #endif
 
+#if LIBAVUTIL_VERSION_MAJOR >= 61
+        uint32_t decodeQueueIndex;
+        uint32_t decodeQueueCount;
+        if (!getQueue(VK_QUEUE_VIDEO_DECODE_BIT_KHR, &decodeQueueIndex, &decodeQueueCount)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Vulkan video decoding is not supported by the Vulkan device");
+            return false;
+        }
+        addQueueFamily(decodeQueueIndex, decodeQueueCount, VK_QUEUE_VIDEO_DECODE_BIT_KHR);
+#else
         static_assert(sizeof(vkDeviceContext->queue_family_decode_index) == sizeof(uint32_t), "sizeof(int) != sizeof(uint32_t)");
         static_assert(sizeof(vkDeviceContext->nb_decode_queues) == sizeof(uint32_t), "sizeof(int) != sizeof(uint32_t)");
         if (!getQueue(VK_QUEUE_VIDEO_DECODE_BIT_KHR, (uint32_t*)&vkDeviceContext->queue_family_decode_index, (uint32_t*)&vkDeviceContext->nb_decode_queues)) {
@@ -522,6 +558,7 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
                         "Vulkan video decoding is not supported by the Vulkan device");
             return false;
         }
+#endif
 
         int err = av_hwdevice_ctx_init(m_HwDeviceCtx);
         if (err < 0) {
