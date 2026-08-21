@@ -1,6 +1,7 @@
 #include "session.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
+#include "backend/computermanager.h"
 #include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
@@ -573,10 +574,13 @@ bool Session::populateDecoderProperties(SDL_Window* window)
     return true;
 }
 
-Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *preferences)
+Session::Session(NvComputer* computer, NvApp& app,
+                 StreamingPreferences *preferences,
+                 ComputerManager *computerManager)
     : m_Preferences(preferences ? preferences : StreamingPreferences::get()),
       m_IsFullScreen(m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED || !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer),
+      m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
       m_VideoDecoder(nullptr),
@@ -1619,6 +1623,19 @@ bool Session::startConnectionAsync()
                       m_InputHandler->getAttachedGamepadMask(),
                       !m_Preferences->multiController,
                       rtspSessionUrl);
+
+        if (m_Computer->stationConnectAuthentication) {
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->sessionToken.fill(QChar('\0'));
+                m_Computer->sessionToken.clear();
+                m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+            }
+            if (m_ComputerManager != nullptr) {
+                m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+            }
+            qInfo() << "StationConnect authentication token consumed after launch";
+        }
     } catch (const GfeHttpResponseException& e) {
         emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
         return false;
