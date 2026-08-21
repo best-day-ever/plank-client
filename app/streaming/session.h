@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QSemaphore>
+#include <QSize>
 #include <QWindow>
 
 #include <Limelight.h>
@@ -173,6 +174,10 @@ private:
 
     void getWindowDimensions(int& x, int& y,
                              int& width, int& height);
+
+    int getTargetDisplayIndex() const;
+
+    QSize configureStationConnectDisplayMode();
 
     void toggleFullscreen();
 

@@ -126,6 +126,14 @@ Flickable {
                     wrapMode: Text.Wrap
                 }
 
+                CheckBox {
+                    id: stationConnectAutoResolutionCheckBox
+                    width: parent.width
+                    text: qsTr("Use the native client display resolution for StationConnect")
+                    checked: StreamingPreferences.stationConnectAutoResolution
+                    onClicked: StreamingPreferences.stationConnectAutoResolution = checked
+                }
+
                 Row {
                     spacing: 5
                     width: parent.width

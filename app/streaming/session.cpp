@@ -1,5 +1,6 @@
 #include "session.h"
 #include "settings/streamingpreferences.h"
+#include "streaming/stationconnectdisplaymode.h"
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
 #include "backend/richpresencemanager.h"
@@ -600,10 +601,8 @@ Session::Session(NvComputer* computer, NvApp& app,
 {
     if (m_Computer->stationConnectAuthentication) {
         // StationConnect is a qualified workstation protocol, not a generic
-        // game-streaming profile. Enforce its current single-display baseline
-        // even if legacy Moonlight settings still contain the 720p defaults.
-        m_Preferences->width = 3840;
-        m_Preferences->height = 2160;
+        // game-streaming profile. Its stream size is selected after SDL video
+        // initialization from the target client display or explicit override.
         m_Preferences->fps = 60;
         m_Preferences->bitrateKbps = 100000;
         m_Preferences->enableYUV444 = true;
@@ -667,9 +666,14 @@ bool Session::initialize()
         return false;
     }
 
+    const QSize stationConnectResolution = m_Computer->stationConnectAuthentication ?
+                                               configureStationConnectDisplayMode() : QSize();
+
     LiInitializeStreamConfiguration(&m_StreamConfig);
-    m_StreamConfig.width = m_Preferences->width;
-    m_StreamConfig.height = m_Preferences->height;
+    m_StreamConfig.width = stationConnectResolution.isValid() ?
+                               stationConnectResolution.width() : m_Preferences->width;
+    m_StreamConfig.height = stationConnectResolution.isValid() ?
+                                stationConnectResolution.height() : m_Preferences->height;
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
@@ -1327,19 +1331,22 @@ private:
     Session* m_Session;
 };
 
-void Session::getWindowDimensions(int& x, int& y,
-                                  int& width, int& height)
+int Session::getTargetDisplayIndex() const
 {
     int displayIndex = 0;
 
     if (m_Window != nullptr) {
         displayIndex = SDL_GetWindowDisplayIndex(m_Window);
-        SDL_assert(displayIndex >= 0);
+        if (displayIndex < 0) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "SDL_GetWindowDisplayIndex() failed: %s",
+                        SDL_GetError());
+            displayIndex = 0;
+        }
     }
     // Create our window on the same display that Qt's UI
     // was being displayed on.
     else {
-        Q_ASSERT(m_QtWindow != nullptr);
         if (m_QtWindow != nullptr) {
             QScreen* screen = m_QtWindow->screen();
             if (screen != nullptr) {
@@ -1374,6 +1381,49 @@ void Session::getWindowDimensions(int& x, int& y,
             }
         }
     }
+
+    return displayIndex;
+}
+
+QSize Session::configureStationConnectDisplayMode()
+{
+    const int displayIndex = getTargetDisplayIndex();
+    SDL_DisplayMode nativeMode;
+    SDL_Rect safeArea;
+    QSize detectedResolution;
+
+    if (StreamUtils::getNativeDesktopMode(displayIndex, &nativeMode, &safeArea)) {
+        detectedResolution = QSize(safeArea.w, safeArea.h);
+    }
+    else if (SDL_GetDesktopDisplayMode(displayIndex, &nativeMode) == 0) {
+        detectedResolution = QSize(nativeMode.w, nativeMode.h);
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Using current desktop mode because native display detection failed");
+    }
+    else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Client display resolution detection failed: %s",
+                    SDL_GetError());
+    }
+
+    const QSize configuredResolution(m_Preferences->width, m_Preferences->height);
+    const QSize selectedResolution = StationConnectDisplayMode::resolve(
+        m_Preferences->stationConnectAutoResolution,
+        detectedResolution,
+        configuredResolution);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect client resolution: detected=%dx%d configured=%dx%d selected=%dx%d mode=%s",
+                detectedResolution.width(), detectedResolution.height(),
+                configuredResolution.width(), configuredResolution.height(),
+                selectedResolution.width(), selectedResolution.height(),
+                m_Preferences->stationConnectAutoResolution ? "auto" : "override");
+    return selectedResolution;
+}
+
+void Session::getWindowDimensions(int& x, int& y,
+                                  int& width, int& height)
+{
+    const int displayIndex = getTargetDisplayIndex();
 
     SDL_Rect usableBounds;
     if (SDL_GetDisplayUsableBounds(displayIndex, &usableBounds) == 0) {

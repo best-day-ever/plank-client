@@ -25,6 +25,7 @@
 #define SER_VIDEOCFG "videocfg"
 #define SER_HDR "hdr"
 #define SER_YUV444 "yuv444"
+#define SER_STATIONCONNECT_AUTO_RESOLUTION "stationconnectautoresolution"
 #define SER_VIDEODEC "videodec"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
@@ -121,6 +122,7 @@ void StreamingPreferences::reload()
     fps = settings.value(SER_FPS, 60).toInt();
     enableYUV444 = settings.value(SER_YUV444, false).toBool();
     identityGbrBitDepth = 10;
+    stationConnectAutoResolution = settings.value(SER_STATIONCONNECT_AUTO_RESOLUTION, true).toBool();
     bitrateKbps = settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps, enableYUV444)).toInt();
     unlockBitrate = settings.value(SER_UNLOCK_BITRATE, false).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
@@ -331,6 +333,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
     settings.setValue(SER_HDR, enableHdr);
     settings.setValue(SER_YUV444, enableYUV444);
+    settings.setValue(SER_STATIONCONNECT_AUTO_RESOLUTION, stationConnectAutoResolution);
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
