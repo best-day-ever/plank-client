@@ -4,6 +4,9 @@ import QtQuick.Controls 2.2
 ItemDelegate {
     property GridView grid
 
+    Accessible.role: Accessible.Button
+    Accessible.onPressAction: clicked()
+
     highlighted: grid.activeFocus && grid.currentItem === this
 
     Keys.onLeftPressed: {

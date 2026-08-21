@@ -146,6 +146,7 @@ CenteredGridView {
     delegate: NavigableItemDelegate {
         width: 300; height: 320;
         grid: pcGrid
+        Accessible.name: model.name
 
         property alias pcContextMenu : pcContextMenuLoader.item
 
