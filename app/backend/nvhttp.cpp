@@ -286,6 +286,7 @@ NvHTTP::startApp(QString verb,
                  bool persistGameControllersOnDisconnect,
                  QString selectedOutputId,
                  QString selectedDisplayMode,
+                 QString topologyGeneration,
                  int stationConnectProtocolVersion,
                  int stationConnectFeatureFlags,
                  QString& rtspSessionUrl)
@@ -301,6 +302,12 @@ NvHTTP::startApp(QString verb,
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
                 "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(selectedDisplayMode));
+        if ((stationConnectFeatureFlags & NvOutputTopology::TopologyGenerationFeature) != 0 &&
+                !topologyGeneration.isEmpty()) {
+            stationConnectOutputArguments +=
+                    "&scTopologyGeneration=" +
+                    QString::fromLatin1(QUrl::toPercentEncoding(topologyGeneration));
+        }
         if (selectedDisplayMode == NvOutputTopology::SingleOutputMode &&
                 !selectedOutputId.isEmpty()) {
             stationConnectOutputArguments +=

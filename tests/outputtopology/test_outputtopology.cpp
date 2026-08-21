@@ -25,7 +25,9 @@ void TestOutputTopology::parsesQualificationVector()
     QVERIFY2(NvOutputTopology::fromJson(document.object(), topology, &error), qPrintable(error));
     QCOMPARE(topology.outputs.size(), 2);
     QCOMPARE(topology.desktopWidth, 5120);
-    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 15);
+    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 31);
+    QVERIFY((topology.featureFlags & NvOutputTopology::TopologyGenerationFeature) != 0);
+    QVERIFY(!topology.generation.isEmpty());
     QVERIFY(topology.supportsScaledSpan());
     QCOMPARE(topology.selectDisplayMode(QString()), QString("scaled-span"));
     QCOMPARE(topology.selectDisplayMode(QString("single-output")), QString("single-output"));
@@ -42,7 +44,7 @@ void TestOutputTopology::rejectsDuplicateIdentity()
         {"refresh_millihz", 60000}, {"primary", true},
     };
     QJsonObject document {
-        {"schema_version", 1}, {"feature_flags", 15}, {"generation", "test"},
+        {"schema_version", 1}, {"feature_flags", 31}, {"generation", "test"},
         {"desktop", QJsonObject {{"x", 0}, {"y", 0}, {"width", 3840}, {"height", 2160}}},
         {"outputs", QJsonArray {output, output}},
     };

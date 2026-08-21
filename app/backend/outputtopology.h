@@ -24,10 +24,12 @@ struct NvOutputTopology
     static const int SelectedOutputFeature = 0x2;
     static const int UnifiedAbsoluteInputFeature = 0x4;
     static const int ScaledSpanFeature = 0x8;
+    static const int TopologyGenerationFeature = 0x10;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
                                              UnifiedAbsoluteInputFeature |
-                                             ScaledSpanFeature;
+                                             ScaledSpanFeature |
+                                             TopologyGenerationFeature;
     static const char* SingleOutputMode;
     static const char* ScaledSpanMode;
 

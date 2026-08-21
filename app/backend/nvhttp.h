@@ -181,6 +181,7 @@ public:
              bool persistGameControllersOnDisconnect,
              QString selectedOutputId,
              QString selectedDisplayMode,
+             QString topologyGeneration,
              int stationConnectProtocolVersion,
              int stationConnectFeatureFlags,
              QString& rtspSessionUrl);

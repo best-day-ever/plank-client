@@ -1615,19 +1615,49 @@ bool Session::startConnectionAsync()
 
     try {
         NvHTTP http(m_Computer);
-        http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
-                      m_Computer->isNvidiaServerSoftware,
-                      m_App.id, &m_StreamConfig,
-                      enableGameOptimizations,
-                      m_Preferences->playAudioOnHost,
-                      m_InputHandler->getAttachedGamepadMask(),
-                      !m_Preferences->multiController,
-                      m_Computer->selectedOutputId,
-                      m_Computer->selectedDisplayMode,
-                      m_Computer->stationConnectTopologyVersion,
-                      m_Computer->stationConnectFeatureFlags &
-                          NvOutputTopology::SupportedFeatureFlags,
-                      rtspSessionUrl);
+        const auto startApp = [&]() {
+            http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
+                          m_Computer->isNvidiaServerSoftware,
+                          m_App.id, &m_StreamConfig,
+                          enableGameOptimizations,
+                          m_Preferences->playAudioOnHost,
+                          m_InputHandler->getAttachedGamepadMask(),
+                          !m_Preferences->multiController,
+                          m_Computer->selectedOutputId,
+                          m_Computer->selectedDisplayMode,
+                          m_Computer->outputTopology.generation,
+                          m_Computer->stationConnectTopologyVersion,
+                          m_Computer->stationConnectFeatureFlags &
+                              NvOutputTopology::SupportedFeatureFlags,
+                          rtspSessionUrl);
+        };
+        try {
+            startApp();
+        } catch (const GfeHttpResponseException& e) {
+            const bool generationBinding =
+                    (m_Computer->stationConnectFeatureFlags &
+                     NvOutputTopology::TopologyGenerationFeature) != 0;
+            if (!m_Computer->stationConnectAuthentication || !generationBinding ||
+                    e.getStatusCode() != 409) {
+                throw;
+            }
+
+            const NvOutputTopology topology = http.getOutputTopology();
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->outputTopology = topology;
+                m_Computer->selectedOutputId =
+                        topology.selectOutput(m_Computer->selectedOutputId);
+                m_Computer->selectedDisplayMode =
+                        topology.selectDisplayMode(m_Computer->selectedDisplayMode);
+            }
+            if (m_ComputerManager != nullptr) {
+                m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+            }
+            qInfo() << "StationConnect refreshed stale topology generation and will retry launch:"
+                    << topology.generation;
+            startApp();
+        }
 
         if (m_Computer->stationConnectAuthentication) {
             {
