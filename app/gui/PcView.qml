@@ -225,6 +225,24 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
+                    text: qsTr("Display…")
+                    visible: model.stationConnectAuthentication
+                    onTriggered: {
+                        var choices = computerModel.stationConnectDisplayChoices(index)
+                        if (choices.length === 0) {
+                            errorDialog.text = qsTr("Connect to this workstation once to retrieve its monitor layout.")
+                            errorDialog.helpText = ""
+                            errorDialog.open()
+                            return
+                        }
+                        displayDialog.pcIndex = index
+                        displayDialog.choices = choices
+                        displayDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
+                        displayDialog.open()
+                    }
+                }
+                NavigableMenuItem {
+                    parentMenu: pcContextMenu
                     text: qsTr("Test Network")
                     onTriggered: {
                         computerModel.testConnectionForComputer(index)
@@ -398,6 +416,39 @@ CenteredGridView {
                 Layout.fillWidth: true
                 Keys.onReturnPressed: loginDialog.accept()
                 Keys.onEnterPressed: loginDialog.accept()
+            }
+        }
+    }
+
+    NavigableDialog {
+        id: displayDialog
+        property int pcIndex: -1
+        property var choices: []
+        property int choiceIndex: 0
+        title: qsTr("Workstation display")
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        onOpened: {
+            displayChoice.model = choices
+            displayChoice.currentIndex = choiceIndex
+            displayChoice.forceActiveFocus()
+        }
+        onAccepted: {
+            computerModel.setStationConnectDisplayChoice(pcIndex,
+                                                         displayChoice.currentIndex)
+        }
+
+        ColumnLayout {
+            Label {
+                text: qsTr("Choose what this workstation displays when you connect. Scaled desktop span is the default for multi-monitor hosts.")
+                wrapMode: Text.Wrap
+                Layout.preferredWidth: 520
+            }
+            ComboBox {
+                id: displayChoice
+                Layout.fillWidth: true
             }
         }
     }

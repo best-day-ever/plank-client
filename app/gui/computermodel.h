@@ -50,6 +50,12 @@ public:
 
     Q_INVOKABLE Session* createSessionForStationConnectDesktop(int computerIndex);
 
+    Q_INVOKABLE QStringList stationConnectDisplayChoices(int computerIndex) const;
+
+    Q_INVOKABLE int stationConnectDisplayChoice(int computerIndex) const;
+
+    Q_INVOKABLE void setStationConnectDisplayChoice(int computerIndex, int choiceIndex);
+
 signals:
     void pairingCompleted(QVariant error);
     void authenticationCompleted(QVariant error);

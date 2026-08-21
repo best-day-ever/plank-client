@@ -35,6 +35,7 @@ struct NvOutputTopology
 
     static bool fromJson(const QJsonObject& object, NvOutputTopology& topology,
                          QString* error = nullptr);
+    QJsonObject toJson() const;
 
     QString selectOutput(QString persistedId) const;
     QString selectDisplayMode(QString persistedMode) const;

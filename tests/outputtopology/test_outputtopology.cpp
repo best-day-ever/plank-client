@@ -8,6 +8,7 @@ class TestOutputTopology : public QObject
 
 private slots:
     void parsesQualificationVector();
+    void roundTripsQualificationVector();
     void rejectsDuplicateIdentity();
 };
 
@@ -34,6 +35,22 @@ void TestOutputTopology::parsesQualificationVector()
     QCOMPARE(topology.selectOutput(QString()), QString("x11:DP-2"));
     QCOMPARE(topology.selectOutput(QString("x11:DP-1")), QString("x11:DP-1"));
     QCOMPARE(topology.selectOutput(QString("x11:missing")), QString("x11:DP-2"));
+}
+
+void TestOutputTopology::roundTripsQualificationVector()
+{
+    const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
+    QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v1.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(document.object(), topology));
+
+    NvOutputTopology restored;
+    QVERIFY(NvOutputTopology::fromJson(topology.toJson(), restored));
+    QCOMPARE(restored.toJson(), topology.toJson());
+    QCOMPARE(restored.selectDisplayMode(QString()), QString("scaled-span"));
 }
 
 void TestOutputTopology::rejectsDuplicateIdentity()

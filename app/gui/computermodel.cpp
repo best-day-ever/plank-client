@@ -4,6 +4,24 @@
 
 #include <utility>
 
+namespace {
+QVector<const NvOutput*> orderedOutputs(const NvOutputTopology& topology)
+{
+    QVector<const NvOutput*> outputs;
+    for (const NvOutput& output : topology.outputs) {
+        if (output.primary) {
+            outputs.append(&output);
+        }
+    }
+    for (const NvOutput& output : topology.outputs) {
+        if (!output.primary) {
+            outputs.append(&output);
+        }
+    }
+    return outputs;
+}
+}
+
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
 
@@ -154,6 +172,79 @@ Session* ComputerModel::createSessionForStationConnectDesktop(int computerIndex)
     }
 
     return nullptr;
+}
+
+QStringList ComputerModel::stationConnectDisplayChoices(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    const NvOutputTopology& topology = computer->outputTopology;
+    QStringList choices;
+    if (topology.supportsScaledSpan()) {
+        choices.append(tr("Scaled desktop span (%1×%2)")
+                       .arg(topology.desktopWidth).arg(topology.desktopHeight));
+    }
+    for (const NvOutput* output : orderedOutputs(topology)) {
+        QString label = tr("%1 — %2×%3")
+                .arg(output->name).arg(output->width).arg(output->height);
+        if (output->primary) {
+            label += tr(" (Primary)");
+        }
+        choices.append(label);
+    }
+    return choices;
+}
+
+int ComputerModel::stationConnectDisplayChoice(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    const NvOutputTopology& topology = computer->outputTopology;
+    if (computer->selectedDisplayMode == NvOutputTopology::ScaledSpanMode &&
+            topology.supportsScaledSpan()) {
+        return 0;
+    }
+    int index = topology.supportsScaledSpan() ? 1 : 0;
+    for (const NvOutput* output : orderedOutputs(topology)) {
+        if (output->id == computer->selectedOutputId) {
+            return index;
+        }
+        ++index;
+    }
+    return 0;
+}
+
+void ComputerModel::setStationConnectDisplayChoice(int computerIndex, int choiceIndex)
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    bool changed = false;
+    {
+        QWriteLocker lock(&computer->lock);
+        const NvOutputTopology& topology = computer->outputTopology;
+        if (topology.supportsScaledSpan()) {
+            if (choiceIndex == 0) {
+                computer->selectedDisplayMode = NvOutputTopology::ScaledSpanMode;
+                changed = true;
+            } else {
+                --choiceIndex;
+            }
+        }
+        if (!changed) {
+            const QVector<const NvOutput*> outputs = orderedOutputs(topology);
+            if (choiceIndex < 0 || choiceIndex >= outputs.size()) {
+                return;
+            }
+            computer->selectedDisplayMode = NvOutputTopology::SingleOutputMode;
+            computer->selectedOutputId = outputs[choiceIndex]->id;
+            changed = true;
+        }
+    }
+    if (changed) {
+        m_ComputerManager->clientSideAttributeUpdated(computer);
+    }
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

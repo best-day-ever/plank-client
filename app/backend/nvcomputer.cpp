@@ -4,6 +4,7 @@
 
 #include <QUdpSocket>
 #include <QHostInfo>
+#include <QJsonDocument>
 #include <QNetworkInterface>
 #include <QNetworkProxy>
 
@@ -24,6 +25,7 @@
 #define SER_NVIDIASOFTWARE "nvidiasw"
 #define SER_SELECTEDOUTPUT "stationconnect-selected-output"
 #define SER_DISPLAYMODE "stationconnect-display-mode"
+#define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
 
 NvComputer::NvComputer(QSettings& settings)
 {
@@ -43,6 +45,11 @@ NvComputer::NvComputer(QSettings& settings)
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
     this->selectedOutputId = settings.value(SER_SELECTEDOUTPUT).toString();
     this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
+    const QJsonDocument serializedTopology = QJsonDocument::fromJson(
+            settings.value(SER_OUTPUTTOPOLOGY).toByteArray());
+    if (serializedTopology.isObject()) {
+        NvOutputTopology::fromJson(serializedTopology.object(), this->outputTopology);
+    }
 
     int appCount = settings.beginReadArray(SER_APPLIST);
     this->appList.reserve(appCount);
@@ -102,6 +109,12 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
     settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
     settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
+    if (!outputTopology.outputs.isEmpty()) {
+        settings.setValue(SER_OUTPUTTOPOLOGY,
+                          QJsonDocument(outputTopology.toJson()).toJson(QJsonDocument::Compact));
+    } else {
+        settings.remove(SER_OUTPUTTOPOLOGY);
+    }
 
     // Avoid deleting an existing applist if we couldn't get one
     if (!appList.isEmpty() && serializeApps) {
@@ -129,6 +142,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
            this->selectedOutputId == that.selectedOutputId &&
            this->selectedDisplayMode == that.selectedDisplayMode &&
+           this->outputTopology.toJson() == that.outputTopology.toJson() &&
            this->appList == that.appList;
 }
 

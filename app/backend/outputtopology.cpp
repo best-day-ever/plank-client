@@ -85,6 +85,31 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
     return true;
 }
 
+QJsonObject NvOutputTopology::toJson() const
+{
+    QJsonArray serializedOutputs;
+    for (const NvOutput& output : outputs) {
+        serializedOutputs.append(QJsonObject {
+            {"id", output.id}, {"name", output.name},
+            {"x", output.x}, {"y", output.y},
+            {"width", output.width}, {"height", output.height},
+            {"rotation", output.rotation},
+            {"refresh_millihz", output.refreshMillihz},
+            {"primary", output.primary},
+        });
+    }
+    return QJsonObject {
+        {"schema_version", schemaVersion},
+        {"feature_flags", featureFlags},
+        {"generation", generation},
+        {"desktop", QJsonObject {
+            {"x", desktopX}, {"y", desktopY},
+            {"width", desktopWidth}, {"height", desktopHeight},
+        }},
+        {"outputs", serializedOutputs},
+    };
+}
+
 bool NvOutputTopology::contains(QString outputId) const
 {
     for (const NvOutput& output : outputs) {
