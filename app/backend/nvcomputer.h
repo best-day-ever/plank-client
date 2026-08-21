@@ -2,6 +2,7 @@
 
 #include "nvhttp.h"
 #include "nvaddress.h"
+#include "outputtopology.h"
 
 #include <QThread>
 #include <QReadWriteLock>
@@ -103,6 +104,9 @@ public:
     bool isSupportedServerVersion;
     bool stationConnectAuthentication = false;
     QString sessionToken;
+    int stationConnectTopologyVersion = 0;
+    int stationConnectFeatureFlags = 0;
+    NvOutputTopology outputTopology;
 
     // Persisted traits
     NvAddress localAddress;
@@ -116,6 +120,8 @@ public:
     QSslCertificate serverCert;
     QVector<NvApp> appList;
     bool isNvidiaServerSoftware;
+    QString selectedOutputId;
+    QString selectedDisplayMode;
     // Remember to update isEqualSerialized() when adding fields here!
 
     // Synchronization

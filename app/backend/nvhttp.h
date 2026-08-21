@@ -3,6 +3,7 @@
 #include "identitymanager.h"
 #include "nvapp.h"
 #include "nvaddress.h"
+#include "outputtopology.h"
 
 #include <Limelight.h>
 
@@ -150,6 +151,7 @@ public:
     void setStationConnectAuthentication(bool enabled, QString sessionToken = QString());
 
     QString authenticate(QString username, QString password);
+    NvOutputTopology getOutputTopology();
 
     bool isApprovedStationConnectRoute() const;
 
@@ -177,6 +179,10 @@ public:
              bool localAudio,
              int gamepadMask,
              bool persistGameControllersOnDisconnect,
+             QString selectedOutputId,
+             QString selectedDisplayMode,
+             int stationConnectProtocolVersion,
+             int stationConnectFeatureFlags,
              QString& rtspSessionUrl);
 
     QVector<NvApp>

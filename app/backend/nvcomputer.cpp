@@ -22,6 +22,8 @@
 #define SER_SRVCERT "srvcert"
 #define SER_CUSTOMNAME "customname"
 #define SER_NVIDIASOFTWARE "nvidiasw"
+#define SER_SELECTEDOUTPUT "stationconnect-selected-output"
+#define SER_DISPLAYMODE "stationconnect-display-mode"
 
 NvComputer::NvComputer(QSettings& settings)
 {
@@ -39,6 +41,8 @@ NvComputer::NvComputer(QSettings& settings)
                                     settings.value(SER_MANUALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
     this->serverCert = QSslCertificate(settings.value(SER_SRVCERT).toByteArray());
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
+    this->selectedOutputId = settings.value(SER_SELECTEDOUTPUT).toString();
+    this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
 
     int appCount = settings.beginReadArray(SER_APPLIST);
     this->appList.reserve(appCount);
@@ -64,6 +68,8 @@ NvComputer::NvComputer(QSettings& settings)
     this->externalPort = this->remoteAddress.port();
     this->activeHttpsPort = 0;
     this->stationConnectAuthentication = false;
+    this->stationConnectTopologyVersion = 0;
+    this->stationConnectFeatureFlags = 0;
     this->sessionToken.clear();
 }
 
@@ -94,6 +100,8 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_MANUALPORT, manualAddress.port());
     settings.setValue(SER_SRVCERT, serverCert.toPem());
     settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
+    settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
+    settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
 
     // Avoid deleting an existing applist if we couldn't get one
     if (!appList.isEmpty() && serializeApps) {
@@ -119,6 +127,8 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->manualAddress == that.manualAddress &&
            this->serverCert == that.serverCert &&
            this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
+           this->selectedOutputId == that.selectedOutputId &&
+           this->selectedDisplayMode == that.selectedDisplayMode &&
            this->appList == that.appList;
 }
 
@@ -205,6 +215,10 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 
     this->stationConnectAuthentication =
             NvHTTP::getXmlString(serverInfo, "StationConnectAuth") == "1";
+    this->stationConnectTopologyVersion =
+            NvHTTP::getXmlString(serverInfo, "StationConnectTopologyVersion").toInt();
+    this->stationConnectFeatureFlags =
+            NvHTTP::getXmlString(serverInfo, "StationConnectFeatureFlags").toInt();
     this->pairState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
                 PS_PAIRED : PS_NOT_PAIRED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
@@ -558,6 +572,8 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(activeHttpsPort);
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(stationConnectAuthentication);
+    ASSIGN_IF_CHANGED(stationConnectTopologyVersion);
+    ASSIGN_IF_CHANGED(stationConnectFeatureFlags);
     if (stationConnectAuthentication && sessionToken.isEmpty()) {
         if (pairState != PS_NOT_PAIRED) {
             pairState = PS_NOT_PAIRED;

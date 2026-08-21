@@ -1622,6 +1622,11 @@ bool Session::startConnectionAsync()
                       m_Preferences->playAudioOnHost,
                       m_InputHandler->getAttachedGamepadMask(),
                       !m_Preferences->multiController,
+                      m_Computer->selectedOutputId,
+                      m_Computer->selectedDisplayMode,
+                      m_Computer->stationConnectTopologyVersion,
+                      m_Computer->stationConnectFeatureFlags &
+                          NvOutputTopology::SupportedFeatureFlags,
                       rtspSessionUrl);
 
         if (m_Computer->stationConnectAuthentication) {

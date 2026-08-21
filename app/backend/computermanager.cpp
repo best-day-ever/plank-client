@@ -691,11 +691,35 @@ private:
             const QString token = http.authenticate(m_Username, m_Password);
             m_Password.fill(QChar('\0'));
             m_Password.clear();
+            NvOutputTopology topology;
+            const bool topologySupported =
+                    m_Computer->stationConnectTopologyVersion == NvOutputTopology::ProtocolVersion &&
+                    (m_Computer->stationConnectFeatureFlags &
+                     (NvOutputTopology::OutputTopologyFeature |
+                      NvOutputTopology::SelectedOutputFeature |
+                      NvOutputTopology::UnifiedAbsoluteInputFeature)) ==
+                    (NvOutputTopology::OutputTopologyFeature |
+                     NvOutputTopology::SelectedOutputFeature |
+                     NvOutputTopology::UnifiedAbsoluteInputFeature);
+            if (topologySupported) {
+                topology = http.getOutputTopology();
+            }
             const QVector<NvApp> apps = http.getAppList();
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
                 m_Computer->pairState = NvComputer::PS_PAIRED;
+                if (topologySupported) {
+                    m_Computer->outputTopology = topology;
+                    m_Computer->selectedOutputId =
+                            topology.selectOutput(m_Computer->selectedOutputId);
+                    m_Computer->selectedDisplayMode =
+                            topology.selectDisplayMode(m_Computer->selectedDisplayMode);
+                    qInfo() << "StationConnect selected display mode"
+                            << m_Computer->selectedDisplayMode << "and host output"
+                            << m_Computer->selectedOutputId
+                            << "from topology generation" << topology.generation;
+                }
                 m_Computer->updateAppList(apps);
             }
             m_ComputerManager->clientSideAttributeUpdated(m_Computer);

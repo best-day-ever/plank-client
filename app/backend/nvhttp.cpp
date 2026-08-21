@@ -284,12 +284,29 @@ NvHTTP::startApp(QString verb,
                  bool localAudio,
                  int gamepadMask,
                  bool persistGameControllersOnDisconnect,
+                 QString selectedOutputId,
+                 QString selectedDisplayMode,
+                 int stationConnectProtocolVersion,
+                 int stationConnectFeatureFlags,
                  QString& rtspSessionUrl)
 {
     int riKeyId;
 
     memcpy(&riKeyId, streamConfig->remoteInputAesIv, sizeof(riKeyId));
     riKeyId = qFromBigEndian(riKeyId);
+
+    QString stationConnectOutputArguments;
+    if (m_StationConnectAuthentication && !selectedDisplayMode.isEmpty()) {
+        stationConnectOutputArguments =
+                "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
+                "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
+                "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(selectedDisplayMode));
+        if (selectedDisplayMode == NvOutputTopology::SingleOutputMode &&
+                !selectedOutputId.isEmpty()) {
+            stationConnectOutputArguments +=
+                    "&scOutputId=" + QString::fromLatin1(QUrl::toPercentEncoding(selectedOutputId));
+        }
+    }
 
     QString response =
             openConnectionToString(m_BaseUrlHttps,
@@ -313,6 +330,7 @@ NvHTTP::startApp(QString verb,
                                    "&remoteControllersBitmap="+QString::number(gamepadMask)+
                                    "&gcmap="+QString::number(gamepadMask)+
                                    "&gcpersist="+QString::number(persistGameControllersOnDisconnect ? 1 : 0)+
+                                   stationConnectOutputArguments+
                                    LiGetLaunchUrlQueryParameters(),
                                    LAUNCH_TIMEOUT_MS);
 
@@ -677,6 +695,26 @@ QString NvHTTP::authenticate(QString username, QString password)
     }
 
     throw GfeHttpResponseException(400, "PAM conversation exceeded the round limit");
+}
+
+NvOutputTopology NvHTTP::getOutputTopology()
+{
+    if (!m_StationConnectAuthentication || m_SessionToken.isEmpty()) {
+        throw GfeHttpResponseException(400, "Invalid StationConnect topology state");
+    }
+    const QString response = openConnectionToString(
+                m_BaseUrlHttps, "stationconnect/topology", nullptr,
+                REQUEST_TIMEOUT_MS, NvLogLevel::NVLL_VERBOSE);
+    const QJsonDocument document = QJsonDocument::fromJson(response.toUtf8());
+    NvOutputTopology topology;
+    QString error;
+    if (!document.isObject() ||
+            !NvOutputTopology::fromJson(document.object(), topology, &error)) {
+        throw GfeHttpResponseException(400,
+                                       error.isEmpty() ?
+                                           "Malformed StationConnect topology response" : error);
+    }
+    return topology;
 }
 
 QNetworkReply*

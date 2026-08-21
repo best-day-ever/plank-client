@@ -176,6 +176,7 @@ macx {
 
 SOURCES += \
     backend/nvaddress.cpp \
+    backend/outputtopology.cpp \
     backend/nvapp.cpp \
     cli/pair.cpp \
     main.cpp \
@@ -216,6 +217,7 @@ SOURCES += \
 
 HEADERS += \
     backend/nvaddress.h \
+    backend/outputtopology.h \
     backend/nvapp.h \
     cli/pair.h \
     settings/compatfetcher.h \
