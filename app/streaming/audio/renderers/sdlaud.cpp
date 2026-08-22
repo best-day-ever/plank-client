@@ -181,9 +181,15 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
     const int inputFrames = m_BytesPerSampleFrame == 0 ?
                                 0 : bytesWritten / m_BytesPerSampleFrame;
 
-    // Don't queue if there's already more than 30 ms of audio data waiting
-    // in Moonlight's audio queue.
-    if (LiGetPendingAudioDuration() > 30) {
+    const int pendingAudioMs = LiGetPendingAudioDuration();
+
+    // Generic Moonlight drops decoded audio to recover latency when its input
+    // queue grows. StationConnect instead uses bounded resampling catch-up for
+    // ordinary scheduling bursts and retains a hard emergency ceiling.
+    constexpr int MaximumStationConnectPendingAudioMs = 100;
+    if ((!m_EnableAvSyncCorrection && pendingAudioMs > 30) ||
+            (m_EnableAvSyncCorrection &&
+             pendingAudioMs > MaximumStationConnectPendingAudioMs)) {
         m_RawAudioFrames += inputFrames;
         m_SkippedAudioBlocks++;
         return true;
@@ -213,16 +219,22 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
 #if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
     if (m_EnableAvSyncCorrection && m_SwrContext != nullptr && inputFrames > 0) {
         const Uint32 now = SDL_GetTicks();
+        const int backlogAudioMs = LiGetPendingAudioDuration();
         const auto correction = m_AudioRateController.update(
             m_RawAudioFrames,
             m_SampleRate,
             now,
             StationConnectAvSync::readVideoClock());
-        if (correction.updated) {
-            constexpr int CompensationSeconds = 10;
+        const auto backlogCorrection = m_AudioBacklogController.update(
+            backlogAudioMs,
+            now);
+        if (correction.updated || backlogCorrection.updated) {
+            constexpr int CompensationSeconds = 1;
             const int compensationDistance = m_SampleRate * CompensationSeconds;
+            const int appliedCorrectionPpm =
+                correction.correctionPpm + backlogCorrection.correctionPpm;
             const int sampleDelta = static_cast<int>(std::llround(
-                -static_cast<double>(correction.correctionPpm) *
+                -static_cast<double>(appliedCorrectionPpm) *
                 compensationDistance / 1000000.0));
             if (swr_set_compensation(m_SwrContext,
                                      sampleDelta,
@@ -230,10 +242,13 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Unable to update StationConnect audio correction");
             }
-            else if ((m_RawAudioFrames / m_SampleRate) % 10 == 0) {
+            else if (correction.updated &&
+                     (m_RawAudioFrames / m_SampleRate) % 10 == 0) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio correction: ppm=%d delta=%d distance=%d",
+                            "StationConnect A/V audio correction: ppm=%d catchup=%d applied=%d delta=%d distance=%d",
                             correction.correctionPpm,
+                            backlogCorrection.correctionPpm,
+                            appliedCorrectionPpm,
                             sampleDelta,
                             compensationDistance);
             }
@@ -307,6 +322,11 @@ qint64 SdlAudioRenderer::getSubmittedAudioMediaTimeMs()
 int SdlAudioRenderer::getAudioClockCorrectionPpm()
 {
     return m_AudioRateController.correctionPpm();
+}
+
+int SdlAudioRenderer::getAudioBacklogCorrectionPpm()
+{
+    return m_AudioBacklogController.correctionPpm();
 }
 
 quint64 SdlAudioRenderer::getSkippedAudioBlockCount()

@@ -32,6 +32,8 @@ public:
 
     virtual int getAudioClockCorrectionPpm() override;
 
+    virtual int getAudioBacklogCorrectionPpm() override;
+
     virtual quint64 getSkippedAudioBlockCount() override;
 
     virtual AudioFormat getAudioBufferFormat();
@@ -51,6 +53,7 @@ private:
     qint64 m_LastSubmittedAudioMediaTimeMs;
     quint64 m_SkippedAudioBlocks;
     StationConnectAvSync::AudioRateController m_AudioRateController;
+    StationConnectAvSync::AudioBacklogController m_AudioBacklogController;
 
 #if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
     SwrContext* m_SwrContext;

@@ -11,6 +11,10 @@ constexpr double MinimumFitDurationMs = 120000.0;
 constexpr double FitWindowDurationMs = 300000.0;
 constexpr std::int32_t MaximumVideoClockAgeMs = 2000;
 constexpr int MaximumCorrectionStepPpm = 2;
+constexpr std::int32_t BacklogUpdateIntervalMs = 100;
+constexpr int BacklogTargetMs = 15;
+constexpr int BacklogGainPpmPerMs = 500;
+constexpr int MaximumBacklogCorrectionStepPpm = 1000;
 
 std::mutex videoClockLock;
 VideoClockSample latestVideoClock;
@@ -174,6 +178,49 @@ void AudioRateController::trimWindow(std::deque<ClockPoint>& points)
                FitWindowDurationMs) {
         points.pop_front();
     }
+}
+
+void AudioBacklogController::reset()
+{
+    m_LastUpdateTicks = 0;
+    m_CorrectionPpm = 0;
+    m_Anchored = false;
+}
+
+AudioBacklogController::Result AudioBacklogController::update(
+        int pendingAudioMs,
+        std::uint32_t observationTicks)
+{
+    Result result {m_CorrectionPpm, false};
+    if (!m_Anchored) {
+        m_LastUpdateTicks = observationTicks;
+        m_Anchored = true;
+        return result;
+    }
+
+    if (static_cast<std::int32_t>(observationTicks - m_LastUpdateTicks) <
+            BacklogUpdateIntervalMs) {
+        return result;
+    }
+    m_LastUpdateTicks = observationTicks;
+
+    const int targetCorrection = std::clamp(
+        (std::max(pendingAudioMs, BacklogTargetMs) - BacklogTargetMs) *
+            BacklogGainPpmPerMs,
+        0,
+        MaximumCorrectionPpm);
+    const int delta = std::clamp(targetCorrection - m_CorrectionPpm,
+                                 -MaximumBacklogCorrectionStepPpm,
+                                 MaximumBacklogCorrectionStepPpm);
+    m_CorrectionPpm += delta;
+    result.correctionPpm = m_CorrectionPpm;
+    result.updated = true;
+    return result;
+}
+
+int AudioBacklogController::correctionPpm() const
+{
+    return m_CorrectionPpm;
 }
 
 } // namespace StationConnectAvSync

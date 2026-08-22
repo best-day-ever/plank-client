@@ -14,6 +14,9 @@ private slots:
     void correctsSlowAudioClock();
     void boundsExtremeCorrection();
     void ignoresStaleVideoClock();
+    void leavesSmallAudioBacklogUnchanged();
+    void catchesUpBoundedAudioBacklog();
+    void removesCatchUpAfterBacklogDrains();
 };
 
 namespace {
@@ -75,6 +78,36 @@ void TestAvSyncController::ignoresStaleVideoClock()
     const auto ignored = controller.update(48000, 48000, 5001, stale);
     QVERIFY(!ignored.updated);
     QCOMPARE(ignored.correctionPpm, 0);
+}
+
+void TestAvSyncController::leavesSmallAudioBacklogUnchanged()
+{
+    StationConnectAvSync::AudioBacklogController controller;
+    for (std::uint32_t ticks = 0; ticks <= 1000; ticks += 100) {
+        controller.update(15, ticks);
+    }
+    QCOMPARE(controller.correctionPpm(), 0);
+}
+
+void TestAvSyncController::catchesUpBoundedAudioBacklog()
+{
+    StationConnectAvSync::AudioBacklogController controller;
+    for (std::uint32_t ticks = 0; ticks <= 1000; ticks += 100) {
+        controller.update(35, ticks);
+    }
+    QCOMPARE(controller.correctionPpm(), 10000);
+}
+
+void TestAvSyncController::removesCatchUpAfterBacklogDrains()
+{
+    StationConnectAvSync::AudioBacklogController controller;
+    for (std::uint32_t ticks = 0; ticks <= 1000; ticks += 100) {
+        controller.update(35, ticks);
+    }
+    for (std::uint32_t ticks = 1100; ticks <= 2100; ticks += 100) {
+        controller.update(0, ticks);
+    }
+    QCOMPARE(controller.correctionPpm(), 0);
 }
 
 QTEST_APPLESS_MAIN(TestAvSyncController)

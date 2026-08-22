@@ -61,4 +61,27 @@ private:
     bool m_Anchored = false;
 };
 
+class AudioBacklogController
+{
+public:
+    static constexpr int MaximumCorrectionPpm = 10000;
+
+    struct Result
+    {
+        int correctionPpm = 0;
+        bool updated = false;
+    };
+
+    void reset();
+
+    Result update(int pendingAudioMs, std::uint32_t observationTicks);
+
+    int correctionPpm() const;
+
+private:
+    std::uint32_t m_LastUpdateTicks = 0;
+    int m_CorrectionPpm = 0;
+    bool m_Anchored = false;
+};
+
 } // namespace StationConnectAvSync

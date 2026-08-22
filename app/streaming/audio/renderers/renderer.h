@@ -37,6 +37,10 @@ public:
         return 0;
     }
 
+    virtual int getAudioBacklogCorrectionPpm() {
+        return 0;
+    }
+
     virtual quint64 getSkippedAudioBlockCount() {
         return 0;
     }

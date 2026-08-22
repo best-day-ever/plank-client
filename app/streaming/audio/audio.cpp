@@ -268,7 +268,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
                     s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
                     s_ActiveSession->m_ActiveAudioConfig.sampleRate;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu",
+                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
                             static_cast<unsigned long long>(mediaTimeMs),
                             now,
                             s_ActiveSession->m_AudioRenderer->getQueuedAudioDurationMs(),
@@ -278,7 +278,8 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
                             s_ActiveSession->m_AudioRenderer->getAudioClockCorrectionPpm(),
                             static_cast<unsigned long long>(
                                 s_ActiveSession->m_AudioRenderer->getSkippedAudioBlockCount()),
-                            static_cast<unsigned long long>(uncorrectedMediaTimeMs));
+                            static_cast<unsigned long long>(uncorrectedMediaTimeMs),
+                            s_ActiveSession->m_AudioRenderer->getAudioBacklogCorrectionPpm());
                 s_ActiveSession->m_LastAudioTelemetryTime = now;
             }
         }
