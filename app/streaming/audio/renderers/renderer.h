@@ -27,6 +27,20 @@ public:
         return -1;
     }
 
+    // Return the start time of the most recently submitted corrected audio
+    // block, or -1 when the renderer does not maintain a corrected clock.
+    virtual qint64 getSubmittedAudioMediaTimeMs() {
+        return -1;
+    }
+
+    virtual int getAudioClockCorrectionPpm() {
+        return 0;
+    }
+
+    virtual quint64 getSkippedAudioBlockCount() {
+        return 0;
+    }
+
     virtual void remapChannels(POPUS_MULTISTREAM_CONFIGURATION) {
         // Use default channel mapping:
         // 0 - Front Left

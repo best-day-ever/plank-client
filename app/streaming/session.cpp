@@ -1,5 +1,6 @@
 #include "session.h"
 #include "settings/streamingpreferences.h"
+#include "streaming/avsynccontroller.h"
 #include "streaming/stationconnectdisplaymode.h"
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
@@ -603,6 +604,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_LastAudioTelemetryTime(0)
 {
     if (m_Computer->stationConnectAuthentication) {
+        StationConnectAvSync::resetVideoClock();
+
         // StationConnect is a qualified workstation protocol, not a generic
         // game-streaming profile. Its stream size is selected after SDL video
         // initialization from the target client display or explicit override.

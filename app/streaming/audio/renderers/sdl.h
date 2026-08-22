@@ -1,12 +1,18 @@
 #pragma once
 
 #include "renderer.h"
+#include "streaming/avsynccontroller.h"
 #include <SDL.h>
+#include <vector>
+
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+struct SwrContext;
+#endif
 
 class SdlAudioRenderer : public IAudioRenderer
 {
 public:
-    SdlAudioRenderer();
+    explicit SdlAudioRenderer(bool enableAvSyncCorrection = false);
 
     virtual ~SdlAudioRenderer();
 
@@ -22,12 +28,32 @@ public:
 
     virtual int getDeviceBufferDurationMs() override;
 
+    virtual qint64 getSubmittedAudioMediaTimeMs() override;
+
+    virtual int getAudioClockCorrectionPpm() override;
+
+    virtual quint64 getSkippedAudioBlockCount() override;
+
     virtual AudioFormat getAudioBufferFormat();
 
 private:
     SDL_AudioDeviceID m_AudioDevice;
     void* m_AudioBuffer;
     int m_FrameSize;
+    int m_BytesPerSampleFrame;
     int m_BytesPerSecond;
     int m_DeviceBufferDurationMs;
+    int m_SampleRate;
+    int m_ChannelCount;
+    bool m_EnableAvSyncCorrection;
+    quint64 m_RawAudioFrames;
+    quint64 m_SubmittedAudioFrames;
+    qint64 m_LastSubmittedAudioMediaTimeMs;
+    quint64 m_SkippedAudioBlocks;
+    StationConnectAvSync::AudioRateController m_AudioRateController;
+
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+    SwrContext* m_SwrContext;
+    std::vector<float> m_CorrectedAudioBuffer;
+#endif
 };

@@ -13,9 +13,9 @@
 
 #include <Limelight.h>
 
-#define TRY_INIT_RENDERER(renderer, opusConfig)        \
-{                                                      \
-    IAudioRenderer* __renderer = new renderer();       \
+#define TRY_INIT_RENDERER(renderer, opusConfig, ...)         \
+{                                                            \
+    IAudioRenderer* __renderer = new renderer(__VA_ARGS__);   \
     if (__renderer->prepareForPlayback(opusConfig))    \
         return __renderer;                             \
     delete __renderer;                                 \
@@ -26,7 +26,8 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     // Handle explicit ML_AUDIO setting and fail if the requested backend fails
     QString mlAudio = qgetenv("ML_AUDIO").toLower();
     if (mlAudio == "sdl") {
-        TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
+        TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
+                          m_Computer->stationConnectAuthentication)
         return nullptr;
     }
 #ifdef HAVE_SOUNDIO
@@ -56,7 +57,8 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
 #endif
 
     // Default to SDL and use libsoundio as a fallback
-    TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
+    TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
+                      m_Computer->stationConnectAuthentication)
 #ifdef HAVE_SOUNDIO
     TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
 #endif
@@ -254,20 +256,29 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
             const Uint32 now = SDL_GetTicks();
             if (s_ActiveSession->m_LastAudioTelemetryTime == 0 ||
                     now - s_ActiveSession->m_LastAudioTelemetryTime >= 1000) {
-                const quint64 mediaTimeMs =
+                const quint64 uncorrectedMediaTimeMs =
                     mediaFrameIndex * s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
                     s_ActiveSession->m_ActiveAudioConfig.sampleRate;
+                const qint64 correctedMediaTimeMs =
+                    s_ActiveSession->m_AudioRenderer->getSubmittedAudioMediaTimeMs();
+                const quint64 mediaTimeMs = correctedMediaTimeMs >= 0 ?
+                    static_cast<quint64>(correctedMediaTimeMs) :
+                    uncorrectedMediaTimeMs;
                 const int frameDurationMs =
                     s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
                     s_ActiveSession->m_ActiveAudioConfig.sampleRate;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d",
+                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu",
                             static_cast<unsigned long long>(mediaTimeMs),
                             now,
                             s_ActiveSession->m_AudioRenderer->getQueuedAudioDurationMs(),
                             s_ActiveSession->m_AudioRenderer->getDeviceBufferDurationMs(),
                             LiGetPendingAudioDuration(),
-                            frameDurationMs);
+                            frameDurationMs,
+                            s_ActiveSession->m_AudioRenderer->getAudioClockCorrectionPpm(),
+                            static_cast<unsigned long long>(
+                                s_ActiveSession->m_AudioRenderer->getSkippedAudioBlockCount()),
+                            static_cast<unsigned long long>(uncorrectedMediaTimeMs));
                 s_ActiveSession->m_LastAudioTelemetryTime = now;
             }
         }

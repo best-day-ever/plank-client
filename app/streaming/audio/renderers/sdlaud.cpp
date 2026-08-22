@@ -2,13 +2,34 @@
 
 #include <Limelight.h>
 #include <SDL.h>
+#include <cmath>
 
-SdlAudioRenderer::SdlAudioRenderer()
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+extern "C" {
+#include <libavutil/channel_layout.h>
+#include <libavutil/opt.h>
+#include <libavutil/samplefmt.h>
+#include <libswresample/swresample.h>
+}
+#endif
+
+SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
     : m_AudioDevice(0),
       m_AudioBuffer(nullptr),
       m_FrameSize(0),
+      m_BytesPerSampleFrame(0),
       m_BytesPerSecond(0),
-      m_DeviceBufferDurationMs(0)
+      m_DeviceBufferDurationMs(0),
+      m_SampleRate(0),
+      m_ChannelCount(0),
+      m_EnableAvSyncCorrection(enableAvSyncCorrection),
+      m_RawAudioFrames(0),
+      m_SubmittedAudioFrames(0),
+      m_LastSubmittedAudioMediaTimeMs(-1),
+      m_SkippedAudioBlocks(0)
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+      , m_SwrContext(nullptr)
+#endif
 {
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 
@@ -56,7 +77,47 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
     }
 
     m_BytesPerSecond = have.freq * have.channels * getAudioBufferSampleSize();
+    m_BytesPerSampleFrame = have.channels * getAudioBufferSampleSize();
     m_DeviceBufferDurationMs = have.samples * 1000 / have.freq;
+    m_SampleRate = have.freq;
+    m_ChannelCount = have.channels;
+
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+    if (m_EnableAvSyncCorrection) {
+        AVChannelLayout channelLayout;
+        av_channel_layout_default(&channelLayout, have.channels);
+        const int allocationResult = swr_alloc_set_opts2(
+            &m_SwrContext,
+            &channelLayout,
+            AV_SAMPLE_FMT_FLT,
+            have.freq,
+            &channelLayout,
+            AV_SAMPLE_FMT_FLT,
+            opusConfig->sampleRate,
+            0,
+            nullptr);
+        if (m_SwrContext != nullptr) {
+            // Keep the resampler active from the first block. Otherwise the
+            // first compensation request would reinitialize it mid-stream.
+            av_opt_set_int(m_SwrContext, "flags", SWR_FLAG_RESAMPLE, 0);
+        }
+        av_channel_layout_uninit(&channelLayout);
+        if (allocationResult < 0 || m_SwrContext == nullptr ||
+                swr_init(m_SwrContext) < 0) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Unable to initialize StationConnect A/V audio correction");
+            swr_free(&m_SwrContext);
+            m_EnableAvSyncCorrection = false;
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "StationConnect video-master audio correction enabled (limit %d ppm)",
+                        StationConnectAvSync::AudioRateController::MaximumCorrectionPpm);
+        }
+    }
+#else
+    m_EnableAvSyncCorrection = false;
+#endif
 
     m_AudioBuffer = SDL_malloc(m_FrameSize);
     if (m_AudioBuffer == nullptr) {
@@ -97,6 +158,10 @@ SdlAudioRenderer::~SdlAudioRenderer()
         SDL_free(m_AudioBuffer);
     }
 
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+    swr_free(&m_SwrContext);
+#endif
+
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 }
@@ -113,9 +178,14 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
         return true;
     }
 
+    const int inputFrames = m_BytesPerSampleFrame == 0 ?
+                                0 : bytesWritten / m_BytesPerSampleFrame;
+
     // Don't queue if there's already more than 30 ms of audio data waiting
     // in Moonlight's audio queue.
     if (LiGetPendingAudioDuration() > 30) {
+        m_RawAudioFrames += inputFrames;
+        m_SkippedAudioBlocks++;
         return true;
     }
 
@@ -137,10 +207,72 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
         SDL_Delay(1);
     }
 
-    if (SDL_QueueAudio(m_AudioDevice, m_AudioBuffer, bytesWritten) < 0) {
+    const void* queuedBuffer = m_AudioBuffer;
+    int queuedBytes = bytesWritten;
+
+#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+    if (m_EnableAvSyncCorrection && m_SwrContext != nullptr && inputFrames > 0) {
+        const Uint32 now = SDL_GetTicks();
+        const auto correction = m_AudioRateController.update(
+            m_RawAudioFrames,
+            m_SampleRate,
+            now,
+            StationConnectAvSync::readVideoClock());
+        if (correction.updated) {
+            constexpr int CompensationSeconds = 10;
+            const int compensationDistance = m_SampleRate * CompensationSeconds;
+            const int sampleDelta = static_cast<int>(std::llround(
+                -static_cast<double>(correction.correctionPpm) *
+                compensationDistance / 1000000.0));
+            if (swr_set_compensation(m_SwrContext,
+                                     sampleDelta,
+                                     compensationDistance) < 0) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Unable to update StationConnect audio correction");
+            }
+            else if ((m_RawAudioFrames / m_SampleRate) % 10 == 0) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect A/V audio correction: ppm=%d delta=%d distance=%d",
+                            correction.correctionPpm,
+                            sampleDelta,
+                            compensationDistance);
+            }
+        }
+
+        const int outputCapacity = swr_get_out_samples(m_SwrContext, inputFrames);
+        m_CorrectedAudioBuffer.resize(
+            static_cast<std::size_t>(outputCapacity) * m_ChannelCount);
+        const uint8_t* inputPlanes[] = {
+            reinterpret_cast<const uint8_t*>(m_AudioBuffer)
+        };
+        uint8_t* outputPlanes[] = {
+            reinterpret_cast<uint8_t*>(m_CorrectedAudioBuffer.data())
+        };
+        const int outputFrames = swr_convert(m_SwrContext,
+                                             outputPlanes,
+                                             outputCapacity,
+                                             inputPlanes,
+                                             inputFrames);
+        if (outputFrames < 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "StationConnect audio correction failed");
+            return false;
+        }
+        queuedBuffer = m_CorrectedAudioBuffer.data();
+        queuedBytes = outputFrames * m_BytesPerSampleFrame;
+    }
+#endif
+
+    m_RawAudioFrames += inputFrames;
+    if (SDL_QueueAudio(m_AudioDevice, queuedBuffer, queuedBytes) < 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to queue audio sample: %s",
                      SDL_GetError());
+    }
+    else if (m_EnableAvSyncCorrection) {
+        m_LastSubmittedAudioMediaTimeMs =
+            m_SubmittedAudioFrames * 1000 / m_SampleRate;
+        m_SubmittedAudioFrames += queuedBytes / m_BytesPerSampleFrame;
     }
 
     return true;
@@ -165,6 +297,21 @@ int SdlAudioRenderer::getQueuedAudioDurationMs()
 int SdlAudioRenderer::getDeviceBufferDurationMs()
 {
     return m_DeviceBufferDurationMs;
+}
+
+qint64 SdlAudioRenderer::getSubmittedAudioMediaTimeMs()
+{
+    return m_LastSubmittedAudioMediaTimeMs;
+}
+
+int SdlAudioRenderer::getAudioClockCorrectionPpm()
+{
+    return m_AudioRateController.correctionPpm();
+}
+
+quint64 SdlAudioRenderer::getSkippedAudioBlockCount()
+{
+    return m_SkippedAudioBlocks;
 }
 
 IAudioRenderer::AudioFormat SdlAudioRenderer::getAudioBufferFormat()

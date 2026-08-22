@@ -1,4 +1,5 @@
 #include "pacer.h"
+#include "streaming/avsynccontroller.h"
 #include "streaming/streamutils.h"
 
 #ifdef Q_OS_WIN32
@@ -414,6 +415,10 @@ void Pacer::renderFrame(AVFrame* frame)
         m_RendererCallLatencyHistogram.size() - 1)]++;
     m_MaxRendererCallLatencyMs = std::max(m_MaxRendererCallLatencyMs, rendererCallLatencyMs);
     m_VideoStats->renderedFrames++;
+
+    if (frame->pts >= 0) {
+        StationConnectAvSync::publishVideoClock(frame->pts, afterRender);
+    }
 
     if (m_AvSyncTelemetryEnabled && frame->pts >= 0 &&
             (m_LastVideoTelemetryTime == 0 || afterRender - m_LastVideoTelemetryTime >= 1000)) {

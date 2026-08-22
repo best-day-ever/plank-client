@@ -73,7 +73,7 @@ unix:if(!macx|disable-prebuilts) {
 
     !disable-ffmpeg {
         packagesExist(libavcodec) {
-            PKGCONFIG += libavcodec libavutil libswscale
+            PKGCONFIG += libavcodec libavutil libswscale libswresample
             CONFIG += ffmpeg
 
             !disable-libva {
@@ -202,6 +202,7 @@ SOURCES += \
     streaming/input/mouse.cpp \
     streaming/input/reltouch.cpp \
     streaming/session.cpp \
+    streaming/avsynccontroller.cpp \
     streaming/stationconnectdisplaymode.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
@@ -237,6 +238,7 @@ HEADERS += \
     cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/session.h \
     streaming/stationconnectdisplaymode.h \
