@@ -10,6 +10,7 @@ QSize StationConnectDisplayMode::qualifiedMaximum()
 QSize StationConnectDisplayMode::resolve(bool autoResolution,
                                          const QSize& detectedResolution,
                                          const QSize& configuredResolution,
+                                         const QSize& exactNativeResolution,
                                          const QSize& maximumResolution)
 {
     const QSize maximum = maximumResolution.isValid() ?
@@ -17,6 +18,13 @@ QSize StationConnectDisplayMode::resolve(bool autoResolution,
     QSize requested = autoResolution ? detectedResolution : configuredResolution;
     if (requested.width() < 2 || requested.height() < 2) {
         requested = maximum;
+    }
+
+    // Avoid a lossy downscale/upscale round trip when the selected host
+    // canvas already matches the physical client display pixel-for-pixel.
+    if (autoResolution && exactNativeResolution.isValid() &&
+            detectedResolution == exactNativeResolution) {
+        return fitWithin(requested, requested);
     }
 
     return fitWithin(requested, maximum);

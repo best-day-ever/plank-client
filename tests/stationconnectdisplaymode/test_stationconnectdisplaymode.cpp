@@ -11,6 +11,9 @@ private slots:
     void usesConfiguredResolutionInOverrideMode();
     void clampsToQualifiedMaximum();
     void preservesUltrawideAspectRatio();
+    void preservesExactNativeMatchAboveQualifiedMaximum();
+    void capsNonMatchingNativeResolution();
+    void capsExplicitOverrideDespiteNativeMatch();
     void fallsBackWhenDetectionFails();
 };
 
@@ -43,6 +46,33 @@ void TestStationConnectDisplayMode::preservesUltrawideAspectRatio()
     QCOMPARE(StationConnectDisplayMode::resolve(true,
                                                 QSize(5120, 2160),
                                                 QSize()),
+             QSize(3840, 1620));
+}
+
+void TestStationConnectDisplayMode::preservesExactNativeMatchAboveQualifiedMaximum()
+{
+    QCOMPARE(StationConnectDisplayMode::resolve(true,
+                                                QSize(5120, 2160),
+                                                QSize(),
+                                                QSize(5120, 2160)),
+             QSize(5120, 2160));
+}
+
+void TestStationConnectDisplayMode::capsNonMatchingNativeResolution()
+{
+    QCOMPARE(StationConnectDisplayMode::resolve(true,
+                                                QSize(5120, 2160),
+                                                QSize(),
+                                                QSize(5120, 2880)),
+             QSize(3840, 1620));
+}
+
+void TestStationConnectDisplayMode::capsExplicitOverrideDespiteNativeMatch()
+{
+    QCOMPARE(StationConnectDisplayMode::resolve(false,
+                                                QSize(5120, 2160),
+                                                QSize(5120, 2160),
+                                                QSize(5120, 2160)),
              QSize(3840, 1620));
 }
 

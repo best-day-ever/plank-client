@@ -1408,13 +1408,31 @@ QSize Session::configureStationConnectDisplayMode()
     }
 
     const QSize configuredResolution(m_Preferences->width, m_Preferences->height);
+    QSize exactNativeResolution;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        if (m_Computer->selectedDisplayMode == NvOutputTopology::ScaledSpanMode) {
+            exactNativeResolution = QSize(m_Computer->outputTopology.desktopWidth,
+                                          m_Computer->outputTopology.desktopHeight);
+        }
+        else if (m_Computer->selectedDisplayMode == NvOutputTopology::SingleOutputMode) {
+            for (const NvOutput& output : m_Computer->outputTopology.outputs) {
+                if (output.id == m_Computer->selectedOutputId) {
+                    exactNativeResolution = QSize(output.width, output.height);
+                    break;
+                }
+            }
+        }
+    }
     const QSize selectedResolution = StationConnectDisplayMode::resolve(
         m_Preferences->stationConnectAutoResolution,
         detectedResolution,
-        configuredResolution);
+        configuredResolution,
+        exactNativeResolution);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect client resolution: detected=%dx%d configured=%dx%d selected=%dx%d mode=%s",
+                "StationConnect client resolution: detected=%dx%d host-native=%dx%d configured=%dx%d selected=%dx%d mode=%s",
                 detectedResolution.width(), detectedResolution.height(),
+                exactNativeResolution.width(), exactNativeResolution.height(),
                 configuredResolution.width(), configuredResolution.height(),
                 selectedResolution.width(), selectedResolution.height(),
                 m_Preferences->stationConnectAutoResolution ? "auto" : "override");

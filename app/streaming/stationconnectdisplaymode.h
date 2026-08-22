@@ -10,6 +10,7 @@ public:
     static QSize resolve(bool autoResolution,
                          const QSize& detectedResolution,
                          const QSize& configuredResolution,
+                         const QSize& exactNativeResolution = QSize(),
                          const QSize& maximumResolution = qualifiedMaximum());
 
 private:
