@@ -11,6 +11,7 @@ constexpr double MinimumFitDurationMs = 120000.0;
 constexpr double FitWindowDurationMs = 300000.0;
 constexpr std::int32_t MaximumVideoClockAgeMs = 2000;
 constexpr int MaximumCorrectionStepPpm = 2;
+constexpr double PhaseCorrectionHorizonMs = 1800000.0;
 constexpr std::int32_t BacklogUpdateIntervalMs = 100;
 constexpr int BacklogTargetMs = 15;
 constexpr int BacklogGainPpmPerMs = 500;
@@ -46,6 +47,7 @@ void AudioRateController::reset()
     m_AudioPoints.clear();
     m_VideoPoints.clear();
     m_FirstAudioFrames = 0;
+    m_FirstSubmittedAudioFrames = 0;
     m_FirstVideoMediaMs = 0;
     m_FirstAudioObservation = 0;
     m_FirstVideoPresentation = 0;
@@ -57,6 +59,7 @@ void AudioRateController::reset()
 
 AudioRateController::Result AudioRateController::update(
         std::uint64_t rawAudioFrames,
+        std::uint64_t submittedAudioFrames,
         int sampleRate,
         std::uint32_t audioObservationTicks,
         const VideoClockSample& videoClock)
@@ -74,6 +77,7 @@ AudioRateController::Result AudioRateController::update(
 
     if (!m_Anchored) {
         m_FirstAudioFrames = rawAudioFrames;
+        m_FirstSubmittedAudioFrames = submittedAudioFrames;
         m_FirstVideoMediaMs = videoClock.mediaTimeMs;
         m_FirstAudioObservation = audioObservationTicks;
         m_FirstVideoPresentation = videoClock.presentationTicks;
@@ -128,11 +132,26 @@ AudioRateController::Result AudioRateController::update(
         return result;
     }
 
+    const double submittedAudioMediaElapsed =
+        static_cast<double>(submittedAudioFrames -
+                            m_FirstSubmittedAudioFrames) * 1000.0 /
+        sampleRate;
+    const double videoPresentationElapsed =
+        m_VideoPoints.back().clockMs;
+    const double videoMediaElapsed = m_VideoPoints.back().mediaMs;
+    const double relativePhaseErrorMs =
+        (audioObservationElapsed - submittedAudioMediaElapsed) -
+        (videoPresentationElapsed - videoMediaElapsed);
+    const int phaseCorrectionPpm = static_cast<int>(std::llround(
+        relativePhaseErrorMs * 1000000.0 / PhaseCorrectionHorizonMs));
     const int measuredPpm = std::clamp(
         static_cast<int>(std::llround((audioRate / videoRate - 1.0) * 1000000.0)),
         -MaximumCorrectionPpm,
         MaximumCorrectionPpm);
-    const int delta = std::clamp(measuredPpm - m_CorrectionPpm,
+    const int targetPpm = std::clamp(measuredPpm - phaseCorrectionPpm,
+                                     -MaximumCorrectionPpm,
+                                     MaximumCorrectionPpm);
+    const int delta = std::clamp(targetPpm - m_CorrectionPpm,
                                  -MaximumCorrectionStepPpm,
                                  MaximumCorrectionStepPpm);
     m_CorrectionPpm += delta;

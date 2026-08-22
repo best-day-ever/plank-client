@@ -33,6 +33,7 @@ public:
     void reset();
 
     Result update(std::uint64_t rawAudioFrames,
+                  std::uint64_t submittedAudioFrames,
                   int sampleRate,
                   std::uint32_t audioObservationTicks,
                   const VideoClockSample& videoClock);
@@ -52,6 +53,7 @@ private:
     std::deque<ClockPoint> m_AudioPoints;
     std::deque<ClockPoint> m_VideoPoints;
     std::uint64_t m_FirstAudioFrames = 0;
+    std::uint64_t m_FirstSubmittedAudioFrames = 0;
     std::int64_t m_FirstVideoMediaMs = 0;
     std::uint32_t m_FirstAudioObservation = 0;
     std::uint32_t m_FirstVideoPresentation = 0;

@@ -222,6 +222,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
         const int backlogAudioMs = LiGetPendingAudioDuration();
         const auto correction = m_AudioRateController.update(
             m_RawAudioFrames,
+            m_SubmittedAudioFrames,
             m_SampleRate,
             now,
             StationConnectAvSync::readVideoClock());
