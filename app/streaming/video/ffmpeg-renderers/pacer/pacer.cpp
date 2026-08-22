@@ -73,7 +73,9 @@ Pacer::Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats) :
     m_VsyncRenderer(renderer),
     m_MaxVideoFps(0),
     m_DisplayFps(0),
-    m_VideoStats(videoStats)
+    m_VideoStats(videoStats),
+    m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("STATIONCONNECT_AV_SYNC_TELEMETRY") > 0),
+    m_LastVideoTelemetryTime(0)
 {
 
 }
@@ -412,6 +414,17 @@ void Pacer::renderFrame(AVFrame* frame)
         m_RendererCallLatencyHistogram.size() - 1)]++;
     m_MaxRendererCallLatencyMs = std::max(m_MaxRendererCallLatencyMs, rendererCallLatencyMs);
     m_VideoStats->renderedFrames++;
+
+    if (m_AvSyncTelemetryEnabled && frame->pts >= 0 &&
+            (m_LastVideoTelemetryTime == 0 || afterRender - m_LastVideoTelemetryTime >= 1000)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect A/V video clock: media=%lld render=%u queue=%u renderer=%u",
+                    static_cast<long long>(frame->pts),
+                    afterRender,
+                    queueLatencyMs,
+                    rendererCallLatencyMs);
+        m_LastVideoTelemetryTime = afterRender;
+    }
     av_frame_free(&frame);
 
     // Drop frames if we have too many queued up for a while

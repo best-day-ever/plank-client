@@ -167,6 +167,7 @@ void Session::arCleanup()
 void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 {
     int samplesDecoded;
+    const quint64 mediaFrameIndex = s_ActiveSession->m_AudioMediaFramesReceived++;
 
 #ifndef STEAM_LINK
     // Set this thread to high priority to reduce the chance of missing
@@ -248,6 +249,27 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 
             delete s_ActiveSession->m_AudioRenderer;
             s_ActiveSession->m_AudioRenderer = nullptr;
+        }
+        else if (s_ActiveSession->m_AvSyncTelemetryEnabled) {
+            const Uint32 now = SDL_GetTicks();
+            if (s_ActiveSession->m_LastAudioTelemetryTime == 0 ||
+                    now - s_ActiveSession->m_LastAudioTelemetryTime >= 1000) {
+                const quint64 mediaTimeMs =
+                    mediaFrameIndex * s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
+                    s_ActiveSession->m_ActiveAudioConfig.sampleRate;
+                const int frameDurationMs =
+                    s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
+                    s_ActiveSession->m_ActiveAudioConfig.sampleRate;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d",
+                            static_cast<unsigned long long>(mediaTimeMs),
+                            now,
+                            s_ActiveSession->m_AudioRenderer->getQueuedAudioDurationMs(),
+                            s_ActiveSession->m_AudioRenderer->getDeviceBufferDurationMs(),
+                            LiGetPendingAudioDuration(),
+                            frameDurationMs);
+                s_ActiveSession->m_LastAudioTelemetryTime = now;
+            }
         }
     }
 

@@ -76,6 +76,8 @@ private:
     int m_MaxVideoFps;
     int m_DisplayFps;
     PVIDEO_STATS m_VideoStats;
+    bool m_AvSyncTelemetryEnabled;
+    Uint32 m_LastVideoTelemetryTime;
     int m_RendererAttributes;
     std::array<uint32_t, 1001> m_QueueLatencyHistogram {};
     std::array<uint32_t, 1001> m_RendererCallLatencyHistogram {};

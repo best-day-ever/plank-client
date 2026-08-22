@@ -17,6 +17,16 @@ public:
 
     virtual int getCapabilities() = 0;
 
+    // Return the renderer-managed queue duration, or -1 when unavailable.
+    virtual int getQueuedAudioDurationMs() {
+        return -1;
+    }
+
+    // Return the output device buffer duration, or -1 when unavailable.
+    virtual int getDeviceBufferDurationMs() {
+        return -1;
+    }
+
     virtual void remapChannels(POPUS_MULTISTREAM_CONFIGURATION) {
         // Use default channel mapping:
         // 0 - Front Left

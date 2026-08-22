@@ -296,6 +296,9 @@ private:
     OPUS_MULTISTREAM_CONFIGURATION m_OriginalAudioConfig;
     int m_AudioSampleCount;
     Uint32 m_DropAudioEndTime;
+    quint64 m_AudioMediaFramesReceived;
+    bool m_AvSyncTelemetryEnabled;
+    Uint32 m_LastAudioTelemetryTime;
 
     Overlay::OverlayManager m_OverlayManager;
 

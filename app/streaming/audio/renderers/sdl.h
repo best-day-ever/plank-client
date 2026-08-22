@@ -18,10 +18,16 @@ public:
 
     virtual int getCapabilities();
 
+    virtual int getQueuedAudioDurationMs() override;
+
+    virtual int getDeviceBufferDurationMs() override;
+
     virtual AudioFormat getAudioBufferFormat();
 
 private:
     SDL_AudioDeviceID m_AudioDevice;
     void* m_AudioBuffer;
     int m_FrameSize;
+    int m_BytesPerSecond;
+    int m_DeviceBufferDurationMs;
 };

@@ -5,7 +5,10 @@
 
 SdlAudioRenderer::SdlAudioRenderer()
     : m_AudioDevice(0),
-      m_AudioBuffer(nullptr)
+      m_AudioBuffer(nullptr),
+      m_FrameSize(0),
+      m_BytesPerSecond(0),
+      m_DeviceBufferDurationMs(0)
 {
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 
@@ -51,6 +54,9 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
                      SDL_GetError());
         return false;
     }
+
+    m_BytesPerSecond = have.freq * have.channels * getAudioBufferSampleSize();
+    m_DeviceBufferDurationMs = have.samples * 1000 / have.freq;
 
     m_AudioBuffer = SDL_malloc(m_FrameSize);
     if (m_AudioBuffer == nullptr) {
@@ -144,6 +150,21 @@ int SdlAudioRenderer::getCapabilities()
 {
     // Direct submit can't be used because we use LiGetPendingAudioDuration()
     return CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
+}
+
+int SdlAudioRenderer::getQueuedAudioDurationMs()
+{
+    if (m_AudioDevice == 0 || m_BytesPerSecond == 0) {
+        return -1;
+    }
+
+    return static_cast<int>(SDL_GetQueuedAudioSize(m_AudioDevice) * 1000ULL /
+                            m_BytesPerSecond);
+}
+
+int SdlAudioRenderer::getDeviceBufferDurationMs()
+{
+    return m_DeviceBufferDurationMs;
 }
 
 IAudioRenderer::AudioFormat SdlAudioRenderer::getAudioBufferFormat()

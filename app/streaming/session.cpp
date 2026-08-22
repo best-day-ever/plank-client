@@ -597,7 +597,10 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_OpusDecoder(nullptr),
       m_AudioRenderer(nullptr),
       m_AudioSampleCount(0),
-      m_DropAudioEndTime(0)
+      m_DropAudioEndTime(0),
+      m_AudioMediaFramesReceived(0),
+      m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("STATIONCONNECT_AV_SYNC_TELEMETRY") > 0),
+      m_LastAudioTelemetryTime(0)
 {
     if (m_Computer->stationConnectAuthentication) {
         // StationConnect is a qualified workstation protocol, not a generic
