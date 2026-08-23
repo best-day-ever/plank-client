@@ -112,7 +112,7 @@ public:
     #if defined(Q_OS_WIN32)
         UINT flags = MB_OK | MB_TOPMOST | MB_SETFOREGROUND;
         flags |= (type == Info ? MB_ICONINFORMATION : MB_ICONERROR);
-        QString title = "Moonlight";
+        QString title = "StationConnect";
         MessageBoxW(nullptr, reinterpret_cast<const wchar_t *>(message.utf16()),
                     reinterpret_cast<const wchar_t *>(title.utf16()), flags);
     #endif

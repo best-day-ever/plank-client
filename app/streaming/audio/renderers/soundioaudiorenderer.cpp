@@ -109,7 +109,7 @@ bool SoundIoAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATI
         return false;
     }
 
-    m_SoundIo->app_name = "Moonlight";
+    m_SoundIo->app_name = "StationConnect";
     m_SoundIo->userdata = this;
     m_SoundIo->on_backend_disconnect = sioBackendDisconnect;
     m_SoundIo->on_devices_change = sioDevicesChanged;
@@ -167,7 +167,7 @@ bool SoundIoAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATI
     m_OutputStream->format = SoundIoFormatFloat32NE;
     m_OutputStream->sample_rate = opusConfig->sampleRate;
     m_OutputStream->software_latency = m_AudioPacketDuration;
-    m_OutputStream->name = "Moonlight";
+    m_OutputStream->name = "StationConnect";
     m_OutputStream->userdata = this;
     m_OutputStream->error_callback = sioErrorCallback;
     m_OutputStream->write_callback = sioWriteCallback;
