@@ -255,6 +255,9 @@ private:
     void clRawHidControl(const unsigned char* data, unsigned int length);
 
     static
+    void clVideoBitrateApplied(uint32_t requestedKbps, uint32_t appliedKbps, uint32_t peakKbps);
+
+    static
     int arInit(int audioConfiguration,
                const POPUS_MULTISTREAM_CONFIGURATION opusConfig,
                void* arContext, int arFlags);
@@ -323,6 +326,9 @@ private:
     std::unique_ptr<StationConnectToolbar> m_StationConnectToolbar;
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
+    std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
+    std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
+    std::atomic<int> m_ConfirmedBitratePeakKbps {0};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

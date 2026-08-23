@@ -22,6 +22,7 @@ constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
 constexpr Uint32 BitrateSettleDelayMs = 250;
+constexpr Uint32 BitrateAcknowledgementRetryMs = 1000;
 constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
 constexpr int BitrateMinimumKbps = 10000;
@@ -44,7 +45,10 @@ StationConnectToolbar::StationConnectToolbar(
       m_PointerInside(false),
       m_PointerInitialized(false),
       m_LocalPointerInteraction(false),
-      m_BitrateSupported((LiGetHostFeatureFlags() & LI_FF_DYNAMIC_VIDEO_BITRATE) != 0),
+      m_BitrateSupported(
+              (LiGetHostFeatureFlags() &
+               (LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK)) ==
+              (LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK)),
       m_WindowWidth(0),
       m_WindowHeight(0),
       m_Width(ToolbarPreferredWidth),
@@ -56,6 +60,8 @@ StationConnectToolbar::StationConnectToolbar(
                            preferences.bitrateKbps,
                            preferences.unlockBitrate ? 500000 : 150000)),
       m_LastSentBitrateKbps(-1),
+      m_AppliedBitrateKbps(-1),
+      m_AppliedPeakKbps(-1),
       m_RenderedFps(0.0f),
       m_VideoMbps(0.0f),
       m_LastDrawnFps(-1.0f),
@@ -75,10 +81,9 @@ StationConnectToolbar::StationConnectToolbar(
     notifyWindowChanged();
     redraw();
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
-    // The normal RTSP setup reserves part of Moonlight's configured network
-    // budget for FEC and audio. The in-session control is explicitly an
-    // encoder target, so send it once at startup to make the toolbar value and
-    // the fresh bounded-ABR encoder agree.
+    // The host receives the exact target in RTSP. Send it over the live
+    // control stream too, then retry until the host confirms its applied
+    // target.
     queueBitrateRequest(SDL_GetTicks(), true);
 }
 
@@ -92,6 +97,29 @@ void StationConnectToolbar::setRenderedStats(float fps, float videoMbps)
 {
     m_RenderedFps = std::max(0.0f, fps);
     m_VideoMbps = std::max(0.0f, videoMbps);
+}
+
+void StationConnectToolbar::setAppliedBitrate(
+        int requestedKbps, int appliedKbps, int peakKbps)
+{
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect encoder target confirmed: requested=%d Kbps, applied=%d Kbps, peak=%d Kbps",
+                requestedKbps, appliedKbps, peakKbps);
+
+    // An acknowledgement for an older slider position must not suppress the
+    // newest pending target. The normal update loop will continue retrying.
+    if (requestedKbps != m_BitrateKbps) {
+        return;
+    }
+
+    m_AppliedBitrateKbps = appliedKbps;
+    m_AppliedPeakKbps = peakKbps;
+    if (appliedKbps != m_BitrateKbps) {
+        m_BitrateKbps = appliedKbps;
+        m_Preferences.bitrateKbps = appliedKbps;
+        m_Preferences.save();
+    }
+    redraw();
 }
 
 void StationConnectToolbar::update(Uint32 now)
@@ -571,12 +599,18 @@ void StationConnectToolbar::updateBitrateFromPointer(int x, Uint32 now, bool for
 
 void StationConnectToolbar::queueBitrateRequest(Uint32 now, bool forceSend)
 {
-    if (!m_BitrateSupported || m_BitrateKbps == m_LastSentBitrateKbps) {
+    if (!m_BitrateSupported) {
+        return;
+    }
+    if (m_BitrateKbps == m_AppliedBitrateKbps) {
         return;
     }
     if (!forceSend &&
             (!SDL_TICKS_PASSED(now, m_LastBitrateChangeTime + BitrateSettleDelayMs) ||
-             !SDL_TICKS_PASSED(now, m_LastBitrateSendTime + BitrateSettleDelayMs))) {
+             !SDL_TICKS_PASSED(now, m_LastBitrateSendTime +
+                              (m_BitrateKbps == m_LastSentBitrateKbps ?
+                                   BitrateAcknowledgementRetryMs :
+                                   BitrateSettleDelayMs)))) {
         return;
     }
     if (LiSetVideoBitrate(m_BitrateKbps) == 0) {

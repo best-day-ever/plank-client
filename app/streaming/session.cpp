@@ -46,6 +46,7 @@
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_STATIONCONNECT_RECONNECT 105
+#define SDL_CODE_STATIONCONNECT_BITRATE_APPLIED 106
 
 #include <openssl/rand.h>
 
@@ -76,6 +77,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clSetMotionEventState,
     Session::clSetControllerLED,
     Session::clRawHidControl,
+    Session::clVideoBitrateApplied,
 };
 
 Session* Session::s_ActiveSession;
@@ -298,6 +300,26 @@ void Session::clRawHidControl(const unsigned char* data, unsigned int length)
     if (s_ActiveSession != nullptr && s_ActiveSession->m_InputHandler != nullptr) {
         s_ActiveSession->m_InputHandler->handleRawHidControl(data, length);
     }
+}
+
+void Session::clVideoBitrateApplied(
+        uint32_t requestedKbps, uint32_t appliedKbps, uint32_t peakKbps)
+{
+    if (s_ActiveSession == nullptr) {
+        return;
+    }
+
+    s_ActiveSession->m_ConfirmedBitrateRequestKbps.store(
+                static_cast<int>(requestedKbps), std::memory_order_relaxed);
+    s_ActiveSession->m_ConfirmedBitrateAppliedKbps.store(
+                static_cast<int>(appliedKbps), std::memory_order_relaxed);
+    s_ActiveSession->m_ConfirmedBitratePeakKbps.store(
+                static_cast<int>(peakKbps), std::memory_order_relaxed);
+
+    SDL_Event event = {};
+    event.type = SDL_USEREVENT;
+    event.user.code = SDL_CODE_STATIONCONNECT_BITRATE_APPLIED;
+    SDL_PushEvent(&event);
 }
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
@@ -2438,6 +2460,14 @@ void Session::execInternal()
                     emit displayLaunchError(
                                 tr("The workstation desktop changed, but the client could not reconnect within 20 seconds."));
                     goto DispatchDeferredCleanup;
+                }
+                break;
+            case SDL_CODE_STATIONCONNECT_BITRATE_APPLIED:
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->setAppliedBitrate(
+                                m_ConfirmedBitrateRequestKbps.load(std::memory_order_relaxed),
+                                m_ConfirmedBitrateAppliedKbps.load(std::memory_order_relaxed),
+                                m_ConfirmedBitratePeakKbps.load(std::memory_order_relaxed));
                 }
                 break;
             case SDL_CODE_FRAME_READY:

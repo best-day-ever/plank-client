@@ -26,6 +26,7 @@ public:
     ~StationConnectToolbar();
 
     void setRenderedStats(float fps, float videoMbps);
+    void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
     void update(Uint32 now);
     void notifyWindowChanged();
 
@@ -74,6 +75,8 @@ private:
     int m_PointerY;
     int m_BitrateKbps;
     int m_LastSentBitrateKbps;
+    int m_AppliedBitrateKbps;
+    int m_AppliedPeakKbps;
     float m_RenderedFps;
     float m_VideoMbps;
     float m_LastDrawnFps;
