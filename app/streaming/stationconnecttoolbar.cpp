@@ -476,15 +476,17 @@ void StationConnectToolbar::redraw()
     painter.setFont(labelFont);
     painter.setPen(QColor(151, 161, 174));
     painter.drawText(QRect(107, 5, 72, 12), Qt::AlignLeft | Qt::AlignVCenter,
-                     "VIDEO Mbps");
+                     "Video Mbps");
     painter.setFont(valueFont);
     painter.setPen(QColor(246, 248, 250));
     painter.drawText(QRect(107, 16, 72, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      QString::number(m_VideoMbps, 'f', 1));
 
-    painter.setFont(labelFont);
+    QFont targetFont = labelFont;
+    targetFont.setPixelSize(12);
+    painter.setFont(targetFont);
     painter.setPen(m_BitrateSupported ? QColor(235, 239, 244) : QColor(135, 143, 153));
-    painter.drawText(QRect(184, 5, 153, 14), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(184, 3, 220, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      QString("Encoder target  %1 Mbps").arg(m_BitrateKbps / 1000.0, 0, 'f', 1));
 
     const int trackLeft = sliderLeft() - toolbarLeft();
