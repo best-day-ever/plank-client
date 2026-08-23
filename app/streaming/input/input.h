@@ -69,7 +69,8 @@ public:
 
     void handleMouseButtonEvent(SDL_MouseButtonEvent* event);
 
-    void handleMouseMotionEvent(SDL_MouseMotionEvent* event);
+    void handleMouseMotionEvent(SDL_MouseMotionEvent* event,
+                                bool batchPendingEvents = true);
 
     void handleMouseWheelEvent(SDL_MouseWheelEvent* event);
 

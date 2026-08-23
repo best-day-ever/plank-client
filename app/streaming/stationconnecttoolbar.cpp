@@ -1,5 +1,6 @@
 #include "stationconnecttoolbar.h"
 
+#include "input/input.h"
 #include "settings/streamingpreferences.h"
 #include "video/overlaymanager.h"
 
@@ -19,10 +20,12 @@ constexpr int ToolbarPreferredWidth = 850;
 constexpr int ToolbarHeight = 64;
 constexpr int EdgeRevealHeight = 3;
 constexpr int InteractionExitY = ToolbarHeight + 32;
+constexpr Uint32 EdgeActivationDelayMs = 2000;
 constexpr Uint32 AutoHideDelayMs = 1400;
 constexpr Uint32 BitrateSettleDelayMs = 250;
 constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
+constexpr Uint32 LocalInteractionGraceMs = 1000;
 constexpr int BitrateMinimumKbps = 500;
 constexpr int BitrateStepKbps = 500;
 }
@@ -30,9 +33,11 @@ constexpr int BitrateStepKbps = 500;
 StationConnectToolbar::StationConnectToolbar(
         SDL_Window* window,
         Overlay::OverlayManager& overlayManager,
+        SdlInputHandler& inputHandler,
         StreamingPreferences& preferences)
     : m_Window(window),
       m_OverlayManager(overlayManager),
+      m_InputHandler(inputHandler),
       m_Preferences(preferences),
       m_Visible(preferences.stationConnectToolbarPinned),
       m_Pinned(preferences.stationConnectToolbarPinned),
@@ -41,6 +46,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_PointerInside(false),
       m_PointerInitialized(false),
       m_LocalPointerInteraction(false),
+      m_RestoreCapture(false),
       m_ConsumeNextLeftRelease(false),
       m_BitrateSupported((LiGetHostFeatureFlags() & LI_FF_DYNAMIC_VIDEO_BITRATE) != 0),
       m_WindowWidth(0),
@@ -50,6 +56,8 @@ StationConnectToolbar::StationConnectToolbar(
       m_ToolbarDragOffsetX(0),
       m_PointerX(0),
       m_PointerY(0),
+      m_RemotePointerX(0),
+      m_RemotePointerY(0),
       m_BitrateKbps(preferences.bitrateKbps),
       m_LastSentBitrateKbps(-1),
       m_RenderedFps(0.0f),
@@ -60,7 +68,9 @@ StationConnectToolbar::StationConnectToolbar(
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
       m_LastToolbarMoveDrawTime(0),
-      m_LastRedrawTime(0)
+      m_LastRedrawTime(0),
+      m_EdgeHoverStartTime(0),
+      m_LocalInteractionGraceDeadline(0)
 {
     notifyWindowChanged();
     redraw();
@@ -85,6 +95,14 @@ void StationConnectToolbar::setRenderedStats(float fps, float videoMbps)
 
 void StationConnectToolbar::update(Uint32 now)
 {
+    if (!m_Visible && !m_LocalPointerInteraction &&
+            m_EdgeHoverStartTime != 0 &&
+            m_PointerY <= EdgeRevealHeight &&
+            SDL_TICKS_PASSED(now,
+                             m_EdgeHoverStartTime + EdgeActivationDelayMs)) {
+        show(now);
+    }
+
     if (m_Visible && !m_DraggingSlider && !m_PointerInside &&
             m_HideDeadline != 0 && SDL_TICKS_PASSED(now, m_HideDeadline)) {
         if (m_Pinned) {
@@ -129,13 +147,21 @@ void StationConnectToolbar::notifyWindowChanged()
 
 bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
 {
+    if (event.which == SDL_TOUCH_MOUSEID) {
+        return false;
+    }
+
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
     const bool relativeMode = SDL_GetRelativeMouseMode();
-    if (relativeMode) {
-        // Relative capture remains active for the entire interaction. The
-        // toolbar has its own pointer controller, like RGS separates normal
-        // toolbar input from its relative Game Mode controller. Keeping this
-        // path capture-stable avoids cursor warps and stale transition events.
+    const int remotePointerXBeforeEvent = m_PointerX;
+    const int remotePointerYBeforeEvent = m_PointerY;
+    if (m_LocalPointerInteraction) {
+        // Once relative capture has been released, the real SDL cursor is the
+        // single source of truth for drawing and hit testing.
+        SDL_GetMouseState(&m_PointerX, &m_PointerY);
+    } else if (relativeMode) {
+        // Track the remote relative cursor so the edge dwell and subsequent
+        // toolbar entry use the same accumulated motion as the host.
         m_PointerX = qBound(0, m_PointerX + event.xrel,
                            std::max(0, m_WindowWidth - 1));
         m_PointerY = qBound(0, m_PointerY + event.yrel,
@@ -145,17 +171,34 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         m_PointerY = event.y;
     }
 
-    // Reaching the top edge reveals the toolbar but must not pull the pointer
-    // horizontally into it. Local interaction begins only when the pointer's
-    // real tracked position enters the toolbar rectangle.
-    const bool pointerEnteredVisibleToolbar =
-            m_Visible && contains(m_PointerX, m_PointerY);
-    if (!m_LocalPointerInteraction && m_PointerY <= EdgeRevealHeight &&
-            !m_Visible) {
-        show(now);
+    // The edge must be held continuously for two seconds. Leaving the edge
+    // cancels the activation, so ordinary host UI at the top remains usable.
+    if (!m_Visible && !m_LocalPointerInteraction) {
+        if (m_PointerY <= EdgeRevealHeight) {
+            if (m_EdgeHoverStartTime == 0) {
+                m_EdgeHoverStartTime = now;
+            } else if (SDL_TICKS_PASSED(
+                               now,
+                               m_EdgeHoverStartTime + EdgeActivationDelayMs)) {
+                show(now);
+            }
+        } else {
+            m_EdgeHoverStartTime = 0;
+        }
     }
+
+    // Revealing does not claim the pointer. The user must move down from the
+    // edge into the visible toolbar before local interaction begins.
+    const bool pointerEnteredVisibleToolbar =
+            m_Visible && m_PointerY > EdgeRevealHeight &&
+            contains(m_PointerX, m_PointerY);
     if (!m_LocalPointerInteraction && pointerEnteredVisibleToolbar) {
-        beginLocalPointerInteraction();
+        // This entry event is consumed locally and is therefore not seen by
+        // the host. Save the host position from before this event so resuming
+        // relative input cannot introduce a one-event offset.
+        beginLocalPointerInteraction(now,
+                                     remotePointerXBeforeEvent,
+                                     remotePointerYBeforeEvent);
         return true;
     }
 
@@ -172,6 +215,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     m_PointerInside = contains(m_PointerX, m_PointerY);
     if (m_PointerInside || m_DraggingSlider) {
         m_HideDeadline = 0;
+        m_LocalInteractionGraceDeadline = 0;
     } else {
         m_HideDeadline = now + AutoHideDelayMs;
     }
@@ -197,7 +241,9 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     }
 
     if (m_LocalPointerInteraction && !m_DraggingSlider &&
-            m_PointerY > InteractionExitY) {
+            m_PointerY > InteractionExitY &&
+            (m_LocalInteractionGraceDeadline == 0 ||
+             SDL_TICKS_PASSED(now, m_LocalInteractionGraceDeadline))) {
         if (m_Pinned) {
             endLocalPointerInteraction();
         } else {
@@ -230,6 +276,9 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         return m_LocalPointerInteraction ? Action::Consumed : Action::None;
     }
 
+    if (m_LocalPointerInteraction) {
+        SDL_GetMouseState(&m_PointerX, &m_PointerY);
+    }
     const int pointerX = m_PointerX;
     const int pointerY = m_PointerY;
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
@@ -290,7 +339,9 @@ bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 {
     int mouseX;
     int mouseY;
-    if (SDL_GetRelativeMouseMode()) {
+    if (m_LocalPointerInteraction) {
+        SDL_GetMouseState(&mouseX, &mouseY);
+    } else if (SDL_GetRelativeMouseMode()) {
         mouseX = m_PointerX;
         mouseY = m_PointerY;
     } else {
@@ -316,12 +367,13 @@ bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 
 int StationConnectToolbar::eventWaitTimeout() const
 {
-    return m_Visible ? 50 : 1000;
+    return (m_Visible || m_EdgeHoverStartTime != 0) ? 50 : 1000;
 }
 
 void StationConnectToolbar::show(Uint32 now)
 {
     m_Visible = true;
+    m_EdgeHoverStartTime = 0;
     m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
     redraw();
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, true);
@@ -331,23 +383,40 @@ void StationConnectToolbar::hide()
 {
     endLocalPointerInteraction();
     m_Visible = false;
+    m_EdgeHoverStartTime = 0;
     m_PointerInside = false;
     m_HideDeadline = 0;
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
 }
 
-void StationConnectToolbar::beginLocalPointerInteraction()
+void StationConnectToolbar::beginLocalPointerInteraction(Uint32 now,
+                                                         int remotePointerX,
+                                                         int remotePointerY)
 {
     if (m_LocalPointerInteraction) {
         return;
     }
 
+    // Save the remote cursor position. Local toolbar motion is not sent to the
+    // host, so restoring this position afterward prevents cumulative drift.
+    m_RemotePointerX = remotePointerX;
+    m_RemotePointerY = remotePointerY;
+
+    m_RestoreCapture = m_InputHandler.isCaptureActive();
+    if (m_RestoreCapture) {
+        m_InputHandler.setCaptureActive(false);
+    }
+    SDL_ShowCursor(SDL_ENABLE);
+    SDL_FlushEvent(SDL_MOUSEMOTION);
+
     m_LocalPointerInteraction = true;
+    SDL_WarpMouseInWindow(m_Window, m_PointerX, m_PointerY);
     m_PointerInside = true;
     m_HideDeadline = 0;
+    m_LocalInteractionGraceDeadline = now + LocalInteractionGraceMs;
     redraw();
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
-                 "StationConnect toolbar entered capture-stable local interaction");
+                 "StationConnect toolbar entered aligned local interaction");
 }
 
 void StationConnectToolbar::endLocalPointerInteraction()
@@ -360,8 +429,18 @@ void StationConnectToolbar::endLocalPointerInteraction()
     m_DraggingToolbar = false;
     m_DraggingSlider = false;
     m_PointerInside = false;
+    m_LocalInteractionGraceDeadline = 0;
+
+    // The host cursor did not follow local toolbar motion. Resume the private
+    // tracker at the saved host position before relative input starts again.
+    m_PointerX = m_RemotePointerX;
+    m_PointerY = m_RemotePointerY;
+    if (m_RestoreCapture) {
+        m_InputHandler.setCaptureActive(true);
+    }
+    m_RestoreCapture = false;
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
-                 "StationConnect toolbar returned input to the remote session");
+                 "StationConnect toolbar restored aligned remote interaction");
 }
 
 void StationConnectToolbar::redraw()
@@ -498,24 +577,6 @@ void StationConnectToolbar::redraw()
         painter.setPen(QColor(183, 151, 92));
         painter.drawText(QRect(276, 42, 280, 14), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
-    }
-
-    // SDL hides the system cursor while relative capture is active. Draw the
-    // toolbar controller's pointer last so hit testing and the visible pointer
-    // always use the same canonical coordinates without releasing capture.
-    if (m_LocalPointerInteraction) {
-        const qreal pointerX = m_PointerX - toolbarLeft();
-        const qreal pointerY = m_PointerY;
-        QPainterPath cursor;
-        cursor.moveTo(pointerX, pointerY);
-        cursor.lineTo(pointerX + 5, pointerY + 16);
-        cursor.lineTo(pointerX + 8, pointerY + 10);
-        cursor.lineTo(pointerX + 15, pointerY + 9);
-        cursor.closeSubpath();
-        painter.setPen(QPen(QColor(15, 19, 24), 3, Qt::SolidLine,
-                            Qt::RoundCap, Qt::RoundJoin));
-        painter.setBrush(QColor(250, 252, 255));
-        painter.drawPath(cursor);
     }
 
     painter.end();

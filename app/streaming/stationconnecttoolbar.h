@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 class StreamingPreferences;
+class SdlInputHandler;
 
 namespace Overlay {
 class OverlayManager;
@@ -20,6 +21,7 @@ public:
 
     StationConnectToolbar(SDL_Window* window,
                           Overlay::OverlayManager& overlayManager,
+                          SdlInputHandler& inputHandler,
                           StreamingPreferences& preferences);
     ~StationConnectToolbar();
 
@@ -36,7 +38,9 @@ public:
 private:
     void show(Uint32 now);
     void hide();
-    void beginLocalPointerInteraction();
+    void beginLocalPointerInteraction(Uint32 now,
+                                      int remotePointerX,
+                                      int remotePointerY);
     void endLocalPointerInteraction();
     void redraw();
     void updateBitrateFromPointer(int x, Uint32 now, bool forceSend);
@@ -53,6 +57,7 @@ private:
 
     SDL_Window* m_Window;
     Overlay::OverlayManager& m_OverlayManager;
+    SdlInputHandler& m_InputHandler;
     StreamingPreferences& m_Preferences;
     bool m_Visible;
     bool m_Pinned;
@@ -61,6 +66,7 @@ private:
     bool m_PointerInside;
     bool m_PointerInitialized;
     bool m_LocalPointerInteraction;
+    bool m_RestoreCapture;
     bool m_ConsumeNextLeftRelease;
     bool m_BitrateSupported;
     int m_WindowWidth;
@@ -70,6 +76,8 @@ private:
     int m_ToolbarDragOffsetX;
     int m_PointerX;
     int m_PointerY;
+    int m_RemotePointerX;
+    int m_RemotePointerY;
     int m_BitrateKbps;
     int m_LastSentBitrateKbps;
     float m_RenderedFps;
@@ -81,4 +89,6 @@ private:
     Uint32 m_LastBitrateChangeTime;
     Uint32 m_LastToolbarMoveDrawTime;
     Uint32 m_LastRedrawTime;
+    Uint32 m_EdgeHoverStartTime;
+    Uint32 m_LocalInteractionGraceDeadline;
 };

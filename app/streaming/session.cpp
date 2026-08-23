@@ -2373,7 +2373,7 @@ void Session::execInternal()
 
     if (m_Computer->stationConnectAuthentication) {
         m_StationConnectToolbar.reset(new StationConnectToolbar(
-                    m_Window, m_OverlayManager, *m_Preferences));
+                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
@@ -2712,11 +2712,31 @@ void Session::execInternal()
             m_InputHandler->handleMouseButtonEvent(&event.button);
             break;
         case SDL_MOUSEMOTION:
-            if (m_StationConnectToolbar &&
-                    m_StationConnectToolbar->handleMouseMotion(event.motion)) {
-                break;
+            if (m_StationConnectToolbar) {
+                // The ordinary input path batches queued motion for efficient
+                // transport. Aggregate it here when the toolbar is present so
+                // the toolbar tracker and host receive the identical delta.
+                if (event.motion.which != SDL_TOUCH_MOUSEID) {
+                    SDL_Event nextMotionEvent;
+                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
+                                          SDL_MOUSEMOTION,
+                                          SDL_MOUSEMOTION) > 0) {
+                        if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
+                            event.motion.timestamp =
+                                    nextMotionEvent.motion.timestamp;
+                            event.motion.x = nextMotionEvent.motion.x;
+                            event.motion.y = nextMotionEvent.motion.y;
+                            event.motion.xrel += nextMotionEvent.motion.xrel;
+                            event.motion.yrel += nextMotionEvent.motion.yrel;
+                        }
+                    }
+                }
+                if (m_StationConnectToolbar->handleMouseMotion(event.motion)) {
+                    break;
+                }
             }
-            m_InputHandler->handleMouseMotionEvent(&event.motion);
+            m_InputHandler->handleMouseMotionEvent(
+                        &event.motion, !m_StationConnectToolbar);
             break;
         case SDL_MOUSEWHEEL:
             if (m_StationConnectToolbar &&

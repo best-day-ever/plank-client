@@ -68,7 +68,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
                            button);
 }
 
-void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
+void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
+                                             bool batchPendingEvents)
 {
     if (!isCaptureActive()) {
         // Not capturing
@@ -82,7 +83,9 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
     // Batch all pending mouse motion events to save CPU time
     Sint32 x = event->x, y = event->y, xrel = event->xrel, yrel = event->yrel;
     SDL_Event nextEvent;
-    while (SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT, SDL_MOUSEMOTION, SDL_MOUSEMOTION) > 0) {
+    while (batchPendingEvents &&
+           SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
+                          SDL_MOUSEMOTION, SDL_MOUSEMOTION) > 0) {
         event = &nextEvent.motion;
 
         // Ignore synthetic mouse events
