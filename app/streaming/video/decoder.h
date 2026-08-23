@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <Limelight.h>
 #include <SDL.h>
 #include "settings/streamingpreferences.h"
@@ -9,6 +11,7 @@
 #define MAX_SLICES 4
 
 typedef struct _VIDEO_STATS {
+    uint64_t receivedVideoBytes;
     uint32_t receivedFrames;
     uint32_t decodedFrames;
     uint32_t renderedFrames;
@@ -29,6 +32,7 @@ typedef struct _VIDEO_STATS {
     uint32_t lastRtt;
     uint32_t lastRttVariance;
     float totalFps;
+    float receivedVideoMbps;
     float receivedFps;
     float decodedFps;
     float renderedFps;

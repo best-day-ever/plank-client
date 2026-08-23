@@ -699,6 +699,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
 
 void FFmpegVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
 {
+    dst.receivedVideoBytes += src.receivedVideoBytes;
     dst.receivedFrames += src.receivedFrames;
     dst.decodedFrames += src.decodedFrames;
     dst.renderedFrames += src.renderedFrames;
@@ -743,10 +744,12 @@ void FFmpegVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
     // The following code assumes the global measure was already started first
     SDL_assert(dst.measurementStartTimestamp <= src.measurementStartTimestamp);
 
-    dst.totalFps = (float)dst.totalFrames / ((float)(now - dst.measurementStartTimestamp) / 1000);
-    dst.receivedFps = (float)dst.receivedFrames / ((float)(now - dst.measurementStartTimestamp) / 1000);
-    dst.decodedFps = (float)dst.decodedFrames / ((float)(now - dst.measurementStartTimestamp) / 1000);
-    dst.renderedFps = (float)dst.renderedFrames / ((float)(now - dst.measurementStartTimestamp) / 1000);
+    const float measurementSeconds = (float)(now - dst.measurementStartTimestamp) / 1000;
+    dst.totalFps = (float)dst.totalFrames / measurementSeconds;
+    dst.receivedVideoMbps = (float)(dst.receivedVideoBytes * 8) / measurementSeconds / 1000000;
+    dst.receivedFps = (float)dst.receivedFrames / measurementSeconds;
+    dst.decodedFps = (float)dst.decodedFrames / measurementSeconds;
+    dst.renderedFps = (float)dst.renderedFrames / measurementSeconds;
 }
 
 void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, int length)
@@ -873,9 +876,11 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 
         ret = snprintf(&output[offset],
                        length - offset,
+                       "Incoming video bitrate: %.2f Mbps\n"
                        "Incoming frame rate from network: %.2f FPS\n"
                        "Decoding frame rate: %.2f FPS\n"
                        "Rendering frame rate: %.2f FPS\n",
+                       stats.receivedVideoMbps,
                        stats.receivedFps,
                        stats.decodedFps,
                        stats.renderedFps);
@@ -1940,6 +1945,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     m_ActiveWndVideoStats.totalHostProcessingLatency += du->frameHostProcessingLatency;
 
     m_ActiveWndVideoStats.receivedFrames++;
+    m_ActiveWndVideoStats.receivedVideoBytes += static_cast<uint64_t>(du->fullLength);
     m_ActiveWndVideoStats.totalFrames++;
 
     int requiredBufferSize = du->fullLength;
