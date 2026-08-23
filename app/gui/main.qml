@@ -236,6 +236,14 @@ ApplicationWindow {
                 }
             }
 
+            Label {
+                id: stationConnectVersionLabel
+                text: SystemProperties.stationConnectVersionString
+                font.pointSize: 12
+                horizontalAlignment: Qt.AlignLeft
+                verticalAlignment: Qt.AlignVCenter
+            }
+
             // This label will appear when the window gets too small and
             // we need to ensure the toolbar controls don't collide
             Label {
@@ -250,14 +258,6 @@ ApplicationWindow {
                 // the remaining space in the RowLayout. To "hide" it, we
                 // just set the text to empty string.
                 text: !titleLabel.visible ? stackView.currentItem.objectName : ""
-            }
-
-            Label {
-                id: stationConnectVersionLabel
-                text: qsTr("StationConnect %1").arg(SystemProperties.stationConnectVersionString)
-                font.pointSize: 12
-                horizontalAlignment: Qt.AlignRight
-                verticalAlignment: Qt.AlignVCenter
             }
 
             Label {
