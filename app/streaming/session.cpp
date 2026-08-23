@@ -53,8 +53,6 @@
 #include <QtEndian>
 #include <QCoreApplication>
 #include <QThreadPool>
-#include <QSvgRenderer>
-#include <QPainter>
 #include <QImage>
 #include <QGuiApplication>
 #include <QCursor>
@@ -2320,17 +2318,17 @@ void Session::execInternal()
 
     m_InputHandler->setWindow(m_Window);
 
-    QSvgRenderer svgIconRenderer(QString(":/res/moonlight.svg"));
-    QImage svgImage(ICON_SIZE, ICON_SIZE, QImage::Format_RGBA8888);
-    svgImage.fill(0);
-
-    QPainter svgPainter(&svgImage);
-    svgIconRenderer.render(&svgPainter);
-    SDL_Surface* iconSurface = SDL_CreateRGBSurfaceWithFormatFrom((void*)svgImage.constBits(),
-                                                                  svgImage.width(),
-                                                                  svgImage.height(),
+    QImage iconImage(":/res/stationconnect.png");
+    iconImage = iconImage.scaled(ICON_SIZE,
+                                 ICON_SIZE,
+                                 Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation)
+                    .convertToFormat(QImage::Format_RGBA8888);
+    SDL_Surface* iconSurface = SDL_CreateRGBSurfaceWithFormatFrom((void*)iconImage.constBits(),
+                                                                  iconImage.width(),
+                                                                  iconImage.height(),
                                                                   32,
-                                                                  4 * svgImage.width(),
+                                                                  4 * iconImage.width(),
                                                                   SDL_PIXELFORMAT_RGBA32);
 #ifndef Q_OS_DARWIN
     // Other platforms seem to preserve our Qt icon when creating a new window.

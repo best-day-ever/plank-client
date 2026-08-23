@@ -666,7 +666,7 @@ int main(int argc, char *argv[])
 #ifndef Q_OS_DARWIN
     // Set the window icon except on macOS where we want to keep the
     // modified macOS 11 style rounded corner icon.
-    app.setWindowIcon(QIcon(":/res/moonlight.svg"));
+    app.setWindowIcon(QIcon(":/res/stationconnect.png"));
 #endif
 
     // Match the StationConnect desktop entry so Wayland and X11 shells group
