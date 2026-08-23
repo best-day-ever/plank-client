@@ -106,7 +106,7 @@ void Path::initialize(bool portable)
         s_BoxArtCacheDir = QDir::currentPath() + "/boxart";
         s_QmlCacheDir = QDir::currentPath() + "/qmlcache";
 
-        // In order for the If-Modified-Since logic to work in MappingFetcher,
+        // Preserve timestamps for cache consumers that use If-Modified-Since.
         // the cache directory must be different than the current directory.
         s_CacheDir = QDir::currentPath() + "/cache";
     }

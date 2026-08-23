@@ -195,8 +195,6 @@ private:
 
     void toggleFullscreen();
 
-    void notifyMouseEmulationMode(bool enabled);
-
     void updateOptimalWindowDisplayMode();
 
     enum class DecoderAvailability {
@@ -234,22 +232,10 @@ private:
     void clLogMessage(const char* format, ...);
 
     static
-    void clRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor);
-
-    static
     void clConnectionStatusUpdate(int connectionStatus);
 
     static
     void clSetHdrMode(bool enabled);
-
-    static
-    void clRumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger);
-
-    static
-    void clSetMotionEventState(uint16_t controllerNumber, uint8_t motionType, uint16_t reportRateHz);
-
-    static
-    void clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
     static
     void clRawHidControl(const unsigned char* data, unsigned int length);
@@ -301,7 +287,6 @@ private:
     QString m_StationConnectUsername;
     QString m_StationConnectPassword;
     SdlInputHandler* m_InputHandler;
-    int m_MouseEmulationRefCount;
     int m_FlushingWindowEventsRef;
 
     bool m_AsyncConnectionSuccess;

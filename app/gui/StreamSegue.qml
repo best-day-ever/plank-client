@@ -2,7 +2,6 @@ import QtQuick 2.0
 import QtQuick.Controls 2.2
 import QtQuick.Window 2.2
 
-import SdlGamepadKeyNavigation 1.0
 import Session 1.0
 
 Item {
@@ -76,9 +75,6 @@ Item {
             streamSegueErrorDialog.text += "\n\n" + qsTr("This PC's Internet connection is blocking Moonlight. Streaming over the Internet may not work while connected to this network.")
         }
 
-        // Enable GUI gamepad usage now
-        SdlGamepadKeyNavigation.enable()
-
         if (quitAfter) {
             if (streamSegueErrorDialog.text) {
                 // Quit when the error dialog is acknowledged
@@ -98,8 +94,7 @@ Item {
 
             // Display any launch errors. We do this after
             // the Qt UI is visible again to prevent losing
-            // focus on the dialog which would impact gamepad
-            // users.
+            // focus on the dialog.
             if (streamSegueErrorDialog.text) {
                 streamSegueErrorDialog.quitAfter = quitAfter
                 streamSegueErrorDialog.open()
@@ -118,9 +113,6 @@ Item {
     StackView.onDeactivating: {
         // Show the toolbar again when popped off the stack
         toolBar.visible = true
-
-        // Enable GUI gamepad usage now
-        SdlGamepadKeyNavigation.enable()
     }
 
     StackView.onActivated: {
@@ -160,15 +152,7 @@ Item {
         asynchronous: true
 
         onLoaded: {
-            // Set the hint text. We do this here rather than
-            // in the hintText control itself to synchronize
-            // with Session.exec() which requires no concurrent
-            // gamepad usage.
-            hintText.text = qsTr("Tip:") + " " + qsTr("Press %1 to disconnect your session").arg(SdlGamepadKeyNavigation.getConnectedGamepads() > 0 ?
-                                                  qsTr("Start+Select+L1+R1") : qsTr("Ctrl+Alt+Shift+Q"))
-
-            // Stop GUI gamepad usage now
-            SdlGamepadKeyNavigation.disable()
+            hintText.text = qsTr("Tip:") + " " + qsTr("Press %1 to disconnect your session").arg(qsTr("Ctrl+Alt+Shift+Q"))
 
             // Garbage collect QML stuff before we start streaming,
             // since we'll probably be streaming for a while and we

@@ -4,9 +4,6 @@
 [submodule "qmdnsengine/qmdnsengine"]
 	path = qmdnsengine/qmdnsengine
 	url = https://github.com/cgutman/qmdnsengine.git
-[submodule "app/SDL_GameControllerDB"]
-	path = app/SDL_GameControllerDB
-	url = https://github.com/gabomdq/SDL_GameControllerDB.git
 [submodule "soundio/libsoundio"]
 	path = soundio/libsoundio
 	url = https://github.com/cgutman/libsoundio.git

@@ -40,10 +40,6 @@
 
 
 #define SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER 100
-#define SDL_CODE_GAMECONTROLLER_RUMBLE 101
-#define SDL_CODE_GAMECONTROLLER_RUMBLE_TRIGGERS 102
-#define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
-#define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
 #define SDL_CODE_STATIONCONNECT_RECONNECT 105
 #define SDL_CODE_STATIONCONNECT_BITRATE_APPLIED 106
 
@@ -67,12 +63,12 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     nullptr,
     Session::clConnectionTerminated,
     Session::clLogMessage,
-    Session::clRumble,
+    nullptr,
     Session::clConnectionStatusUpdate,
     Session::clSetHdrMode,
-    Session::clRumbleTriggers,
-    Session::clSetMotionEventState,
-    Session::clSetControllerLED,
+    nullptr,
+    nullptr,
+    nullptr,
     Session::clRawHidControl,
     Session::clVideoBitrateApplied,
 };
@@ -197,19 +193,6 @@ void Session::clLogMessage(const char* format, ...)
     va_end(ap);
 }
 
-void Session::clRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor)
-{
-    // We push an event for the main thread to handle in order to properly synchronize
-    // with the removal of game controllers that could result in our game controller
-    // going away during this callback.
-    SDL_Event rumbleEvent = {};
-    rumbleEvent.type = SDL_USEREVENT;
-    rumbleEvent.user.code = SDL_CODE_GAMECONTROLLER_RUMBLE;
-    rumbleEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
-    rumbleEvent.user.data2 = (void*)(uintptr_t)((lowFreqMotor << 16) | highFreqMotor);
-    SDL_PushEvent(&rumbleEvent);
-}
-
 void Session::clConnectionStatusUpdate(int connectionStatus)
 {
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -217,11 +200,6 @@ void Session::clConnectionStatusUpdate(int connectionStatus)
                 connectionStatus);
 
     if (!s_ActiveSession->m_Preferences->connectionWarnings) {
-        return;
-    }
-
-    if (s_ActiveSession->m_MouseEmulationRefCount > 0) {
-        // Don't display the overlay if mouse emulation is already using it
         return;
     }
 
@@ -251,45 +229,6 @@ void Session::clSetHdrMode(bool enabled)
         }
         SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
     }
-}
-
-void Session::clRumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger)
-{
-    // We push an event for the main thread to handle in order to properly synchronize
-    // with the removal of game controllers that could result in our game controller
-    // going away during this callback.
-    SDL_Event rumbleEvent = {};
-    rumbleEvent.type = SDL_USEREVENT;
-    rumbleEvent.user.code = SDL_CODE_GAMECONTROLLER_RUMBLE_TRIGGERS;
-    rumbleEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
-    rumbleEvent.user.data2 = (void*)(uintptr_t)((leftTrigger << 16) | rightTrigger);
-    SDL_PushEvent(&rumbleEvent);
-}
-
-void Session::clSetMotionEventState(uint16_t controllerNumber, uint8_t motionType, uint16_t reportRateHz)
-{
-    // We push an event for the main thread to handle in order to properly synchronize
-    // with the removal of game controllers that could result in our game controller
-    // going away during this callback.
-    SDL_Event setMotionEventStateEvent = {};
-    setMotionEventStateEvent.type = SDL_USEREVENT;
-    setMotionEventStateEvent.user.code = SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE;
-    setMotionEventStateEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
-    setMotionEventStateEvent.user.data2 = (void*)(uintptr_t)((motionType << 16) | reportRateHz);
-    SDL_PushEvent(&setMotionEventStateEvent);
-}
-
-void Session::clSetControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b)
-{
-    // We push an event for the main thread to handle in order to properly synchronize
-    // with the removal of game controllers that could result in our game controller
-    // going away during this callback.
-    SDL_Event setControllerLEDEvent = {};
-    setControllerLEDEvent.type = SDL_USEREVENT;
-    setControllerLEDEvent.user.code = SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED;
-    setControllerLEDEvent.user.data1 = (void*)(uintptr_t)controllerNumber;
-    setControllerLEDEvent.user.data2 = (void*)(uintptr_t)(r << 16 | g << 8 | b);
-    SDL_PushEvent(&setControllerLEDEvent);
 }
 
 void Session::clRawHidControl(const unsigned char* data, unsigned int length)
@@ -643,7 +582,6 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_Reconnecting(false),
       m_CanReconnect(false),
       m_InputHandler(nullptr),
-      m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
       m_AsyncConnectionSuccess(false),
       m_PortTestResults(0),
@@ -1687,21 +1625,6 @@ void Session::toggleFullscreen()
     m_InputHandler->updatePointerRegionLock();
 }
 
-void Session::notifyMouseEmulationMode(bool enabled)
-{
-    m_MouseEmulationRefCount += enabled ? 1 : -1;
-    SDL_assert(m_MouseEmulationRefCount >= 0);
-
-    // We re-use the status update overlay for mouse mode notification
-    if (m_MouseEmulationRefCount > 0) {
-        m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate, "Gamepad mouse mode active\nLong press Start to deactivate");
-        m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
-    }
-    else {
-        m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
-    }
-}
-
 class AsyncConnectionStartThread : public QThread
 {
 public:
@@ -1767,8 +1690,8 @@ bool Session::startConnectionAsync(bool reconnecting)
                           m_App.id, &m_StreamConfig,
                           enableGameOptimizations,
                           m_Preferences->playAudioOnHost,
-                          m_InputHandler->getAttachedGamepadMask(),
-                          !m_Preferences->multiController,
+                          0,
+                          false,
                           m_Computer->selectedOutputId,
                           m_Computer->selectedDisplayMode,
                           m_Computer->outputTopology.generation,
@@ -2165,8 +2088,7 @@ void Session::execInternal()
     // We're now active
     s_ActiveSession = this;
 
-    // Initialize the gamepad code with our preferences
-    // NB: m_InputHandler must be initialize before starting the connection.
+    // Initialize input before starting the connection.
     // StationConnect is a remote-desktop product. Like RGS desktop mode, use
     // authoritative absolute coordinates and reserve relative capture for a
     // distinct game-mode path. This also gives receiver UI exact hit testing.
@@ -2470,27 +2392,6 @@ void Session::execInternal()
             case SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER:
                 m_FlushingWindowEventsRef--;
                 break;
-            case SDL_CODE_GAMECONTROLLER_RUMBLE:
-                m_InputHandler->rumble((uint16_t)(uintptr_t)event.user.data1,
-                                       (uint16_t)((uintptr_t)event.user.data2 >> 16),
-                                       (uint16_t)((uintptr_t)event.user.data2 & 0xFFFF));
-                break;
-            case SDL_CODE_GAMECONTROLLER_RUMBLE_TRIGGERS:
-                m_InputHandler->rumbleTriggers((uint16_t)(uintptr_t)event.user.data1,
-                                               (uint16_t)((uintptr_t)event.user.data2 >> 16),
-                                               (uint16_t)((uintptr_t)event.user.data2 & 0xFFFF));
-                break;
-            case SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE:
-                m_InputHandler->setMotionEventState((uint16_t)(uintptr_t)event.user.data1,
-                                                    (uint8_t)((uintptr_t)event.user.data2 >> 16),
-                                                    (uint16_t)((uintptr_t)event.user.data2 & 0xFFFF));
-                break;
-            case SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED:
-                m_InputHandler->setControllerLED((uint16_t)(uintptr_t)event.user.data1,
-                                                 (uint8_t)((uintptr_t)event.user.data2 >> 16),
-                                                 (uint8_t)((uintptr_t)event.user.data2 >> 8),
-                                                 (uint8_t)((uintptr_t)event.user.data2));
-                break;
             default:
                 SDL_assert(false);
             }
@@ -2770,35 +2671,6 @@ void Session::execInternal()
             }
             m_InputHandler->handleMouseWheelEvent(&event.wheel);
             break;
-        case SDL_CONTROLLERAXISMOTION:
-            m_InputHandler->handleControllerAxisEvent(&event.caxis);
-            break;
-        case SDL_CONTROLLERBUTTONDOWN:
-        case SDL_CONTROLLERBUTTONUP:
-            m_InputHandler->handleControllerButtonEvent(&event.cbutton);
-            break;
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-        case SDL_CONTROLLERSENSORUPDATE:
-            m_InputHandler->handleControllerSensorEvent(&event.csensor);
-            break;
-        case SDL_CONTROLLERTOUCHPADDOWN:
-        case SDL_CONTROLLERTOUCHPADUP:
-        case SDL_CONTROLLERTOUCHPADMOTION:
-            m_InputHandler->handleControllerTouchpadEvent(&event.ctouchpad);
-            break;
-#endif
-#if SDL_VERSION_ATLEAST(2, 24, 0)
-        case SDL_JOYBATTERYUPDATED:
-            m_InputHandler->handleJoystickBatteryEvent(&event.jbattery);
-            break;
-#endif
-        case SDL_CONTROLLERDEVICEADDED:
-        case SDL_CONTROLLERDEVICEREMOVED:
-            m_InputHandler->handleControllerDeviceEvent(&event.cdevice);
-            break;
-        case SDL_JOYDEVICEADDED:
-            m_InputHandler->handleJoystickArrivalEvent(&event.jdevice);
-            break;
         case SDL_FINGERDOWN:
         case SDL_FINGERMOTION:
         case SDL_FINGERUP:
@@ -2821,8 +2693,7 @@ DispatchDeferredCleanup:
     m_InputHandler->raiseAllKeys();
 
     // Destroy the input handler now. This must be destroyed
-    // before allowwing the UI to continue execution or it could
-    // interfere with SDLGamepadKeyNavigation.
+    // before allowing the UI to continue execution.
     delete m_InputHandler;
     m_InputHandler = nullptr;
     clearStationConnectReconnectCredentials();

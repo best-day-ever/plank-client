@@ -7,7 +7,6 @@ import QtQuick.Controls.Material 2.2
 import ComputerManager 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
-import SdlGamepadKeyNavigation 1.0
 
 ApplicationWindow {
     property bool pollingActive: false
@@ -109,12 +108,6 @@ ApplicationWindow {
             settingsButton.clicked()
         }
 
-        // This is a keypress we've reserved for letting the
-        // SdlGamepadKeyNavigation object tell us to show settings
-        // when Menu is consumed by a focused control.
-        Keys.onHangupPressed: {
-            settingsButton.clicked()
-        }
     }
 
     // This timer keeps us polling for 5 minutes of inactivity
@@ -311,24 +304,6 @@ ApplicationWindow {
             }
 
             NavigableToolButton {
-                // TODO: Implement gamepad mapping then unhide this button
-                visible: false
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Gamepad Mapper")
-
-                iconSource: "qrc:/res/ic_videogame_asset_white_48px.svg"
-
-                onClicked: navigateTo("qrc:/gui/GamepadMapper.qml", "GamepadMapper")
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            NavigableToolButton {
                 id: settingsButton
 
                 iconSource:  "qrc:/res/settings.svg"
@@ -375,12 +350,12 @@ ApplicationWindow {
         text: qsTr("This StationConnect build isn't optimized for your PC. Please install the '%1' StationConnect package for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
     }
 
-    // This dialog appears when quitting via keyboard or gamepad button
+    // This dialog appears when quitting via keyboard.
     NavigableMessageDialog {
         id: quitConfirmationDialog
         standardButtons: Dialog.Yes | Dialog.No
         text: qsTr("Are you sure you want to quit?")
-        // For keyboard/gamepad navigation
+        // For keyboard navigation
         onAccepted: Qt.quit()
     }
 

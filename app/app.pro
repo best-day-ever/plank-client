@@ -191,10 +191,8 @@ SOURCES += \
     cli/quitstream.cpp \
     cli/startstream.cpp \
     settings/compatfetcher.cpp \
-    settings/mappingfetcher.cpp \
     settings/streamingpreferences.cpp \
     streaming/input/abstouch.cpp \
-    streaming/input/gamepad.cpp \
     streaming/input/input.cpp \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
@@ -209,8 +207,6 @@ SOURCES += \
     gui/appmodel.cpp \
     streaming/streamutils.cpp \
     path.cpp \
-    settings/mappingmanager.cpp \
-    gui/sdlgamepadkeynavigation.cpp \
     streaming/video/overlaymanager.cpp \
     backend/systemproperties.cpp \
     wm.cpp
@@ -221,7 +217,6 @@ HEADERS += \
     backend/nvapp.h \
     cli/pair.h \
     settings/compatfetcher.h \
-    settings/mappingfetcher.h \
     utils.h \
     backend/computerseeker.h \
     backend/identitymanager.h \
@@ -249,8 +244,6 @@ HEADERS += \
     streaming/video/decoder.h \
     streaming/streamutils.h \
     path.h \
-    settings/mappingmanager.h \
-    gui/sdlgamepadkeynavigation.h \
     streaming/video/overlaymanager.h \
     backend/systemproperties.h
 

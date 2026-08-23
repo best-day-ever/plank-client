@@ -11,50 +11,7 @@ class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
 
-struct GamepadState {
-    SDL_GameController* controller;
-    SDL_JoystickID jsId;
-    short index;
-
-#if !SDL_VERSION_ATLEAST(2, 0, 9)
-    SDL_Haptic* haptic;
-    int hapticMethod;
-    int hapticEffectId;
-#endif
-
-    SDL_TimerID mouseEmulationTimer;
-    uint32_t lastStartDownTime;
-
-    bool clickpadButtonEmulationEnabled;
-    bool emulatedClickpadButtonDown;
-
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-    uint8_t gyroReportPeriodMs;
-    float lastGyroEventData[SDL_arraysize(SDL_ControllerSensorEvent::data)];
-    uint32_t lastGyroEventTime;
-
-    uint8_t accelReportPeriodMs;
-    float lastAccelEventData[SDL_arraysize(SDL_ControllerSensorEvent::data)];
-    uint32_t lastAccelEventTime;
-#endif
-
-    int buttons;
-    short lsX, lsY;
-    short rsX, rsY;
-    unsigned char lt, rt;
-};
-
-// activeGamepadMask is a short, so we're bounded by the number of mask bits
-#define MAX_GAMEPADS 16
-
 #define MAX_FINGERS 2
-
-#define GAMEPAD_HAPTIC_METHOD_NONE 0
-#define GAMEPAD_HAPTIC_METHOD_LEFTRIGHT 1
-#define GAMEPAD_HAPTIC_METHOD_SIMPLERUMBLE 2
-
-#define GAMEPAD_HAPTIC_SIMPLE_HIFREQ_MOTOR_WEIGHT 0.33
-#define GAMEPAD_HAPTIC_SIMPLE_LOWFREQ_MOTOR_WEIGHT 0.8
 
 class SdlInputHandler
 {
@@ -77,41 +34,13 @@ public:
 
     void handleMouseWheelEvent(SDL_MouseWheelEvent* event);
 
-    void handleControllerAxisEvent(SDL_ControllerAxisEvent* event);
-
-    void handleControllerButtonEvent(SDL_ControllerButtonEvent* event);
-
-    void handleControllerDeviceEvent(SDL_ControllerDeviceEvent* event);
-
-#if SDL_VERSION_ATLEAST(2, 0, 14)
-    void handleControllerSensorEvent(SDL_ControllerSensorEvent* event);
-
-    void handleControllerTouchpadEvent(SDL_ControllerTouchpadEvent* event);
-#endif
-
-#if SDL_VERSION_ATLEAST(2, 24, 0)
-    void handleJoystickBatteryEvent(SDL_JoyBatteryEvent* event);
-#endif
-
-    void handleJoystickArrivalEvent(SDL_JoyDeviceEvent* event);
-
     void sendText(QString& string);
-
-    void rumble(uint16_t controllerNumber, uint16_t lowFreqMotor, uint16_t highFreqMotor);
-
-    void rumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger);
-
-    void setMotionEventState(uint16_t controllerNumber, uint8_t motionType, uint16_t reportRateHz);
-
-    void setControllerLED(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
     void handleRawHidControl(const unsigned char* data, unsigned int length);
 
     void resetRawHidAfterReconnect();
 
     void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
-
-    int getAttachedGamepadMask();
 
     void raiseAllKeys();
 
@@ -137,9 +66,6 @@ public:
 
     void updatePointerRegionLock();
 
-    static
-    QString getUnmappedGamepads();
-
 private:
     enum KeyCombo {
         KeyComboQuit,
@@ -153,13 +79,6 @@ private:
         KeyComboTogglePointerRegionLock,
         KeyComboMax
     };
-
-    GamepadState*
-    findStateForGamepad(SDL_JoystickID id);
-
-    void sendGamepadState(GamepadState* state);
-
-    void sendGamepadBatteryState(GamepadState* state, SDL_JoystickPowerLevel level);
 
     void handleAbsoluteFingerEvent(SDL_TouchFingerEvent* event);
 
@@ -175,9 +94,6 @@ private:
     Uint32 longPressTimerCallback(Uint32 interval, void* param);
 
     static
-    Uint32 mouseEmulationTimerCallback(Uint32 interval, void* param);
-
-    static
     Uint32 releaseLeftButtonTimerCallback(Uint32 interval, void* param);
 
     static
@@ -187,24 +103,16 @@ private:
     Uint32 dragTimerCallback(Uint32 interval, void* param);
 
     SDL_Window* m_Window;
-    bool m_MultiController;
-    bool m_GamepadMouse;
     bool m_SwapMouseButtons;
     bool m_ReverseScrollDirection;
-    bool m_SwapFaceButtons;
 
     bool m_MouseWasInVideoRegion;
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
 
-    int m_GamepadMask;
-    GamepadState m_GamepadState[MAX_GAMEPADS];
     QSet<short> m_KeysDown;
     bool m_FakeCaptureActive;
-    QString m_OldIgnoreDevices;
-    QString m_OldIgnoreDevicesExcept;
-    QStringList m_IgnoreDeviceGuids;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
     int m_MouseCursorCapturedVisibilityState;
 

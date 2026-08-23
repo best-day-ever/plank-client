@@ -45,7 +45,6 @@
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
-#include "gui/sdlgamepadkeynavigation.h"
 
 #if defined(Q_OS_WIN32)
 #define IS_UNSPECIFIED_HANDLE(x) ((x) == INVALID_HANDLE_VALUE || (x) == NULL)
@@ -527,11 +526,6 @@ int main(int argc, char *argv[])
     // Disable minimize on focus loss by default. Users seem to want this off by default.
     SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0");
 
-    // SDL 2.0.12 changes the default behavior to use the button label rather than the button
-    // position as most other software does. Set this back to 0 to stay consistent with prior
-    // releases of Moonlight.
-    SDL_SetHint("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", "0");
-
     // Disable relative mouse scaling to renderer size or logical DPI. We want to send
     // the mouse motion exactly how it was given to us.
     SDL_SetHint("SDL_MOUSE_RELATIVE_SCALING", "0");
@@ -646,8 +640,7 @@ int main(int argc, char *argv[])
         app.setFont(fon);
     }
 
-    // Move the mouse to the bottom right so it's invisible when using
-    // gamepad-only navigation.
+    // Keep the system cursor out of the full-screen UI on Steam Link.
     QCursor().setPos(0xFFFF, 0xFFFF);
 #elif !SDL_VERSION_ATLEAST(2, 0, 11) && defined(Q_OS_LINUX) && (defined(__arm__) || defined(__aarch64__))
     if (qgetenv("SDL_VIDEO_GL_DRIVER").isEmpty() && QGuiApplication::platformName() == "eglfs") {
@@ -688,11 +681,6 @@ int main(int argc, char *argv[])
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
                                                    return new SystemProperties();
                                                });
-    qmlRegisterSingletonType<SdlGamepadKeyNavigation>("SdlGamepadKeyNavigation", 1, 0,
-                                                      "SdlGamepadKeyNavigation",
-                                                      [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
-                                                          return new SdlGamepadKeyNavigation(StreamingPreferences::get(qmlEngine));
-                                                      });
     qmlRegisterSingletonType<StreamingPreferences>("StreamingPreferences", 1, 0,
                                                    "StreamingPreferences",
                                                    [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {

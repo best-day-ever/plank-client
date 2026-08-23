@@ -113,14 +113,12 @@ public:
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
     Q_PROPERTY(bool gameOptimizations MEMBER gameOptimizations NOTIFY gameOptimizationsChanged)
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
-    Q_PROPERTY(bool multiController MEMBER multiController NOTIFY multiControllerChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
     Q_PROPERTY(bool quitAppAfter MEMBER quitAppAfter NOTIFY quitAppAfterChanged)
     Q_PROPERTY(bool absoluteMouseMode MEMBER absoluteMouseMode NOTIFY absoluteMouseModeChanged)
     Q_PROPERTY(bool absoluteTouchMode MEMBER absoluteTouchMode NOTIFY absoluteTouchModeChanged)
     Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
-    Q_PROPERTY(bool gamepadMouse MEMBER gamepadMouse NOTIFY gamepadMouseChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
@@ -135,9 +133,7 @@ public:
     Q_PROPERTY(UIDisplayMode uiDisplayMode MEMBER uiDisplayMode NOTIFY uiDisplayModeChanged)
     Q_PROPERTY(bool swapMouseButtons MEMBER swapMouseButtons NOTIFY mouseButtonsChanged)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
-    Q_PROPERTY(bool backgroundGamepad MEMBER backgroundGamepad NOTIFY backgroundGamepadChanged)
     Q_PROPERTY(bool reverseScrollDirection MEMBER reverseScrollDirection NOTIFY reverseScrollDirectionChanged)
-    Q_PROPERTY(bool swapFaceButtons MEMBER swapFaceButtons NOTIFY swapFaceButtonsChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
@@ -153,21 +149,17 @@ public:
     bool enableVsync;
     bool gameOptimizations;
     bool playAudioOnHost;
-    bool multiController;
     bool enableMdns;
     bool quitAppAfter;
     bool absoluteMouseMode;
     bool absoluteTouchMode;
     bool framePacing;
     bool connectionWarnings;
-    bool gamepadMouse;
     bool detectNetworkBlocking;
     bool showPerformanceOverlay;
     bool swapMouseButtons;
     bool muteOnFocusLoss;
-    bool backgroundGamepad;
     bool reverseScrollDirection;
-    bool swapFaceButtons;
     bool keepAwake;
     int packetSize;
     AudioConfig audioConfig;
@@ -191,7 +183,6 @@ signals:
     void enableVsyncChanged();
     void gameOptimizationsChanged();
     void playAudioOnHostChanged();
-    void multiControllerChanged();
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void quitAppAfterChanged();
@@ -208,14 +199,11 @@ signals:
     void windowModeChanged();
     void framePacingChanged();
     void connectionWarningsChanged();
-    void gamepadMouseChanged();
     void detectNetworkBlockingChanged();
     void showPerformanceOverlayChanged();
     void mouseButtonsChanged();
     void muteOnFocusLossChanged();
-    void backgroundGamepadChanged();
     void reverseScrollDirectionChanged();
-    void swapFaceButtonsChanged();
     void captureSysKeysModeChanged();
     void keepAwakeChanged();
     void languageChanged();

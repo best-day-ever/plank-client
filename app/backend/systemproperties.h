@@ -21,7 +21,6 @@ public:
     Q_PROPERTY(QString friendlyNativeArchName MEMBER friendlyNativeArchName CONSTANT)
     Q_PROPERTY(bool hasDesktopEnvironment MEMBER hasDesktopEnvironment CONSTANT)
     Q_PROPERTY(bool hasBrowser MEMBER hasBrowser CONSTANT)
-    Q_PROPERTY(QString unmappedGamepads MEMBER unmappedGamepads NOTIFY unmappedGamepadsChanged)
     Q_PROPERTY(QSize maximumResolution MEMBER maximumResolution CONSTANT)
     Q_PROPERTY(QString stationConnectVersionString MEMBER stationConnectVersionString CONSTANT)
     Q_PROPERTY(bool supportsHdr MEMBER supportsHdr CONSTANT)
@@ -31,9 +30,6 @@ public:
     Q_INVOKABLE QRect getNativeResolution(int displayIndex);
     Q_INVOKABLE QRect getSafeAreaResolution(int displayIndex);
     Q_INVOKABLE int getRefreshRate(int displayIndex);
-
-signals:
-    void unmappedGamepadsChanged();
 
 private:
     void querySdlVideoInfo();
@@ -48,7 +44,6 @@ private:
     QString friendlyNativeArchName;
     bool hasDesktopEnvironment;
     bool hasBrowser;
-    QString unmappedGamepads;
     QSize maximumResolution;
     QList<QRect> monitorNativeResolutions;
     QList<QRect> monitorSafeAreaResolutions;

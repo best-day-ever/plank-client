@@ -1,8 +1,6 @@
 #include <Limelight.h>
 #include <SDL.h>
-#include "streaming/session.h"
-#include "settings/mappingmanager.h"
-#include "path.h"
+#include "streaming/input/input.h"
 #include "utils.h"
 
 #ifdef HAVE_LIBINPUT_TABLET
@@ -18,11 +16,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
                                  int streamWidth,
                                  int streamHeight,
                                  bool forceAbsoluteMouseMode)
-    : m_MultiController(prefs.multiController),
-      m_GamepadMouse(prefs.gamepadMouse),
-      m_SwapMouseButtons(prefs.swapMouseButtons),
+    : m_SwapMouseButtons(prefs.swapMouseButtons),
       m_ReverseScrollDirection(prefs.reverseScrollDirection),
-      m_SwapFaceButtons(prefs.swapFaceButtons),
       m_MouseWasInVideoRegion(false),
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false),
       m_PointerRegionLockActive(false),
@@ -47,9 +42,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
     }
 
-    // Allow gamepad input when the app doesn't have focus if requested
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, prefs.backgroundGamepad ? "1" : "0");
-
 #if !SDL_VERSION_ATLEAST(2, 0, 15)
     // For older versions of SDL (2.0.14 and earlier), use SDL_HINT_GRAB_KEYBOARD
     SDL_SetHintWithPriority(SDL_HINT_GRAB_KEYBOARD,
@@ -65,13 +57,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     // trigger a click on the host if the Moonlight window is not focused. In
     // relative mode, the click event will trigger the mouse to be recaptured.
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
-
-    // Enabling extended input reports allows rumble to function on Bluetooth PS4/PS5
-    // controllers, but breaks DirectInput applications. We will enable it because
-    // it's likely that working rumble is what the user is expecting. If they don't
-    // want this behavior, they can override it with the environment variable.
-    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "1");
-    SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE", "1");
 
     // Populate special key combo configuration
     m_SpecialKeyCombos[KeyComboQuit].keyCombo = KeyComboQuit;
@@ -119,82 +104,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
-    m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
-    m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
-
-    QString streamIgnoreDevices = qgetenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES");
-    QString streamIgnoreDevicesExcept = qgetenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
-
-    if (!streamIgnoreDevices.isEmpty() && !streamIgnoreDevices.endsWith(',')) {
-        streamIgnoreDevices += ',';
-    }
-    streamIgnoreDevices += m_OldIgnoreDevices;
-
-    // STREAM_IGNORE_DEVICE_GUIDS allows to specify additional devices to be ignored when starting
-    // the stream in case the scope of STREAM_GAMECONTROLLER_IGNORE_DEVICES is too broad. One such
-    // case is "Steam Virtual Gamepad" where everything is under the same VID/PID, but different GUIDs.
-    // Multiple GUIDs can be provided, but need to be separated by commas:
-    //
-    //     <GUID>,<GUID>,<GUID>,...
-    //
-    QString streamIgnoreDeviceGuids = qgetenv("STREAM_IGNORE_DEVICE_GUIDS");
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    m_IgnoreDeviceGuids = streamIgnoreDeviceGuids.split(',', Qt::SkipEmptyParts);
-#else
-    m_IgnoreDeviceGuids = streamIgnoreDeviceGuids.split(',', QString::SkipEmptyParts);
-#endif
-
-    // For SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, we use the union of SDL_GAMECONTROLLER_IGNORE_DEVICES
-    // and STREAM_GAMECONTROLLER_IGNORE_DEVICES while streaming. STREAM_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT
-    // overrides SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT while streaming.
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, streamIgnoreDevices.toUtf8());
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, streamIgnoreDevicesExcept.toUtf8());
-
-    // We must initialize joystick explicitly before gamecontroller in order
-    // to ensure we receive gamecontroller attach events for gamepads where
-    // SDL doesn't have a built-in mapping. By starting joystick first, we
-    // can allow mapping manager to update the mappings before GC attach
-    // events are generated.
-    SDL_assert(!SDL_WasInit(SDL_INIT_JOYSTICK));
-    if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) != 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_InitSubSystem(SDL_INIT_JOYSTICK) failed: %s",
-                     SDL_GetError());
-    }
-
-    MappingManager mappingManager;
-    mappingManager.applyMappings();
-
-    // Flush gamepad arrival and departure events which may be queued before
-    // starting the gamecontroller subsystem again. This prevents us from
-    // receiving duplicate arrival and departure events for the same gamepad.
-    SDL_FlushEvent(SDL_CONTROLLERDEVICEADDED);
-    SDL_FlushEvent(SDL_CONTROLLERDEVICEREMOVED);
-
-    // We need to reinit this each time, since you only get
-    // an initial set of gamepad arrival events once per init.
-    SDL_assert(!SDL_WasInit(SDL_INIT_GAMECONTROLLER));
-    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) failed: %s",
-                     SDL_GetError());
-    }
-
-#if !SDL_VERSION_ATLEAST(2, 0, 9)
-    SDL_assert(!SDL_WasInit(SDL_INIT_HAPTIC));
-    if (SDL_InitSubSystem(SDL_INIT_HAPTIC) != 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_InitSubSystem(SDL_INIT_HAPTIC) failed: %s",
-                     SDL_GetError());
-    }
-#endif
-
-    // Initialize the gamepad mask with currently attached gamepads to avoid
-    // causing gamepads to unexpectedly disappear and reappear on the host
-    // during stream startup as we detect currently attached gamepads one at a time.
-    m_GamepadMask = getAttachedGamepadMask();
-
-    SDL_zero(m_GamepadState);
     SDL_zero(m_LastTouchDownEvent);
     SDL_zero(m_LastTouchUpEvent);
     SDL_zero(m_TouchDownEvent);
@@ -207,43 +116,10 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxRawWacomInput.reset();
 #endif
 
-    for (int i = 0; i < MAX_GAMEPADS; i++) {
-        if (m_GamepadState[i].mouseEmulationTimer != 0) {
-            Session::get()->notifyMouseEmulationMode(false);
-            SDL_RemoveTimer(m_GamepadState[i].mouseEmulationTimer);
-        }
-#if !SDL_VERSION_ATLEAST(2, 0, 9)
-        if (m_GamepadState[i].haptic != nullptr) {
-            SDL_HapticClose(m_GamepadState[i].haptic);
-        }
-#endif
-        if (m_GamepadState[i].controller != nullptr) {
-            SDL_GameControllerClose(m_GamepadState[i].controller);
-        }
-    }
-
     SDL_RemoveTimer(m_LongPressTimer);
     SDL_RemoveTimer(m_LeftButtonReleaseTimer);
     SDL_RemoveTimer(m_RightButtonReleaseTimer);
     SDL_RemoveTimer(m_DragTimer);
-
-#if !SDL_VERSION_ATLEAST(2, 0, 9)
-    SDL_QuitSubSystem(SDL_INIT_HAPTIC);
-    SDL_assert(!SDL_WasInit(SDL_INIT_HAPTIC));
-#endif
-
-    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
-    SDL_assert(!SDL_WasInit(SDL_INIT_GAMECONTROLLER));
-
-    SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
-    SDL_assert(!SDL_WasInit(SDL_INIT_JOYSTICK));
-
-    // Return background event handling to off
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
-
-    // Restore the ignored devices
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, m_OldIgnoreDevices.toUtf8());
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, m_OldIgnoreDevicesExcept.toUtf8());
 
 #ifdef STEAM_LINK
     // Hide SDL's cursor on Steam Link after quitting the stream.

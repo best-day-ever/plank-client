@@ -411,7 +411,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addValueOption("packet-size", "video packet size");
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
-    parser.addToggleOption("multi-controller", "multiple controller support");
     parser.addToggleOption("quit-after", "quit app after session");
     parser.addToggleOption("absolute-mouse", "remote desktop optimized mouse control");
     parser.addToggleOption("mouse-buttons-swap", "left and right mouse buttons swap");
@@ -420,9 +419,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("audio-on-host", "audio on host PC");
     parser.addToggleOption("frame-pacing", "frame pacing");
     parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
-    parser.addToggleOption("background-gamepad", "background gamepad input");
     parser.addToggleOption("reverse-scroll-direction", "inverted scroll direction");
-    parser.addToggleOption("swap-gamepad-buttons", "swap A/B and X/Y gamepad buttons (Nintendo-style)");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addToggleOption("hdr", "HDR streaming");
@@ -507,9 +504,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->audioConfig = mapValue(m_AudioConfigMap, parser.getChoiceOptionValue("audio-config"));
     }
 
-    // Resolve --multi-controller and --no-multi-controller options
-    preferences->multiController = parser.getToggleOptionValue("multi-controller", preferences->multiController);
-
     // Resolve --quit-after and --no-quit-after options
     preferences->quitAppAfter = parser.getToggleOptionValue("quit-after", preferences->quitAppAfter);
 
@@ -534,14 +528,8 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --mute-on-focus-loss and --no-mute-on-focus-loss options
     preferences->muteOnFocusLoss = parser.getToggleOptionValue("mute-on-focus-loss", preferences->muteOnFocusLoss);
 
-    // Resolve --background-gamepad and --no-background-gamepad options
-    preferences->backgroundGamepad = parser.getToggleOptionValue("background-gamepad", preferences->backgroundGamepad);
-
     // Resolve --reverse-scroll-direction and --no-reverse-scroll-direction options
     preferences->reverseScrollDirection = parser.getToggleOptionValue("reverse-scroll-direction", preferences->reverseScrollDirection);
-
-    // Resolve --swap-gamepad-buttons and --no-swap-gamepad-buttons options
-    preferences->swapFaceButtons = parser.getToggleOptionValue("swap-gamepad-buttons", preferences->swapFaceButtons);
 
     // Resolve --keep-awake and --no-keep-awake options
     preferences->keepAwake = parser.getToggleOptionValue("keep-awake", preferences->keepAwake);

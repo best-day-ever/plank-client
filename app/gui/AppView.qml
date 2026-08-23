@@ -4,7 +4,6 @@ import QtQuick.Controls.Material 2.2
 
 import AppModel 1.0
 import ComputerManager 1.0
-import SdlGamepadKeyNavigation 1.0
 
 CenteredGridView {
     property int computerIndex
@@ -37,10 +36,6 @@ CenteredGridView {
         appModel.computerLost.connect(computerLost)
         activated = true
 
-        // Highlight the first item if a gamepad is connected
-        if (currentIndex == -1 && SdlGamepadKeyNavigation.getConnectedGamepads() > 0) {
-            currentIndex = 0
-        }
 
         if (!showGames && !showHiddenGames) {
             // Check if there's a direct launch app
@@ -261,29 +256,29 @@ CenteredGridView {
         }
 
         Keys.onReturnPressed: {
-            // Open the app context menu if activated via the gamepad or keyboard
+            // Open the app context menu if activated via the keyboard
             // for running games. If the game isn't running, the above onClicked
             // method will handle the launch.
             if (model.running) {
-                // This will be keyboard/gamepad driven so use
+                // This will be keyboard driven so use
                 // open() instead of popup()
                 appContextMenu.open()
             }
         }
 
         Keys.onEnterPressed: {
-            // Open the app context menu if activated via the gamepad or keyboard
+            // Open the app context menu if activated via the keyboard
             // for running games. If the game isn't running, the above onClicked
             // method will handle the launch.
             if (model.running) {
-                // This will be keyboard/gamepad driven so use
+                // This will be keyboard driven so use
                 // open() instead of popup()
                 appContextMenu.open()
             }
         }
 
         Keys.onMenuPressed: {
-            // This will be keyboard/gamepad driven so use open() instead of popup()
+            // This will be keyboard driven so use open() instead of popup()
             appContextMenu.open()
         }
 
