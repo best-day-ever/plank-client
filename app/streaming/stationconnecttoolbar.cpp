@@ -435,15 +435,10 @@ void StationConnectToolbar::redraw()
         painter.drawEllipse(QPointF(14, y), 1.2, 1.2);
     }
 
-    // RGS-style upright outline thumbtack. Blue indicates the pinned state.
-    const QRect pinRect(23, 5, 28, 28);
+    // RGS-style upright outline thumbtack. A slash indicates auto-hide mode;
+    // the unmodified thumbtack indicates that the toolbar is pinned.
     const bool pinHovered = m_LocalPointerInteraction &&
                             pinContains(m_PointerX, m_PointerY);
-    if (m_Pinned || pinHovered) {
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(m_Pinned ? QColor(52, 132, 228) : QColor(69, 78, 89));
-        painter.drawRoundedRect(pinRect, 5, 5);
-    }
     QPainterPath pin;
     pin.moveTo(31, 11);
     pin.lineTo(43, 11);
@@ -458,9 +453,16 @@ void StationConnectToolbar::redraw()
     pin.lineTo(33, 15);
     pin.closeSubpath();
     painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(QColor(238, 242, 247), 1.2, Qt::SolidLine,
+    const QColor pinColor = pinHovered ? QColor(255, 255, 255) :
+                                         QColor(238, 242, 247);
+    painter.setPen(QPen(pinColor, 1.2, Qt::SolidLine,
                         Qt::RoundCap, Qt::RoundJoin));
     painter.drawPath(pin);
+    if (!m_Pinned) {
+        painter.setPen(QPen(pinColor, 1.6, Qt::SolidLine,
+                            Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(28, 8), QPointF(46, 30));
+    }
 
     painter.setPen(QColor(151, 161, 174));
     painter.drawText(QRect(57, 5, 34, 12), Qt::AlignLeft | Qt::AlignVCenter, "FPS");
