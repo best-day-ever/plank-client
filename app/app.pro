@@ -204,6 +204,7 @@ SOURCES += \
     streaming/session.cpp \
     streaming/avsynccontroller.cpp \
     streaming/stationconnectdisplaymode.cpp \
+    streaming/stationconnecttoolbar.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
@@ -244,6 +245,7 @@ HEADERS += \
     streaming/session.h \
     streaming/stationconnectpacketsize.h \
     streaming/stationconnectdisplaymode.h \
+    streaming/stationconnecttoolbar.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \

@@ -92,6 +92,19 @@ void OverlayManager::setOverlayTextUpdated(OverlayType type)
     }
 }
 
+void OverlayManager::updateOverlaySurface(OverlayType type, SDL_Surface* surface)
+{
+    SDL_Surface* oldSurface = (SDL_Surface*)SDL_AtomicSetPtr(
+                (void**)&m_Overlays[type].surface, surface);
+    if (oldSurface != nullptr) {
+        SDL_FreeSurface(oldSurface);
+    }
+
+    if (m_Overlays[type].enabled && m_Renderer != nullptr) {
+        m_Renderer->notifyOverlayUpdated(type);
+    }
+}
+
 void OverlayManager::setOverlayState(OverlayType type, bool enabled)
 {
     bool stateChanged = m_Overlays[type].enabled != enabled;
@@ -121,6 +134,11 @@ void OverlayManager::setOverlayRenderer(IOverlayRenderer* renderer)
 void OverlayManager::notifyOverlayUpdated(OverlayType type)
 {
     if (m_Renderer == nullptr) {
+        return;
+    }
+
+    if (type == OverlayType::OverlayToolbar) {
+        m_Renderer->notifyOverlayUpdated(type);
         return;
     }
 

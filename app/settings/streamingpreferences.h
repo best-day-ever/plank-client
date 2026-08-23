@@ -129,6 +129,7 @@ public:
     Q_PROPERTY(bool enableHdr MEMBER enableHdr NOTIFY enableHdrChanged)
     Q_PROPERTY(bool enableYUV444 MEMBER enableYUV444 NOTIFY enableYUV444Changed)
     Q_PROPERTY(bool stationConnectAutoResolution MEMBER stationConnectAutoResolution NOTIFY stationConnectAutoResolutionChanged)
+    Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
@@ -177,6 +178,7 @@ public:
     bool enableYUV444;
     int identityGbrBitDepth;
     bool stationConnectAutoResolution;
+    bool stationConnectToolbarPinned;
     VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
@@ -202,6 +204,7 @@ signals:
     void enableHdrChanged();
     void enableYUV444Changed();
     void stationConnectAutoResolutionChanged();
+    void stationConnectToolbarPinnedChanged();
     void videoDecoderSelectionChanged();
     void uiDisplayModeChanged();
     void windowModeChanged();

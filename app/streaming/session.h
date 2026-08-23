@@ -5,6 +5,7 @@
 #include <QWindow>
 
 #include <atomic>
+#include <memory>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -15,6 +16,7 @@
 #include "video/overlaymanager.h"
 
 class ComputerManager;
+class StationConnectToolbar;
 
 class SupportedVideoFormatList : public QList<int>
 {
@@ -134,6 +136,11 @@ public:
     }
 
     void flushWindowEvents();
+
+    void updateRenderedFps(float fps)
+    {
+        m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
+    }
 
 signals:
     void stageStarting(QString stage);
@@ -312,6 +319,8 @@ private:
     Uint32 m_LastAudioTelemetryTime;
 
     Overlay::OverlayManager m_OverlayManager;
+    std::unique_ptr<StationConnectToolbar> m_StationConnectToolbar;
+    std::atomic<float> m_CurrentRenderedFps;
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

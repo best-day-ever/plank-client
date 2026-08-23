@@ -3,6 +3,7 @@
 #include "settings/streamingpreferences.h"
 #include "streaming/avsynccontroller.h"
 #include "streaming/stationconnectdisplaymode.h"
+#include "streaming/stationconnecttoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
 #include "backend/richpresencemanager.h"
@@ -633,7 +634,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_DropAudioEndTime(0),
       m_AudioMediaFramesReceived(0),
       m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("STATIONCONNECT_AV_SYNC_TELEMETRY") > 0),
-      m_LastAudioTelemetryTime(0)
+      m_LastAudioTelemetryTime(0),
+      m_CurrentRenderedFps(0.0f)
 {
     if (m_Computer->stationConnectAuthentication) {
         if (m_ComputerManager != nullptr) {
@@ -655,6 +657,9 @@ Session::Session(NvComputer* computer, NvApp& app,
         m_Preferences->enableHdr = false;
         m_Preferences->identityGbrBitDepth = 10;
         m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
+        // The top-edge toolbar and unified workstation pointer mapping require
+        // absolute coordinates rather than relative-mode cursor confinement.
+        m_Preferences->absoluteMouseMode = true;
         // Intel Gen12 does not hardware-decode H.264 High 4:4:4 Predictive.
         // The qualified x264 paths use FFmpeg software decoding on this NUC.
         m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;
@@ -2368,10 +2373,20 @@ void Session::execInternal()
     // Toggle the stats overlay if requested by the user
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
 
+    if (m_Computer->stationConnectAuthentication) {
+        m_StationConnectToolbar.reset(new StationConnectToolbar(
+                    m_Window, m_OverlayManager, *m_Preferences));
+    }
+
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
     SDL_Event event;
     for (;;) {
+        if (m_StationConnectToolbar) {
+            m_StationConnectToolbar->setRenderedFps(
+                        m_CurrentRenderedFps.load(std::memory_order_relaxed));
+            m_StationConnectToolbar->update(SDL_GetTicks());
+        }
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)
         // SDL 2.0.18 has a proper wait event implementation that uses platform
         // support to block on events rather than polling on Windows, macOS, X11,
@@ -2382,7 +2397,9 @@ void Session::execInternal()
         // NB: This behavior was introduced in SDL 2.0.16, but had a few critical
         // issues that could cause indefinite timeouts, delayed joystick detection,
         // and other problems.
-        if (!SDL_WaitEventTimeout(&event, 1000)) {
+        const int eventWaitTimeout = m_StationConnectToolbar ?
+                    m_StationConnectToolbar->eventWaitTimeout() : 1000;
+        if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
             presence.runCallbacks();
             continue;
         }
@@ -2453,6 +2470,10 @@ void Session::execInternal()
             break;
 
         case SDL_WINDOWEVENT:
+            if (m_StationConnectToolbar &&
+                    event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                m_StationConnectToolbar->notifyWindowChanged();
+            }
             // Early handling of some events
             switch (event.window.event) {
             case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -2652,6 +2673,12 @@ void Session::execInternal()
             // of recreating our decoder at the time the HDR transition happens.
             m_VideoDecoder->setHdrMode(LiGetCurrentHostDisplayHdrMode());
 
+            // The replacement renderer has no copy of the prior overlay
+            // texture, so publish the toolbar surface again after recreation.
+            if (m_StationConnectToolbar) {
+                m_StationConnectToolbar->notifyWindowChanged();
+            }
+
             // After a window resize, we need to reset the pointer lock region
             m_InputHandler->updatePointerRegionLock();
 
@@ -2666,12 +2693,31 @@ void Session::execInternal()
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
             presence.runCallbacks();
+            if (m_StationConnectToolbar) {
+                const auto action = m_StationConnectToolbar->handleMouseButton(event.button);
+                if (action == StationConnectToolbar::Action::Disconnect) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "StationConnect toolbar disconnect requested");
+                    goto DispatchDeferredCleanup;
+                }
+                if (action == StationConnectToolbar::Action::Consumed) {
+                    break;
+                }
+            }
             m_InputHandler->handleMouseButtonEvent(&event.button);
             break;
         case SDL_MOUSEMOTION:
+            if (m_StationConnectToolbar &&
+                    m_StationConnectToolbar->handleMouseMotion(event.motion)) {
+                break;
+            }
             m_InputHandler->handleMouseMotionEvent(&event.motion);
             break;
         case SDL_MOUSEWHEEL:
+            if (m_StationConnectToolbar &&
+                    m_StationConnectToolbar->handleMouseWheel(event.wheel)) {
+                break;
+            }
             m_InputHandler->handleMouseWheelEvent(&event.wheel);
             break;
         case SDL_CONTROLLERAXISMOTION:
@@ -2731,6 +2777,8 @@ DispatchDeferredCleanup:
     delete m_InputHandler;
     m_InputHandler = nullptr;
     clearStationConnectReconnectCredentials();
+
+    m_StationConnectToolbar.reset();
 
     // Destroy the decoder, since this must be done on the main thread
     // NB: This must happen before LiStopConnection() for pull-based

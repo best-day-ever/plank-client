@@ -714,6 +714,15 @@ void VAAPIRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             overlayRect.x = 0;
             overlayRect.y = 0;
         }
+        else if (type == Overlay::OverlayToolbar) {
+            // Top center
+            int windowWidth;
+            int windowHeight;
+            SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+            (void)windowHeight;
+            overlayRect.x = SDL_max(0, (windowWidth - newSurface->w) / 2);
+            overlayRect.y = 0;
+        }
 
         overlayRect.w = newSurface->w;
         overlayRect.h = newSurface->h;
