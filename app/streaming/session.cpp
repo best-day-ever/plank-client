@@ -657,9 +657,6 @@ Session::Session(NvComputer* computer, NvApp& app,
         m_Preferences->enableHdr = false;
         m_Preferences->identityGbrBitDepth = 10;
         m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
-        // The top-edge toolbar and unified workstation pointer mapping require
-        // absolute coordinates rather than relative-mode cursor confinement.
-        m_Preferences->absoluteMouseMode = true;
         // Intel Gen12 does not hardware-decode H.264 High 4:4:4 Predictive.
         // The qualified x264 paths use FFmpeg software decoding on this NUC.
         m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;

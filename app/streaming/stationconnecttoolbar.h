@@ -53,9 +53,13 @@ private:
     bool m_Pinned;
     bool m_DraggingSlider;
     bool m_PointerInside;
+    bool m_PointerInitialized;
     bool m_BitrateSupported;
     int m_WindowWidth;
+    int m_WindowHeight;
     int m_Width;
+    int m_PointerX;
+    int m_PointerY;
     int m_BitrateKbps;
     int m_LastSentBitrateKbps;
     float m_RenderedFps;

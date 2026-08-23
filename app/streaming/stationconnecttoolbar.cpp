@@ -36,9 +36,13 @@ StationConnectToolbar::StationConnectToolbar(
       m_Pinned(preferences.stationConnectToolbarPinned),
       m_DraggingSlider(false),
       m_PointerInside(false),
+      m_PointerInitialized(false),
       m_BitrateSupported((LiGetHostFeatureFlags() & LI_FF_DYNAMIC_VIDEO_BITRATE) != 0),
       m_WindowWidth(0),
+      m_WindowHeight(0),
       m_Width(ToolbarPreferredWidth),
+      m_PointerX(0),
+      m_PointerY(0),
       m_BitrateKbps(preferences.bitrateKbps),
       m_LastSentBitrateKbps(preferences.bitrateKbps),
       m_RenderedFps(0.0f),
@@ -79,9 +83,16 @@ void StationConnectToolbar::update(Uint32 now)
 
 void StationConnectToolbar::notifyWindowChanged()
 {
-    int windowHeight;
-    SDL_GetWindowSize(m_Window, &m_WindowWidth, &windowHeight);
+    SDL_GetWindowSize(m_Window, &m_WindowWidth, &m_WindowHeight);
     m_Width = std::min(ToolbarPreferredWidth, std::max(m_WindowWidth, 1));
+    if (!m_PointerInitialized) {
+        m_PointerX = m_WindowWidth / 2;
+        m_PointerY = m_WindowHeight / 2;
+        m_PointerInitialized = true;
+    } else {
+        m_PointerX = qBound(0, m_PointerX, std::max(0, m_WindowWidth - 1));
+        m_PointerY = qBound(0, m_PointerY, std::max(0, m_WindowHeight - 1));
+    }
     if (m_Visible) {
         redraw();
     }
@@ -90,8 +101,20 @@ void StationConnectToolbar::notifyWindowChanged()
 bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
 {
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
+    if (SDL_GetRelativeMouseMode()) {
+        // Keep a toolbar-only virtual pointer while Moonlight retains its
+        // qualified relative mouse transport for the remote desktop. This
+        // avoids changing host input semantics merely to detect the top edge.
+        m_PointerX = qBound(0, m_PointerX + event.xrel,
+                           std::max(0, m_WindowWidth - 1));
+        m_PointerY = qBound(0, m_PointerY + event.yrel,
+                           std::max(0, m_WindowHeight - 1));
+    } else {
+        m_PointerX = event.x;
+        m_PointerY = event.y;
+    }
 
-    if (!m_Visible && event.y <= EdgeRevealHeight) {
+    if (!m_Visible && m_PointerY <= EdgeRevealHeight) {
         show(now);
     }
 
@@ -99,7 +122,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         return false;
     }
 
-    m_PointerInside = contains(event.x, event.y);
+    m_PointerInside = contains(m_PointerX, m_PointerY);
     if (m_PointerInside || m_DraggingSlider) {
         m_HideDeadline = 0;
     } else if (!m_Pinned) {
@@ -107,10 +130,14 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     }
 
     if (m_DraggingSlider) {
-        updateBitrateFromPointer(event.x, now, false);
+        updateBitrateFromPointer(m_PointerX, now, false);
+        redraw();
         return true;
     }
 
+    if (m_PointerInside && SDL_GetRelativeMouseMode()) {
+        redraw();
+    }
     return m_PointerInside;
 }
 
@@ -121,31 +148,33 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         return Action::None;
     }
 
+    const int pointerX = SDL_GetRelativeMouseMode() ? m_PointerX : event.x;
+    const int pointerY = SDL_GetRelativeMouseMode() ? m_PointerY : event.y;
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
     if (event.state == SDL_RELEASED && m_DraggingSlider) {
-        updateBitrateFromPointer(event.x, now, true);
+        updateBitrateFromPointer(pointerX, now, true);
         m_DraggingSlider = false;
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
         return Action::Consumed;
     }
 
-    if (!contains(event.x, event.y)) {
+    if (!contains(pointerX, pointerY)) {
         return Action::None;
     }
 
     if (event.state == SDL_PRESSED) {
-        if (pinContains(event.x, event.y)) {
+        if (pinContains(pointerX, pointerY)) {
             m_Pinned = !m_Pinned;
             m_Preferences.stationConnectToolbarPinned = m_Pinned;
             m_Preferences.save();
             m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
             redraw();
-        } else if (disconnectContains(event.x, event.y)) {
+        } else if (disconnectContains(pointerX, pointerY)) {
             return Action::Disconnect;
-        } else if (m_BitrateSupported && sliderContains(event.x, event.y)) {
+        } else if (m_BitrateSupported && sliderContains(pointerX, pointerY)) {
             m_DraggingSlider = true;
-            updateBitrateFromPointer(event.x, now, false);
+            updateBitrateFromPointer(pointerX, now, false);
         }
     }
 
@@ -156,7 +185,12 @@ bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 {
     int mouseX;
     int mouseY;
-    SDL_GetMouseState(&mouseX, &mouseY);
+    if (SDL_GetRelativeMouseMode()) {
+        mouseX = m_PointerX;
+        mouseY = m_PointerY;
+    } else {
+        SDL_GetMouseState(&mouseX, &mouseY);
+    }
     if (!m_Visible || !m_BitrateSupported || !sliderContains(mouseX, mouseY)) {
         return false;
     }
@@ -288,6 +322,24 @@ void StationConnectToolbar::redraw()
         painter.setPen(QColor(183, 151, 92));
         painter.drawText(QRect(166, 42, 260, 14), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
+    }
+
+    // SDL hides the system cursor in relative mode. Draw the toolbar's
+    // private pointer so hover controls remain usable without switching the
+    // remote desktop to incompatible absolute mouse packets.
+    if (m_PointerInside && SDL_GetRelativeMouseMode()) {
+        const qreal pointerX = m_PointerX - toolbarLeft();
+        const qreal pointerY = m_PointerY;
+        QPainterPath cursor;
+        cursor.moveTo(pointerX, pointerY);
+        cursor.lineTo(pointerX + 5, pointerY + 15);
+        cursor.lineTo(pointerX + 8, pointerY + 9);
+        cursor.lineTo(pointerX + 14, pointerY + 8);
+        cursor.closeSubpath();
+        painter.setPen(QPen(QColor(20, 24, 30), 3, Qt::SolidLine,
+                            Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(QColor(250, 252, 255));
+        painter.drawPath(cursor);
     }
 
     painter.end();
