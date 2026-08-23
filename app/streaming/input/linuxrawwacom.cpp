@@ -192,7 +192,12 @@ void LinuxRawWacomInput::run()
     }
 
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
-    release(true);
+
+    // Normal stream teardown may be followed by a resume into the same host
+    // application. Release the physical tablet locally, but let the host keep
+    // its stable UHID/XInput endpoints. Explicit focus loss still sends
+    // DETACH through setActive(false).
+    release(false);
 }
 
 bool LinuxRawWacomInput::discover()
