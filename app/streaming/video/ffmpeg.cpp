@@ -1915,8 +1915,13 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
         VIDEO_STATS activeWndStats = {};
         addVideoStats(m_ActiveWndVideoStats, activeWndStats);
+        const float currentVideoMbps = activeWndStats.receivedVideoMbps;
+        // Incoming video bitrate has one calculation and one value for every
+        // UI consumer. The remaining debug statistics retain the established
+        // two-window smoothing in lastTwoWndStats.
+        lastTwoWndStats.receivedVideoMbps = currentVideoMbps;
         Session::get()->updateRenderedStats(lastTwoWndStats.renderedFps,
-                                            activeWndStats.receivedVideoMbps);
+                                            currentVideoMbps);
 
         // Update overlay stats if it's enabled
         if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
