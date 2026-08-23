@@ -148,7 +148,14 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         m_PointerY = event.y;
     }
 
-    if (m_PointerY <= EdgeRevealHeight && !m_LocalPointerInteraction) {
+    // A visible toolbar owns its on-screen rectangle. This is important for a
+    // pinned or recently revealed toolbar: after local interaction ends, the
+    // relative pointer must be able to re-enter the moved toolbar directly,
+    // without first travelling through the unrelated top-edge reveal strip.
+    const bool pointerEnteredVisibleToolbar =
+            m_Visible && contains(m_PointerX, m_PointerY);
+    if (!m_LocalPointerInteraction &&
+            (m_PointerY <= EdgeRevealHeight || pointerEnteredVisibleToolbar)) {
         if (!m_Visible) {
             show(now);
         }
@@ -227,8 +234,15 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         return m_LocalPointerInteraction ? Action::Consumed : Action::None;
     }
 
-    const int pointerX = m_LocalPointerInteraction ? event.x : m_PointerX;
-    const int pointerY = m_LocalPointerInteraction ? event.y : m_PointerY;
+    if (m_LocalPointerInteraction) {
+        // Button events can arrive without a preceding motion event after a
+        // warp or capture transition. Keep the canonical pointer used for
+        // hover drawing and hit testing synchronized with SDL's event.
+        m_PointerX = event.x;
+        m_PointerY = event.y;
+    }
+    const int pointerX = m_PointerX;
+    const int pointerY = m_PointerY;
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
     if (event.state == SDL_RELEASED && m_DraggingToolbar) {
         m_DraggingToolbar = false;
@@ -258,6 +272,7 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
 
     if (event.state == SDL_PRESSED) {
         if (handleContains(pointerX, pointerY)) {
+            m_ConsumeNextLeftRelease = false;
             m_DraggingToolbar = true;
             m_ToolbarDragOffsetX = pointerX - toolbarLeft();
             m_HideDeadline = 0;
@@ -588,8 +603,8 @@ bool StationConnectToolbar::pinContains(int x, int y) const
 
 bool StationConnectToolbar::handleContains(int x, int y) const
 {
-    return x >= toolbarLeft() + 6 && x <= toolbarLeft() + 29 &&
-           y >= 8 && y <= 50;
+    return x >= toolbarLeft() && x <= toolbarLeft() + 33 &&
+           y >= 0 && y <= ToolbarHeight - 8;
 }
 
 bool StationConnectToolbar::minimizeContains(int x, int y) const
