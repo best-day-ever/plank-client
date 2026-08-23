@@ -16,8 +16,8 @@
 #include <cmath>
 
 namespace {
-constexpr int ToolbarPreferredWidth = 850;
-constexpr int ToolbarHeight = 64;
+constexpr int ToolbarPreferredWidth = 567;
+constexpr int ToolbarHeight = 43;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
@@ -416,10 +416,10 @@ void StationConnectToolbar::redraw()
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setPen(QPen(QColor(255, 255, 255, 42), 1));
     painter.setBrush(QColor(22, 27, 34, 238));
-    painter.drawRoundedRect(QRectF(0.5, 0.5, m_Width - 1.0, ToolbarHeight - 8.0), 0, 0);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, m_Width - 1.0, ToolbarHeight - 5.0), 0, 0);
 
     QFont labelFont;
-    labelFont.setPixelSize(15);
+    labelFont.setPixelSize(10);
     labelFont.setWeight(QFont::DemiBold);
     painter.setFont(labelFont);
     painter.setPen(QColor(235, 239, 244));
@@ -430,65 +430,65 @@ void StationConnectToolbar::redraw()
     painter.setPen(Qt::NoPen);
     painter.setBrush(handleHovered || m_DraggingToolbar ?
                          QColor(205, 214, 224) : QColor(123, 134, 147));
-    for (int y : {22, 29, 36}) {
-        painter.drawEllipse(QPointF(14, y), 1.8, 1.8);
-        painter.drawEllipse(QPointF(21, y), 1.8, 1.8);
+    for (int y : {15, 19, 24}) {
+        painter.drawEllipse(QPointF(9, y), 1.2, 1.2);
+        painter.drawEllipse(QPointF(14, y), 1.2, 1.2);
     }
 
     // RGS-style upright outline thumbtack. Blue indicates the pinned state.
-    const QRect pinRect(34, 8, 42, 42);
+    const QRect pinRect(23, 5, 28, 28);
     const bool pinHovered = m_LocalPointerInteraction &&
                             pinContains(m_PointerX, m_PointerY);
     if (m_Pinned || pinHovered) {
         painter.setPen(Qt::NoPen);
         painter.setBrush(m_Pinned ? QColor(52, 132, 228) : QColor(69, 78, 89));
-        painter.drawRoundedRect(pinRect, 7, 7);
+        painter.drawRoundedRect(pinRect, 5, 5);
     }
     QPainterPath pin;
-    pin.moveTo(46, 17);
-    pin.lineTo(64, 17);
-    pin.lineTo(60, 22);
-    pin.lineTo(60, 29);
-    pin.lineTo(65, 34);
-    pin.lineTo(56.5, 34);
-    pin.lineTo(55, 43);
-    pin.lineTo(53.5, 34);
-    pin.lineTo(45, 34);
-    pin.lineTo(50, 29);
-    pin.lineTo(50, 22);
+    pin.moveTo(31, 11);
+    pin.lineTo(43, 11);
+    pin.lineTo(40, 15);
+    pin.lineTo(40, 19);
+    pin.lineTo(43, 23);
+    pin.lineTo(38, 23);
+    pin.lineTo(37, 29);
+    pin.lineTo(36, 23);
+    pin.lineTo(30, 23);
+    pin.lineTo(33, 19);
+    pin.lineTo(33, 15);
     pin.closeSubpath();
     painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(QColor(238, 242, 247), 1.8, Qt::SolidLine,
+    painter.setPen(QPen(QColor(238, 242, 247), 1.2, Qt::SolidLine,
                         Qt::RoundCap, Qt::RoundJoin));
     painter.drawPath(pin);
 
     painter.setPen(QColor(151, 161, 174));
-    painter.drawText(QRect(86, 8, 50, 18), Qt::AlignLeft | Qt::AlignVCenter, "FPS");
+    painter.drawText(QRect(57, 5, 34, 12), Qt::AlignLeft | Qt::AlignVCenter, "FPS");
     QFont valueFont = labelFont;
-    valueFont.setPixelSize(20);
+    valueFont.setPixelSize(13);
     painter.setFont(valueFont);
     painter.setPen(QColor(246, 248, 250));
-    painter.drawText(QRect(86, 24, 74, 26), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(57, 16, 50, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      QString::number(m_RenderedFps, 'f', 1));
 
     painter.setFont(labelFont);
     painter.setPen(QColor(151, 161, 174));
-    painter.drawText(QRect(160, 8, 108, 18), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(107, 5, 72, 12), Qt::AlignLeft | Qt::AlignVCenter,
                      "VIDEO Mbps");
     painter.setFont(valueFont);
     painter.setPen(QColor(246, 248, 250));
-    painter.drawText(QRect(160, 24, 108, 26), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(107, 16, 72, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      QString::number(m_VideoMbps, 'f', 1));
 
     painter.setFont(labelFont);
     painter.setPen(m_BitrateSupported ? QColor(235, 239, 244) : QColor(135, 143, 153));
-    painter.drawText(QRect(276, 8, 230, 20), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(184, 5, 153, 14), Qt::AlignLeft | Qt::AlignVCenter,
                      QString("Encoder target  %1 Mbps").arg(m_BitrateKbps / 1000.0, 0, 'f', 1));
 
     const int trackLeft = sliderLeft() - toolbarLeft();
     const int trackRight = sliderRight() - toolbarLeft();
-    const int trackY = 40;
-    painter.setPen(QPen(QColor(92, 102, 114), 5, Qt::SolidLine, Qt::RoundCap));
+    const int trackY = 27;
+    painter.setPen(QPen(QColor(92, 102, 114), 3, Qt::SolidLine, Qt::RoundCap));
     painter.drawLine(trackLeft, trackY, trackRight, trackY);
 
     const int maximum = m_Preferences.unlockBitrate ? 500000 : 150000;
@@ -496,40 +496,40 @@ void StationConnectToolbar::redraw()
                            qreal(maximum - BitrateMinimumKbps);
     const int thumbX = trackLeft + qRound(fraction * (trackRight - trackLeft));
     if (m_BitrateSupported) {
-        painter.setPen(QPen(QColor(52, 132, 228), 5, Qt::SolidLine, Qt::RoundCap));
+        painter.setPen(QPen(QColor(52, 132, 228), 3, Qt::SolidLine, Qt::RoundCap));
         painter.drawLine(trackLeft, trackY, thumbX, trackY);
     }
     painter.setPen(Qt::NoPen);
     painter.setBrush(m_BitrateSupported ? QColor(243, 246, 250) : QColor(112, 120, 130));
-    painter.drawEllipse(QPointF(thumbX, trackY), 7, 7);
+    painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
 
-    const QRect minimizeRect(m_Width - 104, 8, 42, 42);
+    const QRect minimizeRect(m_Width - 69, 5, 28, 28);
     const bool minimizeHovered = m_LocalPointerInteraction &&
                                  minimizeContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(104, 116, 131), 1));
     painter.setBrush(minimizeHovered ? QColor(68, 78, 90, 230) :
                                       QColor(48, 57, 68, 210));
-    painter.drawRoundedRect(minimizeRect, 7, 7);
-    painter.setPen(QPen(QColor(226, 232, 239), 2, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(m_Width - 91, 31, m_Width - 75, 31);
+    painter.drawRoundedRect(minimizeRect, 5, 5);
+    painter.setPen(QPen(QColor(226, 232, 239), 1.5, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(m_Width - 60, 21, m_Width - 50, 21);
 
-    const QRect disconnectRect(m_Width - 54, 8, 42, 42);
+    const QRect disconnectRect(m_Width - 36, 5, 28, 28);
     const bool disconnectHovered = m_LocalPointerInteraction &&
                                    disconnectContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(239, 88, 88), 1));
     painter.setBrush(disconnectHovered ? QColor(151, 43, 49, 220) :
                                         QColor(126, 35, 40, 185));
-    painter.drawRoundedRect(disconnectRect, 7, 7);
-    painter.setPen(QPen(QColor(255, 228, 228), 2, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(m_Width - 42, 20, m_Width - 24, 38);
-    painter.drawLine(m_Width - 24, 20, m_Width - 42, 38);
+    painter.drawRoundedRect(disconnectRect, 5, 5);
+    painter.setPen(QPen(QColor(255, 228, 228), 1.5, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(m_Width - 28, 13, m_Width - 16, 25);
+    painter.drawLine(m_Width - 16, 13, m_Width - 28, 25);
 
     if (!m_BitrateSupported) {
         QFont hintFont = labelFont;
-        hintFont.setPixelSize(11);
+        hintFont.setPixelSize(7);
         painter.setFont(hintFont);
         painter.setPen(QColor(183, 151, 92));
-        painter.drawText(QRect(276, 42, 280, 14), Qt::AlignLeft | Qt::AlignVCenter,
+        painter.drawText(QRect(184, 28, 187, 9), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
     }
 
@@ -596,32 +596,32 @@ bool StationConnectToolbar::contains(int x, int y) const
 
 bool StationConnectToolbar::sliderContains(int x, int y) const
 {
-    return x >= sliderLeft() - 10 && x <= sliderRight() + 10 &&
-           y >= 25 && y <= 55;
+    return x >= sliderLeft() - 7 && x <= sliderRight() + 7 &&
+           y >= 17 && y <= 37;
 }
 
 bool StationConnectToolbar::pinContains(int x, int y) const
 {
-    return x >= toolbarLeft() + 34 && x <= toolbarLeft() + 76 &&
-           y >= 8 && y <= 50;
+    return x >= toolbarLeft() + 23 && x <= toolbarLeft() + 51 &&
+           y >= 5 && y <= 33;
 }
 
 bool StationConnectToolbar::handleContains(int x, int y) const
 {
-    return x >= toolbarLeft() && x <= toolbarLeft() + 33 &&
-           y >= 0 && y <= ToolbarHeight - 8;
+    return x >= toolbarLeft() && x <= toolbarLeft() + 22 &&
+           y >= 0 && y <= ToolbarHeight - 5;
 }
 
 bool StationConnectToolbar::minimizeContains(int x, int y) const
 {
-    return x >= toolbarLeft() + m_Width - 104 &&
-           x <= toolbarLeft() + m_Width - 62 && y >= 8 && y <= 50;
+    return x >= toolbarLeft() + m_Width - 69 &&
+           x <= toolbarLeft() + m_Width - 41 && y >= 5 && y <= 33;
 }
 
 bool StationConnectToolbar::disconnectContains(int x, int y) const
 {
-    return x >= toolbarLeft() + m_Width - 54 &&
-           x <= toolbarLeft() + m_Width - 12 && y >= 8 && y <= 50;
+    return x >= toolbarLeft() + m_Width - 36 &&
+           x <= toolbarLeft() + m_Width - 8 && y >= 5 && y <= 33;
 }
 
 int StationConnectToolbar::toolbarLeft() const
@@ -631,10 +631,10 @@ int StationConnectToolbar::toolbarLeft() const
 
 int StationConnectToolbar::sliderLeft() const
 {
-    return toolbarLeft() + 276;
+    return toolbarLeft() + 184;
 }
 
 int StationConnectToolbar::sliderRight() const
 {
-    return toolbarLeft() + std::max(286, m_Width - 120);
+    return toolbarLeft() + std::max(191, m_Width - 80);
 }
