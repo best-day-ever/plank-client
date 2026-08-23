@@ -648,8 +648,9 @@ Session::Session(NvComputer* computer, NvApp& app,
         // StationConnect is a qualified workstation protocol, not a generic
         // game-streaming profile. Its stream size is selected after SDL video
         // initialization from the target client display or explicit override.
+        // Keep bitrateKbps user-controlled: SettingsView persists the bitrate
+        // slider value and initialize() copies it into the stream configuration.
         m_Preferences->fps = 60;
-        m_Preferences->bitrateKbps = 100000;
         m_Preferences->enableYUV444 = true;
         m_Preferences->enableHdr = false;
         m_Preferences->identityGbrBitDepth = 10;
