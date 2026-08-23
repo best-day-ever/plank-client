@@ -2317,7 +2317,7 @@ void Session::execInternal()
 
     m_InputHandler->setWindow(m_Window);
 
-    QImage iconImage(":/res/stationconnect.png");
+    QImage iconImage(":/res/stationconnect-logo.png");
     iconImage = iconImage.scaled(ICON_SIZE,
                                  ICON_SIZE,
                                  Qt::KeepAspectRatio,

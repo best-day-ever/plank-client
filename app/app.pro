@@ -547,8 +547,8 @@ unix:!macx: {
     desktop.files = deploy/linux/com.moonlight_stream.Moonlight.desktop
     desktop.path = $$PREFIX/$$DATADIR/applications/
 
-    icons.files = res/moonlight.svg
-    icons.path = $$PREFIX/$$DATADIR/icons/hicolor/scalable/apps/
+    icons.files = res/stationconnect-logo.png
+    icons.path = $$PREFIX/$$DATADIR/icons/hicolor/512x512/apps/
 
     appstream.files = deploy/linux/com.moonlight_stream.Moonlight.appdata.xml
     appstream.path = $$PREFIX/$$DATADIR/metainfo/
