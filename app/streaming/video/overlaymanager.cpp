@@ -8,6 +8,9 @@ OverlayManager::OverlayManager() :
     m_FontData(Path::readDataFile("ModeSeven.ttf"))
 {
     memset(m_Overlays, 0, sizeof(m_Overlays));
+    for (auto& position : m_HorizontalPositions) {
+        position.store(0.5f, std::memory_order_relaxed);
+    }
 
     m_Overlays[OverlayType::OverlayDebug].color = {0xD0, 0xD0, 0x00, 0xFF};
     m_Overlays[OverlayType::OverlayDebug].fontSize = 20;
@@ -103,6 +106,17 @@ void OverlayManager::updateOverlaySurface(OverlayType type, SDL_Surface* surface
     if (m_Overlays[type].enabled && m_Renderer != nullptr) {
         m_Renderer->notifyOverlayUpdated(type);
     }
+}
+
+void OverlayManager::setOverlayHorizontalPosition(OverlayType type, float position)
+{
+    m_HorizontalPositions[type].store(SDL_clamp(position, 0.0f, 1.0f),
+                                      std::memory_order_relaxed);
+}
+
+float OverlayManager::getOverlayHorizontalPosition(OverlayType type) const
+{
+    return m_HorizontalPositions[type].load(std::memory_order_relaxed);
 }
 
 void OverlayManager::setOverlayState(OverlayType type, bool enabled)

@@ -16,13 +16,14 @@
 #include <cmath>
 
 namespace {
-constexpr int ToolbarPreferredWidth = 1020;
+constexpr int ToolbarPreferredWidth = 1050;
 constexpr int ToolbarHeight = 64;
 constexpr int EdgeRevealHeight = 3;
 constexpr int InteractionExitY = ToolbarHeight + 32;
 constexpr Uint32 AutoHideDelayMs = 1400;
 constexpr Uint32 BitrateSettleDelayMs = 250;
 constexpr Uint32 RedrawIntervalMs = 200;
+constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
 constexpr int BitrateMinimumKbps = 500;
 constexpr int BitrateStepKbps = 500;
 }
@@ -38,6 +39,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_Preferences(preferences),
       m_Visible(preferences.stationConnectToolbarPinned),
       m_Pinned(preferences.stationConnectToolbarPinned),
+      m_DraggingToolbar(false),
       m_DraggingSlider(false),
       m_PointerInside(false),
       m_PointerInitialized(false),
@@ -48,6 +50,8 @@ StationConnectToolbar::StationConnectToolbar(
       m_WindowWidth(0),
       m_WindowHeight(0),
       m_Width(ToolbarPreferredWidth),
+      m_ToolbarLeft(-1),
+      m_ToolbarDragOffsetX(0),
       m_PointerX(0),
       m_PointerY(0),
       m_BitrateKbps(preferences.bitrateKbps),
@@ -59,6 +63,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_HideDeadline(0),
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
+      m_LastToolbarMoveDrawTime(0),
       m_LastRedrawTime(0)
 {
     notifyWindowChanged();
@@ -107,6 +112,12 @@ void StationConnectToolbar::notifyWindowChanged()
 {
     SDL_GetWindowSize(m_Window, &m_WindowWidth, &m_WindowHeight);
     m_Width = std::min(ToolbarPreferredWidth, std::max(m_WindowWidth, 1));
+    if (m_ToolbarLeft < 0) {
+        m_ToolbarLeft = std::max(0, (m_WindowWidth - m_Width) / 2);
+    } else {
+        m_ToolbarLeft = qBound(0, m_ToolbarLeft,
+                               std::max(0, m_WindowWidth - m_Width));
+    }
     if (!m_PointerInitialized) {
         m_PointerX = m_WindowWidth / 2;
         m_PointerY = m_WindowHeight / 2;
@@ -162,6 +173,20 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         m_HideDeadline = now + AutoHideDelayMs;
     }
 
+    if (m_DraggingToolbar) {
+        const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
+                                   std::max(0, m_WindowWidth - m_Width));
+        if (newLeft != m_ToolbarLeft) {
+            m_ToolbarLeft = newLeft;
+            if (SDL_TICKS_PASSED(now,
+                    m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs)) {
+                redraw();
+                m_LastToolbarMoveDrawTime = now;
+            }
+        }
+        return true;
+    }
+
     if (m_DraggingSlider) {
         updateBitrateFromPointer(m_PointerX, now, false);
         redraw();
@@ -205,6 +230,11 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
     const int pointerX = m_LocalPointerInteraction ? event.x : m_PointerX;
     const int pointerY = m_LocalPointerInteraction ? event.y : m_PointerY;
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
+    if (event.state == SDL_RELEASED && m_DraggingToolbar) {
+        m_DraggingToolbar = false;
+        redraw();
+        return Action::Consumed;
+    }
     if (event.state == SDL_RELEASED && m_DraggingSlider) {
         updateBitrateFromPointer(pointerX, now, true);
         m_DraggingSlider = false;
@@ -227,7 +257,12 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
     }
 
     if (event.state == SDL_PRESSED) {
-        if (pinContains(pointerX, pointerY)) {
+        if (handleContains(pointerX, pointerY)) {
+            m_DraggingToolbar = true;
+            m_ToolbarDragOffsetX = pointerX - toolbarLeft();
+            m_HideDeadline = 0;
+            redraw();
+        } else if (pinContains(pointerX, pointerY)) {
             m_Pinned = !m_Pinned;
             m_Preferences.stationConnectToolbarPinned = m_Pinned;
             m_Preferences.save();
@@ -331,6 +366,7 @@ void StationConnectToolbar::endLocalPointerInteraction()
     }
 
     m_LocalPointerInteraction = false;
+    m_DraggingToolbar = false;
     m_DraggingSlider = false;
     m_PointerInside = false;
     if (m_RestoreCapture) {
@@ -368,8 +404,19 @@ void StationConnectToolbar::redraw()
     painter.setFont(labelFont);
     painter.setPen(QColor(235, 239, 244));
 
+    // Six-dot grip for moving the toolbar horizontally along the top edge.
+    const bool handleHovered = m_LocalPointerInteraction &&
+                               handleContains(m_PointerX, m_PointerY);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(handleHovered || m_DraggingToolbar ?
+                         QColor(205, 214, 224) : QColor(123, 134, 147));
+    for (int y : {22, 29, 36}) {
+        painter.drawEllipse(QPointF(14, y), 1.8, 1.8);
+        painter.drawEllipse(QPointF(21, y), 1.8, 1.8);
+    }
+
     // RGS-style upright outline thumbtack. Blue indicates the pinned state.
-    const QRect pinRect(10, 8, 42, 42);
+    const QRect pinRect(34, 8, 42, 42);
     const bool pinHovered = m_LocalPointerInteraction &&
                             pinContains(m_PointerX, m_PointerY);
     if (m_Pinned || pinHovered) {
@@ -378,17 +425,17 @@ void StationConnectToolbar::redraw()
         painter.drawRoundedRect(pinRect, 7, 7);
     }
     QPainterPath pin;
-    pin.moveTo(22, 17);
-    pin.lineTo(40, 17);
-    pin.lineTo(36, 22);
-    pin.lineTo(36, 29);
-    pin.lineTo(41, 34);
-    pin.lineTo(32.5, 34);
-    pin.lineTo(31, 43);
-    pin.lineTo(29.5, 34);
-    pin.lineTo(21, 34);
-    pin.lineTo(26, 29);
-    pin.lineTo(26, 22);
+    pin.moveTo(46, 17);
+    pin.lineTo(64, 17);
+    pin.lineTo(60, 22);
+    pin.lineTo(60, 29);
+    pin.lineTo(65, 34);
+    pin.lineTo(56.5, 34);
+    pin.lineTo(55, 43);
+    pin.lineTo(53.5, 34);
+    pin.lineTo(45, 34);
+    pin.lineTo(50, 29);
+    pin.lineTo(50, 22);
     pin.closeSubpath();
     painter.setBrush(Qt::NoBrush);
     painter.setPen(QPen(QColor(238, 242, 247), 1.8, Qt::SolidLine,
@@ -396,26 +443,26 @@ void StationConnectToolbar::redraw()
     painter.drawPath(pin);
 
     painter.setPen(QColor(151, 161, 174));
-    painter.drawText(QRect(62, 8, 50, 18), Qt::AlignLeft | Qt::AlignVCenter, "FPS");
+    painter.drawText(QRect(86, 8, 50, 18), Qt::AlignLeft | Qt::AlignVCenter, "FPS");
     QFont valueFont = labelFont;
     valueFont.setPixelSize(20);
     painter.setFont(valueFont);
     painter.setPen(QColor(246, 248, 250));
-    painter.drawText(QRect(62, 24, 74, 26), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(86, 24, 74, 26), Qt::AlignLeft | Qt::AlignVCenter,
                      QString::number(m_RenderedFps, 'f', 1));
 
     painter.setFont(labelFont);
     painter.setPen(QColor(151, 161, 174));
-    painter.drawText(QRect(136, 8, 108, 18), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(160, 8, 108, 18), Qt::AlignLeft | Qt::AlignVCenter,
                      "VIDEO Mbps");
     painter.setFont(valueFont);
     painter.setPen(QColor(246, 248, 250));
-    painter.drawText(QRect(136, 24, 108, 26), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(160, 24, 108, 26), Qt::AlignLeft | Qt::AlignVCenter,
                      QString::number(m_VideoMbps, 'f', 1));
 
     painter.setFont(labelFont);
     painter.setPen(m_BitrateSupported ? QColor(235, 239, 244) : QColor(135, 143, 153));
-    painter.drawText(QRect(252, 8, 230, 20), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(276, 8, 230, 20), Qt::AlignLeft | Qt::AlignVCenter,
                      QString("Encoder target  %1 Mbps").arg(m_BitrateKbps / 1000.0, 0, 'f', 1));
 
     const int trackLeft = sliderLeft() - toolbarLeft();
@@ -470,7 +517,7 @@ void StationConnectToolbar::redraw()
         hintFont.setPixelSize(11);
         painter.setFont(hintFont);
         painter.setPen(QColor(183, 151, 92));
-        painter.drawText(QRect(252, 42, 280, 14), Qt::AlignLeft | Qt::AlignVCenter,
+        painter.drawText(QRect(276, 42, 280, 14), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
     }
 
@@ -478,6 +525,11 @@ void StationConnectToolbar::redraw()
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
     m_LastRedrawTime = SDL_GetTicks();
+    const int availableWidth = std::max(0, m_WindowWidth - m_Width);
+    const float horizontalPosition = availableWidth > 0 ?
+                static_cast<float>(m_ToolbarLeft) / availableWidth : 0.5f;
+    m_OverlayManager.setOverlayHorizontalPosition(Overlay::OverlayToolbar,
+                                                   horizontalPosition);
     m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
 }
 
@@ -538,7 +590,13 @@ bool StationConnectToolbar::sliderContains(int x, int y) const
 
 bool StationConnectToolbar::pinContains(int x, int y) const
 {
-    return x >= toolbarLeft() + 10 && x <= toolbarLeft() + 52 &&
+    return x >= toolbarLeft() + 34 && x <= toolbarLeft() + 76 &&
+           y >= 8 && y <= 50;
+}
+
+bool StationConnectToolbar::handleContains(int x, int y) const
+{
+    return x >= toolbarLeft() + 6 && x <= toolbarLeft() + 29 &&
            y >= 8 && y <= 50;
 }
 
@@ -556,15 +614,15 @@ bool StationConnectToolbar::disconnectContains(int x, int y) const
 
 int StationConnectToolbar::toolbarLeft() const
 {
-    return std::max(0, (m_WindowWidth - m_Width) / 2);
+    return std::max(0, m_ToolbarLeft);
 }
 
 int StationConnectToolbar::sliderLeft() const
 {
-    return toolbarLeft() + 252;
+    return toolbarLeft() + 276;
 }
 
 int StationConnectToolbar::sliderRight() const
 {
-    return toolbarLeft() + std::max(262, m_Width - 326);
+    return toolbarLeft() + std::max(286, m_Width - 326);
 }

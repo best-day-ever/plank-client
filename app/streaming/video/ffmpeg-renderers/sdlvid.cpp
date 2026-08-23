@@ -242,10 +242,12 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
                 m_OverlayRects[type].y = 0;
             }
             else if (type == Overlay::OverlayToolbar) {
-                // Top center
+                // User-positionable along the top edge
                 SDL_Rect viewportRect;
                 SDL_RenderGetViewport(m_Renderer, &viewportRect);
-                m_OverlayRects[type].x = SDL_max(0, (viewportRect.w - newSurface->w) / 2);
+                m_OverlayRects[type].x = SDL_round(
+                    Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *
+                    SDL_max(0, viewportRect.w - newSurface->w));
                 m_OverlayRects[type].y = 0;
             }
 

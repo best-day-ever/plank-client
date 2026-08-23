@@ -715,12 +715,14 @@ void VAAPIRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             overlayRect.y = 0;
         }
         else if (type == Overlay::OverlayToolbar) {
-            // Top center
+            // User-positionable along the top edge
             int windowWidth;
             int windowHeight;
             SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
             (void)windowHeight;
-            overlayRect.x = SDL_max(0, (windowWidth - newSurface->w) / 2);
+            overlayRect.x = SDL_round(
+                Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *
+                SDL_max(0, windowWidth - newSurface->w));
             overlayRect.y = 0;
         }
 

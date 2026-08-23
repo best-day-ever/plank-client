@@ -5,6 +5,8 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
 
+#include <atomic>
+
 namespace Overlay {
 
 enum OverlayType {
@@ -38,6 +40,8 @@ public:
     int getOverlayFontSize(OverlayType type);
     SDL_Surface* getUpdatedOverlaySurface(OverlayType type);
     void updateOverlaySurface(OverlayType type, SDL_Surface* surface);
+    void setOverlayHorizontalPosition(OverlayType type, float position);
+    float getOverlayHorizontalPosition(OverlayType type) const;
 
     void setOverlayRenderer(IOverlayRenderer* renderer);
 
@@ -53,6 +57,7 @@ private:
         TTF_Font* font;
         SDL_Surface* surface;
     } m_Overlays[OverlayMax];
+    std::atomic<float> m_HorizontalPositions[OverlayMax];
     IOverlayRenderer* m_Renderer;
     QByteArray m_FontData;
 };

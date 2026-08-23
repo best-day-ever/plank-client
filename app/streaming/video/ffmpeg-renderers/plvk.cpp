@@ -808,9 +808,12 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
                 overlayParts[i].dst.y0 = 0;
             }
             else if (i == Overlay::OverlayToolbar) {
-                // Top center
-                overlayParts[i].dst.x0 = SDL_max(0.0f,
-                    (targetFrame.crop.x1 - overlayParts[i].src.x1) / 2.0f);
+                // User-positionable along the top edge
+                overlayParts[i].dst.x0 = targetFrame.crop.x0 +
+                    Session::get()->getOverlayManager().getOverlayHorizontalPosition(
+                        (Overlay::OverlayType)i) *
+                    SDL_max(0.0f, targetFrame.crop.x1 - targetFrame.crop.x0 -
+                                      overlayParts[i].src.x1);
                 overlayParts[i].dst.y0 = 0;
             }
             overlayParts[i].dst.x1 = overlayParts[i].dst.x0 + overlayParts[i].src.x1;

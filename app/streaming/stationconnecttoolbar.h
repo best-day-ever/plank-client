@@ -45,6 +45,7 @@ private:
     void queueBitrateRequest(Uint32 now, bool forceSend);
     bool contains(int x, int y) const;
     bool sliderContains(int x, int y) const;
+    bool handleContains(int x, int y) const;
     bool pinContains(int x, int y) const;
     bool minimizeContains(int x, int y) const;
     bool disconnectContains(int x, int y) const;
@@ -58,6 +59,7 @@ private:
     StreamingPreferences& m_Preferences;
     bool m_Visible;
     bool m_Pinned;
+    bool m_DraggingToolbar;
     bool m_DraggingSlider;
     bool m_PointerInside;
     bool m_PointerInitialized;
@@ -68,6 +70,8 @@ private:
     int m_WindowWidth;
     int m_WindowHeight;
     int m_Width;
+    int m_ToolbarLeft;
+    int m_ToolbarDragOffsetX;
     int m_PointerX;
     int m_PointerY;
     int m_BitrateKbps;
@@ -79,5 +83,6 @@ private:
     Uint32 m_HideDeadline;
     Uint32 m_LastBitrateSendTime;
     Uint32 m_LastBitrateChangeTime;
+    Uint32 m_LastToolbarMoveDrawTime;
     Uint32 m_LastRedrawTime;
 };

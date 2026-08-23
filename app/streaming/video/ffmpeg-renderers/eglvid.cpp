@@ -253,8 +253,10 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
             overlayRect.y = viewportHeight - newSurface->h;
         }
         else if (type == Overlay::OverlayToolbar) {
-            // Top center (OpenGL origin is lower-left)
-            overlayRect.x = SDL_max(0, (viewportWidth - newSurface->w) / 2);
+            // User-positionable along the top edge (OpenGL origin is lower-left)
+            overlayRect.x = SDL_round(
+                Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *
+                SDL_max(0, viewportWidth - newSurface->w));
             overlayRect.y = viewportHeight - newSurface->h;
         }
         else {
