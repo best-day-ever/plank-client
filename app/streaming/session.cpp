@@ -1758,6 +1758,16 @@ bool Session::startConnectionAsync(bool reconnecting)
             startApp();
         } catch (const GfeHttpResponseException& e) {
             if (reconnecting && m_Computer->stationConnectAuthentication &&
+                    m_Computer->currentGameId == 0 &&
+                    e.getStatusCode() == 400) {
+                {
+                    QWriteLocker lock(&m_Computer->lock);
+                    m_Computer->currentGameId = m_App.id;
+                }
+                qInfo() << "StationConnect worker already has an active Desktop stream; resuming it";
+                startApp();
+            }
+            else if (reconnecting && m_Computer->stationConnectAuthentication &&
                     m_Computer->currentGameId != 0 &&
                     e.getStatusCode() == 503) {
                 {
@@ -1960,6 +1970,10 @@ bool Session::reconnectStationConnect()
                 m_Computer->sessionToken.fill(QChar('\0'));
                 m_Computer->sessionToken.clear();
                 m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+                // A replacement media worker has no in-memory app state.
+                // Prefer a fresh launch; startConnectionAsync() falls back to
+                // resume when this is merely a transient same-worker outage.
+                m_Computer->currentGameId = 0;
             }
             NvHTTP http(m_Computer);
             const QString token = http.authenticate(
