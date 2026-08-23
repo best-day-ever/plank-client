@@ -1,6 +1,7 @@
 #include "nvcomputer.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
+#include "stationconnectnetwork.h"
 
 #include <QUdpSocket>
 #include <QHostInfo>
@@ -457,8 +458,10 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
                         return ReachabilityType::RI_VPN;
                     }
 
-                    if (nic.humanReadableName().startsWith("ZeroTier")) {
-                        // ZeroTier interfaces always start with "ZeroTier"
+                    if (StationConnectNetwork::isZeroTierInterface(nic.name(),
+                                                                   nic.humanReadableName())) {
+                        // Qt reports Linux ZeroTier interfaces as Ethernet, so
+                        // recognize their ztXXXXXXXX kernel name explicitly.
                         return ReachabilityType::RI_VPN;
                     }
 

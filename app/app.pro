@@ -228,6 +228,7 @@ HEADERS += \
     backend/computerseeker.h \
     backend/identitymanager.h \
     backend/nvcomputer.h \
+    backend/stationconnectnetwork.h \
     backend/nvhttp.h \
     backend/nvpairingmanager.h \
     backend/computermanager.h \
@@ -241,6 +242,7 @@ HEADERS += \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/session.h \
+    streaming/stationconnectpacketsize.h \
     streaming/stationconnectdisplaymode.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \

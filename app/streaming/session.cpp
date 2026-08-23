@@ -1,4 +1,5 @@
 #include "session.h"
+#include "stationconnectpacketsize.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/avsynccontroller.h"
 #include "streaming/stationconnectdisplaymode.h"
@@ -1794,10 +1795,14 @@ bool Session::startConnectionAsync()
             m_StreamConfig.streamingRemotely = STREAM_CFG_LOCAL;
             break;
         case NvComputer::RI_VPN:
-            // It looks like our route to this PC is over a VPN, so cap at 1024 bytes.
+            // Keep the encrypted inner IPv4 packet inside one ZeroTier physical
+            // payload, including RTP, UDP/IP, and extended-frame overhead.
             // Treat it as remote even if the target address is in RFC 1918 address space.
             m_StreamConfig.streamingRemotely = STREAM_CFG_REMOTE;
-            m_StreamConfig.packetSize = 1024;
+            m_StreamConfig.packetSize = StationConnectPacketSize::VpnVideoPacketSize;
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Using StationConnect VPN packet size: %d bytes",
+                        m_StreamConfig.packetSize);
             break;
         default:
             // If we don't have reachability info, let moonlight-common-c decide.
