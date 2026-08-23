@@ -2373,7 +2373,7 @@ void Session::execInternal()
 
     if (m_Computer->stationConnectAuthentication) {
         m_StationConnectToolbar.reset(new StationConnectToolbar(
-                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences));
+                    m_Window, m_OverlayManager, *m_Preferences));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
