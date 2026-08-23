@@ -1913,7 +1913,10 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         VIDEO_STATS lastTwoWndStats = {};
         addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
         addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
-        Session::get()->updateRenderedFps(lastTwoWndStats.renderedFps);
+        VIDEO_STATS activeWndStats = {};
+        addVideoStats(m_ActiveWndVideoStats, activeWndStats);
+        Session::get()->updateRenderedStats(lastTwoWndStats.renderedFps,
+                                            activeWndStats.receivedVideoMbps);
 
         // Update overlay stats if it's enabled
         if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {

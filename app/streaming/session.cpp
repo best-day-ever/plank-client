@@ -635,7 +635,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_AudioMediaFramesReceived(0),
       m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("STATIONCONNECT_AV_SYNC_TELEMETRY") > 0),
       m_LastAudioTelemetryTime(0),
-      m_CurrentRenderedFps(0.0f)
+      m_CurrentRenderedFps(0.0f),
+      m_CurrentVideoMbps(0.0f)
 {
     if (m_Computer->stationConnectAuthentication) {
         if (m_ComputerManager != nullptr) {
@@ -2372,7 +2373,7 @@ void Session::execInternal()
 
     if (m_Computer->stationConnectAuthentication) {
         m_StationConnectToolbar.reset(new StationConnectToolbar(
-                    m_Window, m_OverlayManager, *m_Preferences));
+                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
@@ -2380,8 +2381,9 @@ void Session::execInternal()
     SDL_Event event;
     for (;;) {
         if (m_StationConnectToolbar) {
-            m_StationConnectToolbar->setRenderedFps(
-                        m_CurrentRenderedFps.load(std::memory_order_relaxed));
+            m_StationConnectToolbar->setRenderedStats(
+                        m_CurrentRenderedFps.load(std::memory_order_relaxed),
+                        m_CurrentVideoMbps.load(std::memory_order_relaxed));
             m_StationConnectToolbar->update(SDL_GetTicks());
         }
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)
@@ -2696,6 +2698,12 @@ void Session::execInternal()
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "StationConnect toolbar disconnect requested");
                     goto DispatchDeferredCleanup;
+                }
+                if (action == StationConnectToolbar::Action::Minimize) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "StationConnect toolbar minimize requested");
+                    SDL_MinimizeWindow(m_Window);
+                    break;
                 }
                 if (action == StationConnectToolbar::Action::Consumed) {
                     break;

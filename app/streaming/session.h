@@ -137,9 +137,10 @@ public:
 
     void flushWindowEvents();
 
-    void updateRenderedFps(float fps)
+    void updateRenderedStats(float fps, float videoMbps)
     {
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
+        m_CurrentVideoMbps.store(videoMbps, std::memory_order_relaxed);
     }
 
 signals:
@@ -321,6 +322,7 @@ private:
     Overlay::OverlayManager m_OverlayManager;
     std::unique_ptr<StationConnectToolbar> m_StationConnectToolbar;
     std::atomic<float> m_CurrentRenderedFps;
+    std::atomic<float> m_CurrentVideoMbps;
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;
