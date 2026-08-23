@@ -138,6 +138,18 @@ void LinuxRawWacomInput::setActive(bool active)
     }
 }
 
+void LinuxRawWacomInput::resetAfterReconnect()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+
+    // A StationConnect desktop handoff replaces the host media worker and its
+    // UHID devices. The physical tablet remains open on the client, so force a
+    // fresh discovery/attach transaction on the replacement control stream.
+    // Do not send DETACH: the new host generation has never seen this device.
+    release(false);
+    m_AttachFailed.store(false);
+}
+
 void LinuxRawWacomInput::run()
 {
     SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,

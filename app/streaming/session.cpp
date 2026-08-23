@@ -2011,6 +2011,7 @@ bool Session::reconnectStationConnect()
             }
 
             if (startConnectionAsync(true)) {
+                m_InputHandler->resetRawHidAfterReconnect();
                 m_Reconnecting.store(false);
                 m_ReconnectRequested = false;
                 m_UnexpectedTermination = false;

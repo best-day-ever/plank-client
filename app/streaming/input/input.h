@@ -103,6 +103,8 @@ public:
 
     void handleRawHidControl(const unsigned char* data, unsigned int length);
 
+    void resetRawHidAfterReconnect();
+
     void handleTouchFingerEvent(SDL_TouchFingerEvent* event);
 
     int getAttachedGamepadMask();

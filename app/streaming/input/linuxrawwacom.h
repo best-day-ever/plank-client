@@ -17,6 +17,7 @@ public:
     LinuxRawWacomInput& operator=(const LinuxRawWacomInput&) = delete;
 
     void setActive(bool active);
+    void resetAfterReconnect();
     void handleControl(const unsigned char* data, unsigned int length);
 
 private:

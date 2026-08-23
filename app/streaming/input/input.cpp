@@ -358,6 +358,15 @@ void SdlInputHandler::handleRawHidControl(const unsigned char* data,
 #endif
 }
 
+void SdlInputHandler::resetRawHidAfterReconnect()
+{
+#ifdef HAVE_LIBINPUT_TABLET
+    if (m_LinuxRawWacomInput) {
+        m_LinuxRawWacomInput->resetAfterReconnect();
+    }
+#endif
+}
+
 bool SdlInputHandler::isCaptureActive()
 {
     if (SDL_GetRelativeMouseMode()) {
