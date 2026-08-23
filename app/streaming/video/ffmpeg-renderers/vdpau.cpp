@@ -439,7 +439,7 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             // User-positionable along the top edge
             overlayRect.x0 = SDL_round(
                 Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *
-                SDL_max(0, m_DisplayWidth - newSurface->w));
+                SDL_max(0, static_cast<int>(m_DisplayWidth) - newSurface->w));
             overlayRect.y0 = 0;
         }
 
