@@ -692,7 +692,7 @@ Flickable {
                     value: StreamingPreferences.bitrateKbps
 
                     stepSize: 500
-                    from : 500
+                    from: 10000
                     to: StreamingPreferences.unlockBitrate ? 500000 : 150000
 
                     snapMode: "SnapOnRelease"

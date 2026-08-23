@@ -19,12 +19,12 @@ namespace {
 constexpr int ToolbarPreferredWidth = 850;
 constexpr int ToolbarHeight = 64;
 constexpr int EdgeRevealHeight = 3;
-constexpr Uint32 EdgeActivationDelayMs = 2000;
-constexpr Uint32 AutoHideDelayMs = 10000;
+constexpr Uint32 EdgeActivationDelayMs = 1000;
+constexpr Uint32 AutoHideDelayMs = 5000;
 constexpr Uint32 BitrateSettleDelayMs = 250;
 constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
-constexpr int BitrateMinimumKbps = 500;
+constexpr int BitrateMinimumKbps = 10000;
 constexpr int BitrateStepKbps = 500;
 }
 
@@ -52,7 +52,9 @@ StationConnectToolbar::StationConnectToolbar(
       m_ToolbarDragOffsetX(0),
       m_PointerX(0),
       m_PointerY(0),
-      m_BitrateKbps(preferences.bitrateKbps),
+      m_BitrateKbps(qBound(BitrateMinimumKbps,
+                           preferences.bitrateKbps,
+                           preferences.unlockBitrate ? 500000 : 150000)),
       m_LastSentBitrateKbps(-1),
       m_RenderedFps(0.0f),
       m_VideoMbps(0.0f),
@@ -66,6 +68,10 @@ StationConnectToolbar::StationConnectToolbar(
       m_EdgeHoverStartTime(0)
 {
     SDL_assert(m_InputHandler.isAbsoluteMouseMode());
+    if (m_Preferences.bitrateKbps != m_BitrateKbps) {
+        m_Preferences.bitrateKbps = m_BitrateKbps;
+        m_Preferences.save();
+    }
     notifyWindowChanged();
     redraw();
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
@@ -153,7 +159,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     m_PointerX = event.x;
     m_PointerY = event.y;
 
-    // The edge must be held continuously for two seconds. Leaving the edge
+    // The edge must be held continuously for one second. Leaving the edge
     // cancels the activation, so ordinary host UI at the top remains usable.
     if (!m_Visible && !m_LocalPointerInteraction) {
         if (m_PointerY <= EdgeRevealHeight) {
