@@ -25,6 +25,7 @@ public:
     Q_PROPERTY(QString unmappedGamepads MEMBER unmappedGamepads NOTIFY unmappedGamepadsChanged)
     Q_PROPERTY(QSize maximumResolution MEMBER maximumResolution CONSTANT)
     Q_PROPERTY(QString versionString MEMBER versionString CONSTANT)
+    Q_PROPERTY(QString stationConnectVersionString MEMBER stationConnectVersionString CONSTANT)
     Q_PROPERTY(bool supportsHdr MEMBER supportsHdr CONSTANT)
     Q_PROPERTY(bool usesMaterial3Theme MEMBER usesMaterial3Theme CONSTANT)
 
@@ -56,7 +57,7 @@ private:
     QList<QRect> monitorSafeAreaResolutions;
     QList<int> monitorRefreshRates;
     QString versionString;
+    QString stationConnectVersionString;
     bool supportsHdr;
     bool usesMaterial3Theme;
 };
-

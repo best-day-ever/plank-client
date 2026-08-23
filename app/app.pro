@@ -602,3 +602,8 @@ macx {
 
 VERSION = "$$cat(version.txt)"
 DEFINES += VERSION_STR=\\\"$$cat(version.txt)\\\"
+
+isEmpty(STATIONCONNECT_VERSION) {
+    STATIONCONNECT_VERSION = development
+}
+DEFINES += STATIONCONNECT_VERSION_STR=\\\"$$STATIONCONNECT_VERSION\\\"

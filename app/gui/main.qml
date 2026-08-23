@@ -253,6 +253,14 @@ ApplicationWindow {
             }
 
             Label {
+                id: stationConnectVersionLabel
+                text: qsTr("StationConnect %1").arg(SystemProperties.stationConnectVersionString)
+                font.pointSize: 12
+                horizontalAlignment: Qt.AlignRight
+                verticalAlignment: Qt.AlignVCenter
+            }
+
+            Label {
                 id: versionLabel
                 visible: qmltypeof(stackView.currentItem, "SettingsView")
                 text: qsTr("Version %1").arg(SystemProperties.versionString)

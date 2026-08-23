@@ -7,6 +7,10 @@
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
 
+#ifndef STATIONCONNECT_VERSION_STR
+#define STATIONCONNECT_VERSION_STR "development"
+#endif
+
 #ifdef Q_OS_WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -15,6 +19,7 @@
 SystemProperties::SystemProperties()
 {
     versionString = QString(VERSION_STR);
+    stationConnectVersionString = QString::fromLatin1(STATIONCONNECT_VERSION_STR);
     hasDesktopEnvironment = WMUtils::isRunningDesktopEnvironment();
     isRunningWayland = WMUtils::isRunningWayland();
     isRunningXWayland = isRunningWayland && QGuiApplication::platformName() == "xcb";
