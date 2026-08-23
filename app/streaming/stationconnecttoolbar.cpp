@@ -145,17 +145,16 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         m_PointerY = event.y;
     }
 
-    // A visible toolbar owns its on-screen rectangle. This is important for a
-    // pinned or recently revealed toolbar: after local interaction ends, the
-    // relative pointer must be able to re-enter the moved toolbar directly,
-    // without first travelling through the unrelated top-edge reveal strip.
+    // Reaching the top edge reveals the toolbar but must not pull the pointer
+    // horizontally into it. Local interaction begins only when the pointer's
+    // real tracked position enters the toolbar rectangle.
     const bool pointerEnteredVisibleToolbar =
             m_Visible && contains(m_PointerX, m_PointerY);
-    if (!m_LocalPointerInteraction &&
-            (m_PointerY <= EdgeRevealHeight || pointerEnteredVisibleToolbar)) {
-        if (!m_Visible) {
-            show(now);
-        }
+    if (!m_LocalPointerInteraction && m_PointerY <= EdgeRevealHeight &&
+            !m_Visible) {
+        show(now);
+    }
+    if (!m_LocalPointerInteraction && pointerEnteredVisibleToolbar) {
         beginLocalPointerInteraction();
         return true;
     }
@@ -344,9 +343,6 @@ void StationConnectToolbar::beginLocalPointerInteraction()
     }
 
     m_LocalPointerInteraction = true;
-    m_PointerX = qBound(toolbarLeft() + 2, m_PointerX,
-                        toolbarLeft() + m_Width - 3);
-    m_PointerY = qBound(2, m_PointerY, ToolbarHeight - 3);
     m_PointerInside = true;
     m_HideDeadline = 0;
     redraw();
