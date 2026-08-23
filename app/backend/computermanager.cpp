@@ -223,6 +223,14 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs)
 
 ComputerManager::~ComputerManager()
 {
+    {
+        QMutexLocker credentialLock(&m_ReconnectCredentialLock);
+        for (auto& credentials : m_ReconnectCredentials) {
+            credentials.second.fill(QChar('\0'));
+        }
+        m_ReconnectCredentials.clear();
+    }
+
     // Stop the delayed flush thread before acquiring the lock in write mode
     // to avoid deadlocking with a flush that needs the lock in read mode.
     {
@@ -556,6 +564,15 @@ private:
 
 void ComputerManager::deleteHost(NvComputer* computer)
 {
+    {
+        QMutexLocker credentialLock(&m_ReconnectCredentialLock);
+        auto credentials = m_ReconnectCredentials.find(computer);
+        if (credentials != m_ReconnectCredentials.end()) {
+            credentials.value().second.fill(QChar('\0'));
+            m_ReconnectCredentials.erase(credentials);
+        }
+    }
+
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for the polling thread to die
     QThreadPool::globalInstance()->start(new DeferredHostDeletionTask(this, computer));
@@ -689,8 +706,6 @@ private:
         try {
             NvHTTP http(m_Computer);
             const QString token = http.authenticate(m_Username, m_Password);
-            m_Password.fill(QChar('\0'));
-            m_Password.clear();
             NvOutputTopology topology;
             const bool topologySupported =
                     m_Computer->stationConnectTopologyVersion == NvOutputTopology::ProtocolVersion &&
@@ -705,6 +720,10 @@ private:
                 topology = http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
+            m_ComputerManager->rememberStationConnectReconnectCredentials(
+                        m_Computer, m_Username, std::move(m_Password));
+            m_Password.fill(QChar('\0'));
+            m_Password.clear();
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
@@ -747,6 +766,32 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
     PendingAuthenticationTask* authentication = new PendingAuthenticationTask(
         this, computer, std::move(username), std::move(password));
     QThreadPool::globalInstance()->start(authentication);
+}
+
+void ComputerManager::rememberStationConnectReconnectCredentials(
+        NvComputer* computer, QString username, QString password)
+{
+    QMutexLocker lock(&m_ReconnectCredentialLock);
+    auto existing = m_ReconnectCredentials.find(computer);
+    if (existing != m_ReconnectCredentials.end()) {
+        existing.value().second.fill(QChar('\0'));
+    }
+    m_ReconnectCredentials.insert(computer,
+                                  qMakePair(std::move(username), std::move(password)));
+}
+
+bool ComputerManager::takeStationConnectReconnectCredentials(
+        NvComputer* computer, QString& username, QString& password)
+{
+    QMutexLocker lock(&m_ReconnectCredentialLock);
+    auto existing = m_ReconnectCredentials.find(computer);
+    if (existing == m_ReconnectCredentials.end()) {
+        return false;
+    }
+    username = std::move(existing.value().first);
+    password = std::move(existing.value().second);
+    m_ReconnectCredentials.erase(existing);
+    return !username.isEmpty() && !password.isEmpty();
 }
 
 class PendingQuitTask : public QObject, public QRunnable

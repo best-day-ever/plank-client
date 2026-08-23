@@ -44,6 +44,7 @@
 #define SDL_CODE_GAMECONTROLLER_RUMBLE_TRIGGERS 102
 #define SDL_CODE_GAMECONTROLLER_SET_MOTION_EVENT_STATE 103
 #define SDL_CODE_GAMECONTROLLER_SET_CONTROLLER_LED 104
+#define SDL_CODE_STATIONCONNECT_RECONNECT 105
 
 #include <openssl/rand.h>
 
@@ -89,6 +90,13 @@ void Session::clStageStarting(int stage)
 
 void Session::clStageFailed(int stage, int errorCode)
 {
+    if (s_ActiveSession->m_Reconnecting.load()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect reconnect stage failed: %s (%d)",
+                    LiGetStageName(stage), errorCode);
+        return;
+    }
+
     // Perform the port test now, while we're on the async connection thread and not blocking the UI.
     unsigned int portFlags = LiGetPortFlagsFromStage(stage);
     s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
@@ -100,6 +108,26 @@ void Session::clStageFailed(int stage, int errorCode)
 
 void Session::clConnectionTerminated(int errorCode)
 {
+    if (s_ActiveSession->m_Computer->stationConnectAuthentication &&
+            s_ActiveSession->m_CanReconnect.load() &&
+            !s_ActiveSession->m_Reconnecting.load() &&
+            !s_ActiveSession->m_ReconnectRequested.exchange(true)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect transport ended (%d); requesting bounded reconnect",
+                    errorCode);
+        SDL_Event event = {};
+        event.type = SDL_USEREVENT;
+        event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT;
+        SDL_PushEvent(&event);
+        return;
+    }
+
+    if (s_ActiveSession->m_Reconnecting.load()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect reconnect attempt ended: %d", errorCode);
+        return;
+    }
+
     unsigned int portFlags = LiGetPortFlagsFromTerminationErrorCode(errorCode);
     s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
 
@@ -591,6 +619,9 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_AudioMuted(false),
       m_QtWindow(nullptr),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
+      m_ReconnectRequested(false),
+      m_Reconnecting(false),
+      m_CanReconnect(false),
       m_InputHandler(nullptr),
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
@@ -605,6 +636,13 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_LastAudioTelemetryTime(0)
 {
     if (m_Computer->stationConnectAuthentication) {
+        if (m_ComputerManager != nullptr) {
+            m_ComputerManager->takeStationConnectReconnectCredentials(
+                        m_Computer, m_StationConnectUsername,
+                        m_StationConnectPassword);
+            m_CanReconnect.store(!m_StationConnectUsername.isEmpty() &&
+                                 !m_StationConnectPassword.isEmpty());
+        }
         StationConnectAvSync::resetVideoClock();
 
         // StationConnect is a qualified workstation protocol, not a generic
@@ -620,6 +658,19 @@ Session::Session(NvComputer* computer, NvApp& app,
         // The qualified x264 paths use FFmpeg software decoding on this NUC.
         m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;
     }
+}
+
+Session::~Session()
+{
+    clearStationConnectReconnectCredentials();
+}
+
+void Session::clearStationConnectReconnectCredentials()
+{
+    m_CanReconnect.store(false);
+    m_StationConnectPassword.fill(QChar('\0'));
+    m_StationConnectPassword.clear();
+    m_StationConnectUsername.clear();
 }
 
 bool Session::initialize()
@@ -1647,11 +1698,13 @@ public:
 };
 
 // Called in a non-main thread
-bool Session::startConnectionAsync()
+bool Session::startConnectionAsync(bool reconnecting)
 {
     // Wait 1.5 seconds before connecting to let the user
     // have time to read any messages present on the segue
-    SDL_Delay(1500);
+    if (!reconnecting) {
+        SDL_Delay(1500);
+    }
 
     // The UI should have ensured the old game was already quit
     // if we decide to stream a different game.
@@ -1704,29 +1757,50 @@ bool Session::startConnectionAsync()
         try {
             startApp();
         } catch (const GfeHttpResponseException& e) {
-            const bool generationBinding =
-                    (m_Computer->stationConnectFeatureFlags &
-                     NvOutputTopology::TopologyGenerationFeature) != 0;
-            if (!m_Computer->stationConnectAuthentication || !generationBinding ||
-                    e.getStatusCode() != 409) {
-                throw;
+            if (reconnecting && m_Computer->stationConnectAuthentication &&
+                    m_Computer->currentGameId != 0 &&
+                    e.getStatusCode() == 503) {
+                {
+                    QWriteLocker lock(&m_Computer->lock);
+                    m_Computer->currentGameId = 0;
+                }
+                qInfo() << "StationConnect replacement worker has no app to resume; "
+                           "launching a fresh Desktop stream";
+                startApp();
             }
+            else {
+                const bool generationBinding =
+                        (m_Computer->stationConnectFeatureFlags &
+                         NvOutputTopology::TopologyGenerationFeature) != 0;
+                if (!m_Computer->stationConnectAuthentication || !generationBinding ||
+                        e.getStatusCode() != 409) {
+                    throw;
+                }
 
-            const NvOutputTopology topology = http.getOutputTopology();
-            {
-                QWriteLocker lock(&m_Computer->lock);
-                m_Computer->outputTopology = topology;
-                m_Computer->selectedOutputId =
-                        topology.selectOutput(m_Computer->selectedOutputId);
-                m_Computer->selectedDisplayMode =
-                        topology.selectDisplayMode(m_Computer->selectedDisplayMode);
+                const NvOutputTopology topology = http.getOutputTopology();
+                {
+                    QWriteLocker lock(&m_Computer->lock);
+                    m_Computer->outputTopology = topology;
+                    m_Computer->selectedOutputId =
+                            topology.selectOutput(m_Computer->selectedOutputId);
+                    m_Computer->selectedDisplayMode =
+                            topology.selectDisplayMode(m_Computer->selectedDisplayMode);
+                }
+                if (m_ComputerManager != nullptr) {
+                    m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+                }
+                qInfo() << "StationConnect refreshed stale topology generation and will retry launch:"
+                        << topology.generation;
+                startApp();
             }
-            if (m_ComputerManager != nullptr) {
-                m_ComputerManager->clientSideAttributeUpdated(m_Computer);
-            }
-            qInfo() << "StationConnect refreshed stale topology generation and will retry launch:"
-                    << topology.generation;
-            startApp();
+        }
+
+        // Record the successful launch immediately. If low-level transport
+        // setup fails afterward, the next bounded attempt must resume this
+        // app instead of issuing a second launch request.
+        if (m_Computer->stationConnectAuthentication) {
+            QWriteLocker lock(&m_Computer->lock);
+            m_Computer->currentGameId = m_App.id;
         }
 
         if (m_Computer->stationConnectAuthentication) {
@@ -1742,10 +1816,19 @@ bool Session::startConnectionAsync()
             qInfo() << "StationConnect authentication token consumed after launch";
         }
     } catch (const GfeHttpResponseException& e) {
-        emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
+        if (!reconnecting) {
+            emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
+        } else {
+            qWarning() << "StationConnect reconnect launch failed:" << e.toQString();
+        }
         return false;
     } catch (const QtNetworkReplyException& e) {
-        emit displayLaunchError(e.toQString());
+        if (!reconnecting) {
+            emit displayLaunchError(e.toQString());
+        } else {
+            qWarning() << "StationConnect reconnect transport setup failed:"
+                       << e.toQString();
+        }
         return false;
     }
 
@@ -1829,6 +1912,13 @@ bool Session::startConnectionAsync()
                                                                          false);
     }
 
+    // moonlight-common-c fills missing callbacks in the caller-owned table.
+    // Restore the pull/push decoder contract before every reuse of this
+    // Session for a StationConnect desktop handoff.
+    m_VideoCallbacks.submitDecodeUnit =
+            (m_VideoCallbacks.capabilities & CAPABILITY_PULL_RENDERER) ?
+                nullptr : drSubmitDecodeUnit;
+
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
@@ -1840,6 +1930,112 @@ bool Session::startConnectionAsync()
 
     emit connectionStarted();
     return true;
+}
+
+bool Session::reconnectStationConnect()
+{
+    if (m_StationConnectUsername.isEmpty() ||
+            m_StationConnectPassword.isEmpty()) {
+        return false;
+    }
+
+    m_Reconnecting.store(true);
+    m_OverlayManager.updateOverlayText(
+                Overlay::OverlayStatusUpdate,
+                "Reconnecting to workstation...");
+    m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
+
+    m_InputHandler->raiseAllKeys();
+    SDL_AtomicLock(&m_DecoderLock);
+    delete m_VideoDecoder;
+    m_VideoDecoder = nullptr;
+    SDL_AtomicUnlock(&m_DecoderLock);
+    LiStopConnection();
+
+    constexpr int MaximumAttempts = 20;
+    for (int attempt = 1; attempt <= MaximumAttempts; ++attempt) {
+        try {
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->sessionToken.fill(QChar('\0'));
+                m_Computer->sessionToken.clear();
+                m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+            }
+            NvHTTP http(m_Computer);
+            const QString token = http.authenticate(
+                        m_StationConnectUsername,
+                        m_StationConnectPassword);
+
+            NvOutputTopology topology;
+            const bool topologySupported =
+                    m_Computer->stationConnectTopologyVersion ==
+                        NvOutputTopology::ProtocolVersion &&
+                    (m_Computer->stationConnectFeatureFlags &
+                     (NvOutputTopology::OutputTopologyFeature |
+                      NvOutputTopology::SelectedOutputFeature |
+                      NvOutputTopology::UnifiedAbsoluteInputFeature)) ==
+                    (NvOutputTopology::OutputTopologyFeature |
+                     NvOutputTopology::SelectedOutputFeature |
+                     NvOutputTopology::UnifiedAbsoluteInputFeature);
+            if (topologySupported) {
+                topology = http.getOutputTopology();
+            }
+            const QVector<NvApp> apps = http.getAppList();
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->sessionToken = token;
+                m_Computer->pairState = NvComputer::PS_PAIRED;
+                if (topologySupported) {
+                    m_Computer->outputTopology = topology;
+                    m_Computer->selectedOutputId =
+                            topology.selectOutput(m_Computer->selectedOutputId);
+                    m_Computer->selectedDisplayMode =
+                            topology.selectDisplayMode(
+                                m_Computer->selectedDisplayMode);
+                }
+                m_Computer->updateAppList(apps);
+            }
+
+            if (startConnectionAsync(true)) {
+                m_Reconnecting.store(false);
+                m_ReconnectRequested = false;
+                m_UnexpectedTermination = false;
+                m_OverlayManager.setOverlayState(
+                            Overlay::OverlayStatusUpdate, false);
+
+                SDL_Event resetEvent = {};
+                resetEvent.type = SDL_RENDER_DEVICE_RESET;
+                SDL_PushEvent(&resetEvent);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect reconnect completed on attempt %d",
+                            attempt);
+                return true;
+            }
+        } catch (const GfeHttpResponseException& error) {
+            qWarning() << "StationConnect reauthentication attempt" << attempt
+                       << "failed:" << error.toQString();
+        } catch (const QtNetworkReplyException& error) {
+            qWarning() << "StationConnect reconnect attempt" << attempt
+                       << "could not reach the host:" << error.toQString();
+        }
+
+        LiStopConnection();
+        {
+            QWriteLocker lock(&m_Computer->lock);
+            m_Computer->sessionToken.fill(QChar('\0'));
+            m_Computer->sessionToken.clear();
+            m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+        }
+        if (attempt != MaximumAttempts) {
+            SDL_Delay(1000);
+        }
+    }
+
+    m_Reconnecting.store(false);
+    m_ReconnectRequested = false;
+    m_UnexpectedTermination = true;
+    m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
+    return false;
 }
 
 void Session::flushWindowEvents()
@@ -2199,6 +2395,13 @@ void Session::execInternal()
 
         case SDL_USEREVENT:
             switch (event.user.code) {
+            case SDL_CODE_STATIONCONNECT_RECONNECT:
+                if (!reconnectStationConnect()) {
+                    emit displayLaunchError(
+                                tr("The workstation desktop changed, but the client could not reconnect within 20 seconds."));
+                    goto DispatchDeferredCleanup;
+                }
+                break;
             case SDL_CODE_FRAME_READY:
                 if (m_VideoDecoder != nullptr) {
                     m_VideoDecoder->renderFrameOnMainThread();
@@ -2511,6 +2714,7 @@ DispatchDeferredCleanup:
     // interfere with SDLGamepadKeyNavigation.
     delete m_InputHandler;
     m_InputHandler = nullptr;
+    clearStationConnectReconnectCredentials();
 
     // Destroy the decoder, since this must be done on the main thread
     // NB: This must happen before LiStopConnection() for pull-based

@@ -4,6 +4,8 @@
 #include <QSize>
 #include <QWindow>
 
+#include <atomic>
+
 #include <Limelight.h>
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
@@ -112,7 +114,7 @@ public:
 
     // NB: This may not get destroyed for a long time! Don't put any cleanup here.
     // Use Session::exec() or DeferredSessionCleanupTask instead.
-    virtual ~Session() {};
+    virtual ~Session();
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
@@ -156,7 +158,11 @@ private:
 
     bool initialize();
 
-    bool startConnectionAsync();
+    bool startConnectionAsync(bool reconnecting = false);
+
+    bool reconnectStationConnect();
+
+    void clearStationConnectReconnectCredentials();
 
     bool validateLaunch(SDL_Window* testWindow);
 
@@ -278,6 +284,11 @@ private:
     QWindow* m_QtWindow;
     bool m_ThreadedExec;
     bool m_UnexpectedTermination;
+    std::atomic_bool m_ReconnectRequested;
+    std::atomic_bool m_Reconnecting;
+    std::atomic_bool m_CanReconnect;
+    QString m_StationConnectUsername;
+    QString m_StationConnectPassword;
     SdlInputHandler* m_InputHandler;
     int m_MouseEmulationRefCount;
     int m_FlushingWindowEventsRef;

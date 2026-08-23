@@ -12,6 +12,7 @@
 
 #include <QThread>
 #include <QReadWriteLock>
+#include <QMutex>
 #include <QSettings>
 #include <QRunnable>
 #include <QTimer>
@@ -215,6 +216,7 @@ class ComputerManager : public QObject
     friend class DeferredHostDeletionTask;
     friend class PendingAddTask;
     friend class PendingPairingTask;
+    friend class PendingAuthenticationTask;
     friend class DelayedFlushThread;
 
 public:
@@ -235,6 +237,10 @@ public:
     void pairHost(NvComputer* computer, QString pin);
 
     void authenticateHost(NvComputer* computer, QString username, QString password);
+
+    bool takeStationConnectReconnectCredentials(NvComputer* computer,
+                                                QString& username,
+                                                QString& password);
 
     void quitRunningApp(NvComputer* computer);
 
@@ -274,10 +280,16 @@ private:
 
     void startPollingComputer(NvComputer* computer);
 
+    void rememberStationConnectReconnectCredentials(NvComputer* computer,
+                                                     QString username,
+                                                     QString password);
+
     StreamingPreferences* m_Prefs;
     int m_PollingRef;
     QReadWriteLock m_Lock;
     QMap<QString, NvComputer*> m_KnownHosts;
+    QMutex m_ReconnectCredentialLock;
+    QMap<NvComputer*, QPair<QString, QString>> m_ReconnectCredentials;
     QMap<QString, ComputerPollingEntry*> m_PollEntries;
     QHash<QString, NvComputer> m_LastSerializedHosts; // Protected by m_DelayedFlushMutex
     QSharedPointer<QMdnsEngine::Server> m_MdnsServer;

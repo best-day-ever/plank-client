@@ -25,6 +25,7 @@ class NvComputer
     friend class ComputerManager;
     friend class PendingQuitTask;
     friend class PendingAuthenticationTask;
+    friend class Session;
 
 private:
     void sortAppList();
