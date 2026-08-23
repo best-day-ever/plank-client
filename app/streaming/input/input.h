@@ -59,7 +59,10 @@ struct GamepadState {
 class SdlInputHandler
 {
 public:
-    explicit SdlInputHandler(StreamingPreferences& prefs, int streamWidth, int streamHeight);
+    explicit SdlInputHandler(StreamingPreferences& prefs,
+                             int streamWidth,
+                             int streamHeight,
+                             bool forceAbsoluteMouseMode = false);
 
     ~SdlInputHandler();
 
@@ -119,6 +122,10 @@ public:
     void notifyFocusGained();
 
     bool isCaptureActive();
+
+    bool isAbsoluteMouseMode() const;
+
+    void setToolbarInteractionActive(bool active);
 
     bool isSystemKeyCaptureActive();
 

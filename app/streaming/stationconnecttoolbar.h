@@ -38,9 +38,7 @@ public:
 private:
     void show(Uint32 now);
     void hide();
-    void beginLocalPointerInteraction(Uint32 now,
-                                      int remotePointerX,
-                                      int remotePointerY);
+    void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
     void redraw();
     void updateBitrateFromPointer(int x, Uint32 now, bool forceSend);
@@ -66,8 +64,6 @@ private:
     bool m_PointerInside;
     bool m_PointerInitialized;
     bool m_LocalPointerInteraction;
-    bool m_RestoreCapture;
-    bool m_ConsumeNextLeftRelease;
     bool m_BitrateSupported;
     int m_WindowWidth;
     int m_WindowHeight;
@@ -76,8 +72,6 @@ private:
     int m_ToolbarDragOffsetX;
     int m_PointerX;
     int m_PointerY;
-    int m_RemotePointerX;
-    int m_RemotePointerY;
     int m_BitrateKbps;
     int m_LastSentBitrateKbps;
     float m_RenderedFps;
@@ -90,5 +84,4 @@ private:
     Uint32 m_LastToolbarMoveDrawTime;
     Uint32 m_LastRedrawTime;
     Uint32 m_EdgeHoverStartTime;
-    Uint32 m_LocalInteractionGraceDeadline;
 };

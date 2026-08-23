@@ -2148,7 +2148,13 @@ void Session::execInternal()
 
     // Initialize the gamepad code with our preferences
     // NB: m_InputHandler must be initialize before starting the connection.
-    m_InputHandler = new SdlInputHandler(*m_Preferences, m_StreamConfig.width, m_StreamConfig.height);
+    // StationConnect is a remote-desktop product. Like RGS desktop mode, use
+    // authoritative absolute coordinates and reserve relative capture for a
+    // distinct game-mode path. This also gives receiver UI exact hit testing.
+    m_InputHandler = new SdlInputHandler(*m_Preferences,
+                                         m_StreamConfig.width,
+                                         m_StreamConfig.height,
+                                         m_Computer->stationConnectAuthentication);
 
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {

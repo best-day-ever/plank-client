@@ -14,7 +14,10 @@
 #include <QDir>
 #include <QGuiApplication>
 
-SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, int streamHeight)
+SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
+                                 int streamWidth,
+                                 int streamHeight,
+                                 bool forceAbsoluteMouseMode)
     : m_MultiController(prefs.multiController),
       m_GamepadMouse(prefs.gamepadMouse),
       m_SwapMouseButtons(prefs.swapMouseButtons),
@@ -30,7 +33,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_LongPressTimer(0),
       m_StreamWidth(streamWidth),
       m_StreamHeight(streamHeight),
-      m_AbsoluteMouseMode(prefs.absoluteMouseMode),
+      m_AbsoluteMouseMode(prefs.absoluteMouseMode || forceAbsoluteMouseMode),
       m_AbsoluteTouchMode(prefs.absoluteTouchMode),
       m_DisabledTouchFeedback(false),
       m_LeftButtonReleaseTimer(0),
@@ -375,6 +378,23 @@ bool SdlInputHandler::isCaptureActive()
 
     // Some platforms don't support SDL_SetRelativeMouseMode
     return m_FakeCaptureActive;
+}
+
+bool SdlInputHandler::isAbsoluteMouseMode() const
+{
+    return m_AbsoluteMouseMode;
+}
+
+void SdlInputHandler::setToolbarInteractionActive(bool active)
+{
+    if (!m_AbsoluteMouseMode) {
+        return;
+    }
+
+    // Absolute desktop mode does not need a capture transition. Show the
+    // receiver cursor only while receiver UI owns input, then restore the
+    // user's captured-cursor state when routing resumes to the host.
+    SDL_ShowCursor(active ? SDL_ENABLE : m_MouseCursorCapturedVisibilityState);
 }
 
 void SdlInputHandler::updateKeyboardGrabState()
