@@ -16,7 +16,7 @@
 #include <cmath>
 
 namespace {
-constexpr int ToolbarPreferredWidth = 1050;
+constexpr int ToolbarPreferredWidth = 850;
 constexpr int ToolbarHeight = 64;
 constexpr int EdgeRevealHeight = 3;
 constexpr int InteractionExitY = ToolbarHeight + 32;
@@ -483,7 +483,7 @@ void StationConnectToolbar::redraw()
     painter.setBrush(m_BitrateSupported ? QColor(243, 246, 250) : QColor(112, 120, 130));
     painter.drawEllipse(QPointF(thumbX, trackY), 7, 7);
 
-    const QRect minimizeRect(m_Width - 310, 8, 144, 42);
+    const QRect minimizeRect(m_Width - 104, 8, 42, 42);
     const bool minimizeHovered = m_LocalPointerInteraction &&
                                  minimizeContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(104, 116, 131), 1));
@@ -491,13 +491,9 @@ void StationConnectToolbar::redraw()
                                       QColor(48, 57, 68, 210));
     painter.drawRoundedRect(minimizeRect, 7, 7);
     painter.setPen(QPen(QColor(226, 232, 239), 2, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(m_Width - 293, 31, m_Width - 283, 31);
-    painter.setFont(labelFont);
-    painter.setPen(QColor(235, 239, 244));
-    painter.drawText(QRect(m_Width - 275, 8, 100, 42),
-                     Qt::AlignLeft | Qt::AlignVCenter, "Minimize");
+    painter.drawLine(m_Width - 91, 31, m_Width - 75, 31);
 
-    const QRect disconnectRect(m_Width - 158, 8, 146, 42);
+    const QRect disconnectRect(m_Width - 54, 8, 42, 42);
     const bool disconnectHovered = m_LocalPointerInteraction &&
                                    disconnectContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(239, 88, 88), 1));
@@ -505,12 +501,8 @@ void StationConnectToolbar::redraw()
                                         QColor(126, 35, 40, 185));
     painter.drawRoundedRect(disconnectRect, 7, 7);
     painter.setPen(QPen(QColor(255, 228, 228), 2, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(m_Width - 143, 22, m_Width - 133, 32);
-    painter.drawLine(m_Width - 133, 22, m_Width - 143, 32);
-    painter.setFont(labelFont);
-    painter.setPen(QColor(255, 235, 235));
-    painter.drawText(QRect(m_Width - 125, 8, 106, 42),
-                     Qt::AlignLeft | Qt::AlignVCenter, "Disconnect");
+    painter.drawLine(m_Width - 42, 20, m_Width - 24, 38);
+    painter.drawLine(m_Width - 24, 20, m_Width - 42, 38);
 
     if (!m_BitrateSupported) {
         QFont hintFont = labelFont;
@@ -602,13 +594,13 @@ bool StationConnectToolbar::handleContains(int x, int y) const
 
 bool StationConnectToolbar::minimizeContains(int x, int y) const
 {
-    return x >= toolbarLeft() + m_Width - 310 &&
-           x <= toolbarLeft() + m_Width - 166 && y >= 8 && y <= 50;
+    return x >= toolbarLeft() + m_Width - 104 &&
+           x <= toolbarLeft() + m_Width - 62 && y >= 8 && y <= 50;
 }
 
 bool StationConnectToolbar::disconnectContains(int x, int y) const
 {
-    return x >= toolbarLeft() + m_Width - 158 &&
+    return x >= toolbarLeft() + m_Width - 54 &&
            x <= toolbarLeft() + m_Width - 12 && y >= 8 && y <= 50;
 }
 
@@ -624,5 +616,5 @@ int StationConnectToolbar::sliderLeft() const
 
 int StationConnectToolbar::sliderRight() const
 {
-    return toolbarLeft() + std::max(286, m_Width - 326);
+    return toolbarLeft() + std::max(286, m_Width - 120);
 }
