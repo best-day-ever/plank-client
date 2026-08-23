@@ -24,6 +24,7 @@ constexpr Uint32 AutoHideDelayMs = 1400;
 constexpr Uint32 BitrateSettleDelayMs = 250;
 constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
+constexpr Uint32 LocalInteractionGraceMs = 1000;
 constexpr int BitrateMinimumKbps = 500;
 constexpr int BitrateStepKbps = 500;
 }
@@ -64,7 +65,8 @@ StationConnectToolbar::StationConnectToolbar(
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
       m_LastToolbarMoveDrawTime(0),
-      m_LastRedrawTime(0)
+      m_LastRedrawTime(0),
+      m_LocalInteractionGraceDeadline(0)
 {
     notifyWindowChanged();
     redraw();
@@ -135,7 +137,12 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
 {
     const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
     const bool relativeMode = SDL_GetRelativeMouseMode();
-    if (relativeMode) {
+    if (m_LocalPointerInteraction) {
+        // Events queued before relative capture was released can carry stale
+        // coordinates. Query SDL's current local pointer instead so hit
+        // testing follows the cursor the user can actually see.
+        SDL_GetMouseState(&m_PointerX, &m_PointerY);
+    } else if (relativeMode) {
         // Track a private position only long enough to detect the top edge.
         // Once revealed, the toolbar releases relative capture and uses the
         // real local pointer so its hit testing always agrees with the cursor.
@@ -176,6 +183,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     m_PointerInside = contains(m_PointerX, m_PointerY);
     if (m_PointerInside || m_DraggingSlider) {
         m_HideDeadline = 0;
+        m_LocalInteractionGraceDeadline = 0;
     } else {
         m_HideDeadline = now + AutoHideDelayMs;
     }
@@ -201,7 +209,9 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     }
 
     if (m_LocalPointerInteraction && !m_DraggingSlider &&
-            m_PointerY > InteractionExitY) {
+            m_PointerY > InteractionExitY &&
+            (m_LocalInteractionGraceDeadline == 0 ||
+             SDL_TICKS_PASSED(now, m_LocalInteractionGraceDeadline))) {
         if (m_Pinned) {
             endLocalPointerInteraction();
         } else {
@@ -237,9 +247,9 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
     if (m_LocalPointerInteraction) {
         // Button events can arrive without a preceding motion event after a
         // warp or capture transition. Keep the canonical pointer used for
-        // hover drawing and hit testing synchronized with SDL's event.
-        m_PointerX = event.x;
-        m_PointerY = event.y;
+        // hover drawing and hit testing synchronized with the live SDL pointer
+        // rather than coordinates from an event queued before the transition.
+        SDL_GetMouseState(&m_PointerX, &m_PointerY);
     }
     const int pointerX = m_PointerX;
     const int pointerY = m_PointerY;
@@ -361,6 +371,11 @@ void StationConnectToolbar::beginLocalPointerInteraction(Uint32 now)
     }
     SDL_ShowCursor(SDL_ENABLE);
 
+    // Discard relative motion queued before capture was released. Without
+    // this, one stale event can immediately move the canonical pointer below
+    // the toolbar and restore capture before the user can interact with it.
+    SDL_FlushEvent(SDL_MOUSEMOTION);
+
     m_LocalPointerInteraction = true;
     m_PointerX = qBound(toolbarLeft() + 2, m_PointerX,
                         toolbarLeft() + m_Width - 3);
@@ -368,10 +383,13 @@ void StationConnectToolbar::beginLocalPointerInteraction(Uint32 now)
     SDL_WarpMouseInWindow(m_Window, m_PointerX, m_PointerY);
     m_PointerInside = true;
     m_HideDeadline = 0;
+    // Some Wayland compositors do not honor pointer warps. Keep local mode
+    // active briefly so the visible cursor can be moved into a displaced
+    // toolbar instead of being recaptured on the first motion event.
+    m_LocalInteractionGraceDeadline = now + LocalInteractionGraceMs;
     redraw();
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
                  "StationConnect toolbar entered local pointer interaction");
-    Q_UNUSED(now);
 }
 
 void StationConnectToolbar::endLocalPointerInteraction()
@@ -384,6 +402,7 @@ void StationConnectToolbar::endLocalPointerInteraction()
     m_DraggingToolbar = false;
     m_DraggingSlider = false;
     m_PointerInside = false;
+    m_LocalInteractionGraceDeadline = 0;
     if (m_RestoreCapture) {
         m_InputHandler.setCaptureActive(true);
     }

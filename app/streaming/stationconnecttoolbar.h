@@ -85,4 +85,5 @@ private:
     Uint32 m_LastBitrateChangeTime;
     Uint32 m_LastToolbarMoveDrawTime;
     Uint32 m_LastRedrawTime;
+    Uint32 m_LocalInteractionGraceDeadline;
 };
