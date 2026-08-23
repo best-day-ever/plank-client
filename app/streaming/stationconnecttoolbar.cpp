@@ -16,7 +16,7 @@
 #include <cmath>
 
 namespace {
-constexpr int ToolbarPreferredWidth = 567;
+constexpr int ToolbarPreferredWidth = 506;
 constexpr int ToolbarHeight = 43;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
@@ -27,6 +27,9 @@ constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
 constexpr int BitrateMinimumKbps = 10000;
 constexpr int BitrateStepKbps = 500;
+constexpr qreal WindowGlyphScale = 0.85;
+constexpr qreal WindowButtonSize = 28.0 * WindowGlyphScale;
+constexpr qreal WindowButtonRadius = 5.0 * WindowGlyphScale;
 }
 
 StationConnectToolbar::StationConnectToolbar(
@@ -535,26 +538,49 @@ void StationConnectToolbar::redraw()
     painter.setBrush(m_BitrateSupported ? QColor(243, 246, 250) : QColor(112, 120, 130));
     painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
 
-    const QRect minimizeRect(m_Width - 69, 5, 28, 28);
+    const QPointF minimizeCenter(m_Width - 55.0, 19.0);
+    const QRectF minimizeRect(minimizeCenter.x() - WindowButtonSize / 2.0,
+                              minimizeCenter.y() - WindowButtonSize / 2.0,
+                              WindowButtonSize,
+                              WindowButtonSize);
     const bool minimizeHovered = m_LocalPointerInteraction &&
                                  minimizeContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(104, 116, 131), 1));
     painter.setBrush(minimizeHovered ? QColor(68, 78, 90, 230) :
                                       QColor(48, 57, 68, 210));
-    painter.drawRoundedRect(minimizeRect, 5, 5);
+    painter.drawRoundedRect(minimizeRect,
+                            WindowButtonRadius,
+                            WindowButtonRadius);
     painter.setPen(QPen(QColor(226, 232, 239), 1.5, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(m_Width - 60, 21, m_Width - 50, 21);
+    const qreal minimizeHalfWidth = 5.0 * WindowGlyphScale;
+    painter.drawLine(QPointF(minimizeCenter.x() - minimizeHalfWidth, 21),
+                     QPointF(minimizeCenter.x() + minimizeHalfWidth, 21));
 
-    const QRect disconnectRect(m_Width - 36, 5, 28, 28);
+    const QPointF disconnectCenter(m_Width - 22.0, 19.0);
+    const QRectF disconnectRect(disconnectCenter.x() - WindowButtonSize / 2.0,
+                                disconnectCenter.y() - WindowButtonSize / 2.0,
+                                WindowButtonSize,
+                                WindowButtonSize);
     const bool disconnectHovered = m_LocalPointerInteraction &&
                                    disconnectContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(239, 88, 88), 1));
     painter.setBrush(disconnectHovered ? QColor(151, 43, 49, 220) :
                                         QColor(126, 35, 40, 185));
-    painter.drawRoundedRect(disconnectRect, 5, 5);
+    painter.drawRoundedRect(disconnectRect,
+                            WindowButtonRadius,
+                            WindowButtonRadius);
     painter.setPen(QPen(QColor(255, 228, 228), 1.5, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(m_Width - 28, 13, m_Width - 16, 25);
-    painter.drawLine(m_Width - 16, 13, m_Width - 28, 25);
+    const qreal disconnectHalfExtent = 6.0 * WindowGlyphScale;
+    painter.drawLine(
+                disconnectCenter + QPointF(-disconnectHalfExtent,
+                                            -disconnectHalfExtent),
+                disconnectCenter + QPointF(disconnectHalfExtent,
+                                            disconnectHalfExtent));
+    painter.drawLine(
+                disconnectCenter + QPointF(disconnectHalfExtent,
+                                            -disconnectHalfExtent),
+                disconnectCenter + QPointF(-disconnectHalfExtent,
+                                            disconnectHalfExtent));
 
     if (!m_BitrateSupported) {
         QFont hintFont = labelFont;
