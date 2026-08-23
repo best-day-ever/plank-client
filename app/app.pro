@@ -544,13 +544,13 @@ unix:!macx: {
 
     target.path = $$PREFIX/$$BINDIR/
 
-    desktop.files = deploy/linux/com.moonlight_stream.Moonlight.desktop
+    desktop.files = deploy/linux/la.instinctual.StationConnect.desktop
     desktop.path = $$PREFIX/$$DATADIR/applications/
 
     icons.files = res/stationconnect-logo.png
     icons.path = $$PREFIX/$$DATADIR/icons/hicolor/512x512/apps/
 
-    appstream.files = deploy/linux/com.moonlight_stream.Moonlight.appdata.xml
+    appstream.files = deploy/linux/la.instinctual.StationConnect.appdata.xml
     appstream.path = $$PREFIX/$$DATADIR/metainfo/
 
     INSTALLS += target desktop icons appstream
