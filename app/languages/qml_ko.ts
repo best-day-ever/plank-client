@@ -1012,16 +1012,6 @@
         <translation>연결 품질 경고 표시</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Discord Rich Presence 통합</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>스트리밍중인 게임의 이름을 표시하도록 Discord 상태를 업데이트합니다.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>시작 후 연결되는 게임패드를 지원하지 않는 게임을 스트리밍할 때만 이 옵션을 활성화하십시오.</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>버전 %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Discord에서 커뮤니티에 가입하세요</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

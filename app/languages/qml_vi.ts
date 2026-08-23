@@ -1017,16 +1017,6 @@
         <translation>Hiện cảnh báo chất lượng kết nối</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Tích hợp với Discord Rich Presence</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>Cập nhật trạng thái Discord của bạn để hiển thị tên trò chơi bạn đang stream.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>Chỉ bật tuỳ chọn này khi stream một trò chơi không hỗ trợ tay cầm điều khiển được kết nối sau khi khởi động.</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>Phiên bản %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Tham gia cộng đồng của chúng tôi trên Discord</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

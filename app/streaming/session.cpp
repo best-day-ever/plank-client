@@ -6,7 +6,6 @@
 #include "streaming/stationconnecttoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
-#include "backend/richpresencemanager.h"
 
 #include <Limelight.h>
 #include <SDL.h>
@@ -2391,9 +2390,6 @@ void Session::execInternal()
     // (m_UnexpectedTermination is set back to true).
     m_UnexpectedTermination = false;
 
-    // Start rich presence to indicate we're in game
-    RichPresenceManager presence(*m_Preferences, m_App.name);
-
     // Toggle the stats overlay if requested by the user
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
 
@@ -2425,7 +2421,6 @@ void Session::execInternal()
         const int eventWaitTimeout = m_StationConnectToolbar ?
                     m_StationConnectToolbar->eventWaitTimeout() : 1000;
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
-            presence.runCallbacks();
             continue;
         }
 #else
@@ -2441,7 +2436,6 @@ void Session::execInternal()
             // ARM core in the Steam Link, so we will wait 10 ms instead.
             SDL_Delay(10);
 #endif
-            presence.runCallbacks();
             continue;
         }
 #endif
@@ -2526,7 +2520,6 @@ void Session::execInternal()
                 break;
             }
 
-            presence.runCallbacks();
 
             // Capture the mouse on SDL_WINDOWEVENT_ENTER if needed
             if (needsFirstEnterCapture && event.window.event == SDL_WINDOWEVENT_ENTER) {
@@ -2720,12 +2713,10 @@ void Session::execInternal()
 
         case SDL_KEYUP:
         case SDL_KEYDOWN:
-            presence.runCallbacks();
             m_InputHandler->handleKeyEvent(&event.key);
             break;
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
-            presence.runCallbacks();
             if (m_StationConnectToolbar) {
                 const auto action = m_StationConnectToolbar->handleMouseButton(event.button);
                 if (action == StationConnectToolbar::Action::Disconnect) {
@@ -2784,7 +2775,6 @@ void Session::execInternal()
             break;
         case SDL_CONTROLLERBUTTONDOWN:
         case SDL_CONTROLLERBUTTONUP:
-            presence.runCallbacks();
             m_InputHandler->handleControllerButtonEvent(&event.cbutton);
             break;
 #if SDL_VERSION_ATLEAST(2, 0, 14)

@@ -1017,16 +1017,6 @@
         <translation>顯示連線品質警告</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Discord Rich Presence 整合</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>更新你的 Discord 狀態，以顯示正在執行的遊戲名稱。</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>僅在遊戲啟動後不支援手把連線時才啟用此選項。</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>版本 %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>加入我們的 Discord 社群</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

@@ -1013,16 +1013,6 @@
         <translation>Εμφάνιση προειδοποιήσεων ποιότητας σύνδεσης</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>Ενημερώνει την κατάστασή σας στο Discord για να εμφανίζει το όνομα του παιχνιδιού που μεταδίδετε.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>Ενεργοποιήστε αυτήν την επιλογή μόνο όταν κάνετε streaming σε ένα παιχνίδι που δεν υποστηρίζει τη σύνδεση των gamepads μετά την εκκίνηση.</translation>
@@ -1242,11 +1232,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>Έκδοση %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Γίνετε μέλος της κοινότητάς μας στο Discord</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

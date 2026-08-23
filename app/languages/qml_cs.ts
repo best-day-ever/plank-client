@@ -1007,16 +1007,6 @@
         <translation>Zobrazovat varování ohledně kvality připojení</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Integrace s Discord Rich Presence</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>Aktualizuje váš status na Discordu a zobrazuje jméno hry, kterou právě streamujete.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>Povolte toto nastavení jen, pokud streamujete hru, která nepodporuje připojení gamepadu po zapnutí hry.</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>Verze %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Přidejte se k naší komunitě na Discordu</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

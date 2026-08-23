@@ -18,7 +18,6 @@
 
 SystemProperties::SystemProperties()
 {
-    versionString = QString(VERSION_STR);
     stationConnectVersionString = QString::fromLatin1(STATIONCONNECT_VERSION_STR);
     hasDesktopEnvironment = WMUtils::isRunningDesktopEnvironment();
     isRunningWayland = WMUtils::isRunningWayland();
@@ -64,12 +63,6 @@ SystemProperties::SystemProperties()
 
     // Assume we can probably launch a browser if we're in a GUI environment
     hasBrowser = hasDesktopEnvironment;
-
-#ifdef HAVE_DISCORD
-    hasDiscordIntegration = true;
-#else
-    hasDiscordIntegration = false;
-#endif
 
     unmappedGamepads = SdlInputHandler::getUnmappedGamepads();
 

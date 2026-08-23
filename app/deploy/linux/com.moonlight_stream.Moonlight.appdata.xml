@@ -393,7 +393,6 @@
 					<li>Added the option to swap mouse buttons</li>
 					<li>Added codec and resolution to the on-screen performance stats</li>
 					<li>Added a warning if the connection is too unstable to receive any complete video frames</li>
-					<li>Added a Discord link to the toolbar in settings</li>
 					<li>Enabled the new EGL renderer by default on Linux</li>
 				</ul>
 				<p>Bugfixes:</p>

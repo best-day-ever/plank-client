@@ -41,7 +41,6 @@
 #include "utils.h"
 #include "gui/computermodel.h"
 #include "gui/appmodel.h"
-#include "backend/autoupdatechecker.h"
 #include "backend/computermanager.h"
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
@@ -295,7 +294,7 @@ int main(int argc, char *argv[])
     SDL_SetMainReady();
 
     // Set the app version for the QCommandLineParser's showVersion() command
-    QCoreApplication::setApplicationVersion(VERSION_STR);
+    QCoreApplication::setApplicationVersion(STATIONCONNECT_VERSION_STR);
 
     // Set these here to allow us to use the default QSettings constructor and
     // establish the StationConnect settings/cache namespace before paths are
@@ -684,11 +683,6 @@ int main(int argc, char *argv[])
                                               [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                   return new ComputerManager(StreamingPreferences::get(qmlEngine));
                                               });
-    qmlRegisterSingletonType<AutoUpdateChecker>("AutoUpdateChecker", 1, 0,
-                                                "AutoUpdateChecker",
-                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
-                                                    return new AutoUpdateChecker();
-                                                });
     qmlRegisterSingletonType<SystemProperties>("SystemProperties", 1, 0,
                                                "SystemProperties",
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {

@@ -1013,16 +1013,6 @@
         <translation>Vis kvalitetsadvarsler om tilkoblingen</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Rik tilstedeværelsesintegrasjon for Discord</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>Oppdaterer din Discord-status til å vise navnet på spillet du strømmer.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation type="unfinished">Kun skru på dette når du strømmer et spill som ikke støtter av spillkontrollere er tilkoblet etter oppstart.</translation>
@@ -1242,11 +1232,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>Versjon %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Ta del i gemenskapen på DIscord</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

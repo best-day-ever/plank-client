@@ -1017,16 +1017,6 @@
         <translation>Geef verbindingskwaliteit waarschuwingen weer</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Discord Rich Presence integratie</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>Update je Discord status om de game weer te geven die je streamed.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>Zet deze optie alleen aan als je een game streamed die het niet ondersteund als gamepads verbonden worden nadat de game opgestart is.</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>Versie %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Neem deel aan de community op Discord</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

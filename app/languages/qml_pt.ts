@@ -1017,16 +1017,6 @@
         <translation>Mostre avisos de qualidade de conexão</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Integração de Avantajada Presença do Discord</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>Atualize seu status do DIscord para mostrar o nome do jogo que você está streamando.</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1435"/>
         <source>Only enable this option when streaming a game that doesn&apos;t support gamepads being connected after startup.</source>
         <translation>Apenas habilite esta opção quando streamando um jogo que não suporta contoles sendo conectados após a inicialização.</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>Versão %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>Participe da nossa comunidade no Discord</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

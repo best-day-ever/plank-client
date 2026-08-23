@@ -911,16 +911,6 @@
         <translation>显示连接质量警告</translation>
     </message>
     <message>
-        <location filename="../gui/SettingsView.qml" line="1206"/>
-        <source>Discord Rich Presence integration</source>
-        <translation>Discord Rich Presence 集成</translation>
-    </message>
-    <message>
-        <location filename="../gui/SettingsView.qml" line="1216"/>
-        <source>Updates your Discord status to display the name of the game you&apos;re streaming.</source>
-        <translation>更新你的 Discord 状态，以显示正在运行的游戏名称。</translation>
-    </message>
-    <message>
         <location filename="../gui/SettingsView.qml" line="1222"/>
         <source>Keep the display awake while streaming</source>
         <translation>在串流时保持屏幕开启</translation>
@@ -1246,11 +1236,6 @@
         <location filename="../gui/main.qml" line="262"/>
         <source>Version %1</source>
         <translation>版本 %1</translation>
-    </message>
-    <message>
-        <location filename="../gui/main.qml" line="278"/>
-        <source>Join our community on Discord</source>
-        <translation>加入我们的社区</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="297"/>

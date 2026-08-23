@@ -120,7 +120,6 @@ public:
     Q_PROPERTY(bool absoluteTouchMode MEMBER absoluteTouchMode NOTIFY absoluteTouchModeChanged)
     Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
-    Q_PROPERTY(bool richPresence MEMBER richPresence NOTIFY richPresenceChanged)
     Q_PROPERTY(bool gamepadMouse MEMBER gamepadMouse NOTIFY gamepadMouseChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
@@ -161,7 +160,6 @@ public:
     bool absoluteTouchMode;
     bool framePacing;
     bool connectionWarnings;
-    bool richPresence;
     bool gamepadMouse;
     bool detectNetworkBlocking;
     bool showPerformanceOverlay;
@@ -210,7 +208,6 @@ signals:
     void windowModeChanged();
     void framePacingChanged();
     void connectionWarningsChanged();
-    void richPresenceChanged();
     void gamepadMouseChanged();
     void detectNetworkBlockingChanged();
     void showPerformanceOverlayChanged();

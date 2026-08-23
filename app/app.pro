@@ -158,12 +158,11 @@ win32 {
     CONFIG += ffmpeg libplacebo
 }
 win32:!winrt {
-    CONFIG += soundio discord-rpc
+    CONFIG += soundio
 }
 macx {
     !disable-prebuilts {
         LIBS += -lssl.3 -lcrypto.3 -lavcodec.61 -lavutil.59 -lswscale.8 -lopus -framework SDL2 -framework SDL2_ttf
-        CONFIG += discord-rpc
     }
 
     LIBS += -lobjc -framework VideoToolbox -framework AVFoundation -framework CoreVideo -framework CoreGraphics -framework CoreMedia -framework AppKit -framework Metal -framework QuartzCore
@@ -187,7 +186,6 @@ SOURCES += \
     backend/nvpairingmanager.cpp \
     backend/computermanager.cpp \
     backend/boxartmanager.cpp \
-    backend/richpresencemanager.cpp \
     cli/commandlineparser.cpp \
     cli/listapps.cpp \
     cli/quitstream.cpp \
@@ -210,7 +208,6 @@ SOURCES += \
     gui/computermodel.cpp \
     gui/appmodel.cpp \
     streaming/streamutils.cpp \
-    backend/autoupdatechecker.cpp \
     path.cpp \
     settings/mappingmanager.cpp \
     gui/sdlgamepadkeynavigation.cpp \
@@ -234,7 +231,6 @@ HEADERS += \
     backend/nvpairingmanager.h \
     backend/computermanager.h \
     backend/boxartmanager.h \
-    backend/richpresencemanager.h \
     cli/commandlineparser.h \
     cli/listapps.h \
     cli/quitstream.h \
@@ -252,7 +248,6 @@ HEADERS += \
     gui/appmodel.h \
     streaming/video/decoder.h \
     streaming/streamutils.h \
-    backend/autoupdatechecker.h \
     path.h \
     settings/mappingmanager.h \
     gui/sdlgamepadkeynavigation.h \
@@ -431,12 +426,6 @@ soundio {
     SOURCES += streaming/audio/renderers/soundioaudiorenderer.cpp
     HEADERS += streaming/audio/renderers/soundioaudiorenderer.h
 }
-discord-rpc {
-    message(Discord integration enabled)
-
-    LIBS += -ldiscord-rpc
-    DEFINES += HAVE_DISCORD
-}
 embedded {
     message(Embedded build)
 
@@ -600,10 +589,8 @@ macx {
     }
 }
 
-VERSION = "$$cat(version.txt)"
-DEFINES += VERSION_STR=\\\"$$cat(version.txt)\\\"
-
 isEmpty(STATIONCONNECT_VERSION) {
     STATIONCONNECT_VERSION = development
 }
+VERSION = "$$section(STATIONCONNECT_VERSION, -, 0, 0)"
 DEFINES += STATIONCONNECT_VERSION_STR=\\\"$$STATIONCONNECT_VERSION\\\"

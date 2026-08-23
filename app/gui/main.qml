@@ -5,7 +5,6 @@ import QtQuick.Window 2.2
 import QtQuick.Controls.Material 2.2
 
 import ComputerManager 1.0
-import AutoUpdateChecker 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import SdlGamepadKeyNavigation 1.0
@@ -260,35 +259,6 @@ ApplicationWindow {
                 text: !titleLabel.visible ? stackView.currentItem.objectName : ""
             }
 
-            Label {
-                id: versionLabel
-                visible: qmltypeof(stackView.currentItem, "SettingsView")
-                text: qsTr("Version %1").arg(SystemProperties.versionString)
-                font.pointSize: 12
-                horizontalAlignment: Qt.AlignRight
-                verticalAlignment: Qt.AlignVCenter
-            }
-
-            NavigableToolButton {
-                id: discordButton
-                visible: SystemProperties.hasBrowser &&
-                         qmltypeof(stackView.currentItem, "SettingsView")
-
-                iconSource: "qrc:/res/discord.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Join our community on Discord")
-
-                // TODO need to make sure browser is brought to foreground.
-                onClicked: Qt.openUrlExternally("https://moonlight-stream.org/discord");
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
             NavigableToolButton {
                 id: addPcButton
                 visible: qmltypeof(stackView.currentItem, "PcView")
@@ -308,44 +278,6 @@ ApplicationWindow {
 
                 onClicked: {
                     addPcDialog.open()
-                }
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
-                }
-            }
-
-            NavigableToolButton {
-                property string browserUrl: ""
-
-                id: updateButton
-
-                iconSource: "qrc:/res/update.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered || visible
-
-                // Invisible until we get a callback notifying us that
-                // an update is available
-                visible: false
-
-                onClicked: {
-                    if (SystemProperties.hasBrowser) {
-                        Qt.openUrlExternally(browserUrl);
-                    }
-                }
-
-                function updateAvailable(version, url)
-                {
-                    ToolTip.text = qsTr("Update available for Moonlight: Version %1").arg(version)
-                    updateButton.browserUrl = url
-                    updateButton.visible = true
-                }
-
-                Component.onCompleted: {
-                    AutoUpdateChecker.onUpdateAvailable.connect(updateAvailable)
-                    AutoUpdateChecker.start()
                 }
 
                 Keys.onDownPressed: {
@@ -423,7 +355,7 @@ ApplicationWindow {
 
     ErrorMessageDialog {
         id: noHwDecoderDialog
-        text: qsTr("No functioning hardware accelerated video decoder was detected by Moonlight. " +
+        text: qsTr("No functioning hardware accelerated video decoder was detected by StationConnect. " +
                    "Your streaming performance may be severely degraded in this configuration.")
         helpText: qsTr("Click the Help button for more information on solving this problem.")
         helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Fixing-Hardware-Decoding-Problems"
@@ -439,11 +371,8 @@ ApplicationWindow {
 
     NavigableMessageDialog {
         id: wow64Dialog
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        text: qsTr("This version of Moonlight isn't optimized for your PC. Please download the '%1' version of Moonlight for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
-        onAccepted: {
-            Qt.openUrlExternally("https://github.com/moonlight-stream/moonlight-qt/releases");
-        }
+        standardButtons: Dialog.Ok
+        text: qsTr("This StationConnect build isn't optimized for your PC. Please install the '%1' StationConnect package for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
     }
 
     // This dialog appears when quitting via keyboard or gamepad button
