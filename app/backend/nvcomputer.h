@@ -59,9 +59,6 @@ public:
     bool
     acceptsServerUuid(const QString& candidateUuid) const;
 
-    bool
-    wake() const;
-
     enum ReachabilityType
     {
         RI_UNKNOWN,
@@ -120,7 +117,6 @@ public:
     NvAddress remoteAddress;
     NvAddress ipv6Address;
     NvAddress manualAddress;
-    QByteArray macAddress;
     QString name;
     bool hasCustomName;
     QString uuid;

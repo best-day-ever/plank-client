@@ -3,16 +3,13 @@
 #include "settings/compatfetcher.h"
 #include "stationconnectnetwork.h"
 
-#include <QUdpSocket>
 #include <QCryptographicHash>
-#include <QHostInfo>
 #include <QJsonDocument>
 #include <QNetworkInterface>
 #include <QNetworkProxy>
 
 #define SER_NAME "hostname"
 #define SER_UUID "uuid"
-#define SER_MAC "mac"
 #define SER_LOCALADDR "localaddress"
 #define SER_LOCALPORT "localport"
 #define SER_REMOTEADDR "remoteaddress"
@@ -75,7 +72,6 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         activeHttpsPort = 0;
         externalPort = address.port();
         serverUuid.clear();
-        macAddress.clear();
         appList.clear();
         outputTopology = NvOutputTopology();
         sessionToken.clear();
@@ -107,7 +103,6 @@ NvComputer::NvComputer(QSettings& settings)
     this->name = settings.value(SER_NAME).toString();
     this->uuid = settings.value(SER_UUID).toString();
     this->hasCustomName = settings.value(SER_CUSTOMNAME).toBool();
-    this->macAddress = settings.value(SER_MAC).toByteArray();
     this->localAddress = NvAddress(settings.value(SER_LOCALADDR).toString(),
                                    settings.value(SER_LOCALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
     this->remoteAddress = NvAddress(settings.value(SER_REMOTEADDR).toString(),
@@ -171,7 +166,6 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_NAME, name);
     settings.setValue(SER_CUSTOMNAME, hasCustomName);
     settings.setValue(SER_UUID, uuid);
-    settings.setValue(SER_MAC, macAddress);
     settings.setValue(SER_LOCALADDR, localAddress.address());
     settings.setValue(SER_LOCALPORT, localAddress.port());
     settings.setValue(SER_REMOTEADDR, remoteAddress.address());
@@ -210,7 +204,6 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
     return this->name == that.name &&
            this->hasCustomName == that.hasCustomName &&
            this->uuid == that.uuid &&
-           this->macAddress == that.macAddress &&
            this->localAddress == that.localAddress &&
            this->remoteAddress == that.remoteAddress &&
            this->ipv6Address == that.ipv6Address &&
@@ -242,14 +235,6 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     }
 
     this->uuid = NvHTTP::getXmlString(serverInfo, "uniqueid");
-    QString newMacString = NvHTTP::getXmlString(serverInfo, "mac");
-    if (newMacString != "00:00:00:00:00:00") {
-        QStringList macOctets = newMacString.split(':');
-        for (const QString& macOctet : macOctets) {
-            this->macAddress.append((char) macOctet.toInt(nullptr, 16));
-        }
-    }
-
     QString codecSupport = NvHTTP::getXmlString(serverInfo, "ServerCodecModeSupport");
     if (!codecSupport.isEmpty()) {
         this->serverCodecModeSupport = codecSupport.toInt();
@@ -320,145 +305,6 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->activeAddress = http.address();
     this->state = NvComputer::CS_ONLINE;
     this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
-}
-
-bool NvComputer::wake() const
-{
-    QByteArray wolPayload;
-
-    {
-        QReadLocker readLocker(&lock);
-
-        if (state == NvComputer::CS_ONLINE) {
-            qWarning() << name << "is already online";
-            return true;
-        }
-
-        if (macAddress.isEmpty()) {
-            qWarning() << name << "has no MAC address stored";
-            return false;
-        }
-
-        // Create the WoL payload
-        wolPayload.append(QByteArray::fromHex("FFFFFFFFFFFF"));
-        for (int i = 0; i < 16; i++) {
-            wolPayload.append(macAddress);
-        }
-        Q_ASSERT(wolPayload.size() == 102);
-    }
-
-    // Ports used as-is
-    const quint16 STATIC_WOL_PORTS[] = {
-        9, // Standard WOL port (privileged port)
-        47009, // Port opened by Moonlight Internet Hosting Tool for WoL (non-privileged port)
-    };
-
-    // Ports offset by the HTTP base port for hosts using alternate ports
-    const quint16 DYNAMIC_WOL_PORTS[] = {
-        47998, 47999, 48000, 48002, 48010, // Ports opened by GFE
-    };
-
-    // Add the addresses that we know this host to be
-    // and broadcast addresses for this link just in
-    // case the host has timed out in ARP entries.
-    QMap<QString, quint16> addressMap;
-    QSet<quint16> basePortSet;
-    for (const NvAddress& addr : uniqueAddresses()) {
-        addressMap.insert(addr.address(), addr.port());
-        basePortSet.insert(addr.port());
-    }
-    addressMap.insert("255.255.255.255", 0);
-
-    // Try to broadcast on all available NICs
-    for (const QNetworkInterface& nic : QNetworkInterface::allInterfaces()) {
-        // Ensure the interface is up and skip the loopback adapter
-        if ((nic.flags() & QNetworkInterface::IsUp) == 0 ||
-                (nic.flags() & QNetworkInterface::IsLoopBack) != 0) {
-            continue;
-        }
-
-        QHostAddress allNodesMulticast("FF02::1");
-        for (const QNetworkAddressEntry& addr : nic.addressEntries()) {
-            // Store the scope ID for this NIC if IPv6 is enabled
-            if (!addr.ip().scopeId().isEmpty()) {
-                allNodesMulticast.setScopeId(addr.ip().scopeId());
-            }
-
-            // Skip IPv6 which doesn't support broadcast
-            if (!addr.broadcast().isNull()) {
-                addressMap.insert(addr.broadcast().toString(), 0);
-            }
-        }
-
-        if (!allNodesMulticast.scopeId().isEmpty()) {
-            addressMap.insert(allNodesMulticast.toString(), 0);
-        }
-    }
-
-    // Try all unique address strings or host names
-    bool success = false;
-    for (auto i = addressMap.constBegin(); i != addressMap.constEnd(); i++) {
-        QHostAddress literalAddress;
-        QList<QHostAddress> addressList;
-
-        // If this is an IPv4/IPv6 literal, don't use QHostInfo::fromName() because that will
-        // try to perform a reverse DNS lookup that leads to delays sending WoL packets.
-        if (literalAddress.setAddress(i.key())) {
-            addressList.append(literalAddress);
-        }
-        else {
-            QHostInfo hostInfo = QHostInfo::fromName(i.key());
-            if (hostInfo.error() != QHostInfo::NoError) {
-                qWarning() << "Error resolving" << i.key() << ":" << hostInfo.errorString();
-                continue;
-            }
-
-            addressList.append(hostInfo.addresses());
-        }
-
-        // Try all IP addresses that this string resolves to
-        for (QHostAddress& address : addressList) {
-            QUdpSocket sock;
-
-            // Send to all static ports
-            for (quint16 port : STATIC_WOL_PORTS) {
-                if (sock.writeDatagram(wolPayload, address, port)) {
-                    qInfo().nospace().noquote() << "Sent WoL packet to " << name << " via " << address.toString() << ":" << port;
-                    success = true;
-                }
-                else {
-                    qWarning() << "Send failed:" << sock.error();
-                }
-            }
-
-            QList<quint16> basePorts;
-            if (i.value() != 0) {
-                // If we have a known base port for this address, use only that port
-                basePorts.append(i.value());
-            }
-            else {
-                // If this is a broadcast address without a known HTTP port, try all of them
-                basePorts.append(basePortSet.values());
-            }
-
-            // Send to all dynamic ports using the HTTP port offset(s) for this address
-            for (quint16 basePort : basePorts) {
-                for (quint16 port : DYNAMIC_WOL_PORTS) {
-                    port = (port - 47989) + basePort;
-
-                    if (sock.writeDatagram(wolPayload, address, port)) {
-                        qInfo().nospace().noquote() << "Sent WoL packet to " << name << " via " << address.toString() << ":" << port;
-                        success = true;
-                    }
-                    else {
-                        qWarning() << "Send failed:" << sock.error();
-                    }
-                }
-            }
-        }
-    }
-
-    return success;
 }
 
 NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
@@ -674,7 +520,6 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
         // Only overwrite the name if it's not custom
         ASSIGN_IF_CHANGED(name);
     }
-    ASSIGN_IF_CHANGED_AND_NONEMPTY(macAddress);
     ASSIGN_IF_CHANGED_AND_NONNULL(localAddress);
     ASSIGN_IF_CHANGED_AND_NONNULL(remoteAddress);
     ASSIGN_IF_CHANGED_AND_NONNULL(ipv6Address);

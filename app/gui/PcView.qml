@@ -199,12 +199,6 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Wake PC")
-                    onTriggered: computerModel.wakeComputer(index)
-                    visible: !model.online && model.wakeable
-                }
-                NavigableMenuItem {
-                    parentMenu: pcContextMenu
                     text: qsTr("Edit bookmark…")
                     visible: model.manualBookmark
                     onTriggered: {

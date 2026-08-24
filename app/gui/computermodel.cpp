@@ -56,8 +56,6 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->authorizationState == NvComputer::AS_AUTHORIZED;
     case BusyRole:
         return computer->currentGameId != 0;
-    case WakeableRole:
-        return !computer->macAddress.isEmpty();
     case StatusUnknownRole:
         return computer->state == NvComputer::CS_UNKNOWN;
     case ServerSupportedRole:
@@ -110,7 +108,6 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[OnlineRole] = "online";
     names[AuthorizedRole] = "authorized";
     names[BusyRole] = "busy";
-    names[WakeableRole] = "wakeable";
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
     names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
@@ -264,29 +261,6 @@ void ComputerModel::deleteComputer(int computerIndex)
     m_Computers.removeAt(computerIndex);
 
     endRemoveRows();
-}
-
-class DeferredWakeHostTask : public QRunnable
-{
-public:
-    DeferredWakeHostTask(NvComputer* computer)
-        : m_Computer(computer) {}
-
-    void run()
-    {
-        m_Computer->wake();
-    }
-
-private:
-    NvComputer* m_Computer;
-};
-
-void ComputerModel::wakeComputer(int computerIndex)
-{
-    Q_ASSERT(computerIndex < m_Computers.count());
-
-    DeferredWakeHostTask* wakeTask = new DeferredWakeHostTask(m_Computers[computerIndex]);
-    QThreadPool::globalInstance()->start(wakeTask);
 }
 
 void ComputerModel::renameComputer(int computerIndex, QString name)

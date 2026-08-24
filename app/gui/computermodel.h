@@ -13,7 +13,6 @@ class ComputerModel : public QAbstractListModel
         OnlineRole,
         AuthorizedRole,
         BusyRole,
-        WakeableRole,
         StatusUnknownRole,
         ServerSupportedRole,
         StationConnectAuthenticationRole,
@@ -38,8 +37,6 @@ public:
     Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
 
     Q_INVOKABLE void testConnectionForComputer(int computerIndex);
-
-    Q_INVOKABLE void wakeComputer(int computerIndex);
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
