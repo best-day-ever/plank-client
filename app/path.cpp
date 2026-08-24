@@ -115,6 +115,12 @@ void Path::initialize(bool portable)
         // On macOS, $TMPDIR is some random folder under /var/folders/ that nobody can
         // easily find, so use the system's global tmp directory instead.
         s_LogDir = "/tmp";
+#elif defined(Q_OS_LINUX)
+        QString stateHome = qEnvironmentVariable("XDG_STATE_HOME");
+        if (stateHome.isEmpty() || !QDir::isAbsolutePath(stateHome)) {
+            stateHome = QDir::homePath() + "/.local/state";
+        }
+        s_LogDir = QDir(stateHome).filePath("stationconnect/logs");
 #else
         s_LogDir = QDir::tempPath();
 #endif

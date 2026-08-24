@@ -49,6 +49,9 @@
 
 // Log to file or console dynamically for Windows builds
 #define LOG_TO_FILE
+#elif defined(Q_OS_LINUX)
+// Retain a private per-user log while preserving stderr for journald
+#define LOG_TO_FILE
 #elif !defined(QT_DEBUG) && defined(Q_OS_DARWIN)
 // Log to file for release Mac builds
 #define LOG_TO_FILE
@@ -68,6 +71,7 @@ static QRegularExpression k_RikeyIdRegex("&rikeyid=[\\d-]+");
 static int s_LogBytesWritten = 0;
 static bool s_LogLimitReached = false;
 static QFile* s_LoggerFile;
+static QTextStream s_LoggerFileStream;
 #endif
 
 void logToLoggerStream(QString& message)
@@ -91,26 +95,34 @@ void logToLoggerStream(QString& message)
     message.replace(k_RikeyIdRegex, "&rikeyid=REDACTED");
 
 #ifdef LOG_TO_FILE
-    if (s_LogLimitReached) {
-        return;
-    }
-    else if (s_LogBytesWritten >= MAX_LOG_SIZE_BYTES) {
-        s_LoggerStream << "Log size limit reached!";
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-        s_LoggerStream << Qt::endl;
-#else
-        s_LoggerStream << endl;
-#endif
-        s_LogLimitReached = true;
-        return;
-    }
-    else {
-        s_LogBytesWritten += message.size();
+    if (s_LoggerFileStream.device() != nullptr && !s_LogLimitReached) {
+        const int messageBytes = message.toUtf8().size();
+        if (s_LogBytesWritten + messageBytes > MAX_LOG_SIZE_BYTES) {
+            const QString limitMessage = "Log size limit reached!\n";
+            if (s_LogBytesWritten + limitMessage.toUtf8().size() <= MAX_LOG_SIZE_BYTES) {
+                s_LoggerFileStream << limitMessage;
+                s_LoggerFileStream.flush();
+            }
+            s_LogLimitReached = true;
+        }
+        else {
+            s_LogBytesWritten += messageBytes;
+            s_LoggerFileStream << message;
+            s_LoggerFileStream.flush();
+        }
     }
 #endif
 
+#if defined(Q_OS_LINUX) || !defined(LOG_TO_FILE)
     s_LoggerStream << message;
     s_LoggerStream.flush();
+#elif defined(LOG_TO_FILE)
+    // Preserve the console fallback if the file could not be opened.
+    if (s_LoggerFileStream.device() == nullptr) {
+        s_LoggerStream << message;
+        s_LoggerStream.flush();
+    }
+#endif
 }
 
 void sdlLogToDiskHandler(void*, int category, SDL_LogPriority priority, const char* message)
@@ -325,17 +337,44 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef LOG_TO_FILE
-    QDir tempDir(Path::getLogDir());
+    QDir logDir(Path::getLogDir());
+    QString logNamePattern;
+
+#ifdef Q_OS_LINUX
+    const QFileDevice::Permissions privateDirectoryPermissions =
+            QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
+    bool logDirectoryReady = logDir.exists() || logDir.mkpath(".", privateDirectoryPermissions);
+    if (logDirectoryReady) {
+        logDirectoryReady = QFile::setPermissions(logDir.absolutePath(), privateDirectoryPermissions);
+    }
+    if (!logDirectoryReady) {
+        QTextStream(stderr) << "Unable to create private log directory: " << logDir.absolutePath() << Qt::endl;
+    }
+    logNamePattern = "stationconnect-client-*.log";
+    const QString logFileName = QString("stationconnect-client-%1-%2.log")
+                                    .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz"))
+                                    .arg(QCoreApplication::applicationPid());
+#else
+    logNamePattern = "StationConnect-*.log";
+    const QString logFileName = QString("StationConnect-%1.log").arg(QDateTime::currentSecsSinceEpoch());
+#endif
 
 #ifdef Q_OS_WIN32
     // Only log to a file if the user didn't redirect stderr somewhere else
     if (IS_UNSPECIFIED_HANDLE(oldConErr))
 #endif
     {
-        s_LoggerFile = new QFile(tempDir.filePath(QString("StationConnect-%1.log").arg(QDateTime::currentSecsSinceEpoch())));
-        if (s_LoggerFile->open(QIODevice::WriteOnly | QIODevice::Text)) {
+        s_LoggerFile = new QFile(logDir.filePath(logFileName));
+#ifdef Q_OS_LINUX
+        const bool opened = logDirectoryReady &&
+                            s_LoggerFile->open(QIODevice::WriteOnly | QIODevice::Text,
+                                               QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#else
+        const bool opened = s_LoggerFile->open(QIODevice::WriteOnly | QIODevice::Text);
+#endif
+        if (opened) {
             QTextStream(stderr) << "Redirecting log output to " << s_LoggerFile->fileName() << Qt::endl;
-            s_LoggerStream.setDevice(s_LoggerFile);
+            s_LoggerFileStream.setDevice(s_LoggerFile);
         }
     }
 #endif
@@ -348,6 +387,12 @@ int main(int argc, char *argv[])
     av_log_set_callback(ffmpegLogToDiskHandler);
 #endif
 
+#ifdef Q_OS_LINUX
+    if (s_LoggerFile != nullptr && s_LoggerFile->isOpen()) {
+        qInfo() << "Persistent client log:" << s_LoggerFile->fileName();
+    }
+#endif
+
 #ifdef Q_OS_WIN32
     // Create a crash dump when we crash on Windows
     SetUnhandledExceptionFilter(UnhandledExceptionHandler);
@@ -355,10 +400,10 @@ int main(int argc, char *argv[])
 
 #ifdef LOG_TO_FILE
     // Prune the oldest existing logs if there are more than 10
-    QStringList existingLogNames = tempDir.entryList(QStringList("StationConnect-*.log"), QDir::NoFilter, QDir::SortFlag::Time);
+    QStringList existingLogNames = logDir.entryList(QStringList(logNamePattern), QDir::Files, QDir::Time);
     for (int i = 10; i < existingLogNames.size(); i++) {
         qInfo() << "Removing old log file:" << existingLogNames.at(i);
-        QFile(tempDir.filePath(existingLogNames.at(i))).remove();
+        QFile(logDir.filePath(existingLogNames.at(i))).remove();
     }
 #endif
 
