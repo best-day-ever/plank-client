@@ -44,7 +44,6 @@ public:
     virtual quint64 getSkippedAudioBlockCount() {
         return 0;
     }
-
     virtual void remapChannels(POPUS_MULTISTREAM_CONFIGURATION) {
         // Use default channel mapping:
         // 0 - Front Left

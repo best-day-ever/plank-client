@@ -91,7 +91,6 @@ private slots:
 
     void handleResolvedAddress(const QHostAddress& address)
     {
-        qInfo() << "Resolved" << hostname() << "to" << address;
         m_Addresses.push_back(address);
     }
 
@@ -152,7 +151,7 @@ public:
         // interrupt() should have taken care of this
         Q_ASSERT(m_ActiveThread == nullptr);
 
-        for (QThread* thread : m_InactiveList) {
+        for (QThread* thread : std::as_const(m_InactiveList)) {
             thread->wait();
             delete thread;
         }
@@ -233,7 +232,7 @@ public:
     bool editManualBookmark(NvComputer* computer, QString address, QString nickname,
                             QString displayMode, QString selectedOutputId);
 
-    void addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address = NvAddress());
+    void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 
     void authenticateHost(NvComputer* computer, QString username, QString password);
 

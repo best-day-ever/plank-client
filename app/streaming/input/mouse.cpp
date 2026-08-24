@@ -1,7 +1,7 @@
 #include "input.h"
 
 #include <Limelight.h>
-#include <SDL.h>
+#include "SDL_compat.h"
 #include "streaming/streamutils.h"
 
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
@@ -121,8 +121,9 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     Uint32 buttonState = SDL_GetMouseState(nullptr, nullptr);
     if (buttonState == 0) {
         if (m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
-            // Stop capturing the mouse now
-            SDL_CaptureMouse(SDL_FALSE);
+            if (m_NeedsManualCaptureOnLeave) {
+                SDL_CaptureMouse(SDL_FALSE);
+            }
             m_PendingMouseButtonsAllUpOnVideoRegionLeave = false;
         }
     }
@@ -231,8 +232,10 @@ void SdlInputHandler::updatePointerRegionLock()
     // toggled it themselves using the keyboard shortcut. If that's the case, they
     // have full control over it and we don't touch it anymore.
     if (!m_PointerRegionLockToggledByUser) {
-        // Lock the pointer in true full-screen mode and leave it unlocked in other modes
-        m_PointerRegionLockActive = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN;
+        // Lock the pointer in true full-screen mode or in any fullscreen mode when only a single monitor is present
+        Uint32 fullscreenFlags = SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+        m_PointerRegionLockActive = (fullscreenFlags == SDL_WINDOW_FULLSCREEN) ||
+                                    (fullscreenFlags != 0 && SDL_GetNumVideoDisplays() == 1);
     }
 
     // If region lock is enabled, grab the cursor so it can't accidentally leave our window.

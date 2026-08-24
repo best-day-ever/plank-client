@@ -1,6 +1,7 @@
 #include <Limelight.h>
-#include <SDL.h>
+#include "SDL_compat.h"
 #include "streaming/input/input.h"
+#include "streaming/session.h"
 #include "utils.h"
 
 #ifdef HAVE_LIBINPUT_TABLET
@@ -15,11 +16,14 @@
 SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
                                  int streamWidth,
                                  int streamHeight)
-    : m_MouseWasInVideoRegion(false),
+    : m_Window(nullptr),
+      m_NeedsManualCaptureOnLeave(false),
+      m_MouseWasInVideoRegion(false),
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false),
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
-      m_FakeCaptureActive(false),
+      m_FakeMouseCaptureActive(false),
+      m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
       m_MouseCursorCapturedVisibilityState(SDL_DISABLE),
       m_StreamWidth(streamWidth),
@@ -30,6 +34,18 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
     }
 
+    // SDL3 breaks our auto-capture-on-leave logic because the mouse focus has already
+    // been lost by the time we attempt to call SDL_CaptureMouse(). Fortunately, SDL3's
+    // own auto-capture logic seems to be stable now (unlike SDL2), so we can rely on
+    // that instead of our own hack when running on sdl2-compat.
+    // https://github.com/libsdl-org/SDL/commit/e54001b02809dcebbb822bd0297919c8c76976a1
+    SDL_version ver;
+    SDL_GetVersion(&ver);
+    m_NeedsManualCaptureOnLeave = !(ver.major == 2 && ver.minor >= 30 && ver.patch >= 50) && !SDL_GetHint("SDL3_VERSION");
+    if (m_NeedsManualCaptureOnLeave) {
+        // Disable the buggy auto-capture on earlier SDL2 builds
+        SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
+    }
 #if !SDL_VERSION_ATLEAST(2, 0, 15)
     // For older versions of SDL (2.0.14 and earlier), use SDL_HINT_GRAB_KEYBOARD
     SDL_SetHintWithPriority(SDL_HINT_GRAB_KEYBOARD,
@@ -38,7 +54,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
 #endif
 
     // Opt-out of SDL's built-in Alt+Tab handling while keyboard grab is enabled
-    SDL_SetHint("SDL_ALLOW_ALT_TAB_WHILE_GRABBED", "0");
+    SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
 
     // Allow clicks to pass through to us when focusing the window. If we're in
     // absolute mouse mode, this will avoid the user having to click twice to
@@ -55,12 +71,12 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCombo = KeyComboUngrabInput;
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCode = SDLK_z;
     m_SpecialKeyCombos[KeyComboUngrabInput].scanCode = SDL_SCANCODE_Z;
-    m_SpecialKeyCombos[KeyComboUngrabInput].enabled = QGuiApplication::platformName() != "eglfs";
+    m_SpecialKeyCombos[KeyComboUngrabInput].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCombo = KeyComboToggleFullScreen;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCode = SDLK_x;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].scanCode = SDL_SCANCODE_X;
-    m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = QGuiApplication::platformName() != "eglfs";
+    m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCombo = KeyComboToggleStatsOverlay;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCode = SDLK_s;
@@ -75,7 +91,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCombo = KeyComboToggleMinimize;
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCode = SDLK_d;
     m_SpecialKeyCombos[KeyComboToggleMinimize].scanCode = SDL_SCANCODE_D;
-    m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = QGuiApplication::platformName() != "eglfs";
+    m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboPasteText].keyCombo = KeyComboPasteText;
     m_SpecialKeyCombos[KeyComboPasteText].keyCode = SDLK_v;
@@ -87,6 +103,16 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
+    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCombo = KeyComboQuitAndExit;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCode = SDLK_e;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].scanCode = SDL_SCANCODE_E;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].enabled = true;
+
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCombo = KeyComboToggleKeyboardGrab;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_k;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
+            WMUtils::isRunningDesktopEnvironment();
 }
 
 SdlInputHandler::~SdlInputHandler()
@@ -138,7 +164,7 @@ void SdlInputHandler::raiseAllKeys()
                 "Raising %d keys",
                 (int)m_KeysDown.count());
 
-    for (auto keyDown : m_KeysDown) {
+    for (auto keyDown : std::as_const(m_KeysDown)) {
         LiSendKeyboardEvent(keyDown, KEY_ACTION_UP, 0);
     }
 
@@ -153,7 +179,7 @@ void SdlInputHandler::notifyMouseLeave()
     //
     // On macOS and X11, capturing the mouse allows us to receive mouse motion outside the
     // window (button up already worked without capture).
-    if (isCaptureActive()) {
+    if (m_NeedsManualCaptureOnLeave && isCaptureActive()) {
         // NB: Not using SDL_GetGlobalMouseState() because we want our state not the system's
         Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
         for (Uint32 button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; button++) {
@@ -217,7 +243,7 @@ void SdlInputHandler::resetRawHidAfterReconnect()
 
 bool SdlInputHandler::isCaptureActive()
 {
-    return m_FakeCaptureActive;
+    return m_FakeMouseCaptureActive;
 }
 
 void SdlInputHandler::setToolbarInteractionActive(bool active)
@@ -230,16 +256,14 @@ void SdlInputHandler::setToolbarInteractionActive(bool active)
 
 void SdlInputHandler::updateKeyboardGrabState()
 {
-    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_OFF) {
-        return;
-    }
-
-    bool shouldGrab = isCaptureActive();
-    Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
-    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
+    bool shouldGrab = m_CaptureSystemKeysMode != StreamingPreferences::CSK_OFF && isCaptureActive();
+    if (shouldGrab) {
+        Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
+        if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
             !(windowFlags & SDL_WINDOW_FULLSCREEN)) {
-        // Ungrab if it's fullscreen only and we left fullscreen
-        shouldGrab = false;
+            // Ungrab if it's fullscreen only and we left fullscreen
+            shouldGrab = false;
+        }
     }
 
     // Don't close the window on Alt+F4 when keyboard grab is enabled
@@ -250,6 +274,8 @@ void SdlInputHandler::updateKeyboardGrabState()
     // SDL 2.0.18 adds keyboard grab on macOS (if built with non-AppStore APIs).
     SDL_SetWindowKeyboardGrab(m_Window, shouldGrab ? SDL_TRUE : SDL_FALSE);
 #endif
+
+    m_KeyboardCaptureActive = shouldGrab;
 }
 
 bool SdlInputHandler::isSystemKeyCaptureActive()
@@ -262,15 +288,12 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
         return false;
     }
 
+    // NB: We used to check SDL_WINDOW_KEYBOARD_GRABBED here, but this isn't
+    // always set when capture "fails" on SDL3, even though the user may have
+    // configured the compositor to pass through system keys to us anyway.
+    // See issues #1776 and #1900 for details.
     Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
-    if (!(windowFlags & SDL_WINDOW_INPUT_FOCUS)
-#if SDL_VERSION_ATLEAST(2, 0, 15)
-            || !(windowFlags & SDL_WINDOW_KEYBOARD_GRABBED)
-#else
-            || !(windowFlags & SDL_WINDOW_INPUT_GRABBED)
-#endif
-            )
-    {
+    if (!(windowFlags & SDL_WINDOW_INPUT_FOCUS) || !m_KeyboardCaptureActive) {
         return false;
     }
 
@@ -286,7 +309,7 @@ void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
         SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
-        m_FakeCaptureActive = true;
+        m_FakeMouseCaptureActive = true;
 
         // Synchronize the client and host cursor when activating absolute capture
         int mouseX, mouseY;
@@ -314,7 +337,7 @@ void SdlInputHandler::setCaptureActive(bool active)
     }
     else {
         SDL_ShowCursor(SDL_ENABLE);
-        m_FakeCaptureActive = false;
+        m_FakeMouseCaptureActive = false;
     }
 
     // Update mouse pointer region constraints

@@ -1,10 +1,6 @@
 #include "../session.h"
 #include "renderers/renderer.h"
 
-#ifdef HAVE_SOUNDIO
-#include "renderers/soundioaudiorenderer.h"
-#endif
-
 #ifdef HAVE_SLAUDIO
 #include "renderers/slaud.h"
 #endif
@@ -30,12 +26,6 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
                           m_Computer->stationConnectAuthentication)
         return nullptr;
     }
-#ifdef HAVE_SOUNDIO
-    else if (mlAudio == "libsoundio") {
-        TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
-        return nullptr;
-    }
-#endif
 #if defined(HAVE_SLAUDIO)
     else if (mlAudio == "slaudio") {
         TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
@@ -56,12 +46,9 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
 #endif
 
-    // Default to SDL and use libsoundio as a fallback
+    // StationConnect uses SDL as its sole audio renderer.
     TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
                       m_Computer->stationConnectAuthentication)
-#ifdef HAVE_SOUNDIO
-    TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
-#endif
 
     return nullptr;
 }
@@ -110,21 +97,17 @@ bool Session::initializeAudioRenderer()
 
 int Session::getAudioRendererCapabilities(int audioConfiguration)
 {
-    // Build a fake OPUS_MULTISTREAM_CONFIGURATION to give
-    // the renderer the channel count and sample rate.
-    OPUS_MULTISTREAM_CONFIGURATION opusConfig = {};
-    opusConfig.sampleRate = 48000;
-    opusConfig.samplesPerFrame = 240;
-    opusConfig.channelCount = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(audioConfiguration);
+    int caps = 0;
 
-    IAudioRenderer* audioRenderer = createAudioRenderer(&opusConfig);
-    if (audioRenderer == nullptr) {
-        return 0;
-    }
+    Q_UNUSED(audioConfiguration);
 
-    int caps = audioRenderer->getCapabilities();
+    // All audio renderers support arbitrary audio duration
+    caps |= CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
 
-    delete audioRenderer;
+#ifdef STEAM_LINK
+    // Steam Link devices have slow Opus decoders
+    caps |= CAPABILITY_SLOW_OPUS_DECODER;
+#endif
 
     return caps;
 }

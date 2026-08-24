@@ -1,7 +1,7 @@
 #include "streaming/session.h"
 
 #include <Limelight.h>
-#include <SDL.h>
+#include "SDL_compat.h"
 
 #define VK_0 0x30
 #define VK_A 0x41
@@ -119,6 +119,35 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         updatePointerRegionLock();
         break;
 
+    case KeyComboQuitAndExit:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected quitAndExit key combo");
+
+        // Indicate that we want to exit afterwards
+        Session::get()->setShouldExit(true);
+
+        // Push a quit event to the main loop
+        SDL_Event quitExitEvent;
+        quitExitEvent.type = SDL_QUIT;
+        quitExitEvent.quit.timestamp = SDL_GetTicks();
+        SDL_PushEvent(&quitExitEvent);
+        break;
+
+    case KeyComboToggleKeyboardGrab:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected keyboard grab toggle combo");
+
+        // Toggle the system key capture mode
+        if (isSystemKeyCaptureActive()) {
+            m_CaptureSystemKeysMode = StreamingPreferences::CSK_OFF;
+        }
+        else {
+            m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
+        }
+
+        updateKeyboardGrabState();
+        break;
+
     default:
         Q_UNREACHABLE();
     }
@@ -128,6 +157,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
 {
     short keyCode;
     char modifiers;
+    bool shouldNotConvertToScanCodeOnServer = false;
 
     if (event->repeat) {
         // Ignore repeat key down events
@@ -382,6 +412,9 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
             case SDL_SCANCODE_LEFTBRACKET:
                 keyCode = 0xDB;
                 break;
+            case SDL_SCANCODE_INTERNATIONAL3:
+                shouldNotConvertToScanCodeOnServer = true;
+                Q_FALLTHROUGH();
             case SDL_SCANCODE_BACKSLASH:
                 keyCode = 0xDC;
                 break;
@@ -391,8 +424,17 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
             case SDL_SCANCODE_APOSTROPHE:
                 keyCode = 0xDE;
                 break;
+            case SDL_SCANCODE_INTERNATIONAL1:
+                shouldNotConvertToScanCodeOnServer = true;
+                Q_FALLTHROUGH();
             case SDL_SCANCODE_NONUSBACKSLASH:
                 keyCode = 0xE2;
+                break;
+            case SDL_SCANCODE_LANG1:
+                keyCode = 0x1C;
+                break;
+            case SDL_SCANCODE_LANG2:
+                keyCode = 0x1D;
                 break;
             default:
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -410,8 +452,9 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         m_KeysDown.remove(keyCode);
     }
 
-    LiSendKeyboardEvent(0x8000 | keyCode,
+    LiSendKeyboardEvent2(0x8000 | keyCode,
                         event->state == SDL_PRESSED ?
                             KEY_ACTION_DOWN : KEY_ACTION_UP,
-                        modifiers);
+                        modifiers,
+                        shouldNotConvertToScanCodeOnServer ? SS_KBE_FLAG_NON_NORMALIZED : 0);
 }
