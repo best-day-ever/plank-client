@@ -96,7 +96,22 @@ void StreamingPreferences::reload()
                          150000);
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
-    enableMdns = settings.value(SER_MDNS, true).toBool();
+    enableMdns = settings.value(SER_MDNS, false).toBool();
+    const QByteArray mdnsDiscoveryOverride =
+            qgetenv("STATIONCONNECT_MDNS_DISCOVERY").trimmed();
+    mdnsDiscoveryManaged =
+            qEnvironmentVariableIsSet("STATIONCONNECT_MDNS_DISCOVERY");
+    if (mdnsDiscoveryManaged) {
+        if (mdnsDiscoveryOverride == "1") {
+            enableMdns = true;
+        }
+        else {
+            if (mdnsDiscoveryOverride != "0") {
+                qWarning() << "Invalid STATIONCONNECT_MDNS_DISCOVERY value; disabling mDNS discovery";
+            }
+            enableMdns = false;
+        }
+    }
     framePacing = settings.value(SER_FRAMEPACING, false).toBool();
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
     detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
@@ -256,7 +271,9 @@ void StreamingPreferences::save()
     settings.setValue(SER_BITRATE, bitrateKbps);
     settings.setValue(SER_VSYNC, enableVsync);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
-    settings.setValue(SER_MDNS, enableMdns);
+    if (!mdnsDiscoveryManaged) {
+        settings.setValue(SER_MDNS, enableMdns);
+    }
     settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
     settings.setValue(SER_NETWORKMTU, networkMtu);
