@@ -86,46 +86,6 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
             return computer->ipv6Address.toString();
         }
         return QString();
-    case DetailsRole: {
-        QString state, authorizationState;
-
-        switch (computer->state) {
-        case NvComputer::CS_ONLINE:
-            state = tr("Online");
-            break;
-        case NvComputer::CS_OFFLINE:
-            state = tr("Offline");
-            break;
-        default:
-            state = tr("Unknown");
-            break;
-        }
-
-        switch (computer->authorizationState) {
-        case NvComputer::AS_AUTHORIZED:
-            authorizationState = tr("Authorized");
-            break;
-        case NvComputer::AS_UNAUTHORIZED:
-            authorizationState = tr("Sign-in required");
-            break;
-        default:
-            authorizationState = tr("Unknown");
-            break;
-        }
-
-        return tr("Name: %1").arg(computer->name) + '\n' +
-               tr("Status: %1").arg(state) + '\n' +
-               tr("Active Address: %1").arg(computer->activeAddress.toString()) + '\n' +
-               tr("UUID: %1").arg(computer->uuid) + '\n' +
-               tr("Local Address: %1").arg(computer->localAddress.toString()) + '\n' +
-               tr("Remote Address: %1").arg(computer->remoteAddress.toString()) + '\n' +
-               tr("IPv6 Address: %1").arg(computer->ipv6Address.toString()) + '\n' +
-               tr("Manual Address: %1").arg(computer->manualAddress.toString()) + '\n' +
-               tr("MAC Address: %1").arg(computer->macAddress.isEmpty() ? tr("Unknown") : QString(computer->macAddress.toHex(':'))) + '\n' +
-               tr("Authorization: %1").arg(authorizationState) + '\n' +
-               tr("Running Game ID: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->currentGameId) : tr("Unknown")) + '\n' +
-               tr("HTTPS Port: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->activeHttpsPort) : tr("Unknown"));
-    }
     default:
         return QVariant();
     }
@@ -156,7 +116,6 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
     names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
-    names[DetailsRole] = "details";
 
     return names;
 }

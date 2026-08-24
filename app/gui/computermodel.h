@@ -18,8 +18,7 @@ class ComputerModel : public QAbstractListModel
         ServerSupportedRole,
         StationConnectAuthenticationRole,
         ManualBookmarkRole,
-        AddressRole,
-        DetailsRole
+        AddressRole
     };
 
 public:

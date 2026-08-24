@@ -245,14 +245,6 @@ CenteredGridView {
                         deletePcDialog.open()
                     }
                 }
-                NavigableMenuItem {
-                    parentMenu: pcContextMenu
-                    text: qsTr("View Details")
-                    onTriggered: {
-                        showPcDetailsDialog.pcDetails = model.details
-                        showPcDetailsDialog.open()
-                    }
-                }
             }
         }
 
@@ -527,14 +519,6 @@ CenteredGridView {
                 }
             }
         }
-    }
-
-    NavigableMessageDialog {
-        id: showPcDetailsDialog
-        property string pcDetails : "";
-        text: showPcDetailsDialog.pcDetails
-        imageSrc: "qrc:/res/baseline-help_outline-24px.svg"
-        standardButtons: Dialog.Ok
     }
 
     ScrollBar.vertical: ScrollBar {}
