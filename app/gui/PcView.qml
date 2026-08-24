@@ -205,20 +205,16 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Display…")
-                    visible: model.stationConnectAuthentication
+                    text: qsTr("Edit bookmark…")
+                    visible: model.manualBookmark
                     onTriggered: {
                         var choices = computerModel.stationConnectDisplayChoices(index)
-                        if (choices.length === 0) {
-                            errorDialog.text = qsTr("Connect to this workstation once to retrieve its monitor layout.")
-                            errorDialog.helpText = ""
-                            errorDialog.open()
-                            return
-                        }
-                        displayDialog.pcIndex = index
-                        displayDialog.choices = choices
-                        displayDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
-                        displayDialog.open()
+                        editBookmarkDialog.pcIndex = index
+                        editBookmarkDialog.originalAddress = model.address
+                        editBookmarkDialog.originalNickname = model.name
+                        editBookmarkDialog.choices = choices
+                        editBookmarkDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
+                        editBookmarkDialog.open()
                     }
                 }
                 NavigableMenuItem {
@@ -238,6 +234,7 @@ CenteredGridView {
                         renamePcDialog.originalName = model.name
                         renamePcDialog.open()
                     }
+                    visible: !model.manualBookmark
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
@@ -363,34 +360,81 @@ CenteredGridView {
     }
 
     NavigableDialog {
-        id: displayDialog
+        id: editBookmarkDialog
         property int pcIndex: -1
+        property string originalAddress: ""
+        property string originalNickname: ""
         property var choices: []
         property int choiceIndex: 0
-        title: qsTr("Workstation display")
+        title: qsTr("Edit workstation bookmark")
+        width: Math.min(640, parent.width - 40)
+        dim: false
         modal: true
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         onOpened: {
-            displayChoice.model = choices
-            displayChoice.currentIndex = choiceIndex
-            displayChoice.forceActiveFocus()
+            editAddressText.text = originalAddress
+            editNicknameText.text = originalNickname
+            editDisplayChoice.model = choices
+            editDisplayChoice.currentIndex = choiceIndex
+            editAddressText.forceActiveFocus()
+            standardButton(Dialog.Ok).enabled = Qt.binding(function() {
+                return editAddressText.text.trim() !== "" &&
+                       editNicknameText.text.trim() !== "" &&
+                       editDisplayChoice.currentIndex >= 0
+            })
+        }
+        onClosed: {
+            editAddressText.clear()
+            editNicknameText.clear()
         }
         onAccepted: {
-            computerModel.setStationConnectDisplayChoice(pcIndex,
-                                                         displayChoice.currentIndex)
+            if (!computerModel.editComputerBookmark(pcIndex,
+                                                    editAddressText.text.trim(),
+                                                    editNicknameText.text.trim(),
+                                                    editDisplayChoice.currentIndex)) {
+                errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
+                errorDialog.helpText = ""
+                errorDialog.open()
+            }
         }
 
         ColumnLayout {
+            width: parent.width
+
             Label {
-                text: qsTr("Choose what this workstation displays when you connect. Scaled desktop span is the default for multi-monitor hosts.")
-                wrapMode: Text.Wrap
-                Layout.preferredWidth: 520
+                text: qsTr("Address or hostname")
+                font.bold: true
+            }
+            TextField {
+                id: editAddressText
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: qsTr("Nickname")
+                font.bold: true
+            }
+            TextField {
+                id: editNicknameText
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: qsTr("Workstation display")
+                font.bold: true
             }
             ComboBox {
-                id: displayChoice
+                id: editDisplayChoice
                 Layout.fillWidth: true
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Named monitors become available after StationConnect has retrieved this workstation's monitor layout.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
         }
     }

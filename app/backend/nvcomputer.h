@@ -46,11 +46,15 @@ public:
 
     NvComputer(NvAddress manualAddress, QString nickname);
 
+    bool
+    updateManualBookmark(NvAddress manualAddress, QString nickname,
+                         QString displayMode, QString selectedOutputId);
+
     void
     setRemoteAddress(QHostAddress);
 
     bool
-    update(const NvComputer& that);
+    update(const NvComputer& that, NvAddress expectedAddress = NvAddress());
 
     bool
     acceptsServerUuid(const QString& candidateUuid) const;

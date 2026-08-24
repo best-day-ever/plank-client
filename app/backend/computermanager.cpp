@@ -14,6 +14,19 @@
 #define SER_HOSTS "hosts"
 #define SER_HOSTS_BACKUP "hostsbackup"
 
+namespace {
+bool parseManualAddress(const QString& address, NvAddress& manualAddress)
+{
+    const QUrl url = QUrl::fromUserInput("moonlight://" + address.trimmed());
+    if (!url.isValid() || url.host().isEmpty() || url.scheme() != "moonlight") {
+        return false;
+    }
+
+    manualAddress = NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT));
+    return true;
+}
+}
+
 class PcMonitorThread : public QThread
 {
     Q_OBJECT
@@ -64,7 +77,7 @@ private:
                         !m_Computer->acceptsServerUuid(discoveredState.uuid)) {
                     return false;
                 }
-                changed = m_Computer->update(discoveredState);
+                changed = m_Computer->update(discoveredState, address);
                 return true;
             } catch (...) {
                 return false;
@@ -85,7 +98,7 @@ private:
             return false;
         }
 
-        changed = m_Computer->update(newState);
+        changed = m_Computer->update(newState, address);
         return true;
     }
 
@@ -131,6 +144,10 @@ private:
                         break;
                     }
                 }
+            }
+
+            if (isInterruptionRequested()) {
+                return;
             }
 
             // Check if we failed after all retry attempts
@@ -750,11 +767,10 @@ void ComputerManager::stopPollingAsync()
     }
 }
 
-void ComputerManager::addNewHostManually(QString address, QString nickname)
+void ComputerManager::addNewHostManually(QString address, QString nickname, bool scaledSpan)
 {
-    QUrl url = QUrl::fromUserInput("moonlight://" + address);
-    if (url.isValid() && !url.host().isEmpty() && url.scheme() == "moonlight") {
-        const NvAddress manualAddress(url.host(), url.port(DEFAULT_HTTP_PORT));
+    NvAddress manualAddress;
+    if (parseManualAddress(address, manualAddress)) {
         if (nickname.trimmed().isEmpty()) {
             nickname = manualAddress.address();
         }
@@ -772,8 +788,21 @@ void ComputerManager::addNewHostManually(QString address, QString nickname)
 
             if (bookmark == nullptr) {
                 bookmark = new NvComputer(manualAddress, nickname.trimmed());
+                bookmark->selectedDisplayMode = scaledSpan ?
+                            NvOutputTopology::ScaledSpanMode :
+                            NvOutputTopology::SingleOutputMode;
                 m_KnownHosts[bookmark->uuid] = bookmark;
                 startPollingComputer(bookmark);
+            }
+        }
+
+        {
+            QWriteLocker bookmarkLock(&bookmark->lock);
+            bookmark->selectedDisplayMode = scaledSpan ?
+                        NvOutputTopology::ScaledSpanMode :
+                        NvOutputTopology::SingleOutputMode;
+            if (!scaledSpan) {
+                bookmark->selectedOutputId.clear();
             }
         }
 
@@ -794,6 +823,72 @@ void ComputerManager::addNewHostManually(QString address, QString nickname)
     else {
         emit computerAddCompleted(false, false);
     }
+}
+
+bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
+                                         QString nickname, QString displayMode,
+                                         QString selectedOutputId)
+{
+    NvAddress manualAddress;
+    nickname = nickname.trimmed();
+    if (computer == nullptr || nickname.isEmpty() ||
+            !parseManualAddress(address, manualAddress)) {
+        return false;
+    }
+
+    bool addressChanged;
+    {
+        QReadLocker computerLock(&computer->lock);
+        if (!computer->manualBookmark) {
+            return false;
+        }
+        addressChanged = computer->manualAddress != manualAddress;
+    }
+
+    QString oldUuid;
+    ComputerPollingEntry* pollingEntry = nullptr;
+    if (addressChanged) {
+        {
+            QWriteLocker managerLock(&m_Lock);
+            for (NvComputer* candidate : m_KnownHosts) {
+                if (candidate == computer) {
+                    continue;
+                }
+                QReadLocker candidateLock(&candidate->lock);
+                if (candidate->manualAddress == manualAddress) {
+                    return false;
+                }
+            }
+            oldUuid = computer->uuid;
+            pollingEntry = m_PollEntries.take(computer->uuid);
+            if (pollingEntry != nullptr) {
+                pollingEntry->interrupt();
+            }
+
+            computer->updateManualBookmark(manualAddress, nickname, displayMode,
+                                           selectedOutputId);
+            m_KnownHosts.remove(oldUuid);
+            m_KnownHosts[computer->uuid] = computer;
+            if (pollingEntry != nullptr) {
+                m_PollEntries[computer->uuid] = pollingEntry;
+            }
+            startPollingComputer(computer);
+        }
+
+        QMutexLocker credentialLock(&m_ReconnectCredentialLock);
+        auto credentials = m_ReconnectCredentials.find(computer);
+        if (credentials != m_ReconnectCredentials.end()) {
+            credentials.value().second.fill(QChar('\0'));
+            m_ReconnectCredentials.erase(credentials);
+        }
+    }
+    else {
+        computer->updateManualBookmark(manualAddress, nickname, displayMode,
+                                       selectedOutputId);
+    }
+
+    handleComputerStateChanged(computer);
+    return true;
 }
 
 class PendingAddTask : public QObject, public QRunnable

@@ -64,6 +64,8 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->isSupportedServerVersion;
     case StationConnectAuthenticationRole:
         return computer->stationConnectAuthentication;
+    case ManualBookmarkRole:
+        return computer->manualBookmark;
     case AddressRole:
         // New StationConnect bookmarks have a durable manual address, but
         // workstation records created before bookmarks do not. Never expose
@@ -152,6 +154,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
     names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
+    names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
     names[DetailsRole] = "details";
 
@@ -200,6 +203,11 @@ QStringList ComputerModel::stationConnectDisplayChoices(int computerIndex) const
     QReadLocker lock(&computer->lock);
     const NvOutputTopology& topology = computer->outputTopology;
     QStringList choices;
+    if (topology.outputs.isEmpty()) {
+        choices.append(tr("Scaled desktop span"));
+        choices.append(tr("Primary display"));
+        return choices;
+    }
     if (topology.supportsScaledSpan()) {
         choices.append(tr("Scaled desktop span (%1×%2)")
                        .arg(topology.desktopWidth).arg(topology.desktopHeight));
@@ -221,6 +229,9 @@ int ComputerModel::stationConnectDisplayChoice(int computerIndex) const
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
     const NvOutputTopology& topology = computer->outputTopology;
+    if (topology.outputs.isEmpty()) {
+        return computer->selectedDisplayMode == NvOutputTopology::SingleOutputMode ? 1 : 0;
+    }
     if (computer->selectedDisplayMode == NvOutputTopology::ScaledSpanMode &&
             topology.supportsScaledSpan()) {
         return 0;
@@ -235,35 +246,50 @@ int ComputerModel::stationConnectDisplayChoice(int computerIndex) const
     return 0;
 }
 
-void ComputerModel::setStationConnectDisplayChoice(int computerIndex, int choiceIndex)
+bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
+                                         QString nickname, int displayChoice)
 {
-    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        return false;
+    }
+
     NvComputer* computer = m_Computers[computerIndex];
-    bool changed = false;
+    QString displayMode;
+    QString selectedOutputId;
     {
-        QWriteLocker lock(&computer->lock);
+        QReadLocker lock(&computer->lock);
         const NvOutputTopology& topology = computer->outputTopology;
-        if (topology.supportsScaledSpan()) {
-            if (choiceIndex == 0) {
-                computer->selectedDisplayMode = NvOutputTopology::ScaledSpanMode;
-                changed = true;
-            } else {
-                --choiceIndex;
+        if (topology.outputs.isEmpty()) {
+            if (displayChoice < 0 || displayChoice > 1) {
+                return false;
+            }
+            displayMode = displayChoice == 0 ? NvOutputTopology::ScaledSpanMode :
+                                               NvOutputTopology::SingleOutputMode;
+        }
+        else {
+            int outputIndex = displayChoice;
+            if (topology.supportsScaledSpan()) {
+                if (displayChoice == 0) {
+                    displayMode = NvOutputTopology::ScaledSpanMode;
+                }
+                else {
+                    --outputIndex;
+                }
+            }
+            if (displayMode.isEmpty()) {
+                const QVector<const NvOutput*> outputs = orderedOutputs(topology);
+                if (outputIndex < 0 || outputIndex >= outputs.size()) {
+                    return false;
+                }
+                displayMode = NvOutputTopology::SingleOutputMode;
+                selectedOutputId = outputs[outputIndex]->id;
             }
         }
-        if (!changed) {
-            const QVector<const NvOutput*> outputs = orderedOutputs(topology);
-            if (choiceIndex < 0 || choiceIndex >= outputs.size()) {
-                return;
-            }
-            computer->selectedDisplayMode = NvOutputTopology::SingleOutputMode;
-            computer->selectedOutputId = outputs[choiceIndex]->id;
-            changed = true;
-        }
     }
-    if (changed) {
-        m_ComputerManager->clientSideAttributeUpdated(computer);
-    }
+
+    return m_ComputerManager->editManualBookmark(computer, std::move(address),
+                                                  std::move(nickname), displayMode,
+                                                  selectedOutputId);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

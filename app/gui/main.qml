@@ -376,6 +376,7 @@ ApplicationWindow {
 
     NavigableDialog {
         id: addPcDialog
+        title: qsTr("Add workstation bookmark")
 
         // Give both connection fields enough room for real hostnames while
         // keeping the dialog inside smaller launcher windows. The dialog still
@@ -405,11 +406,14 @@ ApplicationWindow {
             addressText.clear()
             nicknameText.clear()
             nicknameText.manuallyEdited = false
+            addDisplayChoice.currentIndex = 0
         }
 
         onAccepted: {
             if (addressText.text && nicknameText.text) {
-                ComputerManager.addNewHostManually(addressText.text.trim(), nicknameText.text.trim())
+                ComputerManager.addNewHostManually(addressText.text.trim(),
+                                                   nicknameText.text.trim(),
+                                                   addDisplayChoice.currentIndex === 0)
             }
         }
 
@@ -460,6 +464,24 @@ ApplicationWindow {
                         addPcDialog.accept()
                     }
                 }
+            }
+
+            Label {
+                text: qsTr("Workstation display")
+                font.bold: true
+            }
+
+            ComboBox {
+                id: addDisplayChoice
+                Layout.fillWidth: true
+                model: [qsTr("Scaled desktop span"), qsTr("Primary display")]
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("A specific monitor can be selected later after StationConnect has retrieved this workstation's monitor layout.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
         }
     }

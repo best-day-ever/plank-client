@@ -227,7 +227,11 @@ public:
 
     Q_INVOKABLE void stopPollingAsync();
 
-    Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString());
+    Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
+                                        bool scaledSpan = true);
+
+    bool editManualBookmark(NvComputer* computer, QString address, QString nickname,
+                            QString displayMode, QString selectedOutputId);
 
     void addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address = NvAddress());
 

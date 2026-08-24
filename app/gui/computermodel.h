@@ -17,6 +17,7 @@ class ComputerModel : public QAbstractListModel
         StatusUnknownRole,
         ServerSupportedRole,
         StationConnectAuthenticationRole,
+        ManualBookmarkRole,
         AddressRole,
         DetailsRole
     };
@@ -51,7 +52,8 @@ public:
 
     Q_INVOKABLE int stationConnectDisplayChoice(int computerIndex) const;
 
-    Q_INVOKABLE void setStationConnectDisplayChoice(int computerIndex, int choiceIndex);
+    Q_INVOKABLE bool editComputerBookmark(int computerIndex, QString address,
+                                          QString nickname, int displayChoice);
 
 signals:
     void authenticationCompleted(QVariant error);

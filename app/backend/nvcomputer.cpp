@@ -30,11 +30,19 @@
 #define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
 #define SER_SERVERUUID "stationconnect-server-uuid"
 
-NvComputer::NvComputer(NvAddress address, QString nickname)
+namespace {
+QString manualBookmarkUuid(const NvAddress& address)
 {
     const QByteArray bookmarkKey = address.toString().toUtf8();
-    this->uuid = QStringLiteral("stationconnect-bookmark-") +
-            QString::fromLatin1(QCryptographicHash::hash(bookmarkKey, QCryptographicHash::Sha256).toHex().left(32));
+    return QStringLiteral("stationconnect-bookmark-") +
+            QString::fromLatin1(QCryptographicHash::hash(
+                                    bookmarkKey, QCryptographicHash::Sha256).toHex().left(32));
+}
+}
+
+NvComputer::NvComputer(NvAddress address, QString nickname)
+{
+    this->uuid = manualBookmarkUuid(address);
     this->name = nickname;
     this->hasCustomName = true;
     this->manualAddress = address;
@@ -48,6 +56,50 @@ NvComputer::NvComputer(NvAddress address, QString nickname)
     this->isSupportedServerVersion = true;
     this->isNvidiaServerSoftware = false;
     this->externalPort = address.port();
+}
+
+bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
+                                      QString displayMode, QString outputId)
+{
+    QWriteLocker writeLocker(&lock);
+    Q_ASSERT(manualBookmark);
+
+    const bool addressChanged = manualAddress != address;
+    if (addressChanged) {
+        uuid = manualBookmarkUuid(address);
+        manualAddress = address;
+        localAddress = NvAddress();
+        remoteAddress = NvAddress();
+        ipv6Address = NvAddress();
+        activeAddress = NvAddress();
+        activeHttpsPort = 0;
+        externalPort = address.port();
+        serverUuid.clear();
+        macAddress.clear();
+        appList.clear();
+        outputTopology = NvOutputTopology();
+        sessionToken.clear();
+        authorizationState = AS_UNKNOWN;
+        state = CS_UNKNOWN;
+        currentGameId = 0;
+        stationConnectAuthentication = false;
+        stationConnectTopologyVersion = 0;
+        stationConnectFeatureFlags = 0;
+        displayModes.clear();
+        maxLumaPixelsHEVC = 0;
+        serverCodecModeSupport = 0;
+        gpuModel.clear();
+        gfeVersion.clear();
+        appVersion.clear();
+        isSupportedServerVersion = true;
+        isNvidiaServerSoftware = false;
+    }
+
+    name = nickname;
+    hasCustomName = true;
+    selectedDisplayMode = displayMode;
+    selectedOutputId = outputId;
+    return addressChanged;
 }
 
 NvComputer::NvComputer(QSettings& settings)
@@ -570,13 +622,19 @@ QVector<NvAddress> NvComputer::uniqueAddresses() const
     return uniqueAddressList;
 }
 
-bool NvComputer::update(const NvComputer& that)
+bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
 {
     bool changed = false;
 
     // Lock us for write and them for read
     QWriteLocker thisLock(&this->lock);
     QReadLocker thatLock(&that.lock);
+
+    if (!expectedAddress.isNull() && expectedAddress != activeAddress &&
+            expectedAddress != localAddress && expectedAddress != remoteAddress &&
+            expectedAddress != ipv6Address && expectedAddress != manualAddress) {
+        return false;
+    }
 
     // A manual bookmark has a stable local UUID before its server identity is
     // known. Bind it to the first server that successfully answers, then reject
