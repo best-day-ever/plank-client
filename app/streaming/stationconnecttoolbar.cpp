@@ -553,14 +553,11 @@ void StationConnectToolbar::redraw()
                      "Loss");
     const QColor lossColor = m_PacketLossPercent < 0.0f ?
                 QColor(112, 120, 130) : packetLossColor(m_PacketLossPercent);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(lossColor);
-    painter.drawEllipse(QPointF(176, 24.5), 3.5, 3.5);
     QFont lossFont = valueFont;
     lossFont.setPixelSize(12);
     painter.setFont(lossFont);
     painter.setPen(lossColor);
-    painter.drawText(QRect(183, 16, 44, 17), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(174, 16, 52, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      m_PacketLossPercent < 0.0f ?
                          QString("--") :
                          QString("%1%").arg(m_PacketLossPercent, 0, 'f', 1));
