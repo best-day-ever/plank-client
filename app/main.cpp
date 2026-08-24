@@ -23,7 +23,7 @@
 // doing the same thing. This needs to be before any headers
 // that might include SDL.h themselves.
 #define SDL_MAIN_HANDLED
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 
 #ifdef HAVE_FFMPEG
 #include "streaming/video/ffmpeg.h"
@@ -519,8 +519,8 @@ int main(int argc, char *argv[])
 #else
     SDL_LogOutputFunction oldSdlLogFn;
     void* oldSdlLogUserdata;
-    SDL_LogGetOutputFunction(&oldSdlLogFn, &oldSdlLogUserdata);
-    SDL_LogSetOutputFunction(sdlLogToDiskHandler, nullptr);
+    SDL_GetLogOutputFunction(&oldSdlLogFn, &oldSdlLogUserdata);
+    SDL_SetLogOutputFunction(sdlLogToDiskHandler, nullptr);
 #endif
     qInstallMessageHandler(qtLogToDiskHandler);
 #ifdef HAVE_FFMPEG
@@ -1075,7 +1075,7 @@ int main(int argc, char *argv[])
 #if SDL_VERSION_ATLEAST(3, 0, 0)
     SDL_SetLogOutputFunction(SDL_GetDefaultLogOutputFunction(), nullptr);
 #else
-    SDL_LogSetOutputFunction(oldSdlLogFn, oldSdlLogUserdata);
+    SDL_SetLogOutputFunction(oldSdlLogFn, oldSdlLogUserdata);
 #endif
     qInstallMessageHandler(nullptr);
 #ifdef HAVE_FFMPEG

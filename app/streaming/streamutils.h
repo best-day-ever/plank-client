@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 
 class StreamUtils
 {

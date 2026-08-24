@@ -1,5 +1,5 @@
 #include <Limelight.h>
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 #include "streaming/input/input.h"
 #include "streaming/session.h"
 #include "utils.h"
@@ -64,52 +64,52 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
 
     // Populate special key combo configuration
     m_SpecialKeyCombos[KeyComboQuit].keyCombo = KeyComboQuit;
-    m_SpecialKeyCombos[KeyComboQuit].keyCode = SDLK_q;
+    m_SpecialKeyCombos[KeyComboQuit].keyCode = SDLK_Q;
     m_SpecialKeyCombos[KeyComboQuit].scanCode = SDL_SCANCODE_Q;
     m_SpecialKeyCombos[KeyComboQuit].enabled = true;
 
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCombo = KeyComboUngrabInput;
-    m_SpecialKeyCombos[KeyComboUngrabInput].keyCode = SDLK_z;
+    m_SpecialKeyCombos[KeyComboUngrabInput].keyCode = SDLK_Z;
     m_SpecialKeyCombos[KeyComboUngrabInput].scanCode = SDL_SCANCODE_Z;
     m_SpecialKeyCombos[KeyComboUngrabInput].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCombo = KeyComboToggleFullScreen;
-    m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCode = SDLK_x;
+    m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCode = SDLK_X;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].scanCode = SDL_SCANCODE_X;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCombo = KeyComboToggleStatsOverlay;
-    m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCode = SDLK_s;
+    m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCode = SDLK_S;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].scanCode = SDL_SCANCODE_S;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].enabled = true;
 
     m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCombo = KeyComboToggleCursorHide;
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCode = SDLK_c;
+    m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCode = SDLK_C;
     m_SpecialKeyCombos[KeyComboToggleCursorHide].scanCode = SDL_SCANCODE_C;
     m_SpecialKeyCombos[KeyComboToggleCursorHide].enabled = true;
 
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCombo = KeyComboToggleMinimize;
-    m_SpecialKeyCombos[KeyComboToggleMinimize].keyCode = SDLK_d;
+    m_SpecialKeyCombos[KeyComboToggleMinimize].keyCode = SDLK_D;
     m_SpecialKeyCombos[KeyComboToggleMinimize].scanCode = SDL_SCANCODE_D;
     m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = WMUtils::isRunningDesktopEnvironment();
 
     m_SpecialKeyCombos[KeyComboPasteText].keyCombo = KeyComboPasteText;
-    m_SpecialKeyCombos[KeyComboPasteText].keyCode = SDLK_v;
+    m_SpecialKeyCombos[KeyComboPasteText].keyCode = SDLK_V;
     m_SpecialKeyCombos[KeyComboPasteText].scanCode = SDL_SCANCODE_V;
     m_SpecialKeyCombos[KeyComboPasteText].enabled = true;
 
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].keyCombo = KeyComboTogglePointerRegionLock;
-    m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].keyCode = SDLK_l;
+    m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].keyCode = SDLK_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
     m_SpecialKeyCombos[KeyComboQuitAndExit].keyCombo = KeyComboQuitAndExit;
-    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCode = SDLK_e;
+    m_SpecialKeyCombos[KeyComboQuitAndExit].keyCode = SDLK_E;
     m_SpecialKeyCombos[KeyComboQuitAndExit].scanCode = SDL_SCANCODE_E;
     m_SpecialKeyCombos[KeyComboQuitAndExit].enabled = true;
 
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCombo = KeyComboToggleKeyboardGrab;
-    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_k;
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
             WMUtils::isRunningDesktopEnvironment();
@@ -183,8 +183,8 @@ void SdlInputHandler::notifyMouseLeave()
         // NB: Not using SDL_GetGlobalMouseState() because we want our state not the system's
         Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
         for (Uint32 button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; button++) {
-            if (mouseState & SDL_BUTTON(button)) {
-                SDL_CaptureMouse(SDL_TRUE);
+            if (mouseState & SDL_BUTTON_MASK(button)) {
+                SDL_CaptureMouse(true);
                 break;
             }
         }
@@ -272,7 +272,7 @@ void SdlInputHandler::updateKeyboardGrabState()
 #if SDL_VERSION_ATLEAST(2, 0, 15)
     // On SDL 2.0.15+, we can get keyboard-only grab on Win32, X11, and Wayland.
     // SDL 2.0.18 adds keyboard grab on macOS (if built with non-AppStore APIs).
-    SDL_SetWindowKeyboardGrab(m_Window, shouldGrab ? SDL_TRUE : SDL_FALSE);
+    SDL_SetWindowKeyboardGrab(m_Window, shouldGrab ? true : false);
 #endif
 
     m_KeyboardCaptureActive = shouldGrab;
@@ -327,7 +327,7 @@ void SdlInputHandler::setCaptureActive(bool active)
         if (isMouseInVideoRegion(mouseX, mouseY)) {
             // Synthesize a mouse event to synchronize the cursor
             SDL_MouseMotionEvent motionEvent = {};
-            motionEvent.type = SDL_MOUSEMOTION;
+            motionEvent.type = SDL_EVENT_MOUSE_MOTION;
             motionEvent.timestamp = SDL_GetTicks();
             motionEvent.windowID = SDL_GetWindowID(m_Window);
             motionEvent.x = mouseX;

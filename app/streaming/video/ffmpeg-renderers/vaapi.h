@@ -101,7 +101,7 @@ private:
     bool m_RequiresExplicitPixelFormat;
     bool m_IdentityGbr;
 
-    SDL_mutex* m_OverlayMutex;
+    SDL_Mutex* m_OverlayMutex;
     VAImageFormat m_OverlayFormat;
     Uint32 m_OverlaySdlPixelFormat;
     VAImage m_OverlayImage[Overlay::OverlayMax];

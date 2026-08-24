@@ -5,7 +5,7 @@
 
 #include <Limelight.h>
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 
 extern "C" {
 #include <libavutil/pixdesc.h>
@@ -237,7 +237,7 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
             if (type == Overlay::OverlayStatusUpdate) {
                 // Bottom Left
                 SDL_Rect viewportRect;
-                SDL_RenderGetViewport(m_Renderer, &viewportRect);
+                SDL_GetRenderViewport(m_Renderer, &viewportRect);
                 m_OverlayRects[type].x = 0;
                 m_OverlayRects[type].y = viewportRect.h - newSurface->h;
             }
@@ -249,7 +249,7 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
             else if (type == Overlay::OverlayToolbar) {
                 // User-positionable along the top edge
                 SDL_Rect viewportRect;
-                SDL_RenderGetViewport(m_Renderer, &viewportRect);
+                SDL_GetRenderViewport(m_Renderer, &viewportRect);
                 m_OverlayRects[type].x = SDL_round(
                     Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *
                     SDL_max(0, viewportRect.w - newSurface->w));
@@ -260,17 +260,17 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
             m_OverlayRects[type].h = newSurface->h;
 
             m_OverlayTextures[type] = SDL_CreateTextureFromSurface(m_Renderer, newSurface);
-            SDL_FreeSurface(newSurface);
+            SDL_DestroySurface(newSurface);
 
             if (m_OverlayTextures[type]) {
                 // Overlays are always drawn at exact size
-                SDL_SetTextureScaleMode(m_OverlayTextures[type], SDL_ScaleModeNearest);
+                SDL_SetTextureScaleMode(m_OverlayTextures[type], SDL_SCALEMODE_NEAREST);
             }
         }
 
         // If we have an overlay texture, render it too
         if (m_OverlayTextures[type] != nullptr) {
-            SDL_RenderCopy(m_Renderer, m_OverlayTextures[type], nullptr, &m_OverlayRects[type]);
+            SDL_RenderTexture(m_Renderer, m_OverlayTextures[type], nullptr, &m_OverlayRects[type]);
         }
     }
 }
@@ -366,7 +366,7 @@ ReadbackRetry:
             av_dict_set_int(&options, "dsth", m_RgbFrame->height, 0);
             av_dict_set_int(&options, "dst_format", m_RgbFrame->format, 0);
             av_dict_set_int(&options, "dst_range", 1, 0);
-            av_dict_set_int(&options, "threads", std::min(SDL_GetCPUCount(), 4), 0); // Up to 4 threads
+            av_dict_set_int(&options, "threads", std::min(SDL_GetNumLogicalCPUCores(), 4), 0); // Up to 4 threads
 
             err = av_opt_set_dict(m_SwsContext, &options);
             av_dict_free(&options);
@@ -581,17 +581,17 @@ ReadbackRetry:
     src.w = frame->width;
     src.h = frame->height;
     dst.x = dst.y = 0;
-    SDL_GetRendererOutputSize(m_Renderer, &dst.w, &dst.h);
+    SDL_GetCurrentRenderOutputSize(m_Renderer, &dst.w, &dst.h);
     StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
 
     // Ensure the viewport is set to the desired video region
-    SDL_RenderSetViewport(m_Renderer, &dst);
+    SDL_SetRenderViewport(m_Renderer, &dst);
 
     // Draw the video content itself
-    SDL_RenderCopy(m_Renderer, m_Texture, nullptr, nullptr);
+    SDL_RenderTexture(m_Renderer, m_Texture, nullptr, nullptr);
 
     // Reset the viewport to the full window for overlay rendering
-    SDL_RenderSetViewport(m_Renderer, nullptr);
+    SDL_SetRenderViewport(m_Renderer, nullptr);
 
     // Draw the overlays
     for (int i = 0; i < Overlay::OverlayMax; i++) {

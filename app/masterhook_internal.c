@@ -6,7 +6,7 @@
 #define _GNU_SOURCE
 #endif
 
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>

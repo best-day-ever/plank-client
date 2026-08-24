@@ -10,8 +10,8 @@
 #include <Limelight.h>
 #include <unistd.h>
 
-#include <SDL_render.h>
-#include <SDL_syswm.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_system.h>
 
 // These are extensions, so some platform headers may not provide them
 #ifndef EGL_PLATFORM_WAYLAND_KHR
@@ -130,7 +130,7 @@ EGLRenderer::~EGLRenderer()
                 glDeleteBuffers(1, &m_OverlayVbos[i]);
             }
         }
-        SDL_GL_DeleteContext(m_Context);
+        SDL_GL_DestroyContext(m_Context);
     }
 
     if (m_DummyRenderer) {
@@ -163,7 +163,7 @@ void EGLRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
     if (!Session::get()->getOverlayManager().isOverlayEnabled(type)) {
         // If the overlay has been disabled, mark the data as invalid/stale.
-        SDL_AtomicSet(&m_OverlayHasValidData[type], 0);
+        SDL_SetAtomicInt(&m_OverlayHasValidData[type], 0);
         return;
     }
 }
@@ -222,7 +222,7 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
             // we must allocate a tightly packed buffer and copy our pixels there.
             packedPixelData = malloc(newSurface->w * newSurface->h * newSurface->format->BytesPerPixel);
             if (!packedPixelData) {
-                SDL_FreeSurface(newSurface);
+                SDL_DestroySurface(newSurface);
                 return;
             }
 
@@ -266,7 +266,7 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
         overlayRect.w = newSurface->w;
         overlayRect.h = newSurface->h;
 
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
 
         // Convert screen space to normalized device coordinates
         StreamUtils::screenSpaceToNormalizedDeviceCoords(&overlayRect, viewportWidth, viewportHeight);
@@ -284,10 +284,10 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
         glBindBuffer(GL_ARRAY_BUFFER, m_OverlayVbos[type]);
         glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
 
-        SDL_AtomicSet(&m_OverlayHasValidData[type], 1);
+        SDL_SetAtomicInt(&m_OverlayHasValidData[type], 1);
     }
 
-    if (!SDL_AtomicGet(&m_OverlayHasValidData[type])) {
+    if (!SDL_GetAtomicInt(&m_OverlayHasValidData[type])) {
         // If the overlay is not populated yet or is stale, don't render it.
         return;
     }
@@ -859,7 +859,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
             // XWayland. Other strategies like calling glGetError() don't seem
             // to be able to detect this situation for some reason.
             SDL_Event event;
-            event.type = SDL_RENDER_TARGETS_RESET;
+            event.type = SDL_EVENT_RENDER_TARGETS_RESET;
             SDL_PushEvent(&event);
 
             return;

@@ -9,7 +9,7 @@
 #include "streaming/streamutils.h"
 #include "streaming/session.h"
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 
 #include <dwmapi.h>
 
@@ -485,10 +485,10 @@ bool D3D11VARenderer::initialize(PDECODER_PARAMETERS params)
         }
     }
 
-    if (!SDL_DXGIGetOutputInfo(SDL_GetWindowDisplayIndex(params->window),
+    if (!SDL_GetDXGIOutputInfo(SDL_GetDisplayForWindow(params->window),
                                &m_AdapterIndex, &outputIndex)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_DXGIGetOutputInfo() failed: %s",
+                     "SDL_GetDXGIOutputInfo() failed: %s",
                      SDL_GetError());
         return false;
     }
@@ -819,7 +819,7 @@ void D3D11VARenderer::renderFrame(AVFrame* frame)
 
         // The card may have been removed or crashed. Reset the decoder.
         SDL_Event event;
-        event.type = SDL_RENDER_DEVICE_RESET;
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
         SDL_PushEvent(&event);
         return;
     }
@@ -832,7 +832,7 @@ void D3D11VARenderer::renderOverlay(Overlay::OverlayType type)
     }
 
     // If the overlay is being updated, just skip rendering it this frame
-    if (!SDL_AtomicTryLock(&m_OverlayLock)) {
+    if (!SDL_TryLockSpinlock(&m_OverlayLock)) {
         return;
     }
 
@@ -841,7 +841,7 @@ void D3D11VARenderer::renderOverlay(Overlay::OverlayType type)
     ComPtr<ID3D11Texture2D> overlayTexture = m_OverlayTextures[type];
     ComPtr<ID3D11Buffer> overlayVertexBuffer = m_OverlayVertexBuffers[type];
     ComPtr<ID3D11ShaderResourceView> overlayTextureResourceView = m_OverlayTextureResourceViews[type];
-    SDL_AtomicUnlock(&m_OverlayLock);
+    SDL_UnlockSpinlock(&m_OverlayLock);
 
     if (!overlayTexture) {
         return;
@@ -1089,15 +1089,15 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
         return;
     }
 
-    SDL_AtomicLock(&m_OverlayLock);
+    SDL_LockSpinlock(&m_OverlayLock);
     ComPtr<ID3D11Texture2D> oldTexture = std::move(m_OverlayTextures[type]);
     ComPtr<ID3D11Buffer> oldVertexBuffer = std::move(m_OverlayVertexBuffers[type]);
     ComPtr<ID3D11ShaderResourceView> oldTextureResourceView = std::move(m_OverlayTextureResourceViews[type]);
-    SDL_AtomicUnlock(&m_OverlayLock);
+    SDL_UnlockSpinlock(&m_OverlayLock);
 
     // If the overlay is disabled, we're done
     if (!overlayEnabled) {
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         return;
     }
 
@@ -1125,7 +1125,7 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
     ComPtr<ID3D11Texture2D> newTexture;
     hr = m_RenderDevice->CreateTexture2D(&texDesc, &texData, &newTexture);
     if (FAILED(hr)) {
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "ID3D11Device::CreateTexture2D() failed: %x",
                      hr);
@@ -1135,7 +1135,7 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
     ComPtr<ID3D11ShaderResourceView> newTextureResourceView;
     hr = m_RenderDevice->CreateShaderResourceView((ID3D11Resource*)newTexture.Get(), nullptr, &newTextureResourceView);
     if (FAILED(hr)) {
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "ID3D11Device::CreateShaderResourceView() failed: %x",
                      hr);
@@ -1144,19 +1144,19 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
     ComPtr<ID3D11Buffer> newVertexBuffer;
     if (!createOverlayVertexBuffer(type, newSurface->w, newSurface->h, newVertexBuffer)) {
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         return;
     }
 
     // The surface is no longer required
-    SDL_FreeSurface(newSurface);
+    SDL_DestroySurface(newSurface);
     newSurface = nullptr;
 
-    SDL_AtomicLock(&m_OverlayLock);
+    SDL_LockSpinlock(&m_OverlayLock);
     m_OverlayVertexBuffers[type] = std::move(newVertexBuffer);
     m_OverlayTextures[type] = std::move(newTexture);
     m_OverlayTextureResourceViews[type] = std::move(newTextureResourceView);
-    SDL_AtomicUnlock(&m_OverlayLock);
+    SDL_UnlockSpinlock(&m_OverlayLock);
 }
 
 bool D3D11VARenderer::createOverlayVertexBuffer(Overlay::OverlayType type, int width, int height, ComPtr<ID3D11Buffer>& newVertexBuffer)
@@ -1214,10 +1214,10 @@ bool D3D11VARenderer::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO stateInfo)
 {
     if (stateInfo->stateChangeFlags & WINDOW_STATE_CHANGE_DISPLAY) {
         int adapterIndex, outputIndex;
-        if (!SDL_DXGIGetOutputInfo(stateInfo->displayIndex,
+        if (!SDL_GetDXGIOutputInfo(stateInfo->displayIndex,
                                    &adapterIndex, &outputIndex)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_DXGIGetOutputInfo() failed: %s",
+                         "SDL_GetDXGIOutputInfo() failed: %s",
                          SDL_GetError());
             return false;
         }
@@ -1254,7 +1254,7 @@ bool D3D11VARenderer::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO stateInfo)
         m_VideoVertexBuffer.Reset();
 
         // Create new vertex buffers for active overlays
-        SDL_AtomicLock(&m_OverlayLock);
+        SDL_LockSpinlock(&m_OverlayLock);
         for (size_t i = 0; i < m_OverlayVertexBuffers.size(); i++) {
             if (!m_OverlayTextures[i]) {
                 continue;
@@ -1264,7 +1264,7 @@ bool D3D11VARenderer::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO stateInfo)
             m_OverlayTextures[i]->GetDesc(&textureDesc);
             createOverlayVertexBuffer((Overlay::OverlayType)i, textureDesc.Width, textureDesc.Height, m_OverlayVertexBuffers[i]);
         }
-        SDL_AtomicUnlock(&m_OverlayLock);
+        SDL_UnlockSpinlock(&m_OverlayLock);
 
         // We must release all references to the back buffer
         m_RenderTargetView.Reset();

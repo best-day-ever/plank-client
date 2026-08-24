@@ -42,11 +42,11 @@ win32 {
 
     contains(QT_ARCH, x86_64) {
         LIBS += -L$$PWD/../libs/windows/lib/x64
-        INCLUDEPATH += $$PWD/../libs/windows/include/x64 $$PWD/../libs/windows/include/x64/SDL2
+        INCLUDEPATH += $$PWD/../libs/windows/include/x64 $$PWD/../libs/windows/include/x64/SDL3
     }
     contains(QT_ARCH, arm64) {
         LIBS += -L$$PWD/../libs/windows/lib/arm64
-        INCLUDEPATH += $$PWD/../libs/windows/include/arm64 $$PWD/../libs/windows/include/arm64/SDL2
+        INCLUDEPATH += $$PWD/../libs/windows/include/arm64 $$PWD/../libs/windows/include/arm64/SDL3
     }
 
     INCLUDEPATH += $$PWD/../libs/windows/include
@@ -57,13 +57,13 @@ macx:!disable-prebuilts {
         error("Missing dependencies. Please run 'python3 setup-deps.py' to fetch prebuilt libraries.")
     }
 
-    INCLUDEPATH += $$PWD/../libs/mac/include $$PWD/../libs/mac/include/SDL2
+    INCLUDEPATH += $$PWD/../libs/mac/include $$PWD/../libs/mac/include/SDL3
     LIBS += -L$$PWD/../libs/mac/lib
 }
 
 unix:if(!macx|disable-prebuilts) {
     CONFIG += link_pkgconfig
-    PKGCONFIG += openssl sdl2 SDL2_ttf
+    PKGCONFIG += openssl sdl3 sdl3-ttf
 
     # We have our own optimized libopus.a for Steam Link
     if(!config_SL|disable-prebuilts) {
@@ -155,14 +155,14 @@ linux:packagesExist(libinput):packagesExist(libudev) {
 }
 
 win32 {
-    LIBS += -llibssl -llibcrypto -lSDL2 -lSDL2_ttf -lavcodec -lavutil -lswscale -lopus -ldxgi -ld3d11 -llibplacebo
+    LIBS += -llibssl -llibcrypto -lSDL3 -lSDL3_ttf -lavcodec -lavutil -lswscale -lopus -ldxgi -ld3d11 -llibplacebo
     CONFIG += ffmpeg libplacebo
 }
 win32:!winrt {
 }
 macx {
     !disable-prebuilts {
-        LIBS += -lssl.3 -lcrypto.3 -lavcodec.63 -lavutil.61 -lswscale.10 -lopus.0 -lSDL2 -lSDL2_ttf -lplacebo
+        LIBS += -lssl.3 -lcrypto.3 -lavcodec.63 -lavutil.61 -lswscale.10 -lopus.0 -lSDL3 -lSDL3_ttf -lplacebo
         CONFIG += libplacebo
     }
 
@@ -204,7 +204,6 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
-    SDL_compat.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/nvapp.h \

@@ -1,6 +1,6 @@
 #include "waylandvsyncsource.h"
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 
 #ifndef SDL_VIDEO_DRIVER_WAYLAND
 #warning Unable to use WaylandVsyncSource without SDL support

@@ -1,7 +1,7 @@
 #include "linuxwacom.h"
 
 #include <Limelight.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <libinput.h>
 #include <libudev.h>
 

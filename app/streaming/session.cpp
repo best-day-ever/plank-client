@@ -8,7 +8,7 @@
 #include "backend/computermanager.h"
 
 #include <Limelight.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include "utils.h"
 
 #ifdef HAVE_FFMPEG
@@ -28,7 +28,7 @@
 
 // HACK: Remove once proper Dark Mode support lands in SDL
 #ifdef Q_OS_WIN32
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 #include <dwmapi.h>
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE_OLD
 #define DWMWA_USE_IMMERSIVE_DARK_MODE_OLD 19
@@ -113,7 +113,7 @@ void Session::clConnectionTerminated(int errorCode)
                     "StationConnect transport ended (%d); requesting bounded reconnect",
                     errorCode);
         SDL_Event event = {};
-        event.type = SDL_USEREVENT;
+        event.type = SDL_EVENT_USER;
         event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT;
         SDL_PushEvent(&event);
         return;
@@ -177,7 +177,7 @@ void Session::clConnectionTerminated(int errorCode)
 
     // Push a quit event to the main loop
     SDL_Event event;
-    event.type = SDL_QUIT;
+    event.type = SDL_EVENT_QUIT;
     event.quit.timestamp = SDL_GetTicks();
     SDL_PushEvent(&event);
 }
@@ -223,12 +223,12 @@ void Session::clSetHdrMode(bool enabled)
     // If we're in the process of recreating our decoder when we get
     // this callback, we'll drop it. The main thread will make the
     // callback when it finishes creating the new decoder.
-    if (SDL_AtomicTryLock(&s_ActiveSession->m_DecoderLock)) {
+    if (SDL_TryLockSpinlock(&s_ActiveSession->m_DecoderLock)) {
         IVideoDecoder* decoder = s_ActiveSession->m_VideoDecoder;
         if (decoder != nullptr) {
             decoder->setHdrMode(enabled);
         }
-        SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
+        SDL_UnlockSpinlock(&s_ActiveSession->m_DecoderLock);
     }
 }
 
@@ -254,7 +254,7 @@ void Session::clVideoBitrateApplied(
                 static_cast<int>(peakKbps), std::memory_order_relaxed);
 
     SDL_Event event = {};
-    event.type = SDL_USEREVENT;
+    event.type = SDL_EVENT_USER;
     event.user.code = SDL_CODE_STATIONCONNECT_BITRATE_APPLIED;
     SDL_PushEvent(&event);
 }
@@ -383,15 +383,15 @@ int Session::drSubmitDecodeUnit(PDECODE_UNIT du)
     // safely return DR_OK and wait for the IDR frame request by
     // the decoder reinitialization code.
 
-    if (SDL_AtomicTryLock(&s_ActiveSession->m_DecoderLock)) {
+    if (SDL_TryLockSpinlock(&s_ActiveSession->m_DecoderLock)) {
         IVideoDecoder* decoder = s_ActiveSession->m_VideoDecoder;
         if (decoder != nullptr) {
             int ret = decoder->submitDecodeUnit(du);
-            SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
+            SDL_UnlockSpinlock(&s_ActiveSession->m_DecoderLock);
             return ret;
         }
         else {
-            SDL_AtomicUnlock(&s_ActiveSession->m_DecoderLock);
+            SDL_UnlockSpinlock(&s_ActiveSession->m_DecoderLock);
             return DR_OK;
         }
     }
@@ -697,7 +697,7 @@ bool Session::initialize()
 #ifndef STEAM_LINK
     // Opt-in to all encryption features if we detect that the platform
     // has AES cryptography acceleration instructions and more than 2 cores.
-    if (StreamUtils::hasFastAes() && SDL_GetCPUCount() > 2) {
+    if (StreamUtils::hasFastAes() && SDL_GetNumLogicalCPUCores() > 2) {
         m_StreamConfig.encryptionFlags = ENCFLG_ALL;
     }
     else {
@@ -1028,10 +1028,10 @@ int Session::getTargetDisplayIndex() const
     int displayIndex = 0;
 
     if (m_Window != nullptr) {
-        displayIndex = SDL_GetWindowDisplayIndex(m_Window);
+        displayIndex = SDL_GetDisplayForWindow(m_Window);
         if (displayIndex < 0) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "SDL_GetWindowDisplayIndex() failed: %s",
+                        "SDL_GetDisplayForWindow() failed: %s",
                         SDL_GetError());
             displayIndex = 0;
         }
@@ -1176,7 +1176,7 @@ void Session::getWindowDimensions(int& x, int& y,
 void Session::updateOptimalWindowDisplayMode()
 {
     SDL_DisplayMode desktopMode, bestMode, mode;
-    int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
+    int displayIndex = SDL_GetDisplayForWindow(m_Window);
 
     // Try the current display mode first. On macOS, this will be the normal
     // scaled desktop resolution setting.
@@ -1259,7 +1259,7 @@ void Session::updateOptimalWindowDisplayMode()
                     bestMode.w, bestMode.h, bestMode.refresh_rate);
     }
 
-    SDL_SetWindowDisplayMode(m_Window, &bestMode);
+    SDL_SetWindowFullscreenMode(m_Window, &bestMode);
 }
 
 void Session::toggleFullscreen()
@@ -1275,10 +1275,10 @@ void Session::toggleFullscreen()
     // On Apple Silicon Macs, the AVSampleBufferDisplayLayer may cause WindowServer
     // to deadlock when transitioning out of fullscreen. Destroy the decoder before
     // exiting fullscreen as a workaround. See issue #973.
-    SDL_AtomicLock(&m_DecoderLock);
+    SDL_LockSpinlock(&m_DecoderLock);
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
-    SDL_AtomicUnlock(&m_DecoderLock);
+    SDL_UnlockSpinlock(&m_DecoderLock);
 #endif
 
     // Actually enter/leave fullscreen
@@ -1528,10 +1528,10 @@ bool Session::reconnectStationConnect()
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
 
     m_InputHandler->raiseAllKeys();
-    SDL_AtomicLock(&m_DecoderLock);
+    SDL_LockSpinlock(&m_DecoderLock);
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
-    SDL_AtomicUnlock(&m_DecoderLock);
+    SDL_UnlockSpinlock(&m_DecoderLock);
     LiStopConnection();
 
     constexpr int MaximumAttempts = 20;
@@ -1591,7 +1591,7 @@ bool Session::reconnectStationConnect()
                             Overlay::OverlayStatusUpdate, false);
 
                 SDL_Event resetEvent = {};
-                resetEvent.type = SDL_RENDER_DEVICE_RESET;
+                resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
                 SDL_PushEvent(&resetEvent);
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "StationConnect reconnect completed on attempt %d",
@@ -1637,7 +1637,7 @@ void Session::flushWindowEvents()
 
     // This event will cause us to set m_FlushingWindowEvents back to false.
     SDL_Event flushEvent = {};
-    flushEvent.type = SDL_USEREVENT;
+    flushEvent.type = SDL_EVENT_USER;
     flushEvent.user.code = SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER;
     SDL_PushEvent(&flushEvent);
 }
@@ -1768,7 +1768,7 @@ void Session::execInternal()
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
 
     // We always want a resizable window with High DPI enabled
-    Uint32 defaultWindowFlags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
+    Uint32 defaultWindowFlags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE;
 
     // We use only the computer name on macOS to match Apple conventions where the
     // app name is featured in the menu bar and the document name is in the title bar.
@@ -1814,8 +1814,8 @@ void Session::execInternal()
         // from borderless mode on Wayland.
         SDL_SetWindowFullscreen(m_Window, 0);
         SDL_RestoreWindow(m_Window);
-        SDL_SetWindowBordered(m_Window, SDL_TRUE);
-        SDL_SetWindowResizable(m_Window, SDL_TRUE);
+        SDL_SetWindowBordered(m_Window, true);
+        SDL_SetWindowResizable(m_Window, true);
     }
 
     // HACK: Remove once proper Dark Mode support lands in SDL
@@ -1885,12 +1885,12 @@ void Session::execInternal()
     bool needsFirstEnterCapture = false;
     bool needsPostDecoderCreationCapture = false;
 
-    // HACK: For Wayland, we wait until we get the first SDL_WINDOWEVENT_ENTER
+    // HACK: For Wayland, we wait until we get the first SDL_EVENT_WINDOW_MOUSE_ENTER
     // event where it seems to work consistently on GNOME. For other platforms,
     // especially where SDL may call SDL_RecreateWindow(), we must only capture
     // after the decoder is created.
     if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
-        // Native Wayland: Capture on SDL_WINDOWEVENT_ENTER
+        // Native Wayland: Capture on SDL_EVENT_WINDOW_MOUSE_ENTER
         needsFirstEnterCapture = true;
     }
     else {
@@ -1918,9 +1918,9 @@ void Session::execInternal()
     // sleep precision and more accurate callback timing.
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
 
-    int currentDisplayIndex = SDL_GetWindowDisplayIndex(m_Window);
+    int currentDisplayIndex = SDL_GetDisplayForWindow(m_Window);
 
-    // Now that we're about to stream, any SDL_QUIT event is expected
+    // Now that we're about to stream, any SDL_EVENT_QUIT event is expected
     // unless it comes from the connection termination callback where
     // (m_UnexpectedTermination is set back to true).
     m_UnexpectedTermination = false;
@@ -1977,12 +1977,12 @@ void Session::execInternal()
         }
 #endif
         switch (event.type) {
-        case SDL_QUIT:
+        case SDL_EVENT_QUIT:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Quit event received");
             goto DispatchDeferredCleanup;
 
-        case SDL_USEREVENT:
+        case SDL_EVENT_USER:
             switch (event.user.code) {
             case SDL_CODE_STATIONCONNECT_RECONNECT:
                 if (!reconnectStationConnect()) {
@@ -2014,51 +2014,51 @@ void Session::execInternal()
 
         case SDL_WINDOWEVENT:
             if (m_StationConnectToolbar &&
-                    event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                    event.window.event == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 m_StationConnectToolbar->notifyWindowChanged();
             }
             // Early handling of some events
             switch (event.window.event) {
-            case SDL_WINDOWEVENT_FOCUS_LOST:
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = true;
                 }
                 m_InputHandler->notifyFocusLost();
                 break;
-            case SDL_WINDOWEVENT_FOCUS_GAINED:
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
                 break;
-            case SDL_WINDOWEVENT_LEAVE:
+            case SDL_EVENT_WINDOW_MOUSE_LEAVE:
                 m_InputHandler->notifyMouseLeave();
                 break;
             }
 
 
-            // Capture the mouse on SDL_WINDOWEVENT_ENTER if needed
-            if (needsFirstEnterCapture && event.window.event == SDL_WINDOWEVENT_ENTER) {
+            // Capture the mouse on SDL_EVENT_WINDOW_MOUSE_ENTER if needed
+            if (needsFirstEnterCapture && event.window.event == SDL_EVENT_WINDOW_MOUSE_ENTER) {
                 m_InputHandler->setCaptureActive(true);
                 needsFirstEnterCapture = false;
             }
 
             // We want to recreate the decoder for resizes (full-screen toggles) and the initial shown event.
-            // We use SDL_WINDOWEVENT_SIZE_CHANGED rather than SDL_WINDOWEVENT_RESIZED because the latter doesn't
+            // We use SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED rather than SDL_EVENT_WINDOW_RESIZED because the latter doesn't
             // seem to fire when switching from windowed to full-screen on X11.
-            if (event.window.event != SDL_WINDOWEVENT_SIZE_CHANGED &&
-                (event.window.event != SDL_WINDOWEVENT_SHOWN || m_VideoDecoder != nullptr)) {
+            if (event.window.event != SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED &&
+                (event.window.event != SDL_EVENT_WINDOW_SHOWN || m_VideoDecoder != nullptr)) {
                 // Check that the window display hasn't changed. If it has, we want
                 // to recreate the decoder to allow it to adapt to the new display.
                 // This will allow Pacer to pull the new display refresh rate.
 #if SDL_VERSION_ATLEAST(2, 0, 18)
                 // On SDL 2.0.18+, there's an event for this specific situation
-                if (event.window.event != SDL_WINDOWEVENT_DISPLAY_CHANGED) {
+                if (event.window.event != SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
                     break;
                 }
 #else
                 // Prior to SDL 2.0.18, we must check the display index for each window event
-                if (SDL_GetWindowDisplayIndex(m_Window) == currentDisplayIndex) {
+                if (SDL_GetDisplayForWindow(m_Window) == currentDisplayIndex) {
                     break;
                 }
 #endif
@@ -2090,14 +2090,14 @@ void Session::execInternal()
                 WINDOW_STATE_CHANGE_INFO windowChangeInfo = {};
                 windowChangeInfo.window = m_Window;
 
-                if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                if (event.window.event == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                     windowChangeInfo.stateChangeFlags |= WINDOW_STATE_CHANGE_SIZE;
 
                     windowChangeInfo.width = event.window.data1;
                     windowChangeInfo.height = event.window.data2;
                 }
 
-                int newDisplayIndex = SDL_GetWindowDisplayIndex(m_Window);
+                int newDisplayIndex = SDL_GetDisplayForWindow(m_Window);
                 if (newDisplayIndex != currentDisplayIndex) {
                     windowChangeInfo.stateChangeFlags |= WINDOW_STATE_CHANGE_DISPLAY;
 
@@ -2136,8 +2136,8 @@ void Session::execInternal()
                         event.window.data2);
 
             // Fall through
-        case SDL_RENDER_DEVICE_RESET:
-        case SDL_RENDER_TARGETS_RESET:
+        case SDL_EVENT_RENDER_DEVICE_RESET:
+        case SDL_EVENT_RENDER_TARGETS_RESET:
 
             if (event.type != SDL_WINDOWEVENT) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -2145,7 +2145,7 @@ void Session::execInternal()
                             event.type);
             }
 
-            SDL_AtomicLock(&m_DecoderLock);
+            SDL_LockSpinlock(&m_DecoderLock);
 
             // Destroy the old decoder
             delete m_VideoDecoder;
@@ -2158,8 +2158,8 @@ void Session::execInternal()
 
             // Update the window display mode based on our current monitor
             // NB: Avoid a useless modeset by only doing this if it changed.
-            if (currentDisplayIndex != SDL_GetWindowDisplayIndex(m_Window)) {
-                currentDisplayIndex = SDL_GetWindowDisplayIndex(m_Window);
+            if (currentDisplayIndex != SDL_GetDisplayForWindow(m_Window)) {
+                currentDisplayIndex = SDL_GetDisplayForWindow(m_Window);
                 updateOptimalWindowDisplayMode();
             }
 
@@ -2167,8 +2167,8 @@ void Session::execInternal()
             // have queued to reset itself (if this reset was the result
             // of state loss).
             SDL_PumpEvents();
-            SDL_FlushEvent(SDL_RENDER_DEVICE_RESET);
-            SDL_FlushEvent(SDL_RENDER_TARGETS_RESET);
+            SDL_FlushEvent(SDL_EVENT_RENDER_DEVICE_RESET);
+            SDL_FlushEvent(SDL_EVENT_RENDER_TARGETS_RESET);
 
             {
                 // If the stream exceeds the display refresh rate (plus some slack),
@@ -2192,7 +2192,7 @@ void Session::execInternal()
                                    false,
                                    s_ActiveSession->m_VideoDecoder,
                                    isIdentityGbrEnabledForFormat(m_ActiveVideoFormat))) {
-                    SDL_AtomicUnlock(&m_DecoderLock);
+                    SDL_UnlockSpinlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");
                     emit displayLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
@@ -2224,15 +2224,15 @@ void Session::execInternal()
             // After a window resize, we need to reset the pointer lock region
             m_InputHandler->updatePointerRegionLock();
 
-            SDL_AtomicUnlock(&m_DecoderLock);
+            SDL_UnlockSpinlock(&m_DecoderLock);
             break;
 
-        case SDL_KEYUP:
-        case SDL_KEYDOWN:
+        case SDL_EVENT_KEY_UP:
+        case SDL_EVENT_KEY_DOWN:
             m_InputHandler->handleKeyEvent(&event.key);
             break;
-        case SDL_MOUSEBUTTONDOWN:
-        case SDL_MOUSEBUTTONUP:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
             if (m_StationConnectToolbar) {
                 const auto action = m_StationConnectToolbar->handleMouseButton(event.button);
                 if (action == StationConnectToolbar::Action::Disconnect) {
@@ -2259,7 +2259,7 @@ void Session::execInternal()
             }
             m_InputHandler->handleMouseButtonEvent(&event.button);
             break;
-        case SDL_MOUSEMOTION:
+        case SDL_EVENT_MOUSE_MOTION:
             if (m_StationConnectToolbar) {
                 // The ordinary input path batches queued motion for efficient
                 // transport. Aggregate it here when the toolbar is present so
@@ -2267,8 +2267,8 @@ void Session::execInternal()
                 if (event.motion.which != SDL_TOUCH_MOUSEID) {
                     SDL_Event nextMotionEvent;
                     while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
-                                          SDL_MOUSEMOTION,
-                                          SDL_MOUSEMOTION) > 0) {
+                                          SDL_EVENT_MOUSE_MOTION,
+                                          SDL_EVENT_MOUSE_MOTION) > 0) {
                         if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
                             event.motion.timestamp =
                                     nextMotionEvent.motion.timestamp;
@@ -2286,7 +2286,7 @@ void Session::execInternal()
             m_InputHandler->handleMouseMotionEvent(
                         &event.motion, !m_StationConnectToolbar);
             break;
-        case SDL_MOUSEWHEEL:
+        case SDL_EVENT_MOUSE_WHEEL:
             if (m_StationConnectToolbar &&
                     m_StationConnectToolbar->handleMouseWheel(event.wheel)) {
                 break;
@@ -2320,10 +2320,10 @@ DispatchDeferredCleanup:
     // Destroy the decoder, since this must be done on the main thread
     // NB: This must happen before LiStopConnection() for pull-based
     // decoders.
-    SDL_AtomicLock(&m_DecoderLock);
+    SDL_LockSpinlock(&m_DecoderLock);
     delete m_VideoDecoder;
     m_VideoDecoder = nullptr;
-    SDL_AtomicUnlock(&m_DecoderLock);
+    SDL_UnlockSpinlock(&m_DecoderLock);
 
     // Propagate state changes from the SDL window back to the Qt window
     //
@@ -2355,7 +2355,7 @@ DispatchDeferredCleanup:
     SDL_DestroyWindow(m_Window);
 
     if (iconSurface != nullptr) {
-        SDL_FreeSurface(iconSurface);
+        SDL_DestroySurface(iconSurface);
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);

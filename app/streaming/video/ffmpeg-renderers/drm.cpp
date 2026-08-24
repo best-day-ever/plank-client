@@ -394,7 +394,7 @@ void DrmRenderer::cleanupRenderContext()
     // If we have a composition surface, unmap it before disabling planes
     if (m_OverlayCompositionSurface) {
         munmap(m_OverlayCompositionSurface->pixels, (uintptr_t)m_OverlayCompositionSurface->userdata);
-        SDL_FreeSurface(m_OverlayCompositionSurface);
+        SDL_DestroySurface(m_OverlayCompositionSurface);
         m_OverlayCompositionSurface = nullptr;
     }
 
@@ -1469,10 +1469,10 @@ void DrmRenderer::blitOverlayToCompositionSurface(Overlay::OverlayType type, SDL
         // Compute the union of the current and previous overlay rects. Our draw operation
         // will need to cover this entire area to ensure the old dirty area is covered.
         SDL_Rect overlayUnionRect;
-        SDL_UnionRect(overlayRect, &m_OverlayRects[type], &overlayUnionRect);
+        SDL_GetRectUnion(overlayRect, &m_OverlayRects[type], &overlayUnionRect);
 
         // If the new overlay completely covers the old overlay, blit it all at once
-        if (SDL_RectEquals(&overlayUnionRect, overlayRect)) {
+        if (SDL_RectsEqual(&overlayUnionRect, overlayRect)) {
             SDL_BlitSurface(newSurface, nullptr, m_OverlayCompositionSurface, overlayRect);
         }
         else {
@@ -1520,7 +1520,7 @@ void DrmRenderer::blitOverlayToCompositionSurface(Overlay::OverlayType type, SDL
     }
     else {
         // Clear the pixels where this overlay was drawn before
-        SDL_FillRect(m_OverlayCompositionSurface, &m_OverlayRects[type], 0);
+        SDL_FillSurfaceRect(m_OverlayCompositionSurface, &m_OverlayRects[type], 0);
 
         // Dirty the modified portion of the plane
         m_PropSetter.damagePlane(m_OverlayPlanes[0], m_OverlayRects[type]);
@@ -1580,7 +1580,7 @@ void DrmRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
         // Try to let the display controller composite for us
         if (!m_OverlayCompositionSurface) {
             if (!uploadSurfaceToFb(newSurface, &dumbBuffer, &fbId)) {
-                SDL_FreeSurface(newSurface);
+                SDL_DestroySurface(newSurface);
                 return;
             }
 
@@ -1625,7 +1625,7 @@ void DrmRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
         memcpy(&m_OverlayRects[type], &overlayRect, sizeof(overlayRect));
 
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
     }
 }
 

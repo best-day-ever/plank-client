@@ -3,7 +3,7 @@
 #include <streaming/streamutils.h>
 #include <utils.h>
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 
 #define BAIL_ON_FAIL(status, something) if ((status) != VDP_STATUS_OK) { \
                                             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, \
@@ -399,7 +399,7 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
     }
 
     if (!overlayEnabled) {
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         return;
     }
 
@@ -418,7 +418,7 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "VdpBitmapSurfaceCreate() failed: %s",
                          m_VdpGetErrorString(status));
-            SDL_FreeSurface(newSurface);
+            SDL_DestroySurface(newSurface);
             return;
         }
 
@@ -431,7 +431,7 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
                          "VdpBitmapSurfacePutBitsNative() failed: %s",
                          m_VdpGetErrorString(status));
             m_VdpBitmapSurfaceDestroy(newBitmapSurface);
-            SDL_FreeSurface(newSurface);
+            SDL_DestroySurface(newSurface);
             return;
         }
 
@@ -459,7 +459,7 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
         overlayRect.y1 = overlayRect.y0 + newSurface->h;
 
         // Surface data is no longer needed
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
 
         SDL_LockMutex(m_OverlayMutex);
         m_OverlaySurface[type] = newBitmapSurface;

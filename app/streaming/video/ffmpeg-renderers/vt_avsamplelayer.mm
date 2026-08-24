@@ -5,7 +5,7 @@
 #include "pacer/pacer.h"
 #undef AVMediaType
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 #include <Limelight.h>
 #include <streaming/session.h>
 
@@ -67,7 +67,7 @@ public:
         }
 
         if (m_VsyncPassed != nullptr) {
-            SDL_DestroyCond(m_VsyncPassed);
+            SDL_DestroyCondition(m_VsyncPassed);
         }
 
         if (m_VsyncMutex != nullptr) {
@@ -122,7 +122,7 @@ public:
         SDL_assert(displayLink == me->m_DisplayLink);
 
         SDL_LockMutex(me->m_VsyncMutex);
-        SDL_CondSignal(me->m_VsyncPassed);
+        SDL_SignalCondition(me->m_VsyncPassed);
         SDL_UnlockMutex(me->m_VsyncMutex);
 
         return kCVReturnSuccess;
@@ -166,7 +166,7 @@ public:
         // The CVDisplayLink callback uses these, so we must initialize them before
         // starting the callbacks.
         m_VsyncMutex = SDL_CreateMutex();
-        m_VsyncPassed = SDL_CreateCond();
+        m_VsyncPassed = SDL_CreateCondition();
 
         status = CVDisplayLinkStart(m_DisplayLink);
         if (status != kCVReturnSuccess) {
@@ -184,7 +184,7 @@ public:
         if (m_DisplayLink != nullptr) {
             // Vsync is enabled, so wait for a swap before returning
             SDL_LockMutex(m_VsyncMutex);
-            if (SDL_CondWaitTimeout(m_VsyncPassed, m_VsyncMutex, 100) == SDL_MUTEX_TIMEDOUT) {
+            if (SDL_WaitConditionTimeout(m_VsyncPassed, m_VsyncMutex, 100) == SDL_MUTEX_TIMEDOUT) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "V-sync wait timed out after 100 ms");
             }
@@ -204,7 +204,7 @@ public:
 
             // Trigger the main thread to recreate the decoder
             SDL_Event event;
-            event.type = SDL_RENDER_DEVICE_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -489,8 +489,8 @@ private:
     CVDisplayLinkRef m_DisplayLink;
     int m_LastColorSpace;
     CGColorSpaceRef m_ColorSpace;
-    SDL_mutex* m_VsyncMutex;
-    SDL_cond* m_VsyncPassed;
+    SDL_Mutex* m_VsyncMutex;
+    SDL_Condition* m_VsyncPassed;
     bool m_DirectRendering;
 };
 

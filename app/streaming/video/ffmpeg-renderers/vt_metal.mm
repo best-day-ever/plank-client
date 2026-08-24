@@ -5,7 +5,7 @@
 #include "pacer/pacer.h"
 #undef AVMediaType
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 #include <Limelight.h>
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
@@ -63,7 +63,7 @@ public:
           m_MetalDisplayLink(nullptr),
           m_LatestUnrenderedFrame(nullptr),
           m_FrameLock(SDL_CreateMutex()),
-          m_FrameReady(SDL_CreateCond()),
+          m_FrameReady(SDL_CreateCondition()),
           m_TextureCache(nullptr),
           m_CscParamsBuffer(nullptr),
           m_VideoVertexBuffer(nullptr),
@@ -87,7 +87,7 @@ public:
         // Stop the display link and free associated state
         stopDisplayLink();
         av_frame_free(&m_LatestUnrenderedFrame);
-        SDL_DestroyCond(m_FrameReady);
+        SDL_DestroyCondition(m_FrameReady);
         SDL_DestroyMutex(m_FrameLock);
 
         if (m_HwContext != nullptr) {
@@ -522,9 +522,9 @@ public:
             id<MTLTexture> overlayTexture = nullptr;
 
             // Try to acquire a reference on the overlay texture
-            SDL_AtomicLock(&m_OverlayLock);
+            SDL_LockSpinlock(&m_OverlayLock);
             overlayTexture = [m_OverlayTextures[i] retain];
-            SDL_AtomicUnlock(&m_OverlayLock);
+            SDL_UnlockSpinlock(&m_OverlayLock);
 
             if (overlayTexture) {
                 SDL_FRect renderRect = {};
@@ -579,7 +579,7 @@ public:
         if (!updateColorSpaceForFrame(frame)) {
             // Trigger the main thread to recreate the decoder
             SDL_Event event;
-            event.type = SDL_RENDER_DEVICE_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -588,7 +588,7 @@ public:
         if (!updateVideoRegionSizeForFrame(frame)) {
             // Trigger the main thread to recreate the decoder
             SDL_Event event;
-            event.type = SDL_RENDER_DEVICE_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -610,7 +610,7 @@ public:
             }
             m_LatestUnrenderedFrame = newFrame;
             SDL_UnlockMutex(m_FrameLock);
-            SDL_CondSignal(m_FrameReady);
+            SDL_SignalCondition(m_FrameReady);
 
             av_frame_free(&oldFrame);
         }
@@ -754,16 +754,16 @@ public:
             return;
         }
 
-        SDL_AtomicLock(&m_OverlayLock);
+        SDL_LockSpinlock(&m_OverlayLock);
         auto oldTexture = m_OverlayTextures[type];
         m_OverlayTextures[type] = nullptr;
-        SDL_AtomicUnlock(&m_OverlayLock);
+        SDL_UnlockSpinlock(&m_OverlayLock);
 
         [oldTexture release];
 
         // If the overlay is disabled, we're done
         if (!overlayEnabled) {
-            SDL_FreeSurface(newSurface);
+            SDL_DestroySurface(newSurface);
             return;
         }
 
@@ -786,12 +786,12 @@ public:
                       bytesPerRow:newSurface->pitch];
 
         // The surface is no longer required
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         newSurface = nullptr;
 
-        SDL_AtomicLock(&m_OverlayLock);
+        SDL_LockSpinlock(&m_OverlayLock);
         m_OverlayTextures[type] = newTexture;
-        SDL_AtomicUnlock(&m_OverlayLock);
+        SDL_UnlockSpinlock(&m_OverlayLock);
     }}
 
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override
@@ -923,7 +923,7 @@ public:
 
         // Wait for a new frame to be ready
         SDL_LockMutex(m_FrameLock);
-        if (m_LatestUnrenderedFrame != nullptr || SDL_CondWaitTimeout(m_FrameReady, m_FrameLock, waitTimeMs) == 0) {
+        if (m_LatestUnrenderedFrame != nullptr || SDL_WaitConditionTimeout(m_FrameReady, m_FrameLock, waitTimeMs) == 0) {
             frame = m_LatestUnrenderedFrame;
             m_LatestUnrenderedFrame = nullptr;
         }
@@ -944,8 +944,8 @@ private:
     CAMetalDisplayLink* m_MetalDisplayLink API_AVAILABLE(macos(14.0));
     CAFrameRateRange m_FrameRateRange;
     AVFrame* m_LatestUnrenderedFrame;
-    SDL_mutex* m_FrameLock;
-    SDL_cond* m_FrameReady;
+    SDL_Mutex* m_FrameLock;
+    SDL_Condition* m_FrameReady;
     CVMetalTextureCacheRef m_TextureCache;
     id<MTLBuffer> m_CscParamsBuffer;
     id<MTLBuffer> m_VideoVertexBuffer;

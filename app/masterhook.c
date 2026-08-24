@@ -17,7 +17,7 @@
 // redirection that happens when _FILE_OFFSET_BITS=64!
 // See masterhook_internal.c for details.
 
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <errno.h>

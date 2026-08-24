@@ -1,7 +1,7 @@
 #include "streaming/session.h"
 
 #include <Limelight.h>
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 
 #define VK_0 0x30
 #define VK_A 0x41
@@ -22,7 +22,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 
         // Push a quit event to the main loop
         SDL_Event event;
-        event.type = SDL_QUIT;
+        event.type = SDL_EVENT_QUIT;
         event.quit.timestamp = SDL_GetTicks();
         SDL_PushEvent(&event);
         break;
@@ -128,7 +128,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 
         // Push a quit event to the main loop
         SDL_Event quitExitEvent;
-        quitExitEvent.type = SDL_QUIT;
+        quitExitEvent.type = SDL_EVENT_QUIT;
         quitExitEvent.quit.timestamp = SDL_GetTicks();
         SDL_PushEvent(&quitExitEvent);
         break;
@@ -167,9 +167,9 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
 
     // Check for our special key combos
     if ((event->state == SDL_PRESSED) &&
-            (event->keysym.mod & KMOD_CTRL) &&
-            (event->keysym.mod & KMOD_ALT) &&
-            (event->keysym.mod & KMOD_SHIFT)) {
+            (event->keysym.mod & SDL_KMOD_CTRL) &&
+            (event->keysym.mod & SDL_KMOD_ALT) &&
+            (event->keysym.mod & SDL_KMOD_SHIFT)) {
         // First we test the SDLK combos for matches,
         // that way we ensure that latin keyboard users
         // can match to the key they see on their keyboards.
@@ -198,16 +198,16 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
 
     // Set modifier flags
     modifiers = 0;
-    if (event->keysym.mod & KMOD_CTRL) {
+    if (event->keysym.mod & SDL_KMOD_CTRL) {
         modifiers |= MODIFIER_CTRL;
     }
-    if (event->keysym.mod & KMOD_ALT) {
+    if (event->keysym.mod & SDL_KMOD_ALT) {
         modifiers |= MODIFIER_ALT;
     }
-    if (event->keysym.mod & KMOD_SHIFT) {
+    if (event->keysym.mod & SDL_KMOD_SHIFT) {
         modifiers |= MODIFIER_SHIFT;
     }
-    if (event->keysym.mod & KMOD_GUI) {
+    if (event->keysym.mod & SDL_KMOD_GUI) {
         if (isSystemKeyCaptureActive()) {
             modifiers |= MODIFIER_META;
         }

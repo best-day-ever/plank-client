@@ -15,7 +15,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 #endif
 
 #ifdef Q_OS_LINUX
@@ -158,7 +158,7 @@ void StreamUtils::screenSpaceToNormalizedDeviceCoords(SDL_Rect* src, SDL_FRect* 
 
 int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
 {
-    int displayIndex = SDL_GetWindowDisplayIndex(window);
+    int displayIndex = SDL_GetDisplayForWindow(window);
     if (displayIndex < 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to get current display: %s",
@@ -171,9 +171,9 @@ int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
     SDL_DisplayMode mode;
     if ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN) {
         // Use the window display mode for full-screen exclusive mode
-        if (SDL_GetWindowDisplayMode(window, &mode) != 0) {
+        if (SDL_GetWindowFullscreenMode(window, &mode) != 0) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_GetWindowDisplayMode() failed: %s",
+                         "SDL_GetWindowFullscreenMode() failed: %s",
                          SDL_GetError());
 
             // Assume 60 Hz

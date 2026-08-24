@@ -1,7 +1,7 @@
 #include "input.h"
 
 #include <Limelight.h>
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 #include "streaming/streamutils.h"
 
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
@@ -78,7 +78,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     SDL_Event nextEvent;
     while (batchPendingEvents &&
            SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
-                          SDL_MOUSEMOTION, SDL_MOUSEMOTION) > 0) {
+                          SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
         event = &nextEvent.motion;
 
         // Ignore synthetic mouse events
@@ -122,7 +122,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     if (buttonState == 0) {
         if (m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
             if (m_NeedsManualCaptureOnLeave) {
-                SDL_CaptureMouse(SDL_FALSE);
+                SDL_CaptureMouse(false);
             }
             m_PendingMouseButtonsAllUpOnVideoRegionLeave = false;
         }
@@ -257,9 +257,9 @@ void SdlInputHandler::updatePointerRegionLock()
         SDL_SetWindowMouseRect(m_Window, &dst);
 #elif SDL_VERSION_ATLEAST(2, 0, 15)
         // SDL 2.0.15 only lets us lock the cursor to the whole window
-        SDL_SetWindowMouseGrab(m_Window, SDL_TRUE);
+        SDL_SetWindowMouseGrab(m_Window, true);
 #else
-        SDL_SetWindowGrab(m_Window, SDL_TRUE);
+        SDL_SetWindowGrab(m_Window, true);
 #endif
     }
     else {
@@ -267,9 +267,9 @@ void SdlInputHandler::updatePointerRegionLock()
 #if SDL_VERSION_ATLEAST(2, 0, 18)
         SDL_SetWindowMouseRect(m_Window, nullptr);
 #elif SDL_VERSION_ATLEAST(2, 0, 15)
-        SDL_SetWindowMouseGrab(m_Window, SDL_FALSE);
+        SDL_SetWindowMouseGrab(m_Window, false);
 #else
-        SDL_SetWindowGrab(m_Window, SDL_FALSE);
+        SDL_SetWindowGrab(m_Window, false);
 #endif
     }
 }

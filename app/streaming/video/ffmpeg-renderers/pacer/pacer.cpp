@@ -13,7 +13,7 @@
 #include "waylandvsyncsource.h"
 #endif
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 #include <algorithm>
 
 // Limit the number of queued frames to prevent excessive memory consumption
@@ -158,9 +158,9 @@ int Pacer::vsyncThread(void *context)
     Pacer* me = reinterpret_cast<Pacer*>(context);
 
 #if SDL_VERSION_ATLEAST(2, 0, 9)
-    SDL_SetThreadPriority(SDL_THREAD_PRIORITY_TIME_CRITICAL);
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_TIME_CRITICAL);
 #else
-    SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH);
+    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH);
 #endif
 
     bool async = me->m_VsyncSource->isAsync();
@@ -190,7 +190,7 @@ int Pacer::renderThread(void* context)
 {
     Pacer* me = reinterpret_cast<Pacer*>(context);
 
-    if (SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH) < 0) {
+    if (SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH) < 0) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Unable to set render thread to high priority: %s",
                     SDL_GetError());
@@ -242,7 +242,7 @@ void Pacer::enqueueFrameForRenderingAndUnlock(AVFrame *frame)
         SDL_Event event;
 
         // For main thread rendering, we'll push an event to trigger a callback
-        event.type = SDL_USEREVENT;
+        event.type = SDL_EVENT_USER;
         event.user.code = SDL_CODE_FRAME_READY;
         SDL_PushEvent(&event);
     }

@@ -3,7 +3,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
 
-#include "SDL_compat.h"
+#include <SDL3/SDL.h>
 
 #ifdef HAVE_LIBINPUT_TABLET
 #include <memory>
