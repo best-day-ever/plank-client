@@ -71,6 +71,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     nullptr,
     Session::clRawHidControl,
     Session::clVideoBitrateApplied,
+    Session::clVideoPacketLossUpdate,
 };
 
 Session* Session::s_ActiveSession;
@@ -256,6 +257,17 @@ void Session::clVideoBitrateApplied(
     event.type = SDL_USEREVENT;
     event.user.code = SDL_CODE_STATIONCONNECT_BITRATE_APPLIED;
     SDL_PushEvent(&event);
+}
+
+void Session::clVideoPacketLossUpdate(float packetLossPercent)
+{
+    if (s_ActiveSession == nullptr) {
+        return;
+    }
+
+    s_ActiveSession->m_CurrentVideoPacketLossPercent.store(
+                qBound(0.0f, packetLossPercent, 100.0f),
+                std::memory_order_relaxed);
 }
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
@@ -550,7 +562,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("STATIONCONNECT_AV_SYNC_TELEMETRY") > 0),
       m_LastAudioTelemetryTime(0),
       m_CurrentRenderedFps(0.0f),
-      m_CurrentVideoMbps(0.0f)
+      m_CurrentVideoMbps(0.0f),
+      m_CurrentVideoPacketLossPercent(-1.0f)
 {
     if (m_Computer->stationConnectAuthentication) {
         if (m_ComputerManager != nullptr) {
@@ -1927,7 +1940,9 @@ void Session::execInternal()
         if (m_StationConnectToolbar) {
             m_StationConnectToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
-                        m_CurrentVideoMbps.load(std::memory_order_relaxed));
+                        m_CurrentVideoMbps.load(std::memory_order_relaxed),
+                        m_CurrentVideoPacketLossPercent.load(
+                            std::memory_order_relaxed));
             m_StationConnectToolbar->update(SDL_GetTicks());
         }
 #if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(STEAM_LINK)

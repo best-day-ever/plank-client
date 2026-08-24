@@ -26,7 +26,7 @@ public:
                           StreamingPreferences& preferences);
     ~StationConnectToolbar();
 
-    void setRenderedStats(float fps, float videoMbps);
+    void setRenderedStats(float fps, float videoMbps, float packetLossPercent);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
     void update(Uint32 now);
     void notifyWindowChanged();
@@ -81,8 +81,10 @@ private:
     int m_AppliedPeakKbps;
     float m_RenderedFps;
     float m_VideoMbps;
+    float m_PacketLossPercent;
     float m_LastDrawnFps;
     float m_LastDrawnVideoMbps;
+    float m_LastDrawnPacketLossPercent;
     Uint32 m_HideDeadline;
     Uint32 m_LastBitrateSendTime;
     Uint32 m_LastBitrateChangeTime;

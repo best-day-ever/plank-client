@@ -31,6 +31,27 @@ constexpr int BitrateStepKbps = 500;
 constexpr qreal WindowGlyphScale = 0.85;
 constexpr qreal WindowButtonSize = 28.0 * WindowGlyphScale;
 constexpr qreal WindowButtonRadius = 5.0 * WindowGlyphScale;
+
+QColor interpolateColor(const QColor& start, const QColor& end, qreal fraction)
+{
+    fraction = qBound(0.0, fraction, 1.0);
+    return QColor(qRound(start.red() + (end.red() - start.red()) * fraction),
+                  qRound(start.green() + (end.green() - start.green()) * fraction),
+                  qRound(start.blue() + (end.blue() - start.blue()) * fraction));
+}
+
+QColor packetLossColor(float packetLossPercent)
+{
+    const QColor blue(52, 132, 228);
+    const QColor green(52, 199, 110);
+    const QColor red(239, 88, 88);
+    const qreal clampedLoss = qBound(0.0, qreal(packetLossPercent), 10.0);
+
+    if (clampedLoss <= 5.0) {
+        return interpolateColor(blue, green, clampedLoss / 5.0);
+    }
+    return interpolateColor(green, red, (clampedLoss - 5.0) / 5.0);
+}
 }
 
 StationConnectToolbar::StationConnectToolbar(
@@ -68,8 +89,10 @@ StationConnectToolbar::StationConnectToolbar(
       m_AppliedPeakKbps(-1),
       m_RenderedFps(0.0f),
       m_VideoMbps(0.0f),
+      m_PacketLossPercent(-1.0f),
       m_LastDrawnFps(-1.0f),
       m_LastDrawnVideoMbps(-1.0f),
+      m_LastDrawnPacketLossPercent(-2.0f),
       m_HideDeadline(0),
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
@@ -96,10 +119,13 @@ StationConnectToolbar::~StationConnectToolbar()
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
 }
 
-void StationConnectToolbar::setRenderedStats(float fps, float videoMbps)
+void StationConnectToolbar::setRenderedStats(
+        float fps, float videoMbps, float packetLossPercent)
 {
     m_RenderedFps = std::max(0.0f, fps);
     m_VideoMbps = std::max(0.0f, videoMbps);
+    m_PacketLossPercent = packetLossPercent < 0.0f ?
+                -1.0f : qBound(0.0f, packetLossPercent, 100.0f);
 }
 
 void StationConnectToolbar::setAppliedBitrate(
@@ -147,7 +173,9 @@ void StationConnectToolbar::update(Uint32 now)
 
     if (m_Visible && SDL_TICKS_PASSED(now, m_LastRedrawTime + RedrawIntervalMs) &&
             (std::fabs(m_RenderedFps - m_LastDrawnFps) >= 0.05f ||
-             std::fabs(m_VideoMbps - m_LastDrawnVideoMbps) >= 0.05f)) {
+             std::fabs(m_VideoMbps - m_LastDrawnVideoMbps) >= 0.05f ||
+             std::fabs(m_PacketLossPercent -
+                       m_LastDrawnPacketLossPercent) >= 0.05f)) {
         redraw();
     }
 
@@ -512,18 +540,36 @@ void StationConnectToolbar::redraw()
 
     painter.setFont(labelFont);
     painter.setPen(QColor(151, 161, 174));
-    painter.drawText(QRect(107, 5, 72, 12), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(104, 5, 65, 12), Qt::AlignLeft | Qt::AlignVCenter,
                      "Video Mbps");
     painter.setFont(valueFont);
     painter.setPen(QColor(246, 248, 250));
-    painter.drawText(QRect(107, 16, 72, 17), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(104, 16, 65, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      QString::number(m_VideoMbps, 'f', 1));
+
+    painter.setFont(labelFont);
+    painter.setPen(QColor(151, 161, 174));
+    painter.drawText(QRect(172, 5, 52, 12), Qt::AlignLeft | Qt::AlignVCenter,
+                     "Loss");
+    const QColor lossColor = m_PacketLossPercent < 0.0f ?
+                QColor(112, 120, 130) : packetLossColor(m_PacketLossPercent);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(lossColor);
+    painter.drawEllipse(QPointF(176, 24.5), 3.5, 3.5);
+    QFont lossFont = valueFont;
+    lossFont.setPixelSize(12);
+    painter.setFont(lossFont);
+    painter.setPen(lossColor);
+    painter.drawText(QRect(183, 16, 44, 17), Qt::AlignLeft | Qt::AlignVCenter,
+                     m_PacketLossPercent < 0.0f ?
+                         QString("--") :
+                         QString("%1%").arg(m_PacketLossPercent, 0, 'f', 1));
 
     QFont targetFont = labelFont;
     targetFont.setPixelSize(12);
     painter.setFont(targetFont);
     painter.setPen(m_BitrateSupported ? QColor(235, 239, 244) : QColor(135, 143, 153));
-    painter.drawText(QRect(184, 3, 220, 17), Qt::AlignLeft | Qt::AlignVCenter,
+    painter.drawText(QRect(229, 3, 190, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      QString("Encoder target  %1 Mbps").arg(m_BitrateKbps / 1000.0, 0, 'f', 1));
 
     const int trackLeft = sliderLeft() - toolbarLeft();
@@ -629,13 +675,14 @@ void StationConnectToolbar::redraw()
         hintFont.setPixelSize(7);
         painter.setFont(hintFont);
         painter.setPen(QColor(183, 151, 92));
-        painter.drawText(QRect(184, 28, 187, 9), Qt::AlignLeft | Qt::AlignVCenter,
+        painter.drawText(QRect(229, 28, 187, 9), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
     }
 
     painter.end();
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
+    m_LastDrawnPacketLossPercent = m_PacketLossPercent;
     m_LastRedrawTime = SDL_GetTicks();
     const int availableWidth = std::max(0, m_WindowWidth - m_Width);
     const float horizontalPosition = availableWidth > 0 ?
@@ -742,7 +789,7 @@ int StationConnectToolbar::toolbarLeft() const
 
 int StationConnectToolbar::sliderLeft() const
 {
-    return toolbarLeft() + 184;
+    return toolbarLeft() + 229;
 }
 
 int StationConnectToolbar::sliderRight() const
