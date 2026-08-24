@@ -2242,6 +2242,13 @@ void Session::execInternal()
                                 "StationConnect toolbar disconnect requested");
                     goto DispatchDeferredCleanup;
                 }
+                if (action == StationConnectToolbar::Action::ToggleFullscreen) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "StationConnect toolbar fullscreen toggle requested");
+                    toggleFullscreen();
+                    m_StationConnectToolbar->notifyWindowChanged();
+                    break;
+                }
                 if (action == StationConnectToolbar::Action::Minimize) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "StationConnect toolbar minimize requested");

@@ -15,6 +15,7 @@ public:
     enum class Action {
         None,
         Consumed,
+        ToggleFullscreen,
         Minimize,
         Disconnect,
     };
@@ -48,6 +49,7 @@ private:
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
     bool pinContains(int x, int y) const;
+    bool fullscreenContains(int x, int y) const;
     bool minimizeContains(int x, int y) const;
     bool disconnectContains(int x, int y) const;
     int toolbarLeft() const;

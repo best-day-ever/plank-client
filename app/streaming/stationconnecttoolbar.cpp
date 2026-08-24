@@ -16,7 +16,7 @@
 #include <cmath>
 
 namespace {
-constexpr int ToolbarPreferredWidth = 506;
+constexpr int ToolbarPreferredWidth = 539;
 constexpr int ToolbarHeight = 43;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
@@ -318,6 +318,9 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
             m_Preferences.save();
             m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
             redraw();
+        } else if (fullscreenContains(pointerX, pointerY)) {
+            endLocalPointerInteraction();
+            return Action::ToggleFullscreen;
         } else if (minimizeContains(pointerX, pointerY)) {
             endLocalPointerInteraction();
             return Action::Minimize;
@@ -540,6 +543,43 @@ void StationConnectToolbar::redraw()
     painter.setBrush(m_BitrateSupported ? QColor(243, 246, 250) : QColor(112, 120, 130));
     painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
 
+    const QPointF fullscreenCenter(m_Width - 88.0, 19.0);
+    const QRectF fullscreenRect(fullscreenCenter.x() - WindowButtonSize / 2.0,
+                                fullscreenCenter.y() - WindowButtonSize / 2.0,
+                                WindowButtonSize,
+                                WindowButtonSize);
+    const bool fullscreenHovered = m_LocalPointerInteraction &&
+                                   fullscreenContains(m_PointerX, m_PointerY);
+    painter.setPen(QPen(QColor(104, 116, 131), 1));
+    painter.setBrush(fullscreenHovered ? QColor(68, 78, 90, 230) :
+                                        QColor(48, 57, 68, 210));
+    painter.drawRoundedRect(fullscreenRect,
+                            WindowButtonRadius,
+                            WindowButtonRadius);
+
+    // Four corners point outward when entering fullscreen and inward when the
+    // next click will restore the decorated window.
+    const bool isFullscreen =
+            (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
+    const qreal outer = 6.0 * WindowGlyphScale;
+    const qreal inner = 2.0 * WindowGlyphScale;
+    const qreal cornerDistance = isFullscreen ? inner : outer;
+    const qreal armLength = outer - inner;
+    painter.setPen(QPen(QColor(226, 232, 239), 1.4,
+                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    for (const qreal sx : {-1.0, 1.0}) {
+        for (const qreal sy : {-1.0, 1.0}) {
+            const QPointF corner = fullscreenCenter +
+                    QPointF(sx * cornerDistance, sy * cornerDistance);
+            painter.drawLine(corner,
+                             corner + QPointF((isFullscreen ? sx : -sx) *
+                                              armLength, 0));
+            painter.drawLine(corner,
+                             corner + QPointF(0, (isFullscreen ? sy : -sy) *
+                                              armLength));
+        }
+    }
+
     const QPointF minimizeCenter(m_Width - 55.0, 19.0);
     const QRectF minimizeRect(minimizeCenter.x() - WindowButtonSize / 2.0,
                               minimizeCenter.y() - WindowButtonSize / 2.0,
@@ -683,6 +723,12 @@ bool StationConnectToolbar::minimizeContains(int x, int y) const
            x <= toolbarLeft() + m_Width - 41 && y >= 5 && y <= 33;
 }
 
+bool StationConnectToolbar::fullscreenContains(int x, int y) const
+{
+    return x >= toolbarLeft() + m_Width - 102 &&
+           x <= toolbarLeft() + m_Width - 74 && y >= 5 && y <= 33;
+}
+
 bool StationConnectToolbar::disconnectContains(int x, int y) const
 {
     return x >= toolbarLeft() + m_Width - 36 &&
@@ -701,5 +747,5 @@ int StationConnectToolbar::sliderLeft() const
 
 int StationConnectToolbar::sliderRight() const
 {
-    return toolbarLeft() + std::max(191, m_Width - 80);
+    return toolbarLeft() + std::max(191, m_Width - 113);
 }
