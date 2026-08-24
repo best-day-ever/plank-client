@@ -570,9 +570,11 @@ Session::Session(NvComputer* computer, NvApp& app,
         m_Preferences->fps = 60;
         m_Preferences->identityGbrBitDepth = 10;
         m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
-        // Probe hardware first, then fall back to FFmpeg software decoding when
-        // the client GPU cannot decode H.264 High 10 4:4:4 Predictive.
-        m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_AUTO;
+        // Intel's hardware path cannot decode the qualified H.264 High 10
+        // 4:4:4 identity profile. Keep StationConnect on the proven FFmpeg
+        // software path instead of allowing automatic selection to downgrade
+        // the stream to an 8-bit profile.
+        m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;
     }
 }
 
@@ -728,14 +730,12 @@ bool Session::initialize()
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // StationConnect is an SDR 4:4:4 product. Only advertise codec profiles
-    // that preserve full chroma; 4:2:0 is not a quality fallback.
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH10_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT10_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_AV1_HIGH8_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H265_REXT8_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH10_444);
-    m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH8_444);
+    // StationConnect has one qualified identity profile. Do not silently
+    // downgrade to 8-bit or 4:2:0 when decoder probing fails.
+    if (m_Preferences->identityGbrBitDepth == 10 &&
+            isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H264_HIGH10_444)) {
+        m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH10_444);
+    }
 
     switch (m_Preferences->videoCodecConfig)
     {
@@ -796,23 +796,6 @@ bool Session::initialize()
     }
 
     SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_YUV444) == 0);
-
-    // Identity GBR carries SDR source values losslessly in 10-bit 4:4:4 streams.
-    // Keep the StationConnect H.264 and HEVC identity modes while excluding
-    // non-identity 10-bit profiles, which would represent HDR content.
-    const bool h264Identity10 = m_Preferences->identityGbrBitDepth == 10 &&
-                                isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H264_HIGH10_444) &&
-                                m_SupportedVideoFormats.contains(VIDEO_FORMAT_H264_HIGH10_444);
-    const bool hevcIdentity10 = m_Preferences->identityGbrBitDepth == 10 &&
-                                isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444) &&
-                                m_SupportedVideoFormats.contains(VIDEO_FORMAT_H265_REXT10_444);
-    m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_10BIT);
-    if (hevcIdentity10) {
-        m_SupportedVideoFormats.prepend(VIDEO_FORMAT_H265_REXT10_444);
-    }
-    if (h264Identity10) {
-        m_SupportedVideoFormats.prepend(VIDEO_FORMAT_H264_HIGH10_444);
-    }
 
 #if !SDL_VERSION_ATLEAST(2, 0, 11)
     // HACK: Using a full-screen window breaks mouse capture on the Pi's LXDE
