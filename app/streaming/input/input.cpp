@@ -113,7 +113,9 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                     "Normalized Wacom capture disabled for external raw-HID qualification");
     }
-    else if ((LiGetHostFeatureFlags() & LI_FF_RAW_HID_TABLET) != 0) {
+    else if ((LiGetHostFeatureFlags() &
+              (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
+             (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
         m_LinuxRawWacomInput.reset(new LinuxRawWacomInput());
         m_LinuxRawWacomInput->setActive(
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);

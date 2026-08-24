@@ -129,7 +129,7 @@ void LinuxRawWacomInput::setActive(bool active)
     if (!active) {
         m_Active.store(false);
         std::lock_guard<std::recursive_mutex> lock(m_Mutex);
-        release(true);
+        suspendForFocusLoss();
         return;
     }
 
@@ -159,7 +159,7 @@ void LinuxRawWacomInput::run()
             {
                 std::lock_guard<std::recursive_mutex> lock(m_Mutex);
                 if (!m_Interfaces.empty()) {
-                    release(true);
+                    suspendForFocusLoss();
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -195,8 +195,7 @@ void LinuxRawWacomInput::run()
 
     // Normal stream teardown may be followed by a resume into the same host
     // application. Release the physical tablet locally, but let the host keep
-    // its stable UHID/XInput endpoints. Explicit focus loss still sends
-    // DETACH through setActive(false).
+    // its stable UHID/XInput endpoints.
     release(false);
 }
 
@@ -544,6 +543,21 @@ void LinuxRawWacomInput::setGrabbed(bool grabbed)
                         grabbed ? "grab" : "release", std::strerror(errno));
         }
     }
+}
+
+void LinuxRawWacomInput::suspendForFocusLoss()
+{
+    if (m_AttachPending || m_Attached) {
+        if (sendFrame(SC_RAW_HID_SUSPEND, 0, 0, nullptr, 0)) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                        "Suspended exact Wacom forwarding while preserving host endpoints");
+        }
+        else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                        "Unable to suspend exact Wacom forwarding cleanly");
+        }
+    }
+    release(false);
 }
 
 void LinuxRawWacomInput::release(bool notifyHost)
