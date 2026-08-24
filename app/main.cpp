@@ -81,8 +81,9 @@ static QRegularExpression k_RikeyRegex("&rikey=\\w+");
 static QRegularExpression k_RikeyIdRegex("&rikeyid=[\\d-]+");
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
-static const uint64_t k_MaxLogSizeBytes = 10 * 1024 * 1024;
-static QAtomicInteger<uint64_t> s_LogBytesWritten = 0;
+#define MAX_LOG_SIZE_BYTES (10 * 1024 * 1024)
+static int s_LogBytesWritten = 0;
+static bool s_LogLimitReached = false;
 static QFile* s_LoggerFile;
 static QTextStream s_LoggerFileStream;
 #endif
@@ -116,6 +117,8 @@ private:
 
 void logToLoggerStream(QString& message)
 {
+    QMutexLocker locker(&s_SyncLoggerMutex);
+
 #if defined(QT_DEBUG) && defined(Q_OS_WIN32)
     // Output log messages to a debugger if attached
     if (IsDebuggerPresent()) {
