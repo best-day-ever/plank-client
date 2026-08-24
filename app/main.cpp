@@ -499,14 +499,7 @@ int main(int argc, char *argv[])
     s_LoggerTime.start();
 
     // Register our logger with all libraries
-#if SDL_VERSION_ATLEAST(3, 0, 0)
     SDL_SetLogOutputFunction(sdlLogToDiskHandler, nullptr);
-#else
-    SDL_LogOutputFunction oldSdlLogFn;
-    void* oldSdlLogUserdata;
-    SDL_GetLogOutputFunction(&oldSdlLogFn, &oldSdlLogUserdata);
-    SDL_SetLogOutputFunction(sdlLogToDiskHandler, nullptr);
-#endif
     qInstallMessageHandler(qtLogToDiskHandler);
 #ifdef HAVE_FFMPEG
     av_log_set_callback(ffmpegLogToDiskHandler);
@@ -728,9 +721,8 @@ int main(int argc, char *argv[])
     // the mouse motion exactly how it was given to us.
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
 
-    // Set our app name for SDL to use with PulseAudio and PipeWire. This matches what we
-    // provide as our app name to libsoundio too. On SDL 2.0.18+, SDL_APP_NAME is also used
-    // for screensaver inhibitor reporting.
+    // Set our app name for SDL's native PipeWire stream and screensaver
+    // inhibitor reporting.
     SDL_SetHint("SDL_AUDIO_DEVICE_APP_NAME", "StationConnect");
     SDL_SetHint("SDL_APP_NAME", "StationConnect");
 
@@ -908,17 +900,6 @@ int main(int argc, char *argv[])
 
     // Keep the system cursor out of the full-screen UI on Steam Link.
     QCursor().setPos(0xFFFF, 0xFFFF);
-#elif !SDL_VERSION_ATLEAST(2, 0, 11) && defined(Q_OS_LINUX) && (defined(__arm__) || defined(__aarch64__))
-    if (qgetenv("SDL_VIDEO_GL_DRIVER").isEmpty() && QGuiApplication::platformName() == "eglfs") {
-        // Look for Raspberry Pi GLES libraries. SDL 2.0.10 and earlier needs some help finding
-        // the correct libraries for the KMSDRM backend if not compiled with the RPI backend enabled.
-        if (SDL_LoadObject("libbrcmGLESv2.so") != nullptr) {
-            qputenv("SDL_VIDEO_GL_DRIVER", "libbrcmGLESv2.so");
-        }
-        else if (SDL_LoadObject("/opt/vc/lib/libbrcmGLESv2.so") != nullptr) {
-            qputenv("SDL_VIDEO_GL_DRIVER", "/opt/vc/lib/libbrcmGLESv2.so");
-        }
-    }
 #endif
 
 #ifndef Q_OS_DARWIN
@@ -1025,11 +1006,7 @@ int main(int argc, char *argv[])
     QThreadPool::globalInstance()->waitForDone(30000);
 
     // Restore the default logger for all libraries before shutting down ours
-#if SDL_VERSION_ATLEAST(3, 0, 0)
     SDL_SetLogOutputFunction(SDL_GetDefaultLogOutputFunction(), nullptr);
-#else
-    SDL_SetLogOutputFunction(oldSdlLogFn, oldSdlLogUserdata);
-#endif
     qInstallMessageHandler(nullptr);
 #ifdef HAVE_FFMPEG
     av_log_set_callback(av_log_default_callback);

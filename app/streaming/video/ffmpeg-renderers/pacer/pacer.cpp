@@ -157,11 +157,7 @@ int Pacer::vsyncThread(void *context)
 {
     Pacer* me = reinterpret_cast<Pacer*>(context);
 
-#if SDL_VERSION_ATLEAST(2, 0, 9)
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_TIME_CRITICAL);
-#else
-    SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH);
-#endif
 
     bool async = me->m_VsyncSource->isAsync();
     while (!me->m_Stopping) {

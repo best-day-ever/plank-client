@@ -46,15 +46,22 @@ ApplicationWindow {
 
     }
   
-    Text {
-        id: tooltipTextLayoutHelper
+    // ToolTip is an attached property and must be hosted on an Item rather
+    // than directly on ApplicationWindow under Qt 6.10.
+    Item {
         visible: false
-        font: ToolTip.toolTip.font
-        text: ToolTip.toolTip.text
-    }
+        width: 0
+        height: 0
 
-    // Keep long tooltips readable without attaching ToolTip to a non-Item.
-    ToolTip.toolTip.contentWidth: Math.min(tooltipTextLayoutHelper.width, 400)
+        Text {
+            id: tooltipTextLayoutHelper
+            visible: false
+            font: ToolTip.toolTip.font
+            text: ToolTip.toolTip.text
+        }
+
+        ToolTip.toolTip.contentWidth: Math.min(tooltipTextLayoutHelper.width, 400)
+    }
 
     function goBack() {
         if (clearOnBack) {

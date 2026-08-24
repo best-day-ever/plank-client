@@ -810,17 +810,6 @@ bool Session::initialize()
 
     SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_YUV444) == 0);
 
-#if !SDL_VERSION_ATLEAST(2, 0, 11)
-    // HACK: Using a full-screen window breaks mouse capture on the Pi's LXDE
-    // GUI environment. Force the session to use windowed mode (which won't
-    // really matter anyway because the MMAL renderer always draws full-screen).
-    if (qgetenv("DESKTOP_SESSION") == "LXDE-pi") {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Forcing windowed mode on LXDE-Pi");
-        m_FullScreenFlag = 0;
-    }
-#endif
-
     // Check for validation errors/warnings and emit
     // signals for them, if appropriate
     bool ret = validateLaunch(testWindow);

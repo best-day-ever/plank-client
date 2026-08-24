@@ -27,8 +27,6 @@
 #endif
 #endif
 
-#if SDL_VERSION_ATLEAST(2, 0, 15)
-
 extern int g_QtDrmMasterFd;
 extern struct stat g_DrmMasterStat;
 extern bool g_DisableDrmHooks;
@@ -239,4 +237,3 @@ int openHook(typeof(open) *real_open, typeof(close) *real_close, const char *pat
 
     return fd;
 }
-#endif

@@ -32,14 +32,11 @@
 // Used to turn off the hooks when Qt is not using EGLFS
 bool g_DisableDrmHooks = false;
 
-// We require SDL 2.0.15+ to hook because it supports sharing
-// the DRM FD with our code. This avoids having multiple DRM FDs
+// Native SDL3 supports sharing the DRM FD with our code. This avoids having multiple DRM FDs
 // in flight at the same time which would significantly complicate
 // the logic here because we'd need to figure out exactly which FD
 // should be the master at any given time. With the position of our
 // hooks, that is definitely not trivial.
-#if SDL_VERSION_ATLEAST(2, 0, 15)
-
 // We don't include fcntl.h, so we have to define this ourselves
 typedef int (*fn_open_t)(const char *pathname, int flags, ...);
 
@@ -281,5 +278,3 @@ int close(int fd)
 
     return ret;
 }
-
-#endif
