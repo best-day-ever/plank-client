@@ -418,16 +418,6 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
 {
     m_Window = params->window;
 
-    // It's not safe to attempt to opportunistically create a GLES2
-    // renderer prior to 2.0.10. If GLES2 isn't available, SDL will
-    // attempt to dereference a null pointer and crash Moonlight.
-    // https://bugzilla.libsdl.org/show_bug.cgi?id=4350
-    // https://hg.libsdl.org/SDL/rev/84618d571795
-    if (!SDL_VERSION_ATLEAST(2, 0, 10)) {
-        EGL_LOG(Error, "Not supported until SDL 2.0.10");
-        return false;
-    }
-
     // This renderer doesn't support HDR, so pick a different one.
     // HACK: This avoids a deadlock in SDL_CreateRenderer() if
     // Vulkan was used before and SDL is trying to load EGL.
@@ -458,25 +448,23 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
-    int renderIndex;
+    const char* renderDriver = nullptr;
     int maxRenderers = SDL_GetNumRenderDrivers();
     SDL_assert(maxRenderers >= 0);
 
-    SDL_RendererInfo renderInfo;
-    for (renderIndex = 0; renderIndex < maxRenderers; ++renderIndex) {
-        if (SDL_GetRenderDriverInfo(renderIndex, &renderInfo))
-            continue;
-        if (!strcmp(renderInfo.name, "opengles2")) {
-            SDL_assert(renderInfo.flags & SDL_RENDERER_ACCELERATED);
+    for (int renderIndex = 0; renderIndex < maxRenderers; ++renderIndex) {
+        const char* candidate = SDL_GetRenderDriver(renderIndex);
+        if (candidate != nullptr && !strcmp(candidate, "opengles2")) {
+            renderDriver = candidate;
             break;
         }
     }
-    if (renderIndex == maxRenderers) {
+    if (renderDriver == nullptr) {
         EGL_LOG(Error, "Could not find a suitable SDL_Renderer");
         return false;
     }
 
-    m_DummyRenderer = SDL_CreateRenderer(m_Window, renderIndex, SDL_RENDERER_ACCELERATED);
+    m_DummyRenderer = SDL_CreateRenderer(m_Window, renderDriver);
     if (!m_DummyRenderer) {
         // Print the error here (before it gets clobbered), but ensure that we flush window
         // events just in case SDL re-created the window before eventually failing.
@@ -508,14 +496,14 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     }
 
     const bool isWayland = strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
-    const bool isKmsDrm = strcmp(SDL_GetCurrentVideoDriver(), "KMSDRM") == 0 ||
-                          strcmp(SDL_GetCurrentVideoDriver(), "kmsdrm") == 0;
+    const bool isKmsDrm = strcmp(SDL_GetCurrentVideoDriver(), "kmsdrm") == 0 ||
+                          strcmp(SDL_GetCurrentVideoDriver(), "KMSDRM") == 0;
 
     if (!(m_Context = SDL_GL_CreateContext(params->window))) {
         EGL_LOG(Error, "Cannot create OpenGL context: %s", SDL_GetError());
         return false;
     }
-    if (SDL_GL_MakeCurrent(params->window, m_Context)) {
+    if (!SDL_GL_MakeCurrent(params->window, m_Context)) {
         EGL_LOG(Error, "Cannot use created EGL context: %s", SDL_GetError());
         return false;
     }
@@ -623,7 +611,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
             ) {
         SDL_GL_SetSwapInterval(1);
 
-#if SDL_VERSION_ATLEAST(2, 0, 15) && defined(SDL_VIDEO_DRIVER_KMSDRM)
+#if defined(SDL_VIDEO_DRIVER_KMSDRM)
         // The SDL KMSDRM backend already enforces double buffering (due to
         // SDL_HINT_VIDEO_DOUBLE_BUFFER=1), so calling glFinish() after
         // SDL_GL_SwapWindow() will block an extra frame and lock rendering

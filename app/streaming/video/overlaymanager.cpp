@@ -177,11 +177,9 @@ void OverlayManager::notifyOverlayUpdated(OverlayType type)
         }
     }
 
-    // Exchange the old surface with the new one
     SDL_Surface* oldSurface = (SDL_Surface*)SDL_SetAtomicPointer(
         (void**)&m_Overlays[type].surface,
         m_Overlays[type].enabled ?
-            // The _Wrapped variant is required for line breaks to work
             RenderTextOutlinedWrapped(m_Overlays[type].font,
                                       m_Overlays[type].text,
                                       m_Overlays[type].color,
@@ -193,25 +191,25 @@ void OverlayManager::notifyOverlayUpdated(OverlayType type)
     // Notify the renderer
     m_Renderer->notifyOverlayUpdated(type);
 
-    // Free the old surface
     if (oldSurface != nullptr) {
         SDL_DestroySurface(oldSurface);
     }
 }
 
-SDL_Surface* OverlayManager::RenderTextOutlinedWrapped(TTF_Font* font, const char* text, SDL_Color textColor, SDL_Color outlineColor, int outlineWidth, int wrapWidth) {
+SDL_Surface* OverlayManager::RenderTextOutlinedWrapped(TTF_Font* font,
+                                                        const char* text,
+                                                        SDL_Color textColor,
+                                                        SDL_Color outlineColor,
+                                                        int outlineWidth,
+                                                        int wrapWidth)
+{
     if (text == nullptr || text[0] == '\0') {
         return nullptr;
     }
 
-    int oldOutline = TTF_GetFontOutline(font);
+    const int oldOutline = TTF_GetFontOutline(font);
     TTF_SetFontOutline(font, outlineWidth);
 
-    // Verify that the string won't require wrapping (which could cause the outline and the text
-    // to diverge due to different wrapping positions).
-    //
-    // FIXME: We do this rather than just disabling wrapping entirely (wrapWidth = 0) because we
-    // need further testing to ensure that all renderers can handle non-NPOT overlay textures.
     for (const QString& line : QString(text).split('\n')) {
         const QByteArray utf8Line = line.toUtf8();
         int extent;
@@ -219,18 +217,16 @@ SDL_Surface* OverlayManager::RenderTextOutlinedWrapped(TTF_Font* font, const cha
         if (TTF_MeasureString(font, utf8Line.constData(), utf8Line.size(),
                               wrapWidth, &extent, &count) &&
                 count < static_cast<size_t>(utf8Line.size())) {
-            // If it requires wrapping, render it without the outline
             TTF_SetFontOutline(font, oldOutline);
             return TTF_RenderText_Blended_Wrapped(font, text, strlen(text),
                                                    textColor, wrapWidth);
         }
     }
 
-    // Draw text twice, but outline is a bit bigger
-    auto outlineSurface = TTF_RenderText_Blended_Wrapped(
+    SDL_Surface* outlineSurface = TTF_RenderText_Blended_Wrapped(
         font, text, strlen(text), outlineColor, wrapWidth);
     TTF_SetFontOutline(font, 0);
-    auto textSurface = TTF_RenderText_Blended_Wrapped(
+    SDL_Surface* textSurface = TTF_RenderText_Blended_Wrapped(
         font, text, strlen(text), textColor, wrapWidth);
     TTF_SetFontOutline(font, oldOutline);
 
@@ -240,11 +236,8 @@ SDL_Surface* OverlayManager::RenderTextOutlinedWrapped(TTF_Font* font, const cha
         return nullptr;
     }
 
-    // Merge the texts
-    SDL_Rect dst = { outlineWidth, outlineWidth, textSurface->w, textSurface->h };
+    SDL_Rect dst = {outlineWidth, outlineWidth, textSurface->w, textSurface->h};
     SDL_BlitSurface(textSurface, nullptr, outlineSurface, &dst);
-
     SDL_DestroySurface(textSurface);
     return outlineSurface;
 }
-

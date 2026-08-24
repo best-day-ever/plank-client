@@ -252,7 +252,6 @@ FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
     SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 0);
 
     // Use linear filtering when renderer scaling is required
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 }
 
 FFmpegVideoDecoder::~FFmpegVideoDecoder()
@@ -1837,7 +1836,8 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         // Count time in avcodec_send_packet() and avcodec_receive_frame()
                         // as time spent decoding. Also count time spent in the decode unit
                         // queue because that's directly caused by decoder latency.
-                        const uint32_t decodeLatencyMs = LiGetMillis() - du.enqueueTimeMs;
+                        const uint32_t decodeLatencyMs = static_cast<uint32_t>(
+                            (LiGetMicroseconds() - du.enqueueTimeUs) / 1000);
                         m_ActiveWndVideoStats.totalDecodeTime += decodeLatencyMs;
                         m_DecodeLatencyHistogram[std::min<uint32_t>(
                             decodeLatencyMs,
@@ -1845,7 +1845,7 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         m_MaxDecodeLatencyMs = std::max(m_MaxDecodeLatencyMs, decodeLatencyMs);
 
                         // Store the presentation time
-                        frame->pts = du.presentationTimeMs;
+                        frame->pts = du.presentationTimeUs / 1000;
                     }
 
                     m_ActiveWndVideoStats.decodedFrames++;
@@ -2002,7 +2002,8 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         m_Pkt->flags = 0;
     }
 
-    m_ActiveWndVideoStats.totalReassemblyTime += du->enqueueTimeMs - du->receiveTimeMs;
+    m_ActiveWndVideoStats.totalReassemblyTime += static_cast<uint32_t>(
+        (du->enqueueTimeUs - du->receiveTimeUs) / 1000);
 
     err = avcodec_send_packet(m_VideoDecoderCtx, m_Pkt);
     if (err < 0) {

@@ -85,13 +85,6 @@ public:
 #endif
 
 private:
-    enum WindowSystem {
-        WindowSystemUnknown,
-        WindowSystemX11,
-        WindowSystemWayland,
-        WindowSystemKmsDrm,
-    };
-
     VADisplay openDisplay(SDL_Window* window);
     VAStatus tryVaInitialize(AVVAAPIDeviceContext* vaDeviceContext, PDECODER_PARAMETERS params, int* major, int* minor);
     void renderOverlay(VADisplay display, VASurfaceID surface, Overlay::OverlayType type);
@@ -101,7 +94,12 @@ private:
 #endif
 
     int m_DecoderSelectionPass;
-    WindowSystem m_WindowSystem;
+    enum WindowSystem {
+        WindowSystemUnknown,
+        WindowSystemX11,
+        WindowSystemWayland,
+        WindowSystemKmsDrm,
+    } m_WindowSystem;
     AVBufferRef* m_HwContext;
     bool m_BlacklistedForDirectRendering;
     bool m_HasRfiLatencyBug;

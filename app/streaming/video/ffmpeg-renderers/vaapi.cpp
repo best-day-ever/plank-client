@@ -175,8 +175,8 @@ VAAPIRenderer::openDisplay(SDL_Window* window)
 #endif
     else {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Unsupported VAAPI rendering subsystem: %d",
-                     m_WindowSystem);
+                     "Unsupported VAAPI video driver: %s",
+                     driver != nullptr ? driver : "unknown");
         return nullptr;
     }
 
