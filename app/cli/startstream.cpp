@@ -25,8 +25,6 @@ class Event
 {
 public:
     enum Type {
-        AppQuitCompleted,
-        AppQuitRequested,
         AuthenticationCompleted,
         ComputerFound,
         ComputerUpdated,
@@ -74,8 +72,6 @@ public:
                            q, &Launcher::onComputerUpdated);
                 q->connect(m_ComputerManager, &ComputerManager::authenticationCompleted,
                            q, &Launcher::onAuthenticationCompleted);
-                q->connect(m_ComputerManager, &ComputerManager::quitAppCompleted,
-                           q, &Launcher::onQuitAppCompleted);
 
                 emit q->searchingComputer();
             }
@@ -135,25 +131,10 @@ public:
                                               m_ComputerManager);
                         emit q->sessionCreated(app.name, session);
                     } else {
-                        emit q->appQuitRequired(getCurrentAppName());
+                        m_State = StateFailure;
+                        emit q->failed(QObject::tr("A different host application is already running."));
                     }
                 }
-            }
-            break;
-        // Occurs when there was another app running on computer and user accepted quit
-        // confirmation dialog
-        case Event::AppQuitRequested:
-            if (m_State == StateSeekApp) {
-                m_ComputerManager->quitRunningApp(m_Computer);
-            }
-            break;
-        // Occurs when the previous app quit has been completed, handles quitting errors if any
-        // happened. ComputerUpdated event's handler handles session start when previous app has
-        // quit.
-        case Event::AppQuitCompleted:
-            if (m_State == StateSeekApp && !event.errorMessage.isEmpty()) {
-                m_State = StateFailure;
-                emit q->failed(QObject::tr("Quitting app failed, reason: %1").arg(event.errorMessage));
             }
             break;
         // Occurs when computer or app search timed out
@@ -262,13 +243,6 @@ void Launcher::execute(ComputerManager *manager)
     d->handleEvent(event);
 }
 
-void Launcher::quitRunningApp()
-{
-    Q_D(Launcher);
-    Event event(Event::AppQuitRequested);
-    d->handleEvent(event);
-}
-
 bool Launcher::isExecuted() const
 {
     Q_D(const Launcher);
@@ -304,14 +278,6 @@ void Launcher::onTimeout()
 {
     Q_D(Launcher);
     Event event(Event::Timedout);
-    d->handleEvent(event);
-}
-
-void Launcher::onQuitAppCompleted(QVariant error)
-{
-    Q_D(Launcher);
-    Event event(Event::AppQuitCompleted);
-    event.errorMessage = error.toString();
     d->handleEvent(event);
 }
 

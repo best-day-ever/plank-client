@@ -26,6 +26,7 @@ constexpr Uint32 BitrateAcknowledgementRetryMs = 1000;
 constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
 constexpr int BitrateMinimumKbps = 10000;
+constexpr int BitrateMaximumKbps = 150000;
 constexpr int BitrateStepKbps = 500;
 constexpr qreal WindowGlyphScale = 0.85;
 constexpr qreal WindowButtonSize = 28.0 * WindowGlyphScale;
@@ -61,7 +62,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_PointerY(0),
       m_BitrateKbps(qBound(BitrateMinimumKbps,
                            preferences.bitrateKbps,
-                           preferences.unlockBitrate ? 500000 : 150000)),
+                           BitrateMaximumKbps)),
       m_LastSentBitrateKbps(-1),
       m_AppliedBitrateKbps(-1),
       m_AppliedPeakKbps(-1),
@@ -76,7 +77,6 @@ StationConnectToolbar::StationConnectToolbar(
       m_LastRedrawTime(0),
       m_EdgeHoverStartTime(0)
 {
-    SDL_assert(m_InputHandler.isAbsoluteMouseMode());
     if (m_Preferences.bitrateKbps != m_BitrateKbps) {
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
@@ -356,9 +356,8 @@ bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
     const int delta = event.y > 0 ? BitrateStepKbps :
                       event.y < 0 ? -BitrateStepKbps : 0;
     if (delta != 0) {
-        const int maximum = m_Preferences.unlockBitrate ? 500000 : 150000;
         m_BitrateKbps = qBound(BitrateMinimumKbps,
-                               m_BitrateKbps + delta, maximum);
+                               m_BitrateKbps + delta, BitrateMaximumKbps);
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
         redraw();
@@ -526,9 +525,8 @@ void StationConnectToolbar::redraw()
     painter.setPen(QPen(QColor(92, 102, 114), 3, Qt::SolidLine, Qt::RoundCap));
     painter.drawLine(trackLeft, trackY, trackRight, trackY);
 
-    const int maximum = m_Preferences.unlockBitrate ? 500000 : 150000;
     const qreal fraction = qreal(m_BitrateKbps - BitrateMinimumKbps) /
-                           qreal(maximum - BitrateMinimumKbps);
+                           qreal(BitrateMaximumKbps - BitrateMinimumKbps);
     const int thumbX = trackLeft + qRound(fraction * (trackRight - trackLeft));
     if (m_BitrateSupported) {
         painter.setPen(QPen(QColor(52, 132, 228), 3, Qt::SolidLine, Qt::RoundCap));
@@ -605,15 +603,14 @@ void StationConnectToolbar::redraw()
 
 void StationConnectToolbar::updateBitrateFromPointer(int x, Uint32 now, bool forceSend)
 {
-    const int maximum = m_Preferences.unlockBitrate ? 500000 : 150000;
     const qreal fraction = qBound(
                 qreal(0.0),
                 qreal(x - sliderLeft()) / qreal(std::max(1, sliderRight() - sliderLeft())),
                 qreal(1.0));
     int bitrate = BitrateMinimumKbps +
-                  qRound(fraction * (maximum - BitrateMinimumKbps));
+                  qRound(fraction * (BitrateMaximumKbps - BitrateMinimumKbps));
     bitrate = qRound(qreal(bitrate) / BitrateStepKbps) * BitrateStepKbps;
-    bitrate = qBound(BitrateMinimumKbps, bitrate, maximum);
+    bitrate = qBound(BitrateMinimumKbps, bitrate, BitrateMaximumKbps);
     if (bitrate != m_BitrateKbps) {
         m_BitrateKbps = bitrate;
         m_Preferences.bitrateKbps = bitrate;

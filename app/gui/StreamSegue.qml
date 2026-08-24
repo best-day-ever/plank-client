@@ -59,16 +59,6 @@ Item {
         console.warn(text)
     }
 
-    function quitStarting()
-    {
-        // Avoid the push transition animation
-        var component = Qt.createComponent("QuitSegue.qml")
-        stackView.replace(stackView.currentItem, component.createObject(stackView, {"appName": appName}), StackView.Immediate)
-
-        // Show the Qt window again to show quit segue
-        window.visible = true
-    }
-
     function sessionFinished(portTestResult)
     {
         if (portTestResult !== 0 && portTestResult !== -1 && streamSegueErrorDialog.text) {
@@ -125,7 +115,6 @@ Item {
         session.connectionStarted.connect(connectionStarted)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
-        session.quitStarting.connect(quitStarting)
         session.sessionFinished.connect(sessionFinished)
         session.readyForDeletion.connect(sessionReadyForDeletion)
 

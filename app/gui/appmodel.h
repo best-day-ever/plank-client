@@ -35,7 +35,6 @@ public:
 
     Q_INVOKABLE QString getRunningAppName();
 
-    Q_INVOKABLE void quitRunningApp();
 
     Q_INVOKABLE void setAppHidden(int appIndex, bool hidden);
 

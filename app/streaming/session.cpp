@@ -1027,10 +1027,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    if (m_Preferences->absoluteMouseMode && !m_App.isAppCollectorGame) {
-        emitLaunchWarning(tr("Your selection to enable remote desktop mouse mode may cause problems in games."));
-    }
-
     if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE) {
         emitLaunchWarning(tr("Your settings selection to force software decoding may cause poor streaming performance."));
     }
@@ -1305,18 +1301,7 @@ private:
 
     void run() override
     {
-        // Only quit the running app if our session terminated gracefully
-        bool shouldQuit =
-                !m_Session->m_UnexpectedTermination &&
-                m_Session->m_Preferences->quitAppAfter;
-
-        // Notify the UI
-        if (shouldQuit) {
-            emit m_Session->quitStarting();
-        }
-        else {
-            emit m_Session->sessionFinished(m_Session->m_PortTestResults);
-        }
+        emit m_Session->sessionFinished(m_Session->m_PortTestResults);
 
         // The video decoder must already be destroyed, since it could
         // try to interact with APIs that can only be called between
@@ -1326,20 +1311,6 @@ private:
         // Finish cleanup of the connection state
         LiStopConnection();
 
-        // Perform a best-effort app quit
-        if (shouldQuit) {
-            NvHTTP http(m_Session->m_Computer);
-
-            // Logging is already done inside NvHTTP
-            try {
-                http.quitApp();
-            } catch (const GfeHttpResponseException&) {
-            } catch (const QtNetworkReplyException&) {
-            }
-
-            // Session is finished now
-            emit m_Session->sessionFinished(m_Session->m_PortTestResults);
-        }
     }
 
     Session* m_Session;
@@ -1652,33 +1623,10 @@ bool Session::startConnectionAsync(bool reconnecting)
         SDL_Delay(1500);
     }
 
-    // The UI should have ensured the old game was already quit
-    // if we decide to stream a different game.
+    // StationConnect never terminates a host application remotely. Only resume
+    // the already-running Desktop application or launch it from an idle host.
     Q_ASSERT(m_Computer->currentGameId == 0 ||
              m_Computer->currentGameId == m_App.id);
-
-    bool enableGameOptimizations;
-    if (m_Computer->isNvidiaServerSoftware) {
-        // GFE will set all settings to 720p60 if it doesn't recognize
-        // the chosen resolution. Avoid that by disabling SOPS when it
-        // is not streaming a supported resolution.
-        enableGameOptimizations = false;
-        for (const NvDisplayMode &mode : m_Computer->displayModes) {
-            if (mode.width == m_StreamConfig.width &&
-                    mode.height == m_StreamConfig.height) {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "Found host supported resolution: %dx%d",
-                            mode.width, mode.height);
-                enableGameOptimizations = m_Preferences->gameOptimizations;
-                break;
-            }
-        }
-    }
-    else {
-        // Always send SOPS to Sunshine because we may repurpose the
-        // option to control whether the display mode is adjusted
-        enableGameOptimizations = m_Preferences->gameOptimizations;
-    }
 
     QString rtspSessionUrl;
 
@@ -1686,9 +1634,7 @@ bool Session::startConnectionAsync(bool reconnecting)
         NvHTTP http(m_Computer);
         const auto startApp = [&]() {
             http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
-                          m_Computer->isNvidiaServerSoftware,
                           m_App.id, &m_StreamConfig,
-                          enableGameOptimizations,
                           m_Preferences->playAudioOnHost,
                           0,
                           false,
@@ -2094,8 +2040,7 @@ void Session::execInternal()
     // distinct game-mode path. This also gives receiver UI exact hit testing.
     m_InputHandler = new SdlInputHandler(*m_Preferences,
                                          m_StreamConfig.width,
-                                         m_StreamConfig.height,
-                                         m_Computer->stationConnectAuthentication);
+                                         m_StreamConfig.height);
 
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {
@@ -2670,11 +2615,6 @@ void Session::execInternal()
                 break;
             }
             m_InputHandler->handleMouseWheelEvent(&event.wheel);
-            break;
-        case SDL_FINGERDOWN:
-        case SDL_FINGERMOTION:
-        case SDL_FINGERUP:
-            m_InputHandler->handleTouchFingerEvent(&event.tfinger);
             break;
         }
     }

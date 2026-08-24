@@ -113,11 +113,6 @@ QHash<int, QByteArray> AppModel::roleNames() const
     return names;
 }
 
-void AppModel::quitRunningApp()
-{
-    m_ComputerManager->quitRunningApp(m_Computer);
-}
-
 bool AppModel::isAppCurrentlyVisible(const NvApp& app)
 {
     for (const NvApp& visibleApp : m_VisibleApps) {

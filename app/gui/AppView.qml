@@ -134,7 +134,7 @@ CenteredGridView {
                     }
 
                     onClicked: {
-                        launchOrResumeSelectedApp(true)
+                        launchOrResumeSelectedApp()
                     }
 
                     ToolTip.text: qsTr("Resume Game")
@@ -145,33 +145,6 @@ CenteredGridView {
                     Material.background: "#D0808080"
                 }
 
-                RoundButton {
-                    anchors.horizontalCenterOffset: appIcon.isPlaceholder ? 47 : 0
-                    anchors.verticalCenterOffset: appIcon.isPlaceholder ? -75 : 60
-                    anchors.centerIn: parent
-                    implicitWidth: 85
-                    implicitHeight: 85
-
-                    Image {
-                        source: "qrc:/res/stop_FILL1_wght700_GRAD200_opsz48.svg"
-                        anchors.centerIn: parent
-                        sourceSize {
-                            width: 75
-                            height: 75
-                        }
-                    }
-
-                    onClicked: {
-                        doQuitGame()
-                    }
-
-                    ToolTip.text: qsTr("Quit Game")
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 3000
-                    ToolTip.visible: hovered
-
-                    Material.background: "#D0808080"
-                }
             }
         }
 
@@ -202,18 +175,10 @@ CenteredGridView {
             }
         }
 
-        function launchOrResumeSelectedApp(quitExistingApp)
+        function launchOrResumeSelectedApp()
         {
             var runningId = appModel.getRunningAppId()
             if (runningId !== 0 && runningId !== model.appid) {
-                if (quitExistingApp) {
-                    quitAppDialog.appName = appModel.getRunningAppName()
-                    quitAppDialog.segueToStream = true
-                    quitAppDialog.nextAppName = model.name
-                    quitAppDialog.nextAppIndex = index
-                    quitAppDialog.open()
-                }
-
                 return
             }
 
@@ -227,12 +192,9 @@ CenteredGridView {
         }
 
         onClicked: {
-            // Only allow clicking on the box art for non-running games.
-            // For running games, buttons will appear to resume or quit which
-            // will handle starting the game and clicks on the box art will
-            // be ignored.
+            // A running application is resumed through its explicit action.
             if (!model.running) {
-                launchOrResumeSelectedApp(true)
+                launchOrResumeSelectedApp()
             }
         }
 
@@ -282,12 +244,6 @@ CenteredGridView {
             appContextMenu.open()
         }
 
-        function doQuitGame() {
-            quitAppDialog.appName = appModel.getRunningAppName()
-            quitAppDialog.segueToStream = false
-            quitAppDialog.open()
-        }
-
         Loader {
             id: appContextMenuLoader
             asynchronous: true
@@ -296,13 +252,7 @@ CenteredGridView {
                 NavigableMenuItem {
                     parentMenu: appContextMenu
                     text: model.running ? qsTr("Resume Game") : qsTr("Launch Game")
-                    onTriggered: launchOrResumeSelectedApp(true)
-                }
-                NavigableMenuItem {
-                    parentMenu: appContextMenu
-                    text: qsTr("Quit Game")
-                    onTriggered: doQuitGame()
-                    visible: model.running
+                    onTriggered: launchOrResumeSelectedApp()
                 }
                 NavigableMenuItem {
                     parentMenu: appContextMenu
@@ -332,35 +282,6 @@ CenteredGridView {
                 }
             }
         }
-    }
-
-    NavigableMessageDialog {
-        id: quitAppDialog
-        property string appName : ""
-        property bool segueToStream : false
-        property string nextAppName: ""
-        property int nextAppIndex: 0
-        text:qsTr("Are you sure you want to quit %1? Any unsaved progress will be lost.").arg(appName)
-        standardButtons: Dialog.Yes | Dialog.No
-
-        function quitApp() {
-            var component = Qt.createComponent("QuitSegue.qml")
-            var params = {"appName": appName, "quitRunningAppFn": function() { appModel.quitRunningApp() }}
-            if (segueToStream) {
-                // Store the session and app name if we're going to stream after
-                // successfully quitting the old app.
-                params.nextAppName = nextAppName
-                params.nextSession = appModel.createSessionForApp(nextAppIndex)
-            }
-            else {
-                params.nextAppName = null
-                params.nextSession = null
-            }
-
-            stackView.push(component.createObject(stackView, params))
-        }
-
-        onAccepted: quitApp()
     }
 
     ScrollBar.vertical: ScrollBar {}

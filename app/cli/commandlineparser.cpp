@@ -215,7 +215,6 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
         "\n"
         "Available actions:\n"
         "  list            List the available apps on a host\n"
-        "  quit            Quit the currently running app\n"
         "  stream          Start streaming an app\n"
         "  pair            Pair a new host\n"
         "\n"
@@ -233,17 +232,15 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
         return NormalStartRequested;
     }
     else {
-        // If users supply arguments that accept values prior to the "quit"
-        // or "stream" positional arguments, we will not be able to correctly
+        // If users supply arguments that accept values prior to the "stream"
+        // positional argument, we will not be able to correctly
         // parse the value out of the input because this QCommandLineParser
-        // doesn't know about all of the options that "quit" and "stream"
-        // commands can accept. To work around this issue, we just look
-        // for "quit" or "stream" positional arguments anywhere.
+        // doesn't know about all of the options that "stream" can accept.
+        // To work around this issue, we just look
+        // for the "stream" positional argument anywhere.
         for (int i = 0; i < posArgs.size(); i++) {
             QString action = posArgs.at(i).toLower();
-            if (action == "quit") {
-                return QuitRequested;
-            } else if (action == "stream") {
+            if (action == "stream") {
                 return StreamRequested;
             } else if (action == "pair") {
                 return PairRequested;
@@ -254,48 +251,6 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
 
         parser.showError(QString("Invalid action"));
     }
-}
-
-QuitCommandLineParser::QuitCommandLineParser()
-{
-}
-
-QuitCommandLineParser::~QuitCommandLineParser()
-{
-}
-
-void QuitCommandLineParser::parse(const QStringList &args)
-{
-    CommandLineParser parser;
-    parser.setupCommonOptions();
-    parser.setApplicationDescription(
-        "\n"
-        "Quit the currently running app on the given host."
-    );
-    parser.addPositionalArgument("quit", "quit running app");
-    parser.addPositionalArgument("host", "Host computer name, UUID, or IP address", "<host>");
-
-    if (!parser.parse(args)) {
-        parser.showError(parser.errorText());
-    }
-
-    parser.handleUnknownOptions();
-
-    // This method will not return and terminates the process if --version or
-    // --help is specified
-    parser.handleHelpAndVersionOptions();
-
-    // Verify that host has been provided
-    auto posArgs = parser.positionalArguments();
-    if (posArgs.length() < 2) {
-        parser.showError("Host not provided");
-    }
-    m_Host = parser.positionalArguments().at(1);
-}
-
-QString QuitCommandLineParser::getHost() const
-{
-    return m_Host;
 }
 
 PairCommandLineParser::PairCommandLineParser()
@@ -411,15 +366,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addValueOption("packet-size", "video packet size");
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
-    parser.addToggleOption("quit-after", "quit app after session");
-    parser.addToggleOption("absolute-mouse", "remote desktop optimized mouse control");
-    parser.addToggleOption("mouse-buttons-swap", "left and right mouse buttons swap");
-    parser.addToggleOption("touchscreen-trackpad", "touchscreen in trackpad mode");
-    parser.addToggleOption("game-optimization", "game optimizations");
     parser.addToggleOption("audio-on-host", "audio on host PC");
     parser.addToggleOption("frame-pacing", "frame pacing");
     parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
-    parser.addToggleOption("reverse-scroll-direction", "inverted scroll direction");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addToggleOption("hdr", "HDR streaming");
@@ -474,10 +423,11 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --bitrate option
     if (parser.isSet("bitrate")) {
-        preferences->bitrateKbps = parser.getIntOption("bitrate");
-        if (!inRange(preferences->bitrateKbps, 500, 500000)) {
-            fprintf(stderr, "Warning: Bitrate is out of the supported range (500 - 500000 Kbps). Performance may suffer!\n");
+        const int requestedBitrateKbps = parser.getIntOption("bitrate");
+        if (!inRange(requestedBitrateKbps, 10000, 150000)) {
+            fprintf(stderr, "Warning: Bitrate must be between 10000 and 150000 Kbps; clamping to the supported range.\n");
         }
+        preferences->bitrateKbps = qBound(10000, requestedBitrateKbps, 150000);
     } else if (displaySet || parser.isSet("fps")) {
         preferences->bitrateKbps = preferences->getDefaultBitrate(
             preferences->width, preferences->height, preferences->fps, preferences->enableYUV444);
@@ -504,20 +454,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->audioConfig = mapValue(m_AudioConfigMap, parser.getChoiceOptionValue("audio-config"));
     }
 
-    // Resolve --quit-after and --no-quit-after options
-    preferences->quitAppAfter = parser.getToggleOptionValue("quit-after", preferences->quitAppAfter);
-
-    // Resolve --absolute-mouse and --no-absolute-mouse options
-    preferences->absoluteMouseMode = parser.getToggleOptionValue("absolute-mouse", preferences->absoluteMouseMode);
-
-    // Resolve --mouse-buttons-swap and --no-mouse-buttons-swap options
-    preferences->swapMouseButtons = parser.getToggleOptionValue("mouse-buttons-swap", preferences->swapMouseButtons);
-
-    // Resolve --touchscreen-trackpad and --no-touchscreen-trackpad options
-    preferences->absoluteTouchMode = !parser.getToggleOptionValue("touchscreen-trackpad", !preferences->absoluteTouchMode);
-
-    // Resolve --game-optimization and --no-game-optimization options
-    preferences->gameOptimizations = parser.getToggleOptionValue("game-optimization", preferences->gameOptimizations);
 
     // Resolve --audio-on-host and --no-audio-on-host options
     preferences->playAudioOnHost = parser.getToggleOptionValue("audio-on-host", preferences->playAudioOnHost);
@@ -527,9 +463,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --mute-on-focus-loss and --no-mute-on-focus-loss options
     preferences->muteOnFocusLoss = parser.getToggleOptionValue("mute-on-focus-loss", preferences->muteOnFocusLoss);
-
-    // Resolve --reverse-scroll-direction and --no-reverse-scroll-direction options
-    preferences->reverseScrollDirection = parser.getToggleOptionValue("reverse-scroll-direction", preferences->reverseScrollDirection);
 
     // Resolve --keep-awake and --no-keep-awake options
     preferences->keepAwake = parser.getToggleOptionValue("keep-awake", preferences->keepAwake);

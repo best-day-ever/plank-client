@@ -11,7 +11,6 @@ public:
     enum ParseResult {
         NormalStartRequested,
         StreamRequested,
-        QuitRequested,
         PairRequested,
         ListRequested,
     };
@@ -21,20 +20,6 @@ public:
 
     ParseResult parse(const QStringList &args);
 
-};
-
-class QuitCommandLineParser
-{
-public:
-    QuitCommandLineParser();
-    virtual ~QuitCommandLineParser();
-
-    void parse(const QStringList &args);
-
-    QString getHost() const;
-
-private:
-    QString m_Host;
 };
 
 class PairCommandLineParser

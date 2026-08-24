@@ -27,7 +27,6 @@ public:
                       QObject *parent = nullptr);
     ~Launcher() override;
     Q_INVOKABLE void execute(ComputerManager *manager);
-    Q_INVOKABLE void quitRunningApp();
     Q_INVOKABLE bool isExecuted() const;
 
 signals:
@@ -36,14 +35,12 @@ signals:
     void searchingApp();
     void sessionCreated(QString appName, Session *session);
     void failed(QString text);
-    void appQuitRequired(QString appName);
 
 private slots:
     void onComputerFound(NvComputer *computer);
     void onComputerUpdated(NvComputer *computer);
     void onAuthenticationCompleted(NvComputer *computer, QString error);
     void onTimeout();
-    void onQuitAppCompleted(QVariant error);
 
 private:
     QScopedPointer<LauncherPrivate> m_DPtr;

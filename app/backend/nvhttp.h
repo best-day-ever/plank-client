@@ -168,14 +168,9 @@ public:
     parseQuad(QString quad);
 
     void
-    quitApp();
-
-    void
     startApp(QString verb,
-             bool isGfe,
              int appId,
              PSTREAM_CONFIGURATION streamConfig,
-             bool sops,
              bool localAudio,
              int gamepadMask,
              bool persistGameControllersOnDisconnect,

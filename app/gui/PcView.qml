@@ -17,8 +17,6 @@ CenteredGridView {
     topMargin: 20
     bottomMargin: 5
     cellWidth: 310; cellHeight: 330;
-    objectName: qsTr("Computers")
-
     Component.onCompleted: {
         // Don't show any highlighted item until interacting with them.
         // We do this here instead of onActivated to avoid losing the user's

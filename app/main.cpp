@@ -33,7 +33,6 @@
 #endif
 
 #include "cli/listapps.h"
-#include "cli/quitstream.h"
 #include "cli/startstream.h"
 #include "cli/pair.h"
 #include "cli/commandlineparser.h"
@@ -729,15 +728,6 @@ int main(int argc, char *argv[])
             engine.rootContext()->setContextProperty("launcher", launcher);
             break;
         }
-    case GlobalCommandLineParser::QuitRequested:
-        {
-            initialView = "qrc:/gui/CliQuitStreamSegue.qml";
-            QuitCommandLineParser quitParser;
-            quitParser.parse(app.arguments());
-            auto launcher = new CliQuitStream::Launcher(quitParser.getHost(), &app);
-            engine.rootContext()->setContextProperty("launcher", launcher);
-            break;
-        }
     case GlobalCommandLineParser::PairRequested:
         {
             initialView = "qrc:/gui/CliPair.qml";
@@ -769,8 +759,7 @@ int main(int argc, char *argv[])
 
     int err = app.exec();
 
-    // Give worker tasks time to properly exit. Fixes PendingQuitTask
-    // sometimes freezing and blocking process exit.
+    // Give worker tasks time to exit cleanly before process teardown.
     QThreadPool::globalInstance()->waitForDone(30000);
 
 #ifdef Q_OS_WIN32

@@ -58,32 +58,12 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
                                                             !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
         break;
 
-    case KeyComboToggleMouseMode:
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Detected mouse mode toggle combo");
-
-        // Uncapture input
-        setCaptureActive(false);
-
-        // Toggle mouse mode
-        m_AbsoluteMouseMode = !m_AbsoluteMouseMode;
-
-        // Recapture input
-        setCaptureActive(true);
-        break;
-
     case KeyComboToggleCursorHide:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected show mouse combo");
 
-        if (!SDL_GetRelativeMouseMode()) {
-            m_MouseCursorCapturedVisibilityState = !m_MouseCursorCapturedVisibilityState;
-            SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
-        }
-        else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Cursor can only be shown in remote desktop mouse mode");
-        }
+        m_MouseCursorCapturedVisibilityState = !m_MouseCursorCapturedVisibilityState;
+        SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
         break;
 
     case KeyComboToggleMinimize:

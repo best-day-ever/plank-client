@@ -14,28 +14,16 @@
 
 SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
                                  int streamWidth,
-                                 int streamHeight,
-                                 bool forceAbsoluteMouseMode)
-    : m_SwapMouseButtons(prefs.swapMouseButtons),
-      m_ReverseScrollDirection(prefs.reverseScrollDirection),
-      m_MouseWasInVideoRegion(false),
+                                 int streamHeight)
+    : m_MouseWasInVideoRegion(false),
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false),
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
       m_FakeCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
       m_MouseCursorCapturedVisibilityState(SDL_DISABLE),
-      m_LongPressTimer(0),
       m_StreamWidth(streamWidth),
-      m_StreamHeight(streamHeight),
-      m_AbsoluteMouseMode(prefs.absoluteMouseMode || forceAbsoluteMouseMode),
-      m_AbsoluteTouchMode(prefs.absoluteTouchMode),
-      m_DisabledTouchFeedback(false),
-      m_LeftButtonReleaseTimer(0),
-      m_RightButtonReleaseTimer(0),
-      m_DragTimer(0),
-      m_DragButton(0),
-      m_NumFingersDown(0)
+      m_StreamHeight(streamHeight)
 {
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
@@ -79,11 +67,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].scanCode = SDL_SCANCODE_S;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].enabled = true;
 
-    m_SpecialKeyCombos[KeyComboToggleMouseMode].keyCombo = KeyComboToggleMouseMode;
-    m_SpecialKeyCombos[KeyComboToggleMouseMode].keyCode = SDLK_m;
-    m_SpecialKeyCombos[KeyComboToggleMouseMode].scanCode = SDL_SCANCODE_M;
-    m_SpecialKeyCombos[KeyComboToggleMouseMode].enabled = true;
-
     m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCombo = KeyComboToggleCursorHide;
     m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCode = SDLK_c;
     m_SpecialKeyCombos[KeyComboToggleCursorHide].scanCode = SDL_SCANCODE_C;
@@ -104,9 +87,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].scanCode = SDL_SCANCODE_L;
     m_SpecialKeyCombos[KeyComboTogglePointerRegionLock].enabled = true;
 
-    SDL_zero(m_LastTouchDownEvent);
-    SDL_zero(m_LastTouchUpEvent);
-    SDL_zero(m_TouchDownEvent);
 }
 
 SdlInputHandler::~SdlInputHandler()
@@ -115,11 +95,6 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxWacomInput.reset();
     m_LinuxRawWacomInput.reset();
 #endif
-
-    SDL_RemoveTimer(m_LongPressTimer);
-    SDL_RemoveTimer(m_LeftButtonReleaseTimer);
-    SDL_RemoveTimer(m_RightButtonReleaseTimer);
-    SDL_RemoveTimer(m_DragTimer);
 
 #ifdef STEAM_LINK
     // Hide SDL's cursor on Steam Link after quitting the stream.
@@ -176,7 +151,7 @@ void SdlInputHandler::notifyMouseLeave()
     //
     // On macOS and X11, capturing the mouse allows us to receive mouse motion outside the
     // window (button up already worked without capture).
-    if (m_AbsoluteMouseMode && isCaptureActive()) {
+    if (isCaptureActive()) {
         // NB: Not using SDL_GetGlobalMouseState() because we want our state not the system's
         Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
         for (Uint32 button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; button++) {
@@ -198,14 +173,6 @@ void SdlInputHandler::notifyFocusLost()
         m_LinuxRawWacomInput->setActive(false);
     }
 #endif
-
-    // Release mouse cursor when another window is activated (e.g. by using ALT+TAB).
-    // This lets user to interact with our window's title bar and with the buttons in it.
-    // Doing this while the window is full-screen breaks the transition out of FS
-    // (desktop and exclusive), so we must check for that before releasing mouse capture.
-    if (!(SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) && !m_AbsoluteMouseMode) {
-        setCaptureActive(false);
-    }
 
     // Raise all keys that are currently pressed. If we don't do this, certain keys
     // used in shortcuts that cause focus loss (such as Alt+Tab) may get stuck down.
@@ -248,25 +215,11 @@ void SdlInputHandler::resetRawHidAfterReconnect()
 
 bool SdlInputHandler::isCaptureActive()
 {
-    if (SDL_GetRelativeMouseMode()) {
-        return true;
-    }
-
-    // Some platforms don't support SDL_SetRelativeMouseMode
     return m_FakeCaptureActive;
-}
-
-bool SdlInputHandler::isAbsoluteMouseMode() const
-{
-    return m_AbsoluteMouseMode;
 }
 
 void SdlInputHandler::setToolbarInteractionActive(bool active)
 {
-    if (!m_AbsoluteMouseMode) {
-        return;
-    }
-
     // Absolute desktop mode does not need a capture transition. Show the
     // receiver cursor only while receiver UI owns input, then restore the
     // user's captured-cursor state when routing resumes to the host.
@@ -330,48 +283,36 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
-        // If we're in relative mode, try to activate SDL's relative mouse mode
-        if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
-            // Relative mouse mode didn't work or was disabled, so we'll just hide the cursor
-            SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
-            m_FakeCaptureActive = true;
-        }
+        SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
+        m_FakeCaptureActive = true;
 
         // Synchronize the client and host cursor when activating absolute capture
-        if (m_AbsoluteMouseMode) {
-            int mouseX, mouseY;
-            int windowX, windowY;
+        int mouseX, mouseY;
+        int windowX, windowY;
 
-            // We have to use SDL_GetGlobalMouseState() because macOS may not reflect
-            // the new position of the mouse when outside the window.
-            SDL_GetGlobalMouseState(&mouseX, &mouseY);
+        // We have to use SDL_GetGlobalMouseState() because macOS may not reflect
+        // the new position of the mouse when outside the window.
+        SDL_GetGlobalMouseState(&mouseX, &mouseY);
 
-            // Convert global mouse state to window-relative
-            SDL_GetWindowPosition(m_Window, &windowX, &windowY);
-            mouseX -= windowX;
-            mouseY -= windowY;
+        // Convert global mouse state to window-relative
+        SDL_GetWindowPosition(m_Window, &windowX, &windowY);
+        mouseX -= windowX;
+        mouseY -= windowY;
 
-            if (isMouseInVideoRegion(mouseX, mouseY)) {
-                // Synthesize a mouse event to synchronize the cursor
-                SDL_MouseMotionEvent motionEvent = {};
-                motionEvent.type = SDL_MOUSEMOTION;
-                motionEvent.timestamp = SDL_GetTicks();
-                motionEvent.windowID = SDL_GetWindowID(m_Window);
-                motionEvent.x = mouseX;
-                motionEvent.y = mouseY;
-                handleMouseMotionEvent(&motionEvent);
-            }
+        if (isMouseInVideoRegion(mouseX, mouseY)) {
+            // Synthesize a mouse event to synchronize the cursor
+            SDL_MouseMotionEvent motionEvent = {};
+            motionEvent.type = SDL_MOUSEMOTION;
+            motionEvent.timestamp = SDL_GetTicks();
+            motionEvent.windowID = SDL_GetWindowID(m_Window);
+            motionEvent.x = mouseX;
+            motionEvent.y = mouseY;
+            handleMouseMotionEvent(&motionEvent);
         }
     }
     else {
-        if (m_FakeCaptureActive) {
-            // Display the cursor again
-            SDL_ShowCursor(SDL_ENABLE);
-            m_FakeCaptureActive = false;
-        }
-        else {
-            SDL_SetRelativeMouseMode(SDL_FALSE);
-        }
+        SDL_ShowCursor(SDL_ENABLE);
+        m_FakeCaptureActive = false;
     }
 
     // Update mouse pointer region constraints
@@ -379,29 +320,4 @@ void SdlInputHandler::setCaptureActive(bool active)
 
     // Now update the keyboard grab
     updateKeyboardGrabState();
-}
-
-void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
-{
-#if SDL_VERSION_ATLEAST(2, 0, 10)
-    if (SDL_GetTouchDeviceType(event->touchId) != SDL_TOUCH_DEVICE_DIRECT) {
-        // Ignore anything that isn't a touchscreen. We may get callbacks
-        // for trackpads, but we want to handle those in the mouse path.
-        return;
-    }
-#elif defined(Q_OS_DARWIN)
-    // SDL2 sends touch events from trackpads by default on
-    // macOS. This totally screws our actual mouse handling,
-    // so we must explicitly ignore touch events on macOS
-    // until SDL 2.0.10 where we have SDL_GetTouchDeviceType()
-    // to tell them apart.
-    return;
-#endif
-
-    if (m_AbsoluteTouchMode) {
-        handleAbsoluteFingerEvent(event);
-    }
-    else {
-        handleRelativeFingerEvent(event);
-    }
 }

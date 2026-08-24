@@ -32,11 +32,6 @@ Item {
         console.error(message)
     }
 
-    function onAppQuitRequired(appName) {
-        quitAppDialog.appName = appName
-        quitAppDialog.open()
-    }
-
     StackView.onActivated: {
         if (!launcher.isExecuted()) {
             toolBar.visible = false
@@ -46,7 +41,6 @@ Item {
             launcher.searchingApp.connect(onSearchingApp)
             launcher.sessionCreated.connect(onSessionCreated)
             launcher.failed.connect(onLaunchFailed)
-            launcher.appQuitRequired.connect(onAppQuitRequired)
             launcher.execute(ComputerManager)
         }
     }
@@ -77,19 +71,4 @@ Item {
         }
     }
 
-    NavigableMessageDialog {
-        id: quitAppDialog
-        text:qsTr("Are you sure you want to quit %1? Any unsaved progress will be lost.").arg(appName)
-        standardButtons: Dialog.Yes | Dialog.No
-        property string appName : ""
-
-        function quitApp() {
-            var component = Qt.createComponent("QuitSegue.qml")
-            var params = {"appName": appName, "quitRunningAppFn": function() { launcher.quitRunningApp() }}
-            stackView.push(component.createObject(stackView, params))
-        }
-
-        onAccepted: quitApp()
-        onRejected: Qt.quit()
-    }
 }

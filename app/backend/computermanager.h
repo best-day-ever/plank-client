@@ -242,8 +242,6 @@ public:
                                                 QString& username,
                                                 QString& password);
 
-    void quitRunningApp(NvComputer* computer);
-
     QVector<NvComputer*> getComputers();
 
     // computer is deleted inside this call
@@ -261,8 +259,6 @@ signals:
     void authenticationCompleted(NvComputer* computer, QString error);
 
     void computerAddCompleted(QVariant success, QVariant detectedPortBlocking);
-
-    void quitAppCompleted(QVariant error);
 
 private slots:
     void handleAboutToQuit();

@@ -501,11 +501,6 @@ void ComputerManager::handleComputerStateChanged(NvComputer* computer)
 {
     emit computerStateChanged(computer);
 
-    if (computer->pendingQuit && computer->currentGameId == 0) {
-        computer->pendingQuit = false;
-        emit quitAppCompleted(QVariant());
-    }
-
     // Save updates to this host
     saveHost(computer);
 }
@@ -792,64 +787,6 @@ bool ComputerManager::takeStationConnectReconnectCredentials(
     password = std::move(existing.value().second);
     m_ReconnectCredentials.erase(existing);
     return !username.isEmpty() && !password.isEmpty();
-}
-
-class PendingQuitTask : public QObject, public QRunnable
-{
-    Q_OBJECT
-
-public:
-    PendingQuitTask(ComputerManager* computerManager, NvComputer* computer)
-        : m_Computer(computer)
-    {
-        connect(this, &PendingQuitTask::quitAppFailed,
-                computerManager, &ComputerManager::quitAppCompleted);
-    }
-
-signals:
-    void quitAppFailed(QString error);
-
-private:
-    void run()
-    {
-        NvHTTP http(m_Computer);
-
-        try {
-            if (m_Computer->currentGameId != 0) {
-                http.quitApp();
-            }
-        } catch (const GfeHttpResponseException& e) {
-            {
-                QWriteLocker lock(&m_Computer->lock);
-                m_Computer->pendingQuit = false;
-            }
-            if (e.getStatusCode() == 599) {
-                // 599 is a special code we make a custom message for
-                emit quitAppFailed(tr("The running game wasn't started by this PC. "
-                                      "You must quit the game on the host PC manually or use the device that originally started the game."));
-            }
-            else {
-                emit quitAppFailed(e.toQString());
-            }
-        } catch (const QtNetworkReplyException& e) {
-            {
-                QWriteLocker lock(&m_Computer->lock);
-                m_Computer->pendingQuit = false;
-            }
-            emit quitAppFailed(e.toQString());
-        }
-    }
-
-    NvComputer* m_Computer;
-};
-
-void ComputerManager::quitRunningApp(NvComputer* computer)
-{
-    QWriteLocker lock(&computer->lock);
-    computer->pendingQuit = true;
-
-    PendingQuitTask* quit = new PendingQuitTask(this, computer);
-    QThreadPool::globalInstance()->start(quit);
 }
 
 void ComputerManager::stopPollingAsync()

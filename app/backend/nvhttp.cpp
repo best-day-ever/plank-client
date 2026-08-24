@@ -24,7 +24,6 @@
 #define REQUEST_TIMEOUT_MS 5000
 #define LAUNCH_TIMEOUT_MS 120000
 #define RESUME_TIMEOUT_MS 30000
-#define QUIT_TIMEOUT_MS 30000
 
 namespace {
 class SecureStringGuard
@@ -277,10 +276,8 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
 
 void
 NvHTTP::startApp(QString verb,
-                 bool isGfe,
                  int appId,
                  PSTREAM_CONFIGURATION streamConfig,
-                 bool sops,
                  bool localAudio,
                  int gamepadMask,
                  bool persistGameControllersOnDisconnect,
@@ -321,12 +318,8 @@ NvHTTP::startApp(QString verb,
                                    "appid="+QString::number(appId)+
                                    "&mode="+QString::number(streamConfig->width)+"x"+
                                    QString::number(streamConfig->height)+"x"+
-                                   // Using an FPS value over 60 causes SOPS to default to 720p60,
-                                   // so force it to 0 to ensure the correct resolution is set. We
-                                   // used to use 60 here but that locked the frame rate to 60 FPS
-                                   // on GFE 3.20.3. We don't need this hack for Sunshine.
-                                   QString::number((streamConfig->fps > 60 && isGfe) ? 0 : streamConfig->fps)+
-                                   "&additionalStates=1&sops="+QString::number(sops ? 1 : 0)+
+                                   QString::number(streamConfig->fps)+
+                                   "&additionalStates=1"+
                                    "&rikey="+QByteArray(streamConfig->remoteInputAesKey, sizeof(streamConfig->remoteInputAesKey)).toHex()+
                                    "&rikeyid="+QString::number(riKeyId)+
                                    ((streamConfig->supportedVideoFormats & VIDEO_FORMAT_MASK_10BIT) ?
@@ -347,29 +340,6 @@ NvHTTP::startApp(QString verb,
     verifyResponseStatus(response);
 
     rtspSessionUrl = getXmlString(response, "sessionUrl0");
-}
-
-void
-NvHTTP::quitApp()
-{
-    QString response =
-            openConnectionToString(m_BaseUrlHttps,
-                                   "cancel",
-                                   nullptr,
-                                   QUIT_TIMEOUT_MS);
-
-    qInfo() << "Quit response:" << response;
-
-    // Throws if the request failed
-    verifyResponseStatus(response);
-
-    // Newer GFE versions will just return success even if quitting fails
-    // if we're not the original requester.
-    if (getCurrentGame(getServerInfo(NvHTTP::NVLL_ERROR)) != 0) {
-        // Generate a synthetic GfeResponseException letting the caller know
-        // that they can't kill someone else's stream.
-        throw GfeHttpResponseException(599, "");
-    }
 }
 
 QVector<NvDisplayMode>
@@ -738,9 +708,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     QUrl url(baseUrl);
     url.setPath("/" + command);
 
-    // Use a common UID for Moonlight clients to allow them to quit
-    // games for each other (otherwise GFE gets screwed up and it requires
-    // manual intervention to solve).
+    // Retain the protocol client identifier expected by the host.
     url.setQuery("uniqueid=0123456789ABCDEF&uuid=" +
                  QUuid::createUuid().toRfc4122().toHex() +
                  ((arguments != nullptr) ? ("&" + arguments) : ""));

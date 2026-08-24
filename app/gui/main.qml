@@ -198,6 +198,10 @@ ApplicationWindow {
         anchors.topMargin: 5
         anchors.bottomMargin: 5
 
+        background: Rectangle {
+            color: Qt.lighter(window.Material.background, 1.15)
+        }
+
         Label {
             id: titleLabel
             visible: toolBar.width > 700

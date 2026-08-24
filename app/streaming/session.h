@@ -154,7 +154,6 @@ signals:
 
     void displayLaunchWarning(QString text);
 
-    void quitStarting();
 
     void sessionFinished(int portTestResult);
 

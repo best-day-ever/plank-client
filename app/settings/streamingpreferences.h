@@ -109,14 +109,9 @@ public:
     Q_PROPERTY(int height MEMBER height NOTIFY displayModeChanged)
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
-    Q_PROPERTY(bool unlockBitrate MEMBER unlockBitrate NOTIFY unlockBitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
-    Q_PROPERTY(bool gameOptimizations MEMBER gameOptimizations NOTIFY gameOptimizationsChanged)
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
-    Q_PROPERTY(bool quitAppAfter MEMBER quitAppAfter NOTIFY quitAppAfterChanged)
-    Q_PROPERTY(bool absoluteMouseMode MEMBER absoluteMouseMode NOTIFY absoluteMouseModeChanged)
-    Q_PROPERTY(bool absoluteTouchMode MEMBER absoluteTouchMode NOTIFY absoluteTouchModeChanged)
     Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
@@ -131,9 +126,7 @@ public:
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
     Q_PROPERTY(UIDisplayMode uiDisplayMode MEMBER uiDisplayMode NOTIFY uiDisplayModeChanged)
-    Q_PROPERTY(bool swapMouseButtons MEMBER swapMouseButtons NOTIFY mouseButtonsChanged)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
-    Q_PROPERTY(bool reverseScrollDirection MEMBER reverseScrollDirection NOTIFY reverseScrollDirectionChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
@@ -145,21 +138,14 @@ public:
     int height;
     int fps;
     int bitrateKbps;
-    bool unlockBitrate;
     bool enableVsync;
-    bool gameOptimizations;
     bool playAudioOnHost;
     bool enableMdns;
-    bool quitAppAfter;
-    bool absoluteMouseMode;
-    bool absoluteTouchMode;
     bool framePacing;
     bool connectionWarnings;
     bool detectNetworkBlocking;
     bool showPerformanceOverlay;
-    bool swapMouseButtons;
     bool muteOnFocusLoss;
-    bool reverseScrollDirection;
     bool keepAwake;
     int packetSize;
     AudioConfig audioConfig;
@@ -179,15 +165,10 @@ public:
 signals:
     void displayModeChanged();
     void bitrateChanged();
-    void unlockBitrateChanged();
     void enableVsyncChanged();
-    void gameOptimizationsChanged();
     void playAudioOnHostChanged();
     void unsupportedFpsChanged();
     void enableMdnsChanged();
-    void quitAppAfterChanged();
-    void absoluteMouseModeChanged();
-    void absoluteTouchModeChanged();
     void audioConfigChanged();
     void videoCodecConfigChanged();
     void enableHdrChanged();
@@ -201,9 +182,7 @@ signals:
     void connectionWarningsChanged();
     void detectNetworkBlockingChanged();
     void showPerformanceOverlayChanged();
-    void mouseButtonsChanged();
     void muteOnFocusLossChanged();
-    void reverseScrollDirectionChanged();
     void captureSysKeysModeChanged();
     void keepAwakeChanged();
     void languageChanged();

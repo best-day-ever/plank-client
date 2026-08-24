@@ -188,15 +188,12 @@ SOURCES += \
     backend/boxartmanager.cpp \
     cli/commandlineparser.cpp \
     cli/listapps.cpp \
-    cli/quitstream.cpp \
     cli/startstream.cpp \
     settings/compatfetcher.cpp \
     settings/streamingpreferences.cpp \
-    streaming/input/abstouch.cpp \
     streaming/input/input.cpp \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
-    streaming/input/reltouch.cpp \
     streaming/session.cpp \
     streaming/avsynccontroller.cpp \
     streaming/stationconnectdisplaymode.cpp \
@@ -228,7 +225,6 @@ HEADERS += \
     backend/boxartmanager.h \
     cli/commandlineparser.h \
     cli/listapps.h \
-    cli/quitstream.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
     streaming/avsynccontroller.h \
