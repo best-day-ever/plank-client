@@ -207,28 +207,33 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
     SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
     if (newSurface != nullptr) {
         SDL_assert(!SDL_MUSTLOCK(newSurface));
-        SDL_assert(newSurface->format->format == SDL_PIXELFORMAT_ARGB8888);
+        SDL_assert(newSurface->format == SDL_PIXELFORMAT_ARGB8888);
+
+        const SDL_PixelFormatDetails* formatDetails =
+            SDL_GetPixelFormatDetails(newSurface->format);
+        SDL_assert(formatDetails != nullptr);
+        const int bytesPerPixel = formatDetails->bytes_per_pixel;
 
         glBindTexture(GL_TEXTURE_2D, m_OverlayTextures[type]);
 
         void* packedPixelData = nullptr;
         if (m_GlesMajorVersion >= 3 || m_HasExtUnpackSubimage) {
             // If we are GLES 3.0+ or have GL_EXT_unpack_subimage, GL can handle any pitch
-            SDL_assert(newSurface->pitch % newSurface->format->BytesPerPixel == 0);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, newSurface->pitch / newSurface->format->BytesPerPixel);
+            SDL_assert(newSurface->pitch % bytesPerPixel == 0);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, newSurface->pitch / bytesPerPixel);
         }
-        else if (newSurface->pitch != newSurface->w * newSurface->format->BytesPerPixel) {
+        else if (newSurface->pitch != newSurface->w * bytesPerPixel) {
             // If we can't use GL_UNPACK_ROW_LENGTH and the surface isn't tightly packed,
             // we must allocate a tightly packed buffer and copy our pixels there.
-            packedPixelData = malloc(newSurface->w * newSurface->h * newSurface->format->BytesPerPixel);
+            packedPixelData = malloc(newSurface->w * newSurface->h * bytesPerPixel);
             if (!packedPixelData) {
                 SDL_DestroySurface(newSurface);
                 return;
             }
 
             SDL_ConvertPixels(newSurface->w, newSurface->h,
-                              newSurface->format->format, newSurface->pixels, newSurface->pitch,
-                              newSurface->format->format, packedPixelData, newSurface->w * newSurface->format->BytesPerPixel);
+                              newSurface->format, newSurface->pixels, newSurface->pitch,
+                              newSurface->format, packedPixelData, newSurface->w * bytesPerPixel);
         }
 
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, newSurface->w, newSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
@@ -863,7 +868,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
     glClear(GL_COLOR_BUFFER_BIT);
 
     int drawableWidth, drawableHeight;
-    SDL_GL_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+    SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight);
 
     // Set the viewport to the size of the aspect-ratio-scaled video
     SDL_Rect src, dst;

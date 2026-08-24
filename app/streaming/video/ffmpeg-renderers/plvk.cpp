@@ -360,18 +360,11 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
 {
     m_Window = params->window;
 
-    unsigned int instanceExtensionCount = 0;
-    if (!SDL_Vulkan_GetInstanceExtensions(params->window, &instanceExtensionCount, nullptr)) {
+    Uint32 instanceExtensionCount = 0;
+    const char* const* instanceExtensions = SDL_Vulkan_GetInstanceExtensions(&instanceExtensionCount);
+    if (instanceExtensions == nullptr) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_Vulkan_GetInstanceExtensions() #1 failed: %s",
-                     SDL_GetError());
-        return false;
-    }
-
-    std::vector<const char*> instanceExtensions(instanceExtensionCount);
-    if (!SDL_Vulkan_GetInstanceExtensions(params->window, &instanceExtensionCount, instanceExtensions.data())) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_Vulkan_GetInstanceExtensions() #2 failed: %s",
+                     "SDL_Vulkan_GetInstanceExtensions() failed: %s",
                      SDL_GetError());
         return false;
     }
@@ -388,8 +381,8 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
 #endif
     }
     vkInstParams.get_proc_addr = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
-    vkInstParams.extensions = instanceExtensions.data();
-    vkInstParams.num_extensions = (int)instanceExtensions.size();
+    vkInstParams.extensions = instanceExtensions;
+    vkInstParams.num_extensions = static_cast<int>(instanceExtensionCount);
     m_PlVkInstance = pl_vk_inst_create(m_Log, &vkInstParams);
     if (m_PlVkInstance == nullptr) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -407,7 +400,7 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
     POPULATE_FUNCTION(vkGetPhysicalDeviceSurfaceSupportKHR);
     POPULATE_FUNCTION(vkEnumerateDeviceExtensionProperties);
 
-    if (!SDL_Vulkan_CreateSurface(params->window, m_PlVkInstance->instance, &m_VkSurface)) {
+    if (!SDL_Vulkan_CreateSurface(params->window, m_PlVkInstance->instance, nullptr, &m_VkSurface)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_Vulkan_CreateSurface() failed: %s",
                      SDL_GetError());
@@ -711,7 +704,7 @@ void PlVkRenderer::waitToRender()
 
     // Handle the swapchain being resized
     int vkDrawableW, vkDrawableH;
-    SDL_Vulkan_GetDrawableSize(m_Window, &vkDrawableW, &vkDrawableH);
+    SDL_GetWindowSizeInPixels(m_Window, &vkDrawableW, &vkDrawableH);
     if (!pl_swapchain_resize(m_Swapchain, &vkDrawableW, &vkDrawableH)) {
         // Swapchain (re)creation can fail if the window is occluded
         return;
@@ -921,7 +914,7 @@ void PlVkRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
     }
 
     // Find a compatible texture format
-    SDL_assert(newSurface->format->format == SDL_PIXELFORMAT_ARGB8888);
+    SDL_assert(newSurface->format == SDL_PIXELFORMAT_ARGB8888);
     pl_fmt texFormat = pl_find_named_fmt(m_Vulkan->gpu, "bgra8");
     if (!texFormat) {
         SDL_DestroySurface(newSurface);
