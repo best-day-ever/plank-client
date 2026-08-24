@@ -371,8 +371,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
-    parser.addToggleOption("hdr", "HDR streaming");
-    parser.addToggleOption("yuv444", "YUV 4:4:4 sampling, if supported");
     parser.addChoiceOption("identity-bit-depth", "identity RGB codec bit depth", {"8", "10"});
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
     parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
@@ -430,7 +428,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->bitrateKbps = qBound(10000, requestedBitrateKbps, 150000);
     } else if (displaySet || parser.isSet("fps")) {
         preferences->bitrateKbps = preferences->getDefaultBitrate(
-            preferences->width, preferences->height, preferences->fps, preferences->enableYUV444);
+            preferences->width, preferences->height, preferences->fps);
     }
 
     // Resolve --packet-size option
@@ -469,12 +467,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --performance-overlay and --no-performance-overlay options
     preferences->showPerformanceOverlay = parser.getToggleOptionValue("performance-overlay", preferences->showPerformanceOverlay);
-
-    // Resolve --hdr and --no-hdr options
-    preferences->enableHdr = parser.getToggleOptionValue("hdr", preferences->enableHdr);
-
-    // Resolve --yuv444 and --no-yuv444 options
-    preferences->enableYUV444 = parser.getToggleOptionValue("yuv444", preferences->enableYUV444);
 
     if (parser.isSet("identity-bit-depth")) {
         preferences->identityGbrBitDepth = parser.getChoiceOptionValue("identity-bit-depth").toInt();

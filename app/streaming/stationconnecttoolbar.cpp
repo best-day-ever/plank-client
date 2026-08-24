@@ -444,8 +444,12 @@ void StationConnectToolbar::redraw()
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    // Paint the background through the first pixel row so the toolbar meets
+    // the physical top edge without an antialiased one-pixel gap.
+    painter.fillRect(QRect(0, 0, m_Width, ToolbarHeight - 4),
+                     QColor(22, 27, 34, 238));
     painter.setPen(QPen(QColor(255, 255, 255, 42), 1));
-    painter.setBrush(QColor(22, 27, 34, 238));
+    painter.setBrush(Qt::NoBrush);
     painter.drawRoundedRect(QRectF(0.5, 0.5, m_Width - 1.0, ToolbarHeight - 5.0), 0, 0);
 
     QFont labelFont;

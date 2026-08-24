@@ -277,8 +277,7 @@ Flickable {
 
                                 StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
                                                                                                           StreamingPreferences.height,
-                                                                                                          StreamingPreferences.fps,
-                                                                                                          StreamingPreferences.enableYUV444);
+                                                                                                          StreamingPreferences.fps);
                                 slider.value = StreamingPreferences.bitrateKbps
                             }
 
@@ -443,8 +442,7 @@ Flickable {
 
                                 StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
                                                                                                           StreamingPreferences.height,
-                                                                                                          StreamingPreferences.fps,
-                                                                                                          StreamingPreferences.enableYUV444);
+                                                                                                          StreamingPreferences.fps);
                                 slider.value = StreamingPreferences.bitrateKbps
                             }
 
@@ -913,6 +911,7 @@ Flickable {
 
         GroupBox {
             id: uiSettingsGroupBox
+            parent: settingsColumn2
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             padding: 12
             title: "<font color=\"skyblue\">" + qsTr("UI Settings") + "</font>"
@@ -1341,8 +1340,7 @@ Flickable {
                     Component.onCompleted: {
                         var saved_vcc = StreamingPreferences.videoCodecConfig
 
-                        // Default to Automatic (relevant if HDR is enabled,
-                        // where we will match none of the codecs in the list)
+                        // Default to Automatic for legacy or unknown saved values.
                         currentIndex = 0
 
                         for(var i = 0; i < codecListModel.count; i++) {
@@ -1383,57 +1381,6 @@ Flickable {
                             StreamingPreferences.videoCodecConfig = codecListModel.get(currentIndex).val
                         }
                     }
-                }
-
-                CheckBox {
-                    id: enableHdr
-                    width: parent.width
-                    text: qsTr("Enable HDR (Experimental)")
-                    font.pointSize: 12
-
-                    enabled: SystemProperties.supportsHdr
-                    checked: enabled && StreamingPreferences.enableHdr
-                    onCheckedChanged: {
-                        StreamingPreferences.enableHdr = checked
-                    }
-
-                    // Updating StreamingPreferences.videoCodecConfig is handled above
-
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 5000
-                    ToolTip.visible: hovered
-                    ToolTip.text: enabled ?
-                                      qsTr("The stream will be HDR-capable, but some games may require an HDR monitor on your host PC to enable HDR mode.")
-                                    :
-                                      qsTr("HDR streaming is not supported on this PC.")
-                }
-
-                CheckBox {
-                    id: enableYUV444
-                    width: parent.width
-                    text: qsTr("Enable YUV 4:4:4 (Experimental)")
-                    font.pointSize: 12
-
-                    checked: StreamingPreferences.enableYUV444
-                    onCheckedChanged: {
-                        // This is called on init, so only reset to default bitrate when checked state changes.
-                        if (StreamingPreferences.enableYUV444 != checked) {
-                            StreamingPreferences.enableYUV444 = checked
-                            StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
-                                                                                                      StreamingPreferences.height,
-                                                                                                      StreamingPreferences.fps,
-                                                                                                      StreamingPreferences.enableYUV444);
-                            slider.value = StreamingPreferences.bitrateKbps
-                        }
-                    }
-
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 5000
-                    ToolTip.visible: hovered
-                    ToolTip.text: enabled ?
-                                      qsTr("Good for streaming desktop and text-heavy games, but not recommended for fast-paced games.")
-                                    :
-                                      qsTr("YUV 4:4:4 is not supported on this PC.")
                 }
 
                 CheckBox {

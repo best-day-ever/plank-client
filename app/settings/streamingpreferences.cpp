@@ -20,8 +20,6 @@
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
 #define SER_VIDEOCFG "videocfg"
-#define SER_HDR "hdr"
-#define SER_YUV444 "yuv444"
 #define SER_STATIONCONNECT_AUTO_RESOLUTION "stationconnectautoresolution"
 #define SER_STATIONCONNECT_TOOLBAR_PINNED "stationconnecttoolbarpinned"
 #define SER_VIDEODEC "videodec"
@@ -109,12 +107,11 @@ void StreamingPreferences::reload()
     width = settings.value(SER_WIDTH, 1280).toInt();
     height = settings.value(SER_HEIGHT, 720).toInt();
     fps = settings.value(SER_FPS, 60).toInt();
-    enableYUV444 = settings.value(SER_YUV444, false).toBool();
     identityGbrBitDepth = 10;
     stationConnectAutoResolution = settings.value(SER_STATIONCONNECT_AUTO_RESOLUTION, true).toBool();
     stationConnectToolbarPinned = settings.value(SER_STATIONCONNECT_TOOLBAR_PINNED, false).toBool();
     bitrateKbps = qBound(10000,
-                         settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps, enableYUV444)).toInt(),
+                         settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps)).toInt(),
                          150000);
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
@@ -126,7 +123,6 @@ void StreamingPreferences::reload()
     packetSize = settings.value(SER_PACKETSIZE, 0).toInt();
     muteOnFocusLoss = settings.value(SER_MUTEONFOCUSLOSS, false).toBool();
     keepAwake = settings.value(SER_KEEPAWAKE, true).toBool();
-    enableHdr = settings.value(SER_HDR, false).toBool();
     captureSysKeysMode = static_cast<CaptureSysKeysMode>(settings.value(SER_CAPTURESYSKEYS,
                                                          static_cast<int>(CaptureSysKeysMode::CSK_OFF)).toInt());
     audioConfig = static_cast<AudioConfig>(settings.value(SER_AUDIOCFG,
@@ -161,10 +157,9 @@ void StreamingPreferences::reload()
         }
     }
 
-    // Fixup VCC value to the new settings format with codec and HDR separate
+    // Fix up the deprecated combined HEVC/HDR value. StationConnect is SDR.
     if (videoCodecConfig == VCC_FORCE_HEVC_HDR_DEPRECATED) {
         videoCodecConfig = VCC_AUTO;
-        enableHdr = true;
     }
 }
 
@@ -303,8 +298,6 @@ void StreamingPreferences::save()
     settings.setValue(SER_DETECTNETBLOCKING, detectNetworkBlocking);
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
-    settings.setValue(SER_HDR, enableHdr);
-    settings.setValue(SER_YUV444, enableYUV444);
     settings.setValue(SER_STATIONCONNECT_AUTO_RESOLUTION, stationConnectAutoResolution);
     settings.setValue(SER_STATIONCONNECT_TOOLBAR_PINNED, stationConnectToolbarPinned);
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
@@ -318,7 +311,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_KEEPAWAKE, keepAwake);
 }
 
-int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)
+int StreamingPreferences::getDefaultBitrate(int width, int height, int fps)
 {
     // Don't scale bitrate linearly beyond 60 FPS. It's definitely not a linear
     // bitrate increase for frame rate once we get to values that high.
@@ -366,10 +359,9 @@ int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool
         }
     }
 
-    if (yuv444) {
-        // This is rough estimation based on the fact that 4:4:4 doubles the amount of raw YUV data compared to 4:2:0
-        resolutionFactor *= 2;
-    }
+    // StationConnect always uses 4:4:4. This rough estimate accounts for its
+    // doubled raw sample count relative to 4:2:0.
+    resolutionFactor *= 2;
 
     return qRound(resolutionFactor * frameRateFactor) * 1000;
 }

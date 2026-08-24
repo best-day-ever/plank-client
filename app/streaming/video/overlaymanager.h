@@ -52,7 +52,9 @@ private:
         bool enabled;
         int fontSize;
         SDL_Color color;
-        char text[512];
+        // Debug statistics include StationConnect precision metadata in
+        // addition to the upstream metrics. Keep enough room for every line.
+        char text[1024];
 
         TTF_Font* font;
         SDL_Surface* surface;

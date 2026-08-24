@@ -123,7 +123,7 @@ public:
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
-                        bool& isHdrSupported, QSize& maxResolution);
+                        QSize& maxResolution);
 
     static Session* get()
     {
