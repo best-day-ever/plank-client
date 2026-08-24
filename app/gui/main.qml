@@ -414,6 +414,8 @@ ApplicationWindow {
         }
 
         ColumnLayout {
+            width: parent.width
+
             Label {
                 text: qsTr("Address or hostname")
                 font.bold: true
@@ -423,7 +425,6 @@ ApplicationWindow {
                 id: addressText
                 Layout.fillWidth: true
                 focus: true
-                placeholderText: qsTr("hardware-test-host.stationconnect.io")
 
                 onTextEdited: {
                     if (!nicknameText.manuallyEdited) {
@@ -445,7 +446,6 @@ ApplicationWindow {
                 property bool manuallyEdited: false
 
                 Layout.fillWidth: true
-                placeholderText: qsTr("hardware-test-host")
 
                 onTextEdited: manuallyEdited = true
 
