@@ -2098,10 +2098,7 @@ void Session::execInternal()
 
             // Fall through
         case SDL_EVENT_RENDER_DEVICE_RESET:
-        case SDL_EVENT_RENDER_TARGETS_RESET:
-
-            if (event.type == SDL_EVENT_RENDER_DEVICE_RESET ||
-                    event.type == SDL_EVENT_RENDER_TARGETS_RESET) {
+            if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Recreating renderer by internal request: %d",
                             event.type);
@@ -2130,7 +2127,6 @@ void Session::execInternal()
             // of state loss).
             SDL_PumpEvents();
             SDL_FlushEvent(SDL_EVENT_RENDER_DEVICE_RESET);
-            SDL_FlushEvent(SDL_EVENT_RENDER_TARGETS_RESET);
 
             {
                 // If the stream exceeds the display refresh rate (plus some slack),

@@ -1120,7 +1120,7 @@ void DXVA2Renderer::renderFrame(AVFrame *frame)
                      "Clear() failed: %x",
                      hr);
         SDL_Event event;
-        event.type = SDL_EVENT_RENDER_TARGETS_RESET;
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
         SDL_PushEvent(&event);
         return;
     }
@@ -1131,7 +1131,7 @@ void DXVA2Renderer::renderFrame(AVFrame *frame)
                      "BeginScene() failed: %x",
                      hr);
         SDL_Event event;
-        event.type = SDL_EVENT_RENDER_TARGETS_RESET;
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
         SDL_PushEvent(&event);
         return;
     }
@@ -1157,7 +1157,7 @@ void DXVA2Renderer::renderFrame(AVFrame *frame)
                          "StretchRect() failed: %x",
                          hr);
             SDL_Event event;
-            event.type = SDL_EVENT_RENDER_TARGETS_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -1174,7 +1174,7 @@ void DXVA2Renderer::renderFrame(AVFrame *frame)
                      "EndScene() failed: %x",
                      hr);
         SDL_Event event;
-        event.type = SDL_EVENT_RENDER_TARGETS_RESET;
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
         SDL_PushEvent(&event);
         return;
     }
@@ -1192,7 +1192,7 @@ void DXVA2Renderer::renderFrame(AVFrame *frame)
                      "PresentEx() failed: %x",
                      hr);
         SDL_Event event;
-        event.type = SDL_EVENT_RENDER_TARGETS_RESET;
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
         SDL_PushEvent(&event);
         return;
     }

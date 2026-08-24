@@ -849,7 +849,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
             // XWayland. Other strategies like calling glGetError() don't seem
             // to be able to detect this situation for some reason.
             SDL_Event event;
-            event.type = SDL_EVENT_RENDER_TARGETS_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
 
             return;
