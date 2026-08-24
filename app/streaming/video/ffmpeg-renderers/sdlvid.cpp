@@ -176,7 +176,7 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    if (!SDL_SetRenderVSync(m_Renderer, enableVsync ? 1 : SDL_RENDER_VSYNC_DISABLED)) {
+    if (!SDL_SetRenderVSync(m_Renderer, enableVsync ? 1 : SDL_RENDERER_VSYNC_DISABLED)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "SDL_SetRenderVSync() failed: %s",
                     SDL_GetError());
@@ -306,7 +306,6 @@ ReadbackRetry:
 
     // Recreate the texture if the frame changed in size
     if (m_Texture != nullptr) {
-        int width, height;
         float width, height;
         if (SDL_GetTextureSize(m_Texture, &width, &height) &&
                 (frame->width != static_cast<int>(width) || frame->height != static_cast<int>(height))) {
