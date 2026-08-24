@@ -79,7 +79,7 @@ public:
         // Occurs when searched computer is found
         case Event::ComputerFound:
             if (m_State == StateSeekComputer) {
-                if (event.computer->pairState == NvComputer::PS_PAIRED) {
+                if (event.computer->authorizationState == NvComputer::AS_AUTHORIZED) {
                     beginAppLookup(event.computer);
                 } else if (event.computer->stationConnectAuthentication &&
                            !m_StationConnectUsername.isEmpty() &&
@@ -100,8 +100,7 @@ public:
                                           "--stationconnect-password-stdin.")
                                 .arg(event.computer->name);
                     } else {
-                        msg = QObject::tr("Computer %1 has not been paired. "
-                                          "Please open Moonlight to pair before streaming.")
+                        msg = QObject::tr("Computer %1 requires StationConnect sign-in before streaming.")
                                 .arg(event.computer->name);
                     }
                     emit q->failed(msg);

@@ -38,19 +38,6 @@ CenteredGridView {
         ComputerManager.computerAddCompleted.disconnect(addComplete)
     }
 
-    function pairingComplete(error)
-    {
-        // Close the PIN dialog
-        pairDialog.close()
-
-        // Display a failed dialog if we got an error
-        if (error !== undefined) {
-            errorDialog.text = error
-            errorDialog.helpText = ""
-            errorDialog.open()
-        }
-    }
-
     function authenticationComplete(error)
     {
         var pcIndex = loginDialog.pcIndex
@@ -103,7 +90,6 @@ CenteredGridView {
     {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
-        model.pairingCompleted.connect(pairingComplete)
         model.authenticationCompleted.connect(authenticationComplete)
         model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
         return model
@@ -147,7 +133,7 @@ CenteredGridView {
             anchors.verticalCenter: parent.verticalCenter
             visible: !model.statusUnknown
             source: !model.online ? "qrc:/res/warning_FILL1_wght300_GRAD200_opsz24.svg" :
-                                    (!model.paired ? "qrc:/res/baseline-lock-24px.svg" :
+                                    (!model.authorized ? "qrc:/res/baseline-lock-24px.svg" :
                                                      "qrc:/res/baseline-check_circle_outline-24px.svg")
             sourceSize {
                 width: 44
@@ -209,7 +195,7 @@ CenteredGridView {
                         var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name, "showHiddenGames": true})
                         stackView.push(appView)
                     }
-                    visible: model.online && model.paired && !model.stationConnectAuthentication
+                    visible: false
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
@@ -280,32 +266,12 @@ CenteredGridView {
                     errorDialog.helpText = ""
                     errorDialog.open()
                 }
-                else if (model.paired) {
-                    if (model.stationConnectAuthentication) {
-                        launchStationConnectDesktop(index)
-                    }
-                    else {
-                        // go to game view
-                        var component = Qt.createComponent("AppView.qml")
-                        var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name})
-                        stackView.push(appView)
-                    }
+                else if (model.authorized) {
+                    launchStationConnectDesktop(index)
                 }
                 else {
-                    if (model.stationConnectAuthentication) {
-                        loginDialog.pcIndex = index
-                        loginDialog.open()
-                    }
-                    else {
-                        var pin = computerModel.generatePinString()
-
-                        // Kick off pairing in the background
-                        computerModel.pairComputer(index, pin)
-
-                        // Display the pairing dialog
-                        pairDialog.pin = pin
-                        pairDialog.open()
-                    }
+                    loginDialog.pcIndex = index
+                    loginDialog.open()
                 }
             } else if (!model.online) {
                 // Using open() here because it may be activated by keyboard
@@ -351,24 +317,6 @@ CenteredGridView {
         // Using Setup-Guide here instead of Troubleshooting because it's likely that users
         // will arrive here by forgetting to enable GameStream or not forwarding ports.
         helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide"
-    }
-
-    NavigableMessageDialog {
-        id: pairDialog
-
-        // Pairing dialog must be modal to prevent double-clicks from triggering
-        // pairing twice
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-
-        // don't allow edits to the rest of the window while open
-        property string pin : "0000"
-        text:qsTr("Please enter %1 on your host PC. This dialog will close when pairing is completed.").arg(pin)+"\n\n"+
-             qsTr("If your host PC is running Sunshine, navigate to the Sunshine web UI to enter the PIN.")
-        standardButtons: Dialog.Cancel
-        onRejected: {
-            // FIXME: We should interrupt pairing here
-        }
     }
 
     NavigableDialog {

@@ -1409,7 +1409,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken.fill(QChar('\0'));
                 m_Computer->sessionToken.clear();
-                m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
             }
             if (m_ComputerManager != nullptr) {
                 m_ComputerManager->clientSideAttributeUpdated(m_Computer);
@@ -1545,7 +1545,7 @@ bool Session::reconnectStationConnect()
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken.fill(QChar('\0'));
                 m_Computer->sessionToken.clear();
-                m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
                 // A replacement media worker has no in-memory app state.
                 // Prefer a fresh launch; startConnectionAsync() falls back to
                 // resume when this is merely a transient same-worker outage.
@@ -1574,7 +1574,7 @@ bool Session::reconnectStationConnect()
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
-                m_Computer->pairState = NvComputer::PS_PAIRED;
+                m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
                     m_Computer->selectedOutputId =
@@ -1615,7 +1615,7 @@ bool Session::reconnectStationConnect()
             QWriteLocker lock(&m_Computer->lock);
             m_Computer->sessionToken.fill(QChar('\0'));
             m_Computer->sessionToken.clear();
-            m_Computer->pairState = NvComputer::PS_NOT_PAIRED;
+            m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
         }
         if (attempt != MaximumAttempts) {
             SDL_Delay(1000);

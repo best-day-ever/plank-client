@@ -1,7 +1,6 @@
 #include "computermanager.h"
 #include "boxartmanager.h"
 #include "nvhttp.h"
-#include "nvpairingmanager.h"
 
 #include <Limelight.h>
 #include <QtEndian>
@@ -10,7 +9,6 @@
 #include <QThreadPool>
 #include <QCoreApplication>
 
-#include <random>
 #include <utility>
 
 #define SER_HOSTS "hosts"
@@ -33,16 +31,14 @@ public:
 private:
     bool tryPollComputer(NvAddress address, bool& changed)
     {
-        QSslCertificate serverCert;
         bool stationConnectAuthentication;
         QString sessionToken;
         {
             QReadLocker lock(&m_Computer->lock);
-            serverCert = m_Computer->serverCert;
             stationConnectAuthentication = m_Computer->stationConnectAuthentication;
             sessionToken = m_Computer->sessionToken;
         }
-        NvHTTP http(address, 0, serverCert);
+        NvHTTP http(address, 0);
         http.setStationConnectAuthentication(stationConnectAuthentication, sessionToken);
 
         QString serverInfo;
@@ -53,12 +49,11 @@ private:
                 return false;
             }
 
-            // StationConnect state is deliberately not persisted. If a host
-            // switched from pairing since the last client run, rediscover the
-            // mode from minimal HTTP serverinfo and require the approved route
-            // before updating any in-memory trust state.
+            // StationConnect authorization is deliberately not persisted.
+            // Rediscover the protocol marker over minimal HTTP serverinfo,
+            // then require the approved route before accepting the host.
             try {
-                NvHTTP discoveryHttp(address, 0, QSslCertificate());
+                NvHTTP discoveryHttp(address, 0);
                 const QString discoveryInfo = discoveryHttp.getServerInfo(
                             NvHTTP::NvLogLevel::NVLL_NONE, true);
                 NvComputer discoveredState(discoveryHttp, discoveryInfo);
@@ -77,6 +72,11 @@ private:
         }
 
         NvComputer newState(http, serverInfo);
+
+        if (!newState.stationConnectAuthentication ||
+                !http.isApprovedStationConnectRoute()) {
+            return false;
+        }
 
         // Ensure the machine that responded is the one we intended to contact.
         // An unresolved manual bookmark binds to the first identity it reaches.
@@ -145,7 +145,7 @@ private:
             // Grab the applist if it's empty or it's been long enough that we need to refresh
             pollsSinceLastAppListFetch++;
             if (m_Computer->state == NvComputer::CS_ONLINE &&
-                    m_Computer->pairState == NvComputer::PS_PAIRED &&
+                    m_Computer->authorizationState == NvComputer::AS_AUTHORIZED &&
                     (m_Computer->appList.isEmpty() || pollsSinceLastAppListFetch >= POLLS_PER_APPLIST_FETCH)) {
                 // Notify prior to the app list poll since it may take a while, and we don't
                 // want to delay onlining of a machine, especially if we already have a cached list.
@@ -604,73 +604,6 @@ void ComputerManager::handleAboutToQuit()
     }
 }
 
-class PendingPairingTask : public QObject, public QRunnable
-{
-    Q_OBJECT
-
-public:
-    PendingPairingTask(ComputerManager* computerManager, NvComputer* computer, QString pin)
-        : m_ComputerManager(computerManager),
-          m_Computer(computer),
-          m_Pin(pin)
-    {
-        connect(this, &PendingPairingTask::pairingCompleted,
-                computerManager, &ComputerManager::pairingCompleted);
-    }
-
-signals:
-    void pairingCompleted(NvComputer* computer, QString error);
-
-private:
-    void run()
-    {
-        NvPairingManager pairingManager(m_Computer);
-
-        try {
-           NvPairingManager::PairState result = pairingManager.pair(m_Computer->appVersion, m_Pin, m_Computer->serverCert);
-           switch (result)
-           {
-           case NvPairingManager::PairState::PIN_WRONG:
-               emit pairingCompleted(m_Computer, tr("The PIN from the PC didn't match. Please try again."));
-               break;
-           case NvPairingManager::PairState::FAILED:
-               if (m_Computer->currentGameId != 0) {
-                   emit pairingCompleted(m_Computer, tr("You cannot pair while a previous session is still running on the host PC. Quit any running games or reboot the host PC, then try pairing again."));
-               }
-               else {
-                   emit pairingCompleted(m_Computer, tr("Pairing failed. Please try again."));
-               }
-               break;
-           case NvPairingManager::PairState::ALREADY_IN_PROGRESS:
-               emit pairingCompleted(m_Computer, tr("Another pairing attempt is already in progress."));
-               break;
-           case NvPairingManager::PairState::PAIRED:
-               // Persist the newly pinned server certificate for this host
-               m_ComputerManager->saveHost(m_Computer);
-
-               emit pairingCompleted(m_Computer, nullptr);
-               break;
-           }
-        } catch (const GfeHttpResponseException& e) {
-            emit pairingCompleted(m_Computer, tr("GeForce Experience returned error: %1").arg(e.toQString()));
-        } catch (const QtNetworkReplyException& e) {
-            emit pairingCompleted(m_Computer, e.toQString());
-        }
-    }
-
-    ComputerManager* m_ComputerManager;
-    NvComputer* m_Computer;
-    QString m_Pin;
-};
-
-void ComputerManager::pairHost(NvComputer* computer, QString pin)
-{
-    // Punt to a worker thread to avoid stalling the
-    // UI while waiting for pairing to complete
-    PendingPairingTask* pairing = new PendingPairingTask(this, computer, pin);
-    QThreadPool::globalInstance()->start(pairing);
-}
-
 class PendingAuthenticationTask : public QObject, public QRunnable
 {
     Q_OBJECT
@@ -723,7 +656,7 @@ private:
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
-                m_Computer->pairState = NvComputer::PS_PAIRED;
+                m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
                     m_Computer->selectedOutputId =
@@ -945,11 +878,11 @@ private:
 
     void run()
     {
-        NvHTTP http(m_Address, 0, QSslCertificate());
+        NvHTTP http(m_Address, 0);
 
         qInfo() << "Processing new PC at" << m_Address.toString() << "from" << (m_Mdns ? "mDNS" : "user") << "with IPv6 address" << m_MdnsIpv6Address.toString();
 
-        // Perform initial serverinfo fetch over HTTP since we don't know which cert to use
+        // Initial HTTP serverinfo discovers the StationConnect marker and HTTPS port.
         QString serverInfo = fetchServerInfo(http);
         if (serverInfo.isEmpty() && !m_MdnsIpv6Address.isNull()) {
             // Retry using the global IPv6 address if the IPv4 or link-local IPv6 address fails
@@ -960,10 +893,20 @@ private:
             return;
         }
 
-        // Create initial newComputer using HTTP serverinfo with no pinned cert
+        // Create the initial host state from discovery data.
         NvComputer* newComputer = new NvComputer(http, serverInfo);
 
-        // Check if we have a record of this host UUID to pull the pinned cert
+        if (!newComputer->stationConnectAuthentication ||
+                !http.isApprovedStationConnectRoute()) {
+            qWarning() << "Rejecting a host outside the StationConnect protocol or approved VPN route";
+            delete newComputer;
+            if (!m_Mdns) {
+                emit computerAddCompleted(false, false);
+            }
+            return;
+        }
+
+        // Reuse only the in-memory PAM bearer token for this host.
         NvComputer* existingComputer;
         {
             QReadLocker lock(&m_ComputerManager->m_Lock);
@@ -979,35 +922,28 @@ private:
                     }
                 }
             }
-            if (existingComputer != nullptr && !newComputer->stationConnectAuthentication) {
-                http.setServerCert(existingComputer->serverCert);
+            QString token;
+            if (existingComputer != nullptr) {
+                QReadLocker computerLock(&existingComputer->lock);
+                token = existingComputer->sessionToken;
             }
-            else if (newComputer->stationConnectAuthentication) {
-                QString token;
-                if (existingComputer != nullptr) {
-                    QReadLocker computerLock(&existingComputer->lock);
-                    token = existingComputer->sessionToken;
-                }
-                newComputer->sessionToken = token;
-                if (!token.isEmpty()) {
-                    newComputer->pairState = NvComputer::PS_PAIRED;
-                }
-                http.setStationConnectAuthentication(true, token);
+            newComputer->sessionToken = token;
+            if (!token.isEmpty()) {
+                newComputer->authorizationState = NvComputer::AS_AUTHORIZED;
             }
+            http.setStationConnectAuthentication(true, token);
         }
 
-        // Fetch serverinfo again over HTTPS with the pinned cert
-        if (existingComputer != nullptr || newComputer->stationConnectAuthentication) {
-            Q_ASSERT(http.httpsPort() != 0);
-            serverInfo = fetchServerInfo(http);
-            if (serverInfo.isEmpty()) {
-                return;
-            }
-
-            // Update the polled computer with the HTTPS information
-            NvComputer httpsComputer(http, serverInfo);
-            newComputer->update(httpsComputer);
+        // Fetch authenticated serverinfo over StationConnect TLS.
+        Q_ASSERT(http.httpsPort() != 0);
+        serverInfo = fetchServerInfo(http);
+        if (serverInfo.isEmpty()) {
+            delete newComputer;
+            return;
         }
+
+        NvComputer httpsComputer(http, serverInfo);
+        newComputer->update(httpsComputer);
 
         // Update addresses depending on the context
         if (m_Mdns) {
@@ -1141,16 +1077,6 @@ void ComputerManager::addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv
     // UI while waiting for serverinfo query to complete
     PendingAddTask* addTask = new PendingAddTask(this, address, mdnsIpv6Address, mdns);
     QThreadPool::globalInstance()->start(addTask);
-}
-
-// TODO: Use QRandomGenerator when we drop Qt 5.9 support
-QString ComputerManager::generatePinString()
-{
-    std::uniform_int_distribution<int> dist(0, 9999);
-    std::random_device rd;
-    std::mt19937 engine(rd());
-
-    return QString::asprintf("%04u", dist(engine));
 }
 
 #include "computermanager.moc"

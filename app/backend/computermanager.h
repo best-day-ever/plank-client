@@ -215,7 +215,6 @@ class ComputerManager : public QObject
 
     friend class DeferredHostDeletionTask;
     friend class PendingAddTask;
-    friend class PendingPairingTask;
     friend class PendingAuthenticationTask;
     friend class DelayedFlushThread;
 
@@ -231,10 +230,6 @@ public:
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString());
 
     void addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address = NvAddress());
-
-    QString generatePinString();
-
-    void pairHost(NvComputer* computer, QString pin);
 
     void authenticateHost(NvComputer* computer, QString username, QString password);
 
@@ -253,8 +248,6 @@ public:
 
 signals:
     void computerStateChanged(NvComputer* computer);
-
-    void pairingCompleted(NvComputer* computer, QString error);
 
     void authenticationCompleted(NvComputer* computer, QString error);
 

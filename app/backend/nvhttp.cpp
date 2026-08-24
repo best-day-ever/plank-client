@@ -60,8 +60,7 @@ QSslConfiguration stationConnectSslConfiguration()
 }
 }
 
-NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert) :
-    m_ServerCert(serverCert)
+NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort)
 {
     m_BaseUrlHttp.setScheme("http");
     m_BaseUrlHttps.setScheme("https");
@@ -77,15 +76,10 @@ NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert
 }
 
 NvHTTP::NvHTTP(NvComputer* computer) :
-    NvHTTP(computer->activeAddress, computer->activeHttpsPort, computer->serverCert)
+    NvHTTP(computer->activeAddress, computer->activeHttpsPort)
 {
     setStationConnectAuthentication(computer->stationConnectAuthentication,
                                     computer->sessionToken);
-}
-
-void NvHTTP::setServerCert(QSslCertificate serverCert)
-{
-    m_ServerCert = serverCert;
 }
 
 void NvHTTP::setAddress(NvAddress address)
@@ -152,11 +146,6 @@ NvAddress NvHTTP::address()
     return m_Address;
 }
 
-QSslCertificate NvHTTP::serverCert()
-{
-    return m_ServerCert;
-}
-
 uint16_t NvHTTP::httpPort()
 {
     return m_BaseUrlHttp.port();
@@ -210,13 +199,11 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
 {
     QString serverInfo;
 
-    // Check if we have a pinned cert and HTTPS port for this host yet
-    if ((m_StationConnectAuthentication || !m_ServerCert.isNull()) && httpsPort() != 0)
+    if (m_StationConnectAuthentication && httpsPort() != 0)
     {
         try
         {
-            // Always try HTTPS first, since it properly reports
-            // pairing status (and a few other attributes).
+            // Authenticated StationConnect status is available only over HTTPS.
             serverInfo = openConnectionToString(m_BaseUrlHttps,
                                                 "serverinfo",
                                                 nullptr,
@@ -225,31 +212,15 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
             // Throws if the request failed
             verifyResponseStatus(serverInfo);
         }
-        catch (const GfeHttpResponseException& e)
+        catch (const GfeHttpResponseException&)
         {
-            if (m_StationConnectAuthentication) {
-                throw;
-            }
-            if (e.getStatusCode() == 401)
-            {
-                // Certificate validation error, fallback to HTTP
-                serverInfo = openConnectionToString(m_BaseUrlHttp,
-                                                    "serverinfo",
-                                                    nullptr,
-                                                    fastFail ? FAST_FAIL_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
-                                                    logLevel);
-                verifyResponseStatus(serverInfo);
-            }
-            else
-            {
-                // Rethrow real errors
-                throw e;
-            }
+            throw;
         }
     }
     else
     {
-        // Only use HTTP prior to pairing or fetching HTTPS port
+        // Initial discovery uses HTTP only to learn the HTTPS port and
+        // StationConnect protocol marker.
         serverInfo = openConnectionToString(m_BaseUrlHttp,
                                             "serverinfo",
                                             nullptr,
@@ -264,9 +235,7 @@ NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
         }
         setHttpsPort(httpsPort);
 
-        // If we just needed to determine the HTTPS port, we'll try again over
-        // HTTPS now that we have the port number
-        if (m_StationConnectAuthentication || !m_ServerCert.isNull()) {
+        if (m_StationConnectAuthentication) {
             return getServerInfo(logLevel, fastFail);
         }
     }
@@ -433,7 +402,7 @@ NvHTTP::verifyResponseStatus(QString xml)
             {
                 QString statusMessage = xmlReader.attributes().value("status_message").toString();
                 if (statusCode != 401) {
-                    // 401 is expected for unpaired PCs when we fetch serverinfo over HTTPS
+                    // 401 is expected before PAM authorization establishes a bearer session.
                     qWarning() << "Request failed:" << statusCode << statusMessage;
                 }
                 if (statusCode == -1 && statusMessage == "Invalid") {
@@ -502,60 +471,39 @@ NvHTTP::getXmlString(QString xml,
 
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
-    if (m_StationConnectAuthentication) {
-        if (!isApprovedStationConnectRoute()) {
+    if (!m_StationConnectAuthentication || !isApprovedStationConnectRoute()) {
+        if (m_StationConnectAuthentication) {
             qWarning() << "Rejecting StationConnect TLS certificate outside the approved VPN route";
-            return;
         }
-        const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
-        if (!isStationConnectCertificate(certificate)) {
-            const auto alternativeNames = certificate.subjectAlternativeNames();
-            qWarning() << "Rejecting a TLS certificate outside the StationConnect profile"
-                       << "null" << certificate.isNull()
-                       << "selfSigned" << certificate.isSelfSigned()
-                       << "keyAlgorithm" << certificate.publicKey().algorithm()
-                       << "keyBits" << certificate.publicKey().length()
-                       << "dnsSans" << alternativeNames.values(QSsl::DnsEntry).size()
-                       << "ipSans" << alternativeNames.values(QSsl::IpAddressEntry).size()
-                       << "effective" << certificate.effectiveDate()
-                       << "expiry" << certificate.expiryDate();
-            return;
-        }
-
-        for (const QSslError& error : errors) {
-            switch (error.error()) {
-            case QSslError::SelfSignedCertificate:
-            case QSslError::CertificateUntrusted:
-            case QSslError::UnableToGetLocalIssuerCertificate:
-            case QSslError::UnableToVerifyFirstCertificate:
-            case QSslError::HostNameMismatch:
-                break;
-            default:
-                return;
-            }
-        }
-        reply->ignoreSslErrors(errors);
         return;
     }
-
-    bool ignoreErrors = true;
-
-    if (m_ServerCert.isNull()) {
-        // We should never make an HTTPS request without a cert
-        Q_ASSERT(!m_ServerCert.isNull());
+    const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
+    if (!isStationConnectCertificate(certificate)) {
+        const auto alternativeNames = certificate.subjectAlternativeNames();
+        qWarning() << "Rejecting a TLS certificate outside the StationConnect profile"
+                   << "null" << certificate.isNull()
+                   << "selfSigned" << certificate.isSelfSigned()
+                   << "keyAlgorithm" << certificate.publicKey().algorithm()
+                   << "keyBits" << certificate.publicKey().length()
+                   << "dnsSans" << alternativeNames.values(QSsl::DnsEntry).size()
+                   << "ipSans" << alternativeNames.values(QSsl::IpAddressEntry).size()
+                   << "effective" << certificate.effectiveDate()
+                   << "expiry" << certificate.expiryDate();
         return;
     }
-
     for (const QSslError& error : errors) {
-        if (m_ServerCert != error.certificate()) {
-            ignoreErrors = false;
+        switch (error.error()) {
+        case QSslError::SelfSignedCertificate:
+        case QSslError::CertificateUntrusted:
+        case QSslError::UnableToGetLocalIssuerCertificate:
+        case QSslError::UnableToVerifyFirstCertificate:
+        case QSslError::HostNameMismatch:
             break;
+        default:
+            return;
         }
     }
-
-    if (ignoreErrors) {
-        reply->ignoreSslErrors(errors);
-    }
+    reply->ignoreSslErrors(errors);
 }
 
 QString
@@ -715,11 +663,8 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     QNetworkRequest request(url);
 
-    if (!m_StationConnectAuthentication) {
-        // Legacy GameStream pairing authenticates with a persistent client certificate.
-        request.setSslConfiguration(IdentityManager::get()->getSslConfig());
-    }
-    else {
+    if (baseUrl.scheme() == "https") {
+        Q_ASSERT(m_StationConnectAuthentication);
         request.setSslConfiguration(stationConnectSslConfiguration());
         if (!m_SessionToken.isEmpty()) {
             request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toUtf8());
@@ -774,9 +719,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         }
 
         if (reply->error() == QNetworkReply::SslHandshakeFailedError) {
-            // This will trigger falling back to HTTP for the serverinfo query
-            // then pairing again to get the updated certificate.
-            GfeHttpResponseException exception(401, "Server certificate mismatch");
+            GfeHttpResponseException exception(401, "StationConnect TLS validation failed");
             delete reply;
             throw exception;
         }
@@ -792,8 +735,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         }
     }
 
-    const bool stationConnectTls = m_StationConnectAuthentication &&
-            baseUrl.scheme() == "https";
+    const bool stationConnectTls = baseUrl.scheme() == "https";
     const bool approvedRoute = !stationConnectTls ||
             isApprovedStationConnectRoute();
     const bool approvedCertificate = !stationConnectTls ||

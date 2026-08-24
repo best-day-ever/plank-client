@@ -22,7 +22,6 @@
 #define SER_IPV6ADDR "ipv6address"
 #define SER_IPV6PORT "ipv6port"
 #define SER_APPLIST "apps"
-#define SER_SRVCERT "srvcert"
 #define SER_CUSTOMNAME "customname"
 #define SER_NVIDIASOFTWARE "nvidiasw"
 #define SER_SELECTEDOUTPUT "stationconnect-selected-output"
@@ -41,7 +40,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname)
     this->manualAddress = address;
     this->manualBookmark = true;
     this->state = CS_UNKNOWN;
-    this->pairState = PS_UNKNOWN;
+    this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
     this->activeHttpsPort = 0;
     this->maxLumaPixelsHEVC = 0;
@@ -65,7 +64,6 @@ NvComputer::NvComputer(QSettings& settings)
                                   settings.value(SER_IPV6PORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
-    this->serverCert = QSslCertificate(settings.value(SER_SRVCERT).toByteArray());
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
     this->selectedOutputId = settings.value(SER_SELECTEDOUTPUT).toString();
     this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
@@ -89,7 +87,7 @@ NvComputer::NvComputer(QSettings& settings)
     sortAppList();
 
     this->currentGameId = 0;
-    this->pairState = PS_UNKNOWN;
+    this->authorizationState = AS_UNKNOWN;
     this->state = CS_UNKNOWN;
     this->gfeVersion = nullptr;
     this->appVersion = nullptr;
@@ -130,7 +128,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_IPV6PORT, ipv6Address.port());
     settings.setValue(SER_MANUALADDR, manualAddress.address());
     settings.setValue(SER_MANUALPORT, manualAddress.port());
-    settings.setValue(SER_SRVCERT, serverCert.toPem());
+    settings.remove("srvcert");
     settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
     settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
     settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
@@ -165,7 +163,6 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->remoteAddress == that.remoteAddress &&
            this->ipv6Address == that.ipv6Address &&
            this->manualAddress == that.manualAddress &&
-           this->serverCert == that.serverCert &&
            this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
            this->selectedOutputId == that.selectedOutputId &&
            this->selectedDisplayMode == that.selectedDisplayMode &&
@@ -184,7 +181,6 @@ void NvComputer::sortAppList()
 
 NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 {
-    this->serverCert = http.serverCert();
     this->manualBookmark = false;
 
     this->hasCustomName = false;
@@ -263,8 +259,8 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
             NvHTTP::getXmlString(serverInfo, "StationConnectTopologyVersion").toInt();
     this->stationConnectFeatureFlags =
             NvHTTP::getXmlString(serverInfo, "StationConnectFeatureFlags").toInt();
-    this->pairState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
-                PS_PAIRED : PS_NOT_PAIRED;
+    this->authorizationState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
+                AS_AUTHORIZED : AS_UNAUTHORIZED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
     this->appVersion = NvHTTP::getXmlString(serverInfo, "appversion");
     this->gfeVersion = NvHTTP::getXmlString(serverInfo, "GfeVersion");
@@ -631,13 +627,13 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(stationConnectTopologyVersion);
     ASSIGN_IF_CHANGED(stationConnectFeatureFlags);
     if (stationConnectAuthentication && sessionToken.isEmpty()) {
-        if (pairState != PS_NOT_PAIRED) {
-            pairState = PS_NOT_PAIRED;
+        if (authorizationState != AS_UNAUTHORIZED) {
+            authorizationState = AS_UNAUTHORIZED;
             changed = true;
         }
     }
     else {
-        ASSIGN_IF_CHANGED(pairState);
+        ASSIGN_IF_CHANGED(authorizationState);
     }
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
     ASSIGN_IF_CHANGED(currentGameId);
@@ -649,7 +645,6 @@ bool NvComputer::update(const NvComputer& that)
     ASSIGN_IF_CHANGED(isNvidiaServerSoftware);
     ASSIGN_IF_CHANGED(maxLumaPixelsHEVC);
     ASSIGN_IF_CHANGED(gpuModel);
-    ASSIGN_IF_CHANGED_AND_NONNULL(serverCert);
     ASSIGN_IF_CHANGED_AND_NONEMPTY(displayModes);
 
     if (!that.appList.isEmpty()) {

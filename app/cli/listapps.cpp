@@ -87,7 +87,7 @@ public:
         // Occurs when searched computer is found
         case Event::ComputerFound:
             if (m_State == StateSeekComputer) {
-                if (event.computer->pairState == NvComputer::PS_PAIRED) {
+                if (event.computer->authorizationState == NvComputer::AS_AUTHORIZED) {
                     m_State = StateSeekApp;
                     m_Computer = event.computer;
                     m_TimeoutTimer->start(APP_SEEK_TIMEOUT);
@@ -96,8 +96,7 @@ public:
                     }
                 } else {
                     m_State = StateFailure;
-                    fprintf(stderr, "%s\n", qPrintable(QObject::tr("Computer %1 has not been paired. "
-                                            "Please open Moonlight to pair before retrieving games list.")
+                    fprintf(stderr, "%s\n", qPrintable(QObject::tr("Computer %1 requires StationConnect sign-in before retrieving the application list.")
                                             .arg(event.computer->name)));
 
                     QCoreApplication::exit(-1);

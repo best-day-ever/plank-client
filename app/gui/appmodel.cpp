@@ -252,10 +252,10 @@ void AppModel::handleComputerStateChanged(NvComputer* computer)
         return;
     }
 
-    // If the computer has gone offline or we've been unpaired,
+    // If the computer has gone offline or authorization has expired,
     // signal the UI so we can go back to the PC view.
     if (m_Computer->state == NvComputer::CS_OFFLINE ||
-            m_Computer->pairState == NvComputer::PS_NOT_PAIRED) {
+            m_Computer->authorizationState == NvComputer::AS_UNAUTHORIZED) {
         emit computerLost();
         return;
     }

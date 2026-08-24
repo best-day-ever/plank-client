@@ -78,11 +78,11 @@ public:
     bool
     isEqualSerialized(const NvComputer& that) const;
 
-    enum PairState
+    enum AuthorizationState
     {
-        PS_UNKNOWN,
-        PS_PAIRED,
-        PS_NOT_PAIRED
+        AS_UNKNOWN,
+        AS_AUTHORIZED,
+        AS_UNAUTHORIZED
     };
 
     enum ComputerState
@@ -94,7 +94,7 @@ public:
 
     // Ephemeral traits
     ComputerState state;
-    PairState pairState;
+    AuthorizationState authorizationState;
     NvAddress activeAddress;
     uint16_t activeHttpsPort;
     int currentGameId;
@@ -120,7 +120,6 @@ public:
     QString name;
     bool hasCustomName;
     QString uuid;
-    QSslCertificate serverCert;
     QVector<NvApp> appList;
     bool isNvidiaServerSoftware;
     QString selectedOutputId;

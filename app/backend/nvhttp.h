@@ -1,6 +1,5 @@
 #pragma once
 
-#include "identitymanager.h"
 #include "nvapp.h"
 #include "nvaddress.h"
 #include "outputtopology.h"
@@ -111,7 +110,7 @@ public:
         NVLL_VERBOSE
     };
 
-    explicit NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert);
+    explicit NvHTTP(NvAddress address, uint16_t httpsPort);
 
     explicit NvHTTP(NvComputer* computer);
 
@@ -143,8 +142,6 @@ public:
                            int timeoutMs,
                            NvLogLevel logLevel = NvLogLevel::NVLL_VERBOSE);
 
-    void setServerCert(QSslCertificate serverCert);
-
     void setAddress(NvAddress address);
     void setHttpsPort(uint16_t port);
 
@@ -156,8 +153,6 @@ public:
     bool isApprovedStationConnectRoute() const;
 
     NvAddress address();
-
-    QSslCertificate serverCert();
 
     uint16_t httpPort();
 
@@ -208,7 +203,6 @@ private:
 
     NvAddress m_Address;
     QNetworkAccessManager m_Nam;
-    QSslCertificate m_ServerCert;
     bool m_StationConnectAuthentication = false;
     QString m_SessionToken;
 };

@@ -177,13 +177,10 @@ SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
     backend/nvapp.cpp \
-    cli/pair.cpp \
     main.cpp \
     backend/computerseeker.cpp \
-    backend/identitymanager.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
-    backend/nvpairingmanager.cpp \
     backend/computermanager.cpp \
     backend/boxartmanager.cpp \
     cli/commandlineparser.cpp \
@@ -212,15 +209,12 @@ HEADERS += \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/nvapp.h \
-    cli/pair.h \
     settings/compatfetcher.h \
     utils.h \
     backend/computerseeker.h \
-    backend/identitymanager.h \
     backend/nvcomputer.h \
     backend/stationconnectnetwork.h \
     backend/nvhttp.h \
-    backend/nvpairingmanager.h \
     backend/computermanager.h \
     backend/boxartmanager.h \
     cli/commandlineparser.h \

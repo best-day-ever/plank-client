@@ -30,8 +30,6 @@ void ComputerModel::initialize(ComputerManager* computerManager)
     m_ComputerManager = computerManager;
     connect(m_ComputerManager, &ComputerManager::computerStateChanged,
             this, &ComputerModel::handleComputerStateChanged);
-    connect(m_ComputerManager, &ComputerManager::pairingCompleted,
-            this, &ComputerModel::handlePairingCompleted);
     connect(m_ComputerManager, &ComputerManager::authenticationCompleted,
             this, &ComputerModel::handleAuthenticationCompleted);
 
@@ -54,8 +52,8 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->name;
     case OnlineRole:
         return computer->state == NvComputer::CS_ONLINE;
-    case PairedRole:
-        return computer->pairState == NvComputer::PS_PAIRED;
+    case AuthorizedRole:
+        return computer->authorizationState == NvComputer::AS_AUTHORIZED;
     case BusyRole:
         return computer->currentGameId != 0;
     case WakeableRole:
@@ -87,7 +85,7 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         }
         return QString();
     case DetailsRole: {
-        QString state, pairState;
+        QString state, authorizationState;
 
         switch (computer->state) {
         case NvComputer::CS_ONLINE:
@@ -101,15 +99,15 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
             break;
         }
 
-        switch (computer->pairState) {
-        case NvComputer::PS_PAIRED:
-            pairState = tr("Paired");
+        switch (computer->authorizationState) {
+        case NvComputer::AS_AUTHORIZED:
+            authorizationState = tr("Authorized");
             break;
-        case NvComputer::PS_NOT_PAIRED:
-            pairState = tr("Unpaired");
+        case NvComputer::AS_UNAUTHORIZED:
+            authorizationState = tr("Sign-in required");
             break;
         default:
-            pairState = tr("Unknown");
+            authorizationState = tr("Unknown");
             break;
         }
 
@@ -122,7 +120,7 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
                tr("IPv6 Address: %1").arg(computer->ipv6Address.toString()) + '\n' +
                tr("Manual Address: %1").arg(computer->manualAddress.toString()) + '\n' +
                tr("MAC Address: %1").arg(computer->macAddress.isEmpty() ? tr("Unknown") : QString(computer->macAddress.toHex(':'))) + '\n' +
-               tr("Pair State: %1").arg(pairState) + '\n' +
+               tr("Authorization: %1").arg(authorizationState) + '\n' +
                tr("Running Game ID: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->currentGameId) : tr("Unknown")) + '\n' +
                tr("HTTPS Port: %1").arg(computer->state == NvComputer::CS_ONLINE ? QString::number(computer->activeHttpsPort) : tr("Unknown"));
     }
@@ -148,7 +146,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
 
     names[NameRole] = "name";
     names[OnlineRole] = "online";
-    names[PairedRole] = "paired";
+    names[AuthorizedRole] = "authorized";
     names[BusyRole] = "busy";
     names[WakeableRole] = "wakeable";
     names[StatusUnknownRole] = "statusUnknown";
@@ -313,11 +311,6 @@ void ComputerModel::renameComputer(int computerIndex, QString name)
     m_ComputerManager->renameHost(m_Computers[computerIndex], name);
 }
 
-QString ComputerModel::generatePinString()
-{
-    return m_ComputerManager->generatePinString();
-}
-
 class DeferredTestConnectionTask : public QObject, public QRunnable
 {
     Q_OBJECT
@@ -347,24 +340,12 @@ void ComputerModel::testConnectionForComputer(int)
     QThreadPool::globalInstance()->start(testConnectionTask);
 }
 
-void ComputerModel::pairComputer(int computerIndex, QString pin)
-{
-    Q_ASSERT(computerIndex < m_Computers.count());
-
-    m_ComputerManager->pairHost(m_Computers[computerIndex], pin);
-}
-
 void ComputerModel::authenticateComputer(int computerIndex, QString username,
                                          QString password)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
     m_ComputerManager->authenticateHost(m_Computers[computerIndex],
                                         std::move(username), std::move(password));
-}
-
-void ComputerModel::handlePairingCompleted(NvComputer*, QString error)
-{
-    emit pairingCompleted(error.isEmpty() ? QVariant() : error);
 }
 
 void ComputerModel::handleAuthenticationCompleted(NvComputer*, QString error)

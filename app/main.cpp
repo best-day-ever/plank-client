@@ -34,7 +34,6 @@
 
 #include "cli/listapps.h"
 #include "cli/startstream.h"
-#include "cli/pair.h"
 #include "cli/commandlineparser.h"
 #include "path.h"
 #include "utils.h"
@@ -693,9 +692,6 @@ int main(int argc, char *argv[])
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
 
-    // Create the identity manager on the main thread
-    IdentityManager::get();
-
     // We require the Material theme
     QQuickStyle::setStyle("Material");
 
@@ -732,15 +728,6 @@ int main(int argc, char *argv[])
                     host, appName, preferences,
                     std::move(stationConnectUsername),
                     std::move(stationConnectPassword), &app);
-            engine.rootContext()->setContextProperty("launcher", launcher);
-            break;
-        }
-    case GlobalCommandLineParser::PairRequested:
-        {
-            initialView = "qrc:/gui/CliPair.qml";
-            PairCommandLineParser pairParser;
-            pairParser.parse(app.arguments());
-            auto launcher = new CliPair::Launcher(pairParser.getHost(), pairParser.getPredefinedPin(), &app);
             engine.rootContext()->setContextProperty("launcher", launcher);
             break;
         }

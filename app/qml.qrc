@@ -15,6 +15,5 @@
         <file>gui/NavigableMessageDialog.qml</file>
         <file>gui/NavigableDialog.qml</file>
         <file>gui/CenteredGridView.qml</file>
-        <file>gui/CliPair.qml</file>
     </qresource>
 </RCC>

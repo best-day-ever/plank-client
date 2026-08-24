@@ -11,7 +11,7 @@ class ComputerModel : public QAbstractListModel
     {
         NameRole = Qt::UserRole,
         OnlineRole,
-        PairedRole,
+        AuthorizedRole,
         BusyRole,
         WakeableRole,
         StatusUnknownRole,
@@ -35,10 +35,6 @@ public:
 
     Q_INVOKABLE void deleteComputer(int computerIndex);
 
-    Q_INVOKABLE QString generatePinString();
-
-    Q_INVOKABLE void pairComputer(int computerIndex, QString pin);
-
     Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
 
     Q_INVOKABLE void testConnectionForComputer(int computerIndex);
@@ -58,14 +54,12 @@ public:
     Q_INVOKABLE void setStationConnectDisplayChoice(int computerIndex, int choiceIndex);
 
 signals:
-    void pairingCompleted(QVariant error);
     void authenticationCompleted(QVariant error);
     void connectionTestCompleted(int result, QString blockedPorts);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);
 
-    void handlePairingCompleted(NvComputer* computer, QString error);
     void handleAuthenticationCompleted(NvComputer* computer, QString error);
 
 private:
