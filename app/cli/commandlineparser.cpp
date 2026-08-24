@@ -1,4 +1,5 @@
 #include "commandlineparser.h"
+#include "streaming/stationconnectpacketsize.h"
 
 #include <QCommandLineParser>
 #include <QFile>
@@ -308,7 +309,6 @@ QString PairCommandLineParser::getPredefinedPin() const
 StreamCommandLineParser::StreamCommandLineParser()
 {
     m_WindowModeMap = {
-        {"fullscreen", StreamingPreferences::WM_FULLSCREEN},
         {"windowed",   StreamingPreferences::WM_WINDOWED},
         {"borderless", StreamingPreferences::WM_FULLSCREEN_DESKTOP},
     };
@@ -363,7 +363,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("vsync", "V-Sync");
     parser.addValueOption("fps", "FPS");
     parser.addValueOption("bitrate", "bitrate in Kbps");
-    parser.addValueOption("packet-size", "video packet size");
+    parser.addValueOption("mtu", "physical network path MTU");
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
     parser.addToggleOption("audio-on-host", "audio on host PC");
@@ -431,11 +431,12 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
             preferences->width, preferences->height, preferences->fps);
     }
 
-    // Resolve --packet-size option
-    if (parser.isSet("packet-size")) {
-        preferences->packetSize = parser.getIntOption("packet-size");
-        if (preferences->packetSize < 1024) {
-            parser.showError("Packet size must be greater than 1024 bytes");
+    // Resolve --mtu option
+    if (parser.isSet("mtu")) {
+        preferences->networkMtu = parser.getIntOption("mtu");
+        if (preferences->networkMtu < StationConnectPacketSize::MinimumPhysicalPathMtu ||
+                preferences->networkMtu > StationConnectPacketSize::MaximumPhysicalPathMtu) {
+            parser.showError("MTU must be between 1280 and 9000 bytes");
         }
     }
 

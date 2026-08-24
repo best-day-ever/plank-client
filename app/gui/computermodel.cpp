@@ -66,6 +66,8 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->isSupportedServerVersion;
     case StationConnectAuthenticationRole:
         return computer->stationConnectAuthentication;
+    case AddressRole:
+        return computer->manualAddress.toString();
     case DetailsRole: {
         QString state, pairState;
 
@@ -134,6 +136,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
     names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
+    names[AddressRole] = "address";
     names[DetailsRole] = "details";
 
     return names;

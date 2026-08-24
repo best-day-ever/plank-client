@@ -532,6 +532,7 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_VideoDecoder(nullptr),
       m_DecoderLock(0),
       m_AudioMuted(false),
+      m_FullScreenFlag(SDL_WINDOW_FULLSCREEN_DESKTOP),
       m_QtWindow(nullptr),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_ReconnectRequested(false),
@@ -596,7 +597,7 @@ bool Session::initialize()
         // (notched or notchless), override the fullscreen mode to ensure it works as expected.
         // - SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES=0 will place the video underneath the notch
         // - SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES=1 will place the video below the notch
-        bool shouldUseFullScreenSpaces = m_Preferences->windowMode != StreamingPreferences::WM_FULLSCREEN;
+        bool shouldUseFullScreenSpaces = true;
         SDL_DisplayMode desktopMode;
         SDL_Rect safeArea;
         for (int displayIndex = 0; StreamUtils::getNativeDesktopMode(displayIndex, &desktopMode, &safeArea); displayIndex++) {
@@ -811,31 +812,6 @@ bool Session::initialize()
     }
     if (h264Identity10) {
         m_SupportedVideoFormats.prepend(VIDEO_FORMAT_H264_HIGH10_444);
-    }
-
-    switch (m_Preferences->windowMode)
-    {
-    default:
-    case StreamingPreferences::WM_FULLSCREEN_DESKTOP:
-        // Only use full-screen desktop mode if we're running a desktop environment
-        if (WMUtils::isRunningDesktopEnvironment()) {
-            m_FullScreenFlag = SDL_WINDOW_FULLSCREEN_DESKTOP;
-            break;
-        }
-        // Fall-through
-    case StreamingPreferences::WM_FULLSCREEN:
-#ifdef Q_OS_DARWIN
-        if (qEnvironmentVariableIntValue("I_WANT_BUGGY_FULLSCREEN") == 0) {
-            // Don't use "real" fullscreen on macOS by default. See comments above.
-            m_FullScreenFlag = SDL_WINDOW_FULLSCREEN_DESKTOP;
-        }
-        else {
-            m_FullScreenFlag = SDL_WINDOW_FULLSCREEN;
-        }
-#else
-        m_FullScreenFlag = SDL_WINDOW_FULLSCREEN;
-#endif
-        break;
     }
 
 #if !SDL_VERSION_ATLEAST(2, 0, 11)
@@ -1312,18 +1288,6 @@ void Session::toggleFullscreen()
     // Actually enter/leave fullscreen
     SDL_SetWindowFullscreen(m_Window, fullScreen ? m_FullScreenFlag : 0);
 
-#ifdef Q_OS_DARWIN
-    // SDL on macOS has a bug that causes the window size to be reset to crazy
-    // large dimensions when exiting out of true fullscreen mode. We can work
-    // around the issue by manually resetting the position and size here.
-    if (!fullScreen && m_FullScreenFlag == SDL_WINDOW_FULLSCREEN) {
-        int x, y, width, height;
-        getWindowDimensions(x, y, width, height);
-        SDL_SetWindowSize(m_Window, width, height);
-        SDL_SetWindowPosition(m_Window, x, y);
-    }
-#endif
-
     // Input handler might need to start/stop keyboard grab after changing modes
     m_InputHandler->updateKeyboardGrabState();
 
@@ -1493,14 +1457,17 @@ bool Session::startConnectionAsync(bool reconnecting)
         hostInfo.rtspSessionUrl = rtspSessionUrlStr.data();
     }
 
-    if (m_Preferences->packetSize != 0) {
-        // Override default packet size and remote streaming detection
+    if (m_Preferences->networkMtu != 0) {
+        // Derive a fragmentation-safe, 16-byte-aligned video packet size from
+        // the configured physical path MTU and conservative VPN framing.
         // NB: Using STREAM_CFG_AUTO will cap our packet size at 1024 for remote hosts.
         m_StreamConfig.streamingRemotely = STREAM_CFG_LOCAL;
-        m_StreamConfig.packetSize = m_Preferences->packetSize;
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Using custom packet size: %d bytes",
-                    m_Preferences->packetSize);
+        m_StreamConfig.packetSize = StationConnectPacketSize::videoPacketSizeForPhysicalMtu(
+                    m_Preferences->networkMtu);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Using configured physical MTU %d: video packet size %d bytes",
+                    m_Preferences->networkMtu,
+                    m_StreamConfig.packetSize);
     }
     else {
         // Use 1392 byte video packets by default
@@ -1834,7 +1801,7 @@ void Session::execInternal()
 #ifdef Q_OS_DARWIN
     std::string windowName = QString(m_Computer->name).toStdString();
 #else
-    std::string windowName = QString(m_Computer->name + " - Moonlight").toStdString();
+    std::string windowName = QString(m_Computer->name + " - StationConnect").toStdString();
 #endif
 
     m_Window = SDL_CreateWindow(windowName.c_str(),
@@ -1865,6 +1832,11 @@ void Session::execInternal()
             QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
             return;
         }
+    }
+
+    if (!m_IsFullScreen) {
+        SDL_SetWindowBordered(m_Window, SDL_TRUE);
+        SDL_SetWindowResizable(m_Window, SDL_TRUE);
     }
 
     // HACK: Remove once proper Dark Mode support lands in SDL

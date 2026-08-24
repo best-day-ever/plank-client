@@ -44,11 +44,16 @@ public:
 
     explicit NvComputer(QSettings& settings);
 
+    NvComputer(NvAddress manualAddress, QString nickname);
+
     void
     setRemoteAddress(QHostAddress);
 
     bool
     update(const NvComputer& that);
+
+    bool
+    acceptsServerUuid(const QString& candidateUuid) const;
 
     bool
     wake() const;
@@ -120,6 +125,8 @@ public:
     bool isNvidiaServerSoftware;
     QString selectedOutputId;
     QString selectedDisplayMode;
+    bool manualBookmark = false;
+    QString serverUuid;
     // Remember to update isEqualSerialized() when adding fields here!
 
     // Synchronization

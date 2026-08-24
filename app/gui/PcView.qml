@@ -16,7 +16,8 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 20
     bottomMargin: 5
-    cellWidth: 310; cellHeight: 330;
+    cellWidth: Math.min(760, availableWidth)
+    cellHeight: 104
     Component.onCompleted: {
         // Don't show any highlighted item until interacting with them.
         // We do this here instead of onActivated to avoid losing the user's
@@ -132,57 +133,62 @@ CenteredGridView {
     model: computerModel
 
     delegate: NavigableItemDelegate {
-        width: 300; height: 320;
+        width: pcGrid.cellWidth - 10
+        height: 94
         grid: pcGrid
         Accessible.name: model.name
 
         property alias pcContextMenu : pcContextMenuLoader.item
 
         Image {
-            id: pcIcon
-            anchors.horizontalCenter: parent.horizontalCenter
-            source: "qrc:/res/desktop_windows-48px.svg"
-            sourceSize {
-                width: 200
-                height: 200
-            }
-        }
-
-        Image {
-            // TODO: Tooltip
             id: stateIcon
-            anchors.horizontalCenter: pcIcon.horizontalCenter
-            anchors.verticalCenter: pcIcon.verticalCenter
-            anchors.verticalCenterOffset: !model.online ? -18 : -16
-            visible: !model.statusUnknown && (!model.online || !model.paired)
-            source: !model.online ? "qrc:/res/warning_FILL1_wght300_GRAD200_opsz24.svg" : "qrc:/res/baseline-lock-24px.svg"
+            anchors.left: parent.left
+            anchors.leftMargin: 18
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !model.statusUnknown
+            source: !model.online ? "qrc:/res/warning_FILL1_wght300_GRAD200_opsz24.svg" :
+                                    (!model.paired ? "qrc:/res/baseline-lock-24px.svg" :
+                                                     "qrc:/res/baseline-check_circle_outline-24px.svg")
             sourceSize {
-                width: !model.online ? 75 : 70
-                height: !model.online ? 75 : 70
+                width: 44
+                height: 44
             }
         }
 
         BusyIndicator {
             id: statusUnknownSpinner
-            anchors.horizontalCenter: pcIcon.horizontalCenter
-            anchors.verticalCenter: pcIcon.verticalCenter
-            anchors.verticalCenterOffset: -15
-            width: 75
-            height: 75
+            anchors.horizontalCenter: stateIcon.horizontalCenter
+            anchors.verticalCenter: parent.verticalCenter
+            width: 44
+            height: 44
             visible: model.statusUnknown
         }
 
-        Label {
-            id: pcNameText
-            text: model.name
+        Column {
+            anchors.left: stateIcon.right
+            anchors.leftMargin: 18
+            anchors.right: parent.right
+            anchors.rightMargin: 18
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
 
-            width: parent.width
-            anchors.top: pcIcon.bottom
-            anchors.bottom: parent.bottom
-            font.pointSize: 36
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.Wrap
-            elide: Text.ElideRight
+            Label {
+                id: pcNameText
+                width: parent.width
+                text: model.name
+                font.pointSize: 24
+                elide: Text.ElideRight
+            }
+
+            Label {
+                width: parent.width
+                text: (model.address ? model.address + "  ·  " : "") +
+                      (model.statusUnknown ? qsTr("Checking") :
+                       (model.online ? qsTr("Online") : qsTr("Offline")))
+                font.pointSize: 12
+                opacity: 0.72
+                elide: Text.ElideRight
+            }
         }
 
         Loader {

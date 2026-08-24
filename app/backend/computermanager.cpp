@@ -66,7 +66,7 @@ private:
                             discoveredState.stationConnectAuthentication);
                 if (!discoveredState.stationConnectAuthentication ||
                         !discoveryHttp.isApprovedStationConnectRoute() ||
-                        m_Computer->uuid != discoveredState.uuid) {
+                        !m_Computer->acceptsServerUuid(discoveredState.uuid)) {
                     return false;
                 }
                 changed = m_Computer->update(discoveredState);
@@ -78,8 +78,9 @@ private:
 
         NvComputer newState(http, serverInfo);
 
-        // Ensure the machine that responded is the one we intended to contact
-        if (m_Computer->uuid != newState.uuid) {
+        // Ensure the machine that responded is the one we intended to contact.
+        // An unresolved manual bookmark binds to the first identity it reaches.
+        if (!m_Computer->acceptsServerUuid(newState.uuid)) {
             qInfo() << "Found unexpected PC" << newState.name << "looking for" << m_Computer->name;
             return false;
         }
@@ -816,12 +817,46 @@ void ComputerManager::stopPollingAsync()
     }
 }
 
-void ComputerManager::addNewHostManually(QString address)
+void ComputerManager::addNewHostManually(QString address, QString nickname)
 {
     QUrl url = QUrl::fromUserInput("moonlight://" + address);
     if (url.isValid() && !url.host().isEmpty() && url.scheme() == "moonlight") {
-        // If there wasn't a port specified, use the default
-        addNewHost(NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT)), false);
+        const NvAddress manualAddress(url.host(), url.port(DEFAULT_HTTP_PORT));
+        if (nickname.trimmed().isEmpty()) {
+            nickname = manualAddress.address();
+        }
+
+        NvComputer* bookmark = nullptr;
+        {
+            QWriteLocker lock(&m_Lock);
+            for (NvComputer* computer : m_KnownHosts) {
+                QReadLocker computerLock(&computer->lock);
+                if (computer->manualAddress == manualAddress) {
+                    bookmark = computer;
+                    break;
+                }
+            }
+
+            if (bookmark == nullptr) {
+                bookmark = new NvComputer(manualAddress, nickname.trimmed());
+                m_KnownHosts[bookmark->uuid] = bookmark;
+                startPollingComputer(bookmark);
+            }
+        }
+
+        bool nicknameChanged;
+        {
+            QReadLocker bookmarkLock(&bookmark->lock);
+            nicknameChanged = bookmark->name != nickname.trimmed();
+        }
+        if (nicknameChanged) {
+            renameHost(bookmark, nickname.trimmed());
+        }
+        else {
+            saveHosts();
+            emit computerStateChanged(bookmark);
+        }
+        emit computerAddCompleted(true, false);
     }
     else {
         emit computerAddCompleted(false, false);
@@ -933,6 +968,17 @@ private:
         {
             QReadLocker lock(&m_ComputerManager->m_Lock);
             existingComputer = m_ComputerManager->m_KnownHosts.value(newComputer->uuid);
+            if (existingComputer == nullptr) {
+                for (NvComputer* candidate : m_ComputerManager->m_KnownHosts) {
+                    QReadLocker candidateLock(&candidate->lock);
+                    if (candidate->manualBookmark &&
+                            (candidate->serverUuid == newComputer->uuid ||
+                             (!m_Mdns && candidate->manualAddress == m_Address))) {
+                        existingComputer = candidate;
+                        break;
+                    }
+                }
+            }
             if (existingComputer != nullptr && !newComputer->stationConnectAuthentication) {
                 http.setServerCert(existingComputer->serverCert);
             }
@@ -1003,6 +1049,17 @@ private:
             // Check if this PC already exists using opportunistic read lock
             m_ComputerManager->m_Lock.lockForRead();
             NvComputer* existingComputer = m_ComputerManager->m_KnownHosts.value(newComputer->uuid);
+            if (existingComputer == nullptr) {
+                for (NvComputer* candidate : m_ComputerManager->m_KnownHosts) {
+                    QReadLocker candidateLock(&candidate->lock);
+                    if (candidate->manualBookmark &&
+                            (candidate->serverUuid == newComputer->uuid ||
+                             (!m_Mdns && candidate->manualAddress == m_Address))) {
+                        existingComputer = candidate;
+                        break;
+                    }
+                }
+            }
 
             // If it doesn't already exist, convert to a write lock in preparation for updating.
             //

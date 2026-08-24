@@ -707,11 +707,6 @@ Flickable {
                         var model = Qt.createQmlObject('import QtQuick 2.0; ListModel {}', parent, '')
 
                         model.append({
-                                         text: qsTr("Fullscreen"),
-                                         val: StreamingPreferences.WM_FULLSCREEN
-                                     })
-
-                        model.append({
                                          text: qsTr("Borderless windowed"),
                                          val: StreamingPreferences.WM_FULLSCREEN_DESKTOP
                                      })
@@ -776,7 +771,7 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 5000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Fullscreen generally provides the best performance, but borderless windowed may work better with features like macOS Spaces, Alt+Tab, screenshot tools, on-screen overlays, etc.")
+                    ToolTip.text: qsTr("Borderless fills the display. Windowed provides a movable, resizable stream window with desktop decorations.")
                 }
 
                 CheckBox {
@@ -1087,60 +1082,6 @@ Flickable {
                     }
                 }
 
-                Label {
-                    width: parent.width
-                    id: uiDisplayModeTitle
-                    text: qsTr("GUI display mode")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
-                    visible: SystemProperties.hasDesktopEnvironment
-                }
-
-                AutoResizingComboBox {
-                    // ignore setting the index at first, and actually set it when the component is loaded
-                    Component.onCompleted: {
-                        if (!visible) {
-                            // Do nothing if the control won't even be visible
-                            return
-                        }
-
-                        var saved_uidisplaymode = StreamingPreferences.uiDisplayMode
-                        currentIndex = 0
-                        for (var i = 0; i < uiDisplayModeListModel.count; i++) {
-                            var el_uidisplaymode = uiDisplayModeListModel.get(i).val;
-                            if (saved_uidisplaymode === el_uidisplaymode) {
-                                currentIndex = i
-                                break
-                            }
-                        }
-
-                        activated(currentIndex)
-                    }
-
-                    id: uiDisplayModeComboBox
-                    visible: SystemProperties.hasDesktopEnvironment
-                    textRole: "text"
-                    model: ListModel {
-                        id: uiDisplayModeListModel
-                        ListElement {
-                            text: qsTr("Windowed")
-                            val: StreamingPreferences.UI_WINDOWED
-                        }
-                        ListElement {
-                            text: qsTr("Maximized")
-                            val: StreamingPreferences.UI_MAXIMIZED
-                        }   
-                        ListElement {
-                            text: qsTr("Fullscreen")
-                            val: StreamingPreferences.UI_FULLSCREEN
-                        }
-                    }
-                    // ::onActivated must be used, as it only listens for when the index is changed by a human
-                    onActivated : {
-                        StreamingPreferences.uiDisplayMode = uiDisplayModeListModel.get(currentIndex).val
-                    }
-                }
-
                 CheckBox {
                     id: connectionWarningsCheck
                     width: parent.width
@@ -1269,6 +1210,73 @@ Flickable {
         }
 
         GroupBox {
+            id: networkSettingsGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            padding: 12
+            title: "<font color=\"skyblue\">" + qsTr("Network Settings") + "</font>"
+            font.pointSize: 12
+
+            Column {
+                anchors.fill: parent
+                spacing: 5
+
+                CheckBox {
+                    id: automaticMtuCheckBox
+                    width: parent.width
+                    text: qsTr("Determine network MTU automatically")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.networkMtu === 0
+                    onClicked: {
+                        StreamingPreferences.networkMtu = checked ? 0 : mtuSpinBox.value
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 8
+
+                    Label {
+                        text: qsTr("Physical path MTU")
+                        font.pointSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    SpinBox {
+                        id: mtuSpinBox
+                        from: 1280
+                        to: 9000
+                        stepSize: 1
+                        editable: true
+                        enabled: !automaticMtuCheckBox.checked
+                        value: StreamingPreferences.networkMtu === 0 ? 1432 : StreamingPreferences.networkMtu
+                        onValueModified: {
+                            if (enabled) {
+                                StreamingPreferences.networkMtu = value
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    width: parent.width
+                    text: automaticMtuCheckBox.checked ?
+                              qsTr("Video packet size is selected per connection (1328 bytes on qualified ZeroTier paths).") :
+                              qsTr("Derived video packet size: %1 bytes").arg(StreamingPreferences.videoPacketSizeForMtu(mtuSpinBox.value))
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                }
+
+                Label {
+                    width: parent.width
+                    text: qsTr("Use the physical path MTU, not the larger MTU reported by a VPN interface.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                    opacity: 0.72
+                }
+            }
+        }
+
+        GroupBox {
             id: advancedSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             padding: 12
@@ -1336,51 +1344,24 @@ Flickable {
                 }
 
                 AutoResizingComboBox {
-                    // ignore setting the index at first, and actually set it when the component is loaded
-                    Component.onCompleted: {
-                        var saved_vcc = StreamingPreferences.videoCodecConfig
-
-                        // Default to Automatic for legacy or unknown saved values.
-                        currentIndex = 0
-
-                        for(var i = 0; i < codecListModel.count; i++) {
-                            var el_vcc = codecListModel.get(i).val;
-                            if (saved_vcc === el_vcc) {
-                                currentIndex = i
-                                break
-                            }
-                        }
-
-                        activated(currentIndex)
-                    }
-
                     id: codecComboBox
+                    enabled: false
+                    currentIndex: 0
                     textRole: "text"
                     model: ListModel {
                         id: codecListModel
                         ListElement {
-                            text: qsTr("Automatic (Recommended)")
-                            val: StreamingPreferences.VCC_AUTO
-                        }
-                        ListElement {
                             text: qsTr("H.264")
                             val: StreamingPreferences.VCC_FORCE_H264
                         }
-                        ListElement {
-                            text: qsTr("HEVC (H.265)")
-                            val: StreamingPreferences.VCC_FORCE_HEVC
-                        }
-                        ListElement {
-                            text: qsTr("AV1 (Experimental)")
-                            val: StreamingPreferences.VCC_FORCE_AV1
-                        }
                     }
-                    // ::onActivated must be used, as it only listens for when the index is changed by a human
-                    onActivated : {
-                        if (enabled) {
-                            StreamingPreferences.videoCodecConfig = codecListModel.get(currentIndex).val
-                        }
-                    }
+                }
+
+                Label {
+                    width: parent.width
+                    text: qsTr("StationConnect currently uses H.264 High 10 4:4:4.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
                 }
 
                 CheckBox {

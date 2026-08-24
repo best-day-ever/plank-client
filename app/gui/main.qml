@@ -28,20 +28,8 @@ ApplicationWindow {
             Material.background = "#303030"
         }
 
-        // Show the window according to the user's preferences
-        if (SystemProperties.hasDesktopEnvironment) {
-            if (StreamingPreferences.uiDisplayMode == StreamingPreferences.UI_MAXIMIZED) {
-                window.showMaximized()
-            }
-            else if (StreamingPreferences.uiDisplayMode == StreamingPreferences.UI_FULLSCREEN) {
-                window.showFullScreen()
-            }
-            else {
-                window.show()
-            }
-        } else {
-            window.showFullScreen()
-        }
+        // The StationConnect launcher is always a normal desktop window.
+        window.show()
 
         // Display any modal dialogs for configuration warnings
         if (SystemProperties.isWow64) {
@@ -388,42 +376,83 @@ ApplicationWindow {
 
     NavigableDialog {
         id: addPcDialog
-        property string label: qsTr("Enter the IP address of your host PC:")
+
+        function suggestedNickname(address) {
+            var value = address.trim()
+            if (value === "" || value.charAt(0) === "[" || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(value)) {
+                return ""
+            }
+            return value.split(":")[0].split(".")[0]
+        }
 
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         onOpened: {
             // Force keyboard focus on the textbox so keyboard navigation works
-            editText.forceActiveFocus()
+            addressText.forceActiveFocus()
+            standardButton(Dialog.Ok).enabled = Qt.binding(function() {
+                return addressText.text.trim() !== "" && nicknameText.text.trim() !== ""
+            })
         }
 
         onClosed: {
-            editText.clear()
+            addressText.clear()
+            nicknameText.clear()
+            nicknameText.manuallyEdited = false
         }
 
         onAccepted: {
-            if (editText.text) {
-                ComputerManager.addNewHostManually(editText.text.trim())
+            if (addressText.text && nicknameText.text) {
+                ComputerManager.addNewHostManually(addressText.text.trim(), nicknameText.text.trim())
             }
         }
 
         ColumnLayout {
             Label {
-                text: addPcDialog.label
+                text: qsTr("Address or hostname")
                 font.bold: true
             }
 
             TextField {
-                id: editText
+                id: addressText
                 Layout.fillWidth: true
                 focus: true
+                placeholderText: qsTr("hardware-test-host.stationconnect.io")
+
+                onTextEdited: {
+                    if (!nicknameText.manuallyEdited) {
+                        nicknameText.text = addPcDialog.suggestedNickname(text)
+                    }
+                }
+
+                Keys.onReturnPressed: nicknameText.forceActiveFocus()
+                Keys.onEnterPressed: nicknameText.forceActiveFocus()
+            }
+
+            Label {
+                text: qsTr("Nickname")
+                font.bold: true
+            }
+
+            TextField {
+                id: nicknameText
+                property bool manuallyEdited: false
+
+                Layout.fillWidth: true
+                placeholderText: qsTr("hardware-test-host")
+
+                onTextEdited: manuallyEdited = true
 
                 Keys.onReturnPressed: {
-                    addPcDialog.accept()
+                    if (addressText.text && text) {
+                        addPcDialog.accept()
+                    }
                 }
 
                 Keys.onEnterPressed: {
-                    addPcDialog.accept()
+                    if (addressText.text && text) {
+                        addPcDialog.accept()
+                    }
                 }
             }
         }

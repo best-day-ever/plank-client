@@ -546,6 +546,11 @@ int main(int argc, char *argv[])
     // the mouse cursor.
     SDL_SetHint("SDL_VIDEO_WAYLAND_EMULATE_MOUSE_WARP", "0");
 
+    // StationConnect is a Wayland desktop client. Prefer libdecor so windowed
+    // streams consistently receive a title bar and resize borders on GNOME.
+    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
+
 #ifdef QT_DEBUG
     // Allow thread naming using exceptions on debug builds. SDL doesn't use SEH
     // when throwing the exceptions, so we don't enable it for release builds out

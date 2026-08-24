@@ -1,6 +1,5 @@
 #include "streamingpreferences.h"
-#include "utils.h"
-
+#include "streaming/stationconnectpacketsize.h"
 #include <QSettings>
 #include <QTranslator>
 #include <QCoreApplication>
@@ -15,7 +14,6 @@
 #define SER_HEIGHT "height"
 #define SER_FPS "fps"
 #define SER_BITRATE "bitrate"
-#define SER_FULLSCREEN "fullscreen"
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
@@ -25,20 +23,15 @@
 #define SER_VIDEODEC "videodec"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
-#define SER_STARTWINDOWED "startwindowed"
 #define SER_FRAMEPACING "framepacing"
 #define SER_CONNWARNINGS "connwarnings"
-#define SER_UIDISPLAYMODE "uidisplaymode"
-#define SER_DEFAULTVER "defaultver"
-#define SER_PACKETSIZE "packetsize"
+#define SER_NETWORKMTU "stationconnect-network-mtu"
 #define SER_DETECTNETBLOCKING "detectnetblocking"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_CAPTURESYSKEYS "capturesyskeys"
 #define SER_KEEPAWAKE "keepawake"
 #define SER_LANGUAGE "language"
-
-#define CURRENT_DEFAULT_VER 2
 
 static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
@@ -90,19 +83,7 @@ void StreamingPreferences::reload()
 {
     QSettings settings;
 
-    int defaultVer = settings.value(SER_DEFAULTVER, 0).toInt();
-
-#ifdef Q_OS_DARWIN
     recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
-#else
-    // Wayland doesn't support modesetting, so use fullscreen desktop mode.
-    if (WMUtils::isRunningWayland()) {
-        recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
-    }
-    else {
-        recommendedFullScreenMode = WindowMode::WM_FULLSCREEN;
-    }
-#endif
 
     width = settings.value(SER_WIDTH, 1280).toInt();
     height = settings.value(SER_HEIGHT, 720).toInt();
@@ -120,7 +101,12 @@ void StreamingPreferences::reload()
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
     detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
     showPerformanceOverlay = settings.value(SER_SHOWPERFOVERLAY, false).toBool();
-    packetSize = settings.value(SER_PACKETSIZE, 0).toInt();
+    networkMtu = settings.value(SER_NETWORKMTU, 0).toInt();
+    if (networkMtu != 0) {
+        networkMtu = qBound(StationConnectPacketSize::MinimumPhysicalPathMtu,
+                            networkMtu,
+                            StationConnectPacketSize::MaximumPhysicalPathMtu);
+    }
     muteOnFocusLoss = settings.value(SER_MUTEONFOCUSLOSS, false).toBool();
     keepAwake = settings.value(SER_KEEPAWAKE, true).toBool();
     captureSysKeysMode = static_cast<CaptureSysKeysMode>(settings.value(SER_CAPTURESYSKEYS,
@@ -132,30 +118,9 @@ void StreamingPreferences::reload()
     videoDecoderSelection = static_cast<VideoDecoderSelection>(settings.value(SER_VIDEODEC,
                                                   static_cast<int>(VideoDecoderSelection::VDS_AUTO)).toInt());
     windowMode = static_cast<WindowMode>(settings.value(SER_WINDOWMODE,
-                                                        // Try to load from the old preference value too
-                                                        static_cast<int>(settings.value(SER_FULLSCREEN, true).toBool() ?
-                                                                             recommendedFullScreenMode : WindowMode::WM_WINDOWED)).toInt());
-    uiDisplayMode = static_cast<UIDisplayMode>(settings.value(SER_UIDISPLAYMODE,
-                                               static_cast<int>(settings.value(SER_STARTWINDOWED, true).toBool() ? UIDisplayMode::UI_WINDOWED
-                                                                                                                 : UIDisplayMode::UI_MAXIMIZED)).toInt());
+                                                        static_cast<int>(recommendedFullScreenMode)).toInt());
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
-
-
-    // Perform default settings updates as required based on last default version
-    if (defaultVer < 1) {
-#ifdef Q_OS_DARWIN
-        // Update window mode setting on macOS from full-screen (old default) to borderless windowed (new default)
-        if (windowMode == WindowMode::WM_FULLSCREEN) {
-            windowMode = WindowMode::WM_FULLSCREEN_DESKTOP;
-        }
-#endif
-    }
-    if (defaultVer < 2) {
-        if (windowMode == WindowMode::WM_FULLSCREEN && WMUtils::isRunningWayland()) {
-            windowMode = WindowMode::WM_FULLSCREEN_DESKTOP;
-        }
-    }
 
     // Fix up the deprecated combined HEVC/HDR value. StationConnect is SDR.
     if (videoCodecConfig == VCC_FORCE_HEVC_HDR_DEPRECATED) {
@@ -294,7 +259,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_MDNS, enableMdns);
     settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
-    settings.setValue(SER_PACKETSIZE, packetSize);
+    settings.setValue(SER_NETWORKMTU, networkMtu);
     settings.setValue(SER_DETECTNETBLOCKING, detectNetworkBlocking);
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
@@ -303,12 +268,15 @@ void StreamingPreferences::save()
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
-    settings.setValue(SER_UIDISPLAYMODE, static_cast<int>(uiDisplayMode));
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));
-    settings.setValue(SER_DEFAULTVER, CURRENT_DEFAULT_VER);
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
+}
+
+int StreamingPreferences::videoPacketSizeForMtu(int mtu) const
+{
+    return StationConnectPacketSize::videoPacketSizeForPhysicalMtu(mtu);
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps)

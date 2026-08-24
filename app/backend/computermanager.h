@@ -228,7 +228,7 @@ public:
 
     Q_INVOKABLE void stopPollingAsync();
 
-    Q_INVOKABLE void addNewHostManually(QString address);
+    Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString());
 
     void addNewHost(NvAddress address, bool mdns, NvAddress mdnsIpv6Address = NvAddress());
 

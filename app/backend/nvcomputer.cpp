@@ -4,6 +4,7 @@
 #include "stationconnectnetwork.h"
 
 #include <QUdpSocket>
+#include <QCryptographicHash>
 #include <QHostInfo>
 #include <QJsonDocument>
 #include <QNetworkInterface>
@@ -27,6 +28,28 @@
 #define SER_SELECTEDOUTPUT "stationconnect-selected-output"
 #define SER_DISPLAYMODE "stationconnect-display-mode"
 #define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
+#define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
+#define SER_SERVERUUID "stationconnect-server-uuid"
+
+NvComputer::NvComputer(NvAddress address, QString nickname)
+{
+    const QByteArray bookmarkKey = address.toString().toUtf8();
+    this->uuid = QStringLiteral("stationconnect-bookmark-") +
+            QString::fromLatin1(QCryptographicHash::hash(bookmarkKey, QCryptographicHash::Sha256).toHex().left(32));
+    this->name = nickname;
+    this->hasCustomName = true;
+    this->manualAddress = address;
+    this->manualBookmark = true;
+    this->state = CS_UNKNOWN;
+    this->pairState = PS_UNKNOWN;
+    this->currentGameId = 0;
+    this->activeHttpsPort = 0;
+    this->maxLumaPixelsHEVC = 0;
+    this->serverCodecModeSupport = 0;
+    this->isSupportedServerVersion = true;
+    this->isNvidiaServerSoftware = false;
+    this->externalPort = address.port();
+}
 
 NvComputer::NvComputer(QSettings& settings)
 {
@@ -46,6 +69,8 @@ NvComputer::NvComputer(QSettings& settings)
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
     this->selectedOutputId = settings.value(SER_SELECTEDOUTPUT).toString();
     this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
+    this->manualBookmark = settings.value(SER_MANUALBOOKMARK, false).toBool();
+    this->serverUuid = settings.value(SER_SERVERUUID).toString();
     const QJsonDocument serializedTopology = QJsonDocument::fromJson(
             settings.value(SER_OUTPUTTOPOLOGY).toByteArray());
     if (serializedTopology.isObject()) {
@@ -109,6 +134,8 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
     settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
     settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
+    settings.setValue(SER_MANUALBOOKMARK, manualBookmark);
+    settings.setValue(SER_SERVERUUID, serverUuid);
     if (!outputTopology.outputs.isEmpty()) {
         settings.setValue(SER_OUTPUTTOPOLOGY,
                           QJsonDocument(outputTopology.toJson()).toJson(QJsonDocument::Compact));
@@ -142,6 +169,8 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
            this->selectedOutputId == that.selectedOutputId &&
            this->selectedDisplayMode == that.selectedDisplayMode &&
+           this->manualBookmark == that.manualBookmark &&
+           this->serverUuid == that.serverUuid &&
            this->outputTopology.toJson() == that.outputTopology.toJson() &&
            this->appList == that.appList;
 }
@@ -156,6 +185,7 @@ void NvComputer::sortAppList()
 NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 {
     this->serverCert = http.serverCert();
+    this->manualBookmark = false;
 
     this->hasCustomName = false;
     this->name = NvHTTP::getXmlString(serverInfo, "hostname");
@@ -552,8 +582,19 @@ bool NvComputer::update(const NvComputer& that)
     QWriteLocker thisLock(&this->lock);
     QReadLocker thatLock(&that.lock);
 
-    // UUID may not change or we're talking to a new PC
-    Q_ASSERT(this->uuid == that.uuid);
+    // A manual bookmark has a stable local UUID before its server identity is
+    // known. Bind it to the first server that successfully answers, then reject
+    // any different identity at that saved address.
+    if (manualBookmark) {
+        Q_ASSERT(serverUuid.isEmpty() || serverUuid == that.uuid);
+        if (serverUuid.isEmpty()) {
+            serverUuid = that.uuid;
+            changed = true;
+        }
+    }
+    else {
+        Q_ASSERT(this->uuid == that.uuid);
+    }
 
 #define ASSIGN_IF_CHANGED(field)       \
     if (this->field != that.field) {   \
@@ -617,4 +658,13 @@ bool NvComputer::update(const NvComputer& that)
     }
 
     return changed;
+}
+
+bool NvComputer::acceptsServerUuid(const QString& candidateUuid) const
+{
+    QReadLocker readLocker(&lock);
+    if (manualBookmark) {
+        return serverUuid.isEmpty() || serverUuid == candidateUuid;
+    }
+    return uuid == candidateUuid;
 }

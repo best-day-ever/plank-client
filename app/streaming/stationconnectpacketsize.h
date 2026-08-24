@@ -13,6 +13,8 @@ constexpr int ZeroTierPhysicalPayloadMtu = 1432;
 // This is deliberately one 16-byte step below the direct-frame maximum of
 // 1344. It also fits an extended ZeroTier frame without fragmentation.
 constexpr int VpnVideoPacketSize = 1328;
+constexpr int MinimumPhysicalPathMtu = 1280;
+constexpr int MaximumPhysicalPathMtu = 9000;
 
 constexpr int sunshineNegotiatedPacketSize(int moonlightPacketSize)
 {
@@ -32,11 +34,23 @@ constexpr int zeroTierPhysicalPayload(int moonlightPacketSize,
            InnerIpv4UdpOverhead + zeroTierFrameOverhead;
 }
 
+constexpr int ExtendedPathFramingOverhead = zeroTierPhysicalPayload(
+        0, ZeroTierExtendedFrameOverhead);
+
+constexpr int videoPacketSizeForPhysicalMtu(int physicalMtu)
+{
+    return physicalMtu > ExtendedPathFramingOverhead ?
+                (physicalMtu - ExtendedPathFramingOverhead) -
+                    ((physicalMtu - ExtendedPathFramingOverhead) % 16) : 0;
+}
+
 static_assert(VpnVideoPacketSize % 16 == 0,
               "Moonlight video packet sizes must be 16-byte aligned");
 static_assert(zeroTierPhysicalPayload(VpnVideoPacketSize,
                                      ZeroTierExtendedFrameOverhead) <=
                   ZeroTierPhysicalPayloadMtu,
               "StationConnect VPN packets must not require ZeroTier fragmentation");
+static_assert(videoPacketSizeForPhysicalMtu(1432) == VpnVideoPacketSize,
+              "The qualified ZeroTier MTU must derive the qualified packet size");
 
 }

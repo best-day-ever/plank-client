@@ -46,19 +46,11 @@ public:
 
     enum WindowMode
     {
-        WM_FULLSCREEN,
-        WM_FULLSCREEN_DESKTOP,
-        WM_WINDOWED
+        // Preserve the historical numeric values stored in QSettings.
+        WM_FULLSCREEN_DESKTOP = 1,
+        WM_WINDOWED = 2
     };
     Q_ENUM(WindowMode)
-
-    enum UIDisplayMode
-    {
-        UI_WINDOWED,
-        UI_MAXIMIZED,
-        UI_FULLSCREEN
-    };
-    Q_ENUM(UIDisplayMode)
 
     // New entries must go at the end of the enum
     // to avoid renumbering existing entries (which
@@ -115,6 +107,7 @@ public:
     Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
+    Q_PROPERTY(int networkMtu MEMBER networkMtu NOTIFY networkMtuChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
@@ -123,13 +116,13 @@ public:
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
-    Q_PROPERTY(UIDisplayMode uiDisplayMode MEMBER uiDisplayMode NOTIFY uiDisplayModeChanged)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
 
     Q_INVOKABLE bool retranslate();
+    Q_INVOKABLE int videoPacketSizeForMtu(int mtu) const;
 
     // Directly accessible members for preferences
     int width;
@@ -145,7 +138,7 @@ public:
     bool showPerformanceOverlay;
     bool muteOnFocusLoss;
     bool keepAwake;
-    int packetSize;
+    int networkMtu;
     AudioConfig audioConfig;
     VideoCodecConfig videoCodecConfig;
     int identityGbrBitDepth;
@@ -154,7 +147,6 @@ public:
     VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
-    UIDisplayMode uiDisplayMode;
     Language language;
     CaptureSysKeysMode captureSysKeysMode;
 
@@ -170,11 +162,11 @@ signals:
     void stationConnectAutoResolutionChanged();
     void stationConnectToolbarPinnedChanged();
     void videoDecoderSelectionChanged();
-    void uiDisplayModeChanged();
     void windowModeChanged();
     void framePacingChanged();
     void connectionWarningsChanged();
     void detectNetworkBlockingChanged();
+    void networkMtuChanged();
     void showPerformanceOverlayChanged();
     void muteOnFocusLossChanged();
     void captureSysKeysModeChanged();
