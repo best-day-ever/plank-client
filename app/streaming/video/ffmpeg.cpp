@@ -756,6 +756,8 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 {
     int offset = 0;
     const char* codecString;
+    const float videoPacketLossPercent =
+            Session::get()->currentVideoPacketLossPercent();
     int ret;
 
     // Start with an empty string
@@ -890,6 +892,24 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         }
 
         offset += ret;
+
+        if (videoPacketLossPercent >= 0.0f) {
+            ret = snprintf(&output[offset],
+                           length - offset,
+                           "Incoming video packet loss (before FEC): %.2f%%\n",
+                           videoPacketLossPercent);
+        }
+        else {
+            ret = snprintf(&output[offset],
+                           length - offset,
+                           "Incoming video packet loss (before FEC): N/A\n");
+        }
+        if (ret < 0 || ret >= length - offset) {
+            SDL_assert(false);
+            return;
+        }
+
+        offset += ret;
     }
 
     if (stats.framesWithHostProcessingLatency > 0) {
@@ -947,7 +967,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 void FFmpegVideoDecoder::logVideoStats(VIDEO_STATS& stats, const char* title)
 {
     if (stats.renderedFps > 0 || stats.renderedFrames != 0) {
-        char videoStatsStr[1024];
+        char videoStatsStr[1280];
         stringifyVideoStats(stats, videoStatsStr, sizeof(videoStatsStr));
 
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

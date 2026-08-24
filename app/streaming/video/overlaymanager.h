@@ -54,7 +54,7 @@ private:
         SDL_Color color;
         // Debug statistics include StationConnect precision metadata in
         // addition to the upstream metrics. Keep enough room for every line.
-        char text[1024];
+        char text[1280];
 
         TTF_Font* font;
         SDL_Surface* surface;

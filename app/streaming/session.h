@@ -143,6 +143,11 @@ public:
         m_CurrentVideoMbps.store(videoMbps, std::memory_order_relaxed);
     }
 
+    float currentVideoPacketLossPercent() const
+    {
+        return m_CurrentVideoPacketLossPercent.load(std::memory_order_relaxed);
+    }
+
 signals:
     void stageStarting(QString stage);
 
