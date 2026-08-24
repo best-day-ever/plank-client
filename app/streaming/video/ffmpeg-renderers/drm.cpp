@@ -325,7 +325,7 @@ bool DrmRenderer::initialize(PDECODER_PARAMETERS params)
     m_VideoFormat = params->videoFormat;
     m_SwFrameMapper.setVideoFormat(params->videoFormat);
 
-#if defined(SDL_VIDEO_DRIVER_KMSDRM)
+#if defined(HAVE_DRM)
     const char* videoDriver = SDL_GetCurrentVideoDriver();
     if (videoDriver != nullptr &&
             (strcmp(videoDriver, "kmsdrm") == 0 || strcmp(videoDriver, "KMSDRM") == 0)) {

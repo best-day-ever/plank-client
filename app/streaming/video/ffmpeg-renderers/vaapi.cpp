@@ -125,7 +125,7 @@ VAAPIRenderer::openDisplay(SDL_Window* window)
         return nullptr;
 #endif
     }
-#if defined(SDL_VIDEO_DRIVER_KMSDRM) && defined(HAVE_LIBVA_DRM)
+#if defined(HAVE_LIBVA_DRM)
     else if (driver != nullptr && strcmp(driver, "kmsdrm") == 0) {
         m_WindowSystem = WindowSystemKmsDrm;
         const int sdlDrmFd = static_cast<int>(SDL_GetNumberProperty(

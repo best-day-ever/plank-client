@@ -850,10 +850,7 @@ int main(int argc, char *argv[])
                 SDL_VERSIONNUM_MICRO(runtimeVersion));
 
     // SDL 3.4.0 and 3.4.2 have bugs in atomic KMSDRM support that break us,
-    // so disable atomic on the affected SDL3 versions. Since not all versions
-    // of sdl2-compat will set the SDL3_VERSION hint, we assume that versions
-    // prior to 2.32.66 are affected (since that was released at the same time
-    // as SDL 3.4.4 with the atomic fixes).
+    // so disable atomic on affected native SDL3 runtimes.
     if (runtimeVersion < SDL_VERSIONNUM(3, 4, 4)) {
 #if !defined(Q_OS_WIN32) && !defined(Q_OS_DARWIN)
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -932,7 +929,7 @@ int main(int argc, char *argv[])
 
     // Match the StationConnect desktop entry so Wayland and X11 shells group
     // both the Qt launcher and SDL stream window under the packaged identity.
-    app.setDesktopFileName("la.instinctual.StationConnect.desktop");
+    app.setDesktopFileName("la.instinctual.StationConnect");
     qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "la.instinctual.StationConnect");
     qputenv("SDL_VIDEO_X11_WMCLASS", "la.instinctual.StationConnect");
 

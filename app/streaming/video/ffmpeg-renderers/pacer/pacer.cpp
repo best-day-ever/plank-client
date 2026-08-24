@@ -340,7 +340,7 @@ bool Pacer::initialize(SDL_Window* window, int maxVideoFps, bool enablePacing)
         }
     #endif
 
-    #if defined(SDL_VIDEO_DRIVER_WAYLAND) && defined(HAS_WAYLAND)
+    #if defined(HAS_WAYLAND)
         if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
             m_VsyncSource = new WaylandVsyncSource(this);
         }

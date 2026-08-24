@@ -610,13 +610,13 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     // to resize the window. This seems to happen significantly more often
     // with vsync enabled, so this also mitigates that problem too.
     if (params->enableVsync
-#ifdef SDL_VIDEO_DRIVER_WAYLAND
+#ifdef HAS_WAYLAND
             && !isWayland
 #endif
             ) {
         SDL_GL_SetSwapInterval(1);
 
-#if defined(SDL_VIDEO_DRIVER_KMSDRM)
+#if defined(HAVE_DRM)
         // The SDL KMSDRM backend already enforces double buffering (due to
         // SDL_HINT_VIDEO_DOUBLE_BUFFER=1), so calling glFinish() after
         // SDL_GL_SwapWindow() will block an extra frame and lock rendering
