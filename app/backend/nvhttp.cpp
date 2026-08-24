@@ -557,7 +557,11 @@ QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& b
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 #endif
 
-    QNetworkReply* reply = m_Nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    const auto sslErrorsConnection = connect(
+        m_Nam, &QNetworkAccessManager::sslErrors,
+        this, &NvHTTP::handleSslErrors);
+    QNetworkReply* reply = m_Nam->post(
+        request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     QEventLoop loop;
     connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
@@ -568,10 +572,19 @@ QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& b
         reply->abort();
     }
     m_Nam->clearAccessCache();
+    disconnect(sslErrorsConnection);
     if (reply->error() != QNetworkReply::NoError) {
         const QString message = reply->errorString();
         delete reply;
         throw QtNetworkReplyException(QNetworkReply::UnknownNetworkError, message);
+    }
+    const QSslConfiguration negotiatedSsl = reply->sslConfiguration();
+    if (!isApprovedStationConnectRoute() ||
+            !isStationConnectCertificate(negotiatedSsl.peerCertificate()) ||
+            negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
+        delete reply;
+        throw GfeHttpResponseException(401,
+                                       "StationConnect TLS validation failed");
     }
     const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
     delete reply;
