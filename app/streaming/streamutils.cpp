@@ -90,11 +90,6 @@ SDL_Window* StreamUtils::createTestWindow()
     SDL_Window* testWindow;
     Uint32 baseFlags = 0;
 
-    // Stop text input before creating the test window to avoid sdl2-compat
-    // starting text input on the new window. This might trigger the IME to
-    // be displayed.
-    SDL_StopTextInput();
-
     // Test windows are always hidden
     baseFlags |= SDL_WINDOW_HIDDEN;
 
@@ -105,24 +100,77 @@ SDL_Window* StreamUtils::createTestWindow()
     // desktop mode ensures the window size exactly matches the display mode
     // which prevents false Vulkan renderer failures during decoder probing.
     if (QString(SDL_GetCurrentVideoDriver()) == "KMSDRM") {
-        baseFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+        baseFlags |= SDL_WINDOW_FULLSCREEN;
     }
 
     // Try to add the platform-specific flags first and fall back if that fails
-    testWindow = SDL_CreateWindow("", 0, 0, 1280, 720,
+    testWindow = SDL_CreateWindow("", 1280, 720,
                                   baseFlags | StreamUtils::getPlatformWindowFlags());
     if (!testWindow) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to create test window with platform flags: %s",
                     SDL_GetError());
 
-        testWindow = SDL_CreateWindow("", 0, 0, 1280, 720, baseFlags);
+        testWindow = SDL_CreateWindow("", 1280, 720, baseFlags);
         if (!testWindow) {
             return nullptr;
         }
     }
 
     return testWindow;
+}
+
+int StreamUtils::getDisplayCount()
+{
+    int count = 0;
+    SDL_DisplayID* displays = SDL_GetDisplays(&count);
+    SDL_free(displays);
+    return count;
+}
+
+SDL_DisplayID StreamUtils::getDisplayId(int displayIndex)
+{
+    int count = 0;
+    SDL_DisplayID* displays = SDL_GetDisplays(&count);
+    const SDL_DisplayID id = displays != nullptr && displayIndex >= 0 && displayIndex < count ?
+                                 displays[displayIndex] : 0;
+    SDL_free(displays);
+    return id;
+}
+
+int StreamUtils::getDisplayIndex(SDL_DisplayID display)
+{
+    int count = 0;
+    SDL_DisplayID* displays = SDL_GetDisplays(&count);
+    int index = -1;
+    for (int i = 0; displays != nullptr && i < count; ++i) {
+        if (displays[i] == display) {
+            index = i;
+            break;
+        }
+    }
+    SDL_free(displays);
+    return index;
+}
+
+int StreamUtils::getDisplayModeCount(int displayIndex)
+{
+    int count = 0;
+    SDL_DisplayMode** modes = SDL_GetFullscreenDisplayModes(getDisplayId(displayIndex), &count);
+    SDL_free(modes);
+    return count;
+}
+
+bool StreamUtils::getDisplayMode(int displayIndex, int modeIndex, SDL_DisplayMode* mode)
+{
+    int count = 0;
+    SDL_DisplayMode** modes = SDL_GetFullscreenDisplayModes(getDisplayId(displayIndex), &count);
+    const bool valid = modes != nullptr && modeIndex >= 0 && modeIndex < count;
+    if (valid) {
+        *mode = *modes[modeIndex];
+    }
+    SDL_free(modes);
+    return valid;
 }
 
 void StreamUtils::scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst)
@@ -158,48 +206,32 @@ void StreamUtils::screenSpaceToNormalizedDeviceCoords(SDL_Rect* src, SDL_FRect* 
 
 int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
 {
-    int displayIndex = SDL_GetDisplayForWindow(window);
-    if (displayIndex < 0) {
+    const SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+    if (display == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to get current display: %s",
                      SDL_GetError());
 
-        // Assume display 0 if it fails
-        displayIndex = 0;
+        return 60;
     }
 
-    SDL_DisplayMode mode;
-    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN) {
-        // Use the window display mode for full-screen exclusive mode
-        if (SDL_GetWindowFullscreenMode(window, &mode) != 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_GetWindowFullscreenMode() failed: %s",
-                         SDL_GetError());
-
-            // Assume 60 Hz
-            return 60;
-        }
-    }
-    else {
-        // Use the current display mode for windowed and borderless
-        if (SDL_GetCurrentDisplayMode(displayIndex, &mode) != 0) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_GetCurrentDisplayMode() failed: %s",
-                         SDL_GetError());
-
-            // Assume 60 Hz
-            return 60;
-        }
+    const SDL_DisplayMode* mode = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ?
+                                      SDL_GetWindowFullscreenMode(window) :
+                                      SDL_GetCurrentDisplayMode(display);
+    if (mode == nullptr) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to query display mode: %s", SDL_GetError());
+        return 60;
     }
 
     // May be zero if undefined
-    if (mode.refresh_rate == 0) {
+    if (mode->refresh_rate == 0) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Refresh rate unknown; assuming 60 Hz");
-        mode.refresh_rate = 60;
+        return 60;
     }
 
-    return mode.refresh_rate;
+    return qRound(mode->refresh_rate);
 }
 
 bool StreamUtils::hasFastAes()
@@ -318,9 +350,9 @@ bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, 
     // in Session::initialize() for Darwin only!
     if (SDL_WasInit(SDL_INIT_VIDEO)) {
         // Now find the SDL mode that matches the CG native mode
-        for (int i = 0; i < SDL_GetNumDisplayModes(displayIndex); i++) {
+        for (int i = 0; i < getDisplayModeCount(displayIndex); i++) {
             SDL_DisplayMode thisMode;
-            if (SDL_GetDisplayMode(displayIndex, i, &thisMode) == 0) {
+            if (getDisplayMode(displayIndex, i, &thisMode)) {
                 if (thisMode.w == mode->w && thisMode.h == mode->h &&
                     thisMode.refresh_rate >= mode->refresh_rate) {
                     *mode = thisMode;
@@ -332,7 +364,8 @@ bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, 
 #else
     SDL_assert(SDL_WasInit(SDL_INIT_VIDEO));
 
-    if (displayIndex >= SDL_GetNumVideoDisplays()) {
+    const SDL_DisplayID display = getDisplayId(displayIndex);
+    if (display == 0) {
         return false;
     }
 
@@ -342,7 +375,7 @@ bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, 
     // the first mode on Wayland will get the native resolution without the scaling factor
     // (and macOS is handled in the #ifdef above).
     if (!strcmp(SDL_GetCurrentVideoDriver(), "wayland")) {
-        if (SDL_GetDisplayMode(displayIndex, 0, mode) != 0) {
+        if (!getDisplayMode(displayIndex, 0, mode)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_GetDisplayMode() failed: %s",
                          SDL_GetError());
@@ -350,18 +383,22 @@ bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, 
         }
     }
     else {
-        if (SDL_GetDesktopDisplayMode(displayIndex, mode) != 0) {
+        const SDL_DisplayMode* desktopMode = SDL_GetDesktopDisplayMode(display);
+        if (desktopMode == nullptr) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_GetDesktopDisplayMode() failed: %s",
                          SDL_GetError());
             return false;
         }
+        *mode = *desktopMode;
     }
 
-    safeArea->x = 0;
-    safeArea->y = 0;
-    safeArea->w = mode->w;
-    safeArea->h = mode->h;
+    if (!SDL_GetDisplayUsableBounds(display, safeArea)) {
+        safeArea->x = 0;
+        safeArea->y = 0;
+        safeArea->w = mode->w;
+        safeArea->h = mode->h;
+    }
 #endif
 
     return true;
@@ -371,26 +408,22 @@ int StreamUtils::getDrmFdForWindow(SDL_Window* window, bool* mustClose)
 {
     *mustClose = false;
 
-#if defined(SDL_VIDEO_DRIVER_KMSDRM) && SDL_VERSION_ATLEAST(2, 0, 15)
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(window, &info)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_GetWindowWMInfo() failed: %s",
-                     SDL_GetError());
-        return -1;
-    }
-
-    if (info.subsystem == SDL_SYSWM_KMSDRM) {
-        // If SDL has an FD, share that
-        if (info.info.kmsdrm.drm_fd >= 0) {
+#if defined(SDL_VIDEO_DRIVER_KMSDRM)
+    const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
+    if (properties != 0) {
+        const Sint64 drmFd = SDL_GetNumberProperty(
+            properties, SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER, -1);
+        if (drmFd >= 0) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Sharing DRM FD with SDL");
-            return info.info.kmsdrm.drm_fd;
+            return static_cast<int>(drmFd);
         }
-        else {
+        const Sint64 deviceIndex = SDL_GetNumberProperty(
+            properties, SDL_PROP_WINDOW_KMSDRM_DEVICE_INDEX_NUMBER, -1);
+        if (deviceIndex >= 0) {
             char path[128];
-            snprintf(path, sizeof(path), "/dev/dri/card%u", info.info.kmsdrm.dev_index);
+            snprintf(path, sizeof(path), "/dev/dri/card%lld",
+                     static_cast<long long>(deviceIndex));
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Opening DRM FD from SDL by path: %s",
                         path);

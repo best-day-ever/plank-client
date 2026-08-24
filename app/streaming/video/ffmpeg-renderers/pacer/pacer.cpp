@@ -190,7 +190,7 @@ int Pacer::renderThread(void* context)
 {
     Pacer* me = reinterpret_cast<Pacer*>(context);
 
-    if (SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH) < 0) {
+    if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Unable to set render thread to high priority: %s",
                     SDL_GetError());
@@ -330,37 +330,21 @@ bool Pacer::initialize(SDL_Window* window, int maxVideoFps, bool enablePacing)
                     "Frame pacing: target %d Hz with %d FPS stream",
                     m_DisplayFps, m_MaxVideoFps);
 
-        SDL_SysWMinfo info;
-        SDL_VERSION(&info.version);
-        if (!SDL_GetWindowWMInfo(window, &info)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_GetWindowWMInfo() failed: %s",
-                         SDL_GetError());
-            return false;
-        }
-
-        switch (info.subsystem) {
     #ifdef Q_OS_WIN32
-        case SDL_SYSWM_WINDOWS:
+        if (strcmp(SDL_GetCurrentVideoDriver(), "windows") == 0) {
             // Don't use D3DKMTWaitForVerticalBlankEvent() on Windows 7, because
             // it blocks during other concurrent DX operations (like actually rendering).
             if (IsWindows8OrGreater()) {
                 m_VsyncSource = new DxVsyncSource(this);
             }
-            break;
+        }
     #endif
 
     #if defined(SDL_VIDEO_DRIVER_WAYLAND) && defined(HAS_WAYLAND)
-        case SDL_SYSWM_WAYLAND:
+        if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
             m_VsyncSource = new WaylandVsyncSource(this);
-            break;
-    #endif
-
-        default:
-            // Platforms without a VsyncSource will just render frames
-            // immediately like they used to.
-            break;
         }
+    #endif
 
         SDL_assert(m_VsyncSource != nullptr || !(m_RendererAttributes & RENDERER_ATTRIBUTE_FORCE_PACING));
 

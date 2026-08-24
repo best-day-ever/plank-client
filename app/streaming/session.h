@@ -309,10 +309,10 @@ private:
     OPUS_MULTISTREAM_CONFIGURATION m_ActiveAudioConfig;
     OPUS_MULTISTREAM_CONFIGURATION m_OriginalAudioConfig;
     int m_AudioSampleCount;
-    Uint32 m_DropAudioEndTime;
+    Uint64 m_DropAudioEndTime;
     quint64 m_AudioMediaFramesReceived;
     bool m_AvSyncTelemetryEnabled;
-    Uint32 m_LastAudioTelemetryTime;
+    Uint64 m_LastAudioTelemetryTime;
 
     Overlay::OverlayManager m_OverlayManager;
     std::unique_ptr<StationConnectToolbar> m_StationConnectToolbar;

@@ -734,7 +734,7 @@ void FFmpegVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
         SDL_assert(dst.lastRtt > 0);
     }
 
-    Uint32 now = SDL_GetTicks();
+    Uint64 now = SDL_GetTicks();
 
     // Initialize the measurement start point if this is the first video stat window
     if (!dst.measurementStartTimestamp) {
@@ -1929,7 +1929,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     }
 
     // Flip stats windows roughly every second
-    if (SDL_TICKS_PASSED(SDL_GetTicks(), m_ActiveWndVideoStats.measurementStartTimestamp + 1000)) {
+    if (SDL_GetTicks() >= m_ActiveWndVideoStats.measurementStartTimestamp + 1000) {
         VIDEO_STATS lastTwoWndStats = {};
         addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
         addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);

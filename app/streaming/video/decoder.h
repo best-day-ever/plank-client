@@ -36,7 +36,7 @@ typedef struct _VIDEO_STATS {
     float receivedFps;
     float decodedFps;
     float renderedFps;
-    uint32_t measurementStartTimestamp;
+    uint64_t measurementStartTimestamp;
 } VIDEO_STATS, *PVIDEO_STATS;
 
 typedef struct _DECODER_PARAMETERS {
@@ -65,7 +65,7 @@ typedef struct _WINDOW_STATE_CHANGE_INFO {
     int height;
 
     // Populated if WINDOW_STATE_CHANGE_DISPLAY is set
-    int displayIndex;
+    SDL_DisplayID displayId;
 } WINDOW_STATE_CHANGE_INFO, *PWINDOW_STATE_CHANGE_INFO;
 
 class IVideoDecoder {

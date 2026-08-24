@@ -124,7 +124,7 @@ void SystemProperties::querySdlVideoInfoInternal()
 {
     hasHardwareAcceleration = false;
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: %s",
                      SDL_GetError());
@@ -135,14 +135,14 @@ void SystemProperties::querySdlVideoInfoInternal()
     // We call the internal variant because we're already in a safe thread context.
     refreshDisplaysInternal();
 
-    SDL_Window* testWindow = SDL_CreateWindow("", 0, 0, 1280, 720,
+    SDL_Window* testWindow = SDL_CreateWindow("", 1280, 720,
                                               SDL_WINDOW_HIDDEN | StreamUtils::getPlatformWindowFlags());
     if (!testWindow) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to create test window with platform flags: %s",
                     SDL_GetError());
 
-        testWindow = SDL_CreateWindow("", 0, 0, 1280, 720, SDL_WINDOW_HIDDEN);
+        testWindow = SDL_CreateWindow("", 1280, 720, SDL_WINDOW_HIDDEN);
         if (!testWindow) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Failed to create window for hardware decode test: %s",
@@ -190,7 +190,7 @@ void SystemProperties::refreshDisplays()
 
 void SystemProperties::refreshDisplaysInternal()
 {
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: %s",
                      SDL_GetError());
@@ -200,7 +200,7 @@ void SystemProperties::refreshDisplaysInternal()
     monitorNativeResolutions.clear();
 
     SDL_DisplayMode bestMode;
-    for (int displayIndex = 0; displayIndex < SDL_GetNumVideoDisplays(); displayIndex++) {
+    for (int displayIndex = 0; displayIndex < StreamUtils::getDisplayCount(); displayIndex++) {
         SDL_DisplayMode desktopMode;
         SDL_Rect safeArea;
 
@@ -217,9 +217,9 @@ void SystemProperties::refreshDisplaysInternal()
 
             // Start at desktop mode and work our way up
             bestMode = desktopMode;
-            for (int i = 0; i < SDL_GetNumDisplayModes(displayIndex); i++) {
+            for (int i = 0; i < StreamUtils::getDisplayModeCount(displayIndex); i++) {
                 SDL_DisplayMode mode;
-                if (SDL_GetDisplayMode(displayIndex, i, &mode) == 0) {
+                if (StreamUtils::getDisplayMode(displayIndex, i, &mode)) {
                     if (mode.w == desktopMode.w && mode.h == desktopMode.h) {
                         if (mode.refresh_rate > bestMode.refresh_rate) {
                             bestMode = mode;
@@ -237,7 +237,7 @@ void SystemProperties::refreshDisplaysInternal()
                 monitorRefreshRates.append(30);
             }
             else {
-                monitorRefreshRates.append(bestMode.refresh_rate);
+                monitorRefreshRates.append(qRound(bestMode.refresh_rate));
             }
         }
     }

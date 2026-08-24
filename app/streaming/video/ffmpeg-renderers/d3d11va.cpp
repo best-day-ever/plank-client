@@ -1214,7 +1214,7 @@ bool D3D11VARenderer::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO stateInfo)
 {
     if (stateInfo->stateChangeFlags & WINDOW_STATE_CHANGE_DISPLAY) {
         int adapterIndex, outputIndex;
-        if (!SDL_GetDXGIOutputInfo(stateInfo->displayIndex,
+        if (!SDL_GetDXGIOutputInfo(stateInfo->displayId,
                                    &adapterIndex, &outputIndex)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_GetDXGIOutputInfo() failed: %s",

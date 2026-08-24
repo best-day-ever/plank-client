@@ -69,7 +69,6 @@ private:
         KeyComboToggleMinimize,
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
-        KeyComboQuitAndExit,
         KeyComboToggleKeyboardGrab,
         KeyComboMax
     };
@@ -87,7 +86,9 @@ private:
     bool m_FakeMouseCaptureActive;
     bool m_KeyboardCaptureActive;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
-    int m_MouseCursorCapturedVisibilityState;
+    bool m_MouseCursorCapturedVisibilityState;
+
+    void setCursorVisible(bool visible);
 
     struct {
         KeyCombo keyCombo;

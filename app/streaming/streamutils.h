@@ -12,6 +12,21 @@ public:
     SDL_Window* createTestWindow();
 
     static
+    int getDisplayCount();
+
+    static
+    SDL_DisplayID getDisplayId(int displayIndex);
+
+    static
+    int getDisplayIndex(SDL_DisplayID display);
+
+    static
+    int getDisplayModeCount(int displayIndex);
+
+    static
+    bool getDisplayMode(int displayIndex, int modeIndex, SDL_DisplayMode* mode);
+
+    static
     void scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst);
 
     static

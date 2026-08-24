@@ -151,18 +151,17 @@ void StationConnectToolbar::setAppliedBitrate(
     redraw();
 }
 
-void StationConnectToolbar::update(Uint32 now)
+void StationConnectToolbar::update(Uint64 now)
 {
     if (!m_Visible && !m_LocalPointerInteraction &&
             m_EdgeHoverStartTime != 0 &&
             m_PointerY <= EdgeRevealHeight &&
-            SDL_TICKS_PASSED(now,
-                             m_EdgeHoverStartTime + EdgeActivationDelayMs)) {
+            now >= m_EdgeHoverStartTime + EdgeActivationDelayMs) {
         show(now);
     }
 
     if (m_Visible && !m_DraggingSlider && !m_PointerInside &&
-            m_HideDeadline != 0 && SDL_TICKS_PASSED(now, m_HideDeadline)) {
+            m_HideDeadline != 0 && now >= m_HideDeadline) {
         if (m_Pinned) {
             endLocalPointerInteraction();
             m_HideDeadline = 0;
@@ -171,7 +170,7 @@ void StationConnectToolbar::update(Uint32 now)
         }
     }
 
-    if (m_Visible && SDL_TICKS_PASSED(now, m_LastRedrawTime + RedrawIntervalMs) &&
+    if (m_Visible && now >= m_LastRedrawTime + RedrawIntervalMs &&
             (std::fabs(m_RenderedFps - m_LastDrawnFps) >= 0.05f ||
              std::fabs(m_VideoMbps - m_LastDrawnVideoMbps) >= 0.05f ||
              std::fabs(m_PacketLossPercent -
@@ -211,7 +210,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         return false;
     }
 
-    const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
+    const Uint64 now = SDL_GetTicks();
     // StationConnect sessions use absolute desktop input. SDL's window
     // coordinates are the single source of truth for both the remote pointer
     // and the receiver toolbar.
@@ -224,9 +223,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         if (m_PointerY <= EdgeRevealHeight) {
             if (m_EdgeHoverStartTime == 0) {
                 m_EdgeHoverStartTime = now;
-            } else if (SDL_TICKS_PASSED(
-                               now,
-                               m_EdgeHoverStartTime + EdgeActivationDelayMs)) {
+            } else if (now >= m_EdgeHoverStartTime + EdgeActivationDelayMs) {
                 show(now);
             }
         } else {
@@ -269,8 +266,7 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
                                    std::max(0, m_WindowWidth - m_Width));
         if (newLeft != m_ToolbarLeft) {
             m_ToolbarLeft = newLeft;
-            if (SDL_TICKS_PASSED(now,
-                    m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs)) {
+            if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
                 redraw();
                 m_LastToolbarMoveDrawTime = now;
             }
@@ -302,14 +298,14 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
     m_PointerY = event.y;
     const int pointerX = m_PointerX;
     const int pointerY = m_PointerY;
-    const Uint32 now = event.timestamp != 0 ? event.timestamp : SDL_GetTicks();
-    if (event.button == SDL_BUTTON_LEFT && event.state == SDL_RELEASED &&
+    const Uint64 now = SDL_GetTicks();
+    if (event.button == SDL_BUTTON_LEFT && !event.down &&
             m_DraggingToolbar) {
         m_DraggingToolbar = false;
         redraw();
         return Action::Consumed;
     }
-    if (event.button == SDL_BUTTON_LEFT && event.state == SDL_RELEASED &&
+    if (event.button == SDL_BUTTON_LEFT && !event.down &&
             m_DraggingSlider) {
         updateBitrateFromPointer(pointerX, now, true);
         m_DraggingSlider = false;
@@ -334,7 +330,7 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         return Action::Consumed;
     }
 
-    if (event.state == SDL_PRESSED) {
+    if (event.down) {
         if (handleContains(pointerX, pointerY)) {
             m_DraggingToolbar = true;
             m_ToolbarDragOffsetX = pointerX - toolbarLeft();
@@ -365,9 +361,11 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
 
 bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 {
-    int mouseX;
-    int mouseY;
-    SDL_GetMouseState(&mouseX, &mouseY);
+    float pointerX;
+    float pointerY;
+    SDL_GetMouseState(&pointerX, &pointerY);
+    const int mouseX = qRound(pointerX);
+    const int mouseY = qRound(pointerY);
     m_PointerX = mouseX;
     m_PointerY = mouseY;
     if (!m_Visible) {
@@ -392,7 +390,7 @@ bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
         redraw();
-        queueBitrateRequest(event.timestamp != 0 ? event.timestamp : SDL_GetTicks(), true);
+        queueBitrateRequest(SDL_GetTicks(), true);
     }
     return true;
 }
@@ -402,7 +400,7 @@ int StationConnectToolbar::eventWaitTimeout() const
     return (m_Visible || m_EdgeHoverStartTime != 0) ? 50 : 1000;
 }
 
-void StationConnectToolbar::show(Uint32 now)
+void StationConnectToolbar::show(Uint64 now)
 {
     m_Visible = true;
     m_EdgeHoverStartTime = 0;
@@ -460,8 +458,8 @@ void StationConnectToolbar::endLocalPointerInteraction()
 
 void StationConnectToolbar::redraw()
 {
-    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(
-                0, m_Width, ToolbarHeight, 32, SDL_PIXELFORMAT_ARGB8888);
+    SDL_Surface* surface = SDL_CreateSurface(
+                m_Width, ToolbarHeight, SDL_PIXELFORMAT_ARGB8888);
     if (surface == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to allocate StationConnect toolbar surface: %s",
@@ -689,7 +687,7 @@ void StationConnectToolbar::redraw()
     m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
 }
 
-void StationConnectToolbar::updateBitrateFromPointer(int x, Uint32 now, bool forceSend)
+void StationConnectToolbar::updateBitrateFromPointer(int x, Uint64 now, bool forceSend)
 {
     const qreal fraction = qBound(
                 qreal(0.0),
@@ -708,7 +706,7 @@ void StationConnectToolbar::updateBitrateFromPointer(int x, Uint32 now, bool for
     queueBitrateRequest(now, forceSend);
 }
 
-void StationConnectToolbar::queueBitrateRequest(Uint32 now, bool forceSend)
+void StationConnectToolbar::queueBitrateRequest(Uint64 now, bool forceSend)
 {
     if (!m_BitrateSupported) {
         return;
@@ -717,11 +715,11 @@ void StationConnectToolbar::queueBitrateRequest(Uint32 now, bool forceSend)
         return;
     }
     if (!forceSend &&
-            (!SDL_TICKS_PASSED(now, m_LastBitrateChangeTime + BitrateSettleDelayMs) ||
-             !SDL_TICKS_PASSED(now, m_LastBitrateSendTime +
+            (now < m_LastBitrateChangeTime + BitrateSettleDelayMs ||
+             now < m_LastBitrateSendTime +
                               (m_BitrateKbps == m_LastSentBitrateKbps ?
                                    BitrateAcknowledgementRetryMs :
-                                   BitrateSettleDelayMs)))) {
+                                   BitrateSettleDelayMs))) {
         return;
     }
     if (LiSetVideoBitrate(m_BitrateKbps) == 0) {

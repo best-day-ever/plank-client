@@ -24,6 +24,7 @@
 // that might include SDL.h themselves.
 #define SDL_MAIN_HANDLED
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 #ifdef HAVE_FFMPEG
 #include "streaming/video/ffmpeg.h"
@@ -357,7 +358,6 @@ int SDLCALL signalHandlerThread(void* data)
 {
     Q_UNUSED(data);
 
-    Session* lastSession = nullptr;
     bool requestedQuit = false;
 
     int sig;
@@ -368,36 +368,17 @@ int SDLCALL signalHandlerThread(void* data)
         switch (sig) {
         case SIGINT:
         case SIGTERM:
-            // Check if we have an active streaming session
-            session = Session::get();
-            if (session != nullptr) {
-                // Exit immediately if we haven't changed state since last attempt
-                if (session == lastSession || requestedQuit) {
-                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
-                    _Exit(1);
-                }
-
-                if (sig == SIGTERM) {
-                    // If this is a SIGTERM, set the flag to quit
-                    session->setShouldExit();
-                    requestedQuit = true;
-                }
-
-                // Stop the streaming session
-                session->interrupt();
-                lastSession = session;
+            if (requestedQuit) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
+                _Exit(1);
             }
-            else {
-                // Exit immediately if we haven't changed state since last attempt
-                if (requestedQuit) {
-                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
-                    _Exit(1);
-                }
 
-                // If we're not streaming, we'll close the whole app
-                QCoreApplication::instance()->quit();
-                requestedQuit = true;
-            }
+            // Route termination through the normal client disconnect path.
+            SDL_Event event = {};
+            event.type = SDL_EVENT_QUIT;
+            event.quit.timestamp = SDL_GetTicksNS();
+            SDL_PushEvent(&event);
+            requestedQuit = true;
             break;
 
         default:
@@ -639,7 +620,7 @@ int main(int argc, char *argv[])
     // SDL to fail to find a working OpenGL implementation at all. Let's force EGL
     // on all platforms for both SDL and Qt. This also avoids GLX-EGL interop issues
     // when trying to use EGL on the main thread after Qt uses GLX.
-    SDL_SetHint(SDL_HINT_VIDEO_X11_FORCE_EGL, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");
     qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
 
 #ifdef Q_OS_WIN32
@@ -715,13 +696,6 @@ int main(int argc, char *argv[])
     // The DXVA2 renderer uses Direct3D 9Ex itself directly.
     SDL_SetHint(SDL_HINT_WINDOWS_USE_D3D9EX, "1");
 
-    if (SDL_InitSubSystem(SDL_INIT_TIMER) != 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_InitSubSystem(SDL_INIT_TIMER) failed: %s",
-                     SDL_GetError());
-        return -1;
-    }
-
 #if defined(STEAM_LINK) || defined(Q_OS_WIN32)
     // Steam Link requires that we initialize video before creating our
     // QGuiApplication in order to configure the framebuffer correctly.
@@ -729,7 +703,7 @@ int main(int argc, char *argv[])
     // We keep the video subsystem initialized on Windows because it's
     // much more costly to reinitialize than other platforms. It hurts
     // the settings page transition performance significantly.
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: %s",
                      SDL_GetError());
@@ -751,7 +725,7 @@ int main(int argc, char *argv[])
 
     // Disable relative mouse scaling to renderer size or logical DPI. We want to send
     // the mouse motion exactly how it was given to us.
-    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SCALING, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
 
     // Set our app name for SDL to use with PulseAudio and PipeWire. This matches what we
     // provide as our app name to libsoundio too. On SDL 2.0.18+, SDL_APP_NAME is also used
@@ -762,13 +736,6 @@ int main(int argc, char *argv[])
     // We handle capturing the mouse ourselves when it leaves the window, so we don't need
     // SDL doing it for us behind our backs.
     SDL_SetHint("SDL_MOUSE_AUTO_CAPTURE", "0");
-
-    // SDL will try to lock the mouse cursor on Wayland if it's not visible in order to
-    // support applications that assume they can warp the cursor (which isn't possible
-    // on Wayland). We don't want this behavior because it interferes with seamless mouse
-    // mode when toggling between windowed and fullscreen modes by unexpectedly locking
-    // the mouse cursor.
-    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_EMULATE_MOUSE_WARP, "0");
 
     // StationConnect is a Wayland desktop client. Prefer libdecor so windowed
     // streams consistently receive a title bar and resize borders on GNOME.
@@ -867,44 +834,29 @@ int main(int argc, char *argv[])
         break;
     }
 
-    SDL_version compileVersion;
-    SDL_VERSION(&compileVersion);
+    const int compileVersion = SDL_VERSION;
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Compiled with SDL %d.%d.%d",
-                compileVersion.major, compileVersion.minor, compileVersion.patch);
+                SDL_VERSIONNUM_MAJOR(compileVersion),
+                SDL_VERSIONNUM_MINOR(compileVersion),
+                SDL_VERSIONNUM_MICRO(compileVersion));
 
-    SDL_version runtimeVersion;
-    SDL_GetVersion(&runtimeVersion);
+    const int runtimeVersion = SDL_GetVersion();
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Running with SDL %d.%d.%d",
-                runtimeVersion.major, runtimeVersion.minor, runtimeVersion.patch);
-
-    // If we're running under sdl2-compat, it may tell us the underlying SDL3 version
-    const char* sdl3Version = SDL_GetHint("SDL3_VERSION");
-    int sdl3VersionInt = 0;
-    if (sdl3Version) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "SDL3 version: %s",
-                    sdl3Version);
-
-        // Parse the version into integer form
-        QStringList list = QString(sdl3Version).split('.');
-        Q_ASSERT(list.size() == 3);
-        if (list.size() == 3) {
-            sdl3VersionInt = SDL_VERSIONNUM(list.at(0).toInt(), list.at(1).toInt(), list.at(2).toInt());
-        }
-    }
+                SDL_VERSIONNUM_MAJOR(runtimeVersion),
+                SDL_VERSIONNUM_MINOR(runtimeVersion),
+                SDL_VERSIONNUM_MICRO(runtimeVersion));
 
     // SDL 3.4.0 and 3.4.2 have bugs in atomic KMSDRM support that break us,
     // so disable atomic on the affected SDL3 versions. Since not all versions
     // of sdl2-compat will set the SDL3_VERSION hint, we assume that versions
     // prior to 2.32.66 are affected (since that was released at the same time
     // as SDL 3.4.4 with the atomic fixes).
-    if ((sdl3VersionInt != 0 && sdl3VersionInt < SDL_VERSIONNUM(3, 4, 4)) ||
-            (runtimeVersion.patch >= 50 && runtimeVersion.patch < 66)) {
+    if (runtimeVersion < SDL_VERSIONNUM(3, 4, 4)) {
 #if !defined(Q_OS_WIN32) && !defined(Q_OS_DARWIN)
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Setting SDL_KMSDRM_ATOMIC=0 for older sdl2-compat/SDL3 version");
+                    "Setting SDL_KMSDRM_ATOMIC=0 for older SDL3 version");
         SDL_SetHint("SDL_KMSDRM_ATOMIC", "0");
 #endif
     }

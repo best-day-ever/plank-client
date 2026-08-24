@@ -497,7 +497,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     else {
         // If we get here prior to the start of a session, just pump and flush ourselves.
         SDL_PumpEvents();
-        SDL_FlushEvent(SDL_WINDOWEVENT);
+        SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
     }
 
     // Now we finally bail if we failed during SDL_CreateRenderer() above.
@@ -507,12 +507,9 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(params->window, &info)) {
-        EGL_LOG(Error, "SDL_GetWindowWMInfo() failed: %s", SDL_GetError());
-        return false;
-    }
+    const bool isWayland = strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
+    const bool isKmsDrm = strcmp(SDL_GetCurrentVideoDriver(), "KMSDRM") == 0 ||
+                          strcmp(SDL_GetCurrentVideoDriver(), "kmsdrm") == 0;
 
     if (!(m_Context = SDL_GL_CreateContext(params->window))) {
         EGL_LOG(Error, "Cannot create OpenGL context: %s", SDL_GetError());
@@ -621,7 +618,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     // with vsync enabled, so this also mitigates that problem too.
     if (params->enableVsync
 #ifdef SDL_VIDEO_DRIVER_WAYLAND
-            && info.subsystem != SDL_SYSWM_WAYLAND
+            && !isWayland
 #endif
             ) {
         SDL_GL_SetSwapInterval(1);
@@ -631,7 +628,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
         // SDL_HINT_VIDEO_DOUBLE_BUFFER=1), so calling glFinish() after
         // SDL_GL_SwapWindow() will block an extra frame and lock rendering
         // at 1/2 the display refresh rate.
-        if (info.subsystem != SDL_SYSWM_KMSDRM)
+        if (!isKmsDrm)
 #endif
         {
             m_BlockingSwapBuffers = true;

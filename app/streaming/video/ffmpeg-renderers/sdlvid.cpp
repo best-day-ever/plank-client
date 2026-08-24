@@ -150,36 +150,25 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         return true;
     }
 
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(params->window, &info)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_GetWindowWMInfo() failed: %s",
-                     SDL_GetError());
-        return false;
-    }
-
     // Only set SDL_RENDERER_PRESENTVSYNC if we know we'll get tearing otherwise.
     // Since we don't use V-Sync to pace our frame rate, we want non-blocking
     // presents to reduce video latency.
-    switch (info.subsystem) {
-    case SDL_SYSWM_WINDOWS:
+    if (strcmp(SDL_GetCurrentVideoDriver(), "windows") == 0) {
         // DWM is always tear-free except in full-screen exclusive mode
-        if ((SDL_GetWindowFlags(params->window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN) {
+        if (SDL_GetWindowFlags(params->window) & SDL_WINDOW_FULLSCREEN) {
             if (params->enableVsync) {
                 rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
             }
         }
-        break;
-    case SDL_SYSWM_WAYLAND:
+    }
+    else if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
         // Wayland is always tear-free in all modes
-        break;
-    default:
+    }
+    else {
         // For other subsystems, just set SDL_RENDERER_PRESENTVSYNC if asked
         if (params->enableVsync) {
             rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
         }
-        break;
     }
 
 #ifdef Q_OS_WIN32
@@ -211,7 +200,7 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
     else {
         // If we get here prior to the start of a session, just pump and flush ourselves.
         SDL_PumpEvents();
-        SDL_FlushEvent(SDL_WINDOWEVENT);
+        SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
     }
 
     if (!m_Renderer) {

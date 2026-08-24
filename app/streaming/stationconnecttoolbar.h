@@ -28,7 +28,7 @@ public:
 
     void setRenderedStats(float fps, float videoMbps, float packetLossPercent);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
-    void update(Uint32 now);
+    void update(Uint64 now);
     void notifyWindowChanged();
 
     bool handleMouseMotion(const SDL_MouseMotionEvent& event);
@@ -38,13 +38,13 @@ public:
     int eventWaitTimeout() const;
 
 private:
-    void show(Uint32 now);
+    void show(Uint64 now);
     void hide();
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
     void redraw();
-    void updateBitrateFromPointer(int x, Uint32 now, bool forceSend);
-    void queueBitrateRequest(Uint32 now, bool forceSend);
+    void updateBitrateFromPointer(int x, Uint64 now, bool forceSend);
+    void queueBitrateRequest(Uint64 now, bool forceSend);
     bool contains(int x, int y) const;
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
@@ -85,10 +85,10 @@ private:
     float m_LastDrawnFps;
     float m_LastDrawnVideoMbps;
     float m_LastDrawnPacketLossPercent;
-    Uint32 m_HideDeadline;
-    Uint32 m_LastBitrateSendTime;
-    Uint32 m_LastBitrateChangeTime;
-    Uint32 m_LastToolbarMoveDrawTime;
-    Uint32 m_LastRedrawTime;
-    Uint32 m_EdgeHoverStartTime;
+    Uint64 m_HideDeadline;
+    Uint64 m_LastBitrateSendTime;
+    Uint64 m_LastBitrateChangeTime;
+    Uint64 m_LastToolbarMoveDrawTime;
+    Uint64 m_LastRedrawTime;
+    Uint64 m_EdgeHoverStartTime;
 };
