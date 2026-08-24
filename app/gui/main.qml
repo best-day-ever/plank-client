@@ -377,6 +377,12 @@ ApplicationWindow {
     NavigableDialog {
         id: addPcDialog
 
+        // Give both connection fields enough room for real hostnames while
+        // keeping the dialog inside smaller launcher windows. The dialog still
+        // blocks the launcher, but it must not wash out the UI behind it.
+        width: Math.min(640, parent.width - 40)
+        dim: false
+
         function suggestedNickname(address) {
             var value = address.trim()
             if (value === "" || value.charAt(0) === "[" || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(value)) {

@@ -548,8 +548,10 @@ int main(int argc, char *argv[])
 
     // StationConnect is a Wayland desktop client. Prefer libdecor so windowed
     // streams consistently receive a title bar and resize borders on GNOME.
-    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "1");
-    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR,
+                            "1", SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR,
+                            "1", SDL_HINT_OVERRIDE);
 
 #ifdef QT_DEBUG
     // Allow thread naming using exceptions on debug builds. SDL doesn't use SEH

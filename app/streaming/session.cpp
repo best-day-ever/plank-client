@@ -1774,28 +1774,6 @@ void Session::execInternal()
     // We always want a resizable window with High DPI enabled
     Uint32 defaultWindowFlags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
 
-    // If we're starting in windowed mode and the Moonlight GUI is maximized or
-    // minimized, match that with the streaming window.
-    if (!m_IsFullScreen && m_QtWindow != nullptr) {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-        // Qt 5.10+ can propagate multiple states together
-        if (m_QtWindow->windowStates() & Qt::WindowMaximized) {
-            defaultWindowFlags |= SDL_WINDOW_MAXIMIZED;
-        }
-        if (m_QtWindow->windowStates() & Qt::WindowMinimized) {
-            defaultWindowFlags |= SDL_WINDOW_MINIMIZED;
-        }
-#else
-        // Qt 5.9 only supports a single state at a time
-        if (m_QtWindow->windowState() == Qt::WindowMaximized) {
-            defaultWindowFlags |= SDL_WINDOW_MAXIMIZED;
-        }
-        else if (m_QtWindow->windowState() == Qt::WindowMinimized) {
-            defaultWindowFlags |= SDL_WINDOW_MINIMIZED;
-        }
-#endif
-    }
-
     // We use only the computer name on macOS to match Apple conventions where the
     // app name is featured in the menu bar and the document name is in the title bar.
 #ifdef Q_OS_DARWIN
@@ -1835,6 +1813,11 @@ void Session::execInternal()
     }
 
     if (!m_IsFullScreen) {
+        // Windowed means a normal compositor-managed desktop window. Do not
+        // inherit a maximized launcher state that can make it indistinguishable
+        // from borderless mode on Wayland.
+        SDL_SetWindowFullscreen(m_Window, 0);
+        SDL_RestoreWindow(m_Window);
         SDL_SetWindowBordered(m_Window, SDL_TRUE);
         SDL_SetWindowResizable(m_Window, SDL_TRUE);
     }
