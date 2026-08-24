@@ -112,8 +112,8 @@ VAAPIRenderer::openDisplay(SDL_Window* window)
     else if (driver != nullptr && strcmp(driver, "wayland") == 0) {
         m_WindowSystem = WindowSystemWayland;
 #ifdef HAVE_LIBVA_WAYLAND
-        display = vaGetDisplayWl(SDL_GetPointerProperty(
-            properties, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr));
+        display = vaGetDisplayWl(static_cast<wl_display*>(SDL_GetPointerProperty(
+            properties, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr)));
         if (display == nullptr) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Unable to open Wayland display for VAAPI");
