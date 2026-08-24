@@ -16,6 +16,7 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
     : m_AudioStream(nullptr),
       m_AudioBuffer(nullptr),
       m_FrameSize(0),
+      m_FrameDurationMs(0),
       m_BytesPerSampleFrame(0),
       m_BytesPerSecond(0),
       m_DeviceBufferDurationMs(0),

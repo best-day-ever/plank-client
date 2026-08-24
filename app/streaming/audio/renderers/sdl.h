@@ -41,6 +41,7 @@ private:
     SDL_AudioStream* m_AudioStream;
     void* m_AudioBuffer;
     int m_FrameSize;
+    int m_FrameDurationMs;
     int m_BytesPerSampleFrame;
     int m_BytesPerSecond;
     int m_DeviceBufferDurationMs;

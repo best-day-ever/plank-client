@@ -251,9 +251,9 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
                     s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
                     s_ActiveSession->m_ActiveAudioConfig.sampleRate;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
+                            "StationConnect A/V audio clock: media=%llu submit=%llu queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
                             static_cast<unsigned long long>(mediaTimeMs),
-                            now,
+                            static_cast<unsigned long long>(now),
                             s_ActiveSession->m_AudioRenderer->getQueuedAudioDurationMs(),
                             s_ActiveSession->m_AudioRenderer->getDeviceBufferDurationMs(),
                             LiGetPendingAudioDuration(),
@@ -282,8 +282,9 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 
             s_ActiveSession->m_DropAudioEndTime = audioReinitStopTime + (audioReinitStopTime - audioReinitStartTime);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Audio reinitialization took %d ms - starting drop window",
-                        audioReinitStopTime - audioReinitStartTime);
+                        "Audio reinitialization took %llu ms - starting drop window",
+                        static_cast<unsigned long long>(
+                            audioReinitStopTime - audioReinitStartTime));
         }
     }
 }

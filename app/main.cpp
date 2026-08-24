@@ -364,10 +364,10 @@ int SDLCALL signalHandlerThread(void* data)
     while (recv(signalFds[1], &sig, sizeof(sig), MSG_WAITALL) == sizeof(sig)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Received signal: %d", sig);
 
-        Session* session;
         switch (sig) {
         case SIGINT:
         case SIGTERM:
+        {
             if (requestedQuit) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Exiting immediately on second signal");
                 _Exit(1);
@@ -380,6 +380,7 @@ int SDLCALL signalHandlerThread(void* data)
             SDL_PushEvent(&event);
             requestedQuit = true;
             break;
+        }
 
         default:
             Q_UNREACHABLE();
