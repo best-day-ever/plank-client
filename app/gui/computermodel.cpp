@@ -67,7 +67,25 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
     case StationConnectAuthenticationRole:
         return computer->stationConnectAuthentication;
     case AddressRole:
-        return computer->manualAddress.toString();
+        // New StationConnect bookmarks have a durable manual address, but
+        // workstation records created before bookmarks do not. Never expose
+        // NvAddress's diagnostic <NULL> sentinel in the main workstation row.
+        if (!computer->manualAddress.isNull()) {
+            return computer->manualAddress.toString();
+        }
+        if (!computer->activeAddress.isNull()) {
+            return computer->activeAddress.toString();
+        }
+        if (!computer->localAddress.isNull()) {
+            return computer->localAddress.toString();
+        }
+        if (!computer->remoteAddress.isNull()) {
+            return computer->remoteAddress.toString();
+        }
+        if (!computer->ipv6Address.isNull()) {
+            return computer->ipv6Address.toString();
+        }
+        return QString();
     case DetailsRole: {
         QString state, pairState;
 
