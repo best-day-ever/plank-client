@@ -897,10 +897,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE) {
-        emitLaunchWarning(tr("Your settings selection to force software decoding may cause poor streaming performance."));
-    }
-
     if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_AV1) {
         if (m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport & SCM_MASK_AV1) == 0) {
             if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_AV1) {
