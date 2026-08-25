@@ -723,8 +723,8 @@ int main(int argc, char *argv[])
 
     // Set our app name for SDL's native PipeWire stream and screensaver
     // inhibitor reporting.
-    SDL_SetHint("SDL_AUDIO_DEVICE_APP_NAME", "StationConnect");
-    SDL_SetHint("SDL_APP_NAME", "StationConnect");
+    SDL_SetHint("SDL_AUDIO_DEVICE_APP_NAME", "StationConnect Client");
+    SDL_SetHint("SDL_APP_NAME", "StationConnect Client");
 
     // We handle capturing the mouse ourselves when it leaves the window, so we don't need
     // SDL doing it for us behind our backs.
@@ -766,7 +766,7 @@ int main(int argc, char *argv[])
     }
 
     QGuiApplication app(argc, argv);
-    QGuiApplication::setApplicationDisplayName("StationConnect");
+    QGuiApplication::setApplicationDisplayName("StationConnect Client");
 
 #ifdef Q_OS_DARWIN
     // macOS defaults "Keyboard navigation" to text fields and lists only, which
@@ -910,9 +910,9 @@ int main(int argc, char *argv[])
 
     // Match the StationConnect desktop entry so Wayland and X11 shells group
     // both the Qt launcher and SDL stream window under the packaged identity.
-    app.setDesktopFileName("la.instinctual.StationConnect");
-    qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "la.instinctual.StationConnect");
-    qputenv("SDL_VIDEO_X11_WMCLASS", "la.instinctual.StationConnect");
+    app.setDesktopFileName("la.instinctual.StationConnect.Client");
+    qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "la.instinctual.StationConnect.Client");
+    qputenv("SDL_VIDEO_X11_WMCLASS", "la.instinctual.StationConnect.Client");
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
