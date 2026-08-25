@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QStringList>
 #include <SDL3/SDL.h>
 
 #include "streaming/video/decoder.h"

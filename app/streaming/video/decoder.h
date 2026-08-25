@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include <QSize>
 #include <Limelight.h>
 #include <SDL3/SDL.h>
 
