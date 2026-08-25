@@ -1336,28 +1336,6 @@ Flickable {
                     }
                 }
 
-                Label {
-                    width: parent.width
-                    id: resVCCTitle
-                    text: qsTr("Video codec")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
-                }
-
-                AutoResizingComboBox {
-                    id: codecComboBox
-                    enabled: false
-                    currentIndex: 0
-                    textRole: "text"
-                    model: ListModel {
-                        id: codecListModel
-                        ListElement {
-                            text: qsTr("H.264")
-                            val: StreamingPreferences.VCC_FORCE_H264
-                        }
-                    }
-                }
-
                 CheckBox {
                     id: enableMdns
                     width: parent.width

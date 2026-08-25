@@ -17,7 +17,6 @@
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
-#define SER_VIDEOCFG "videocfg"
 #define SER_STATIONCONNECT_AUTO_RESOLUTION "stationconnectautoresolution"
 #define SER_STATIONCONNECT_TOOLBAR_PINNED "stationconnecttoolbarpinned"
 #define SER_VIDEODEC "videodec"
@@ -128,8 +127,6 @@ void StreamingPreferences::reload()
                                                          static_cast<int>(CaptureSysKeysMode::CSK_ALWAYS)).toInt());
     audioConfig = static_cast<AudioConfig>(settings.value(SER_AUDIOCFG,
                                                   static_cast<int>(AudioConfig::AC_STEREO)).toInt());
-    videoCodecConfig = static_cast<VideoCodecConfig>(settings.value(SER_VIDEOCFG,
-                                                  static_cast<int>(VideoCodecConfig::VCC_AUTO)).toInt());
     videoDecoderSelection = static_cast<VideoDecoderSelection>(settings.value(SER_VIDEODEC,
                                                   static_cast<int>(VideoDecoderSelection::VDS_AUTO)).toInt());
     windowMode = static_cast<WindowMode>(settings.value(SER_WINDOWMODE,
@@ -137,10 +134,6 @@ void StreamingPreferences::reload()
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
 
-    // Fix up the deprecated combined HEVC/HDR value. StationConnect is SDR.
-    if (videoCodecConfig == VCC_FORCE_HEVC_HDR_DEPRECATED) {
-        videoCodecConfig = VCC_AUTO;
-    }
 }
 
 bool StreamingPreferences::retranslate()
@@ -282,7 +275,6 @@ void StreamingPreferences::save()
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
     settings.setValue(SER_STATIONCONNECT_AUTO_RESOLUTION, stationConnectAutoResolution);
     settings.setValue(SER_STATIONCONNECT_TOOLBAR_PINNED, stationConnectToolbarPinned);
-    settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));

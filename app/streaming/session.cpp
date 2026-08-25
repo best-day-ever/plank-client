@@ -611,7 +611,6 @@ Session::Session(NvComputer* computer, NvApp& app,
                      StreamingPreferences::SCVP_H264_8BIT_422 ||
                  m_StationConnectVideoProfile ==
                      StreamingPreferences::SCVP_H264_8BIT_444) ? 8 : 10;
-        m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
         // Intel's hardware path cannot decode the qualified H.264 High 10
         // 4:4:4 identity profile. Keep StationConnect on the proven FFmpeg
         // software path instead of allowing automatic selection to downgrade
@@ -793,64 +792,6 @@ bool Session::initialize()
         m_SupportedVideoFormats.append(selectedVideoFormat);
     }
 
-    switch (m_Preferences->videoCodecConfig)
-    {
-    case StreamingPreferences::VCC_AUTO:
-    {
-        // Codecs are checked in order of ascending decode complexity to ensure
-        // the the deprioritized list prefers lighter codecs for software decoding
-
-        // H.264 is already the lowest priority codec, so we don't need to do
-        // any probing for deprioritization for it here.
-
-        const bool identityGbr = isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444);
-        auto hevcDA = getDecoderAvailability(testWindow,
-                                             m_Preferences->videoDecoderSelection,
-                                             identityGbr ? VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_REXT8_444,
-                                             m_StreamConfig.width,
-                                             m_StreamConfig.height,
-                                             m_StreamConfig.fps,
-                                             identityGbr);
-
-        if (hevcDA != DecoderAvailability::Hardware) {
-            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_H265);
-        }
-
-        // AV1 host support remains less broadly available than H.264/HEVC.
-        m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-
-#ifdef Q_OS_DARWIN
-        {
-            // Prior to GFE 3.11, GFE did not allow us to constrain
-            // the number of reference frames, so we have to fixup the SPS
-            // to allow decoding via VideoToolbox on macOS. Since we don't
-            // have fixup code for HEVC, just avoid it if GFE is too old.
-            QVector<int> gfeVersion = NvHTTP::parseQuad(m_Computer->gfeVersion);
-            if (gfeVersion.isEmpty() || // Very old versions don't have GfeVersion at all
-                    gfeVersion[0] < 3 ||
-                    (gfeVersion[0] == 3 && gfeVersion[1] < 11)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Disabling HEVC on macOS due to old GFE version");
-                m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265);
-            }
-        }
-#endif
-        break;
-    }
-    case StreamingPreferences::VCC_FORCE_H264:
-        m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H264);
-        break;
-    case StreamingPreferences::VCC_FORCE_HEVC:
-    case StreamingPreferences::VCC_FORCE_HEVC_HDR_DEPRECATED:
-        m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H265);
-        break;
-    case StreamingPreferences::VCC_FORCE_AV1:
-        // We'll try to fall back to HEVC first if AV1 fails. We'd rather not fall back
-        // straight to H.264 if the user asked for AV1 and the host doesn't support it.
-        m_SupportedVideoFormats.removeByMask(~(VIDEO_FORMAT_MASK_AV1 | VIDEO_FORMAT_MASK_H265));
-        break;
-    }
-
     SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) == 0);
 
     // Check for validation errors/warnings and emit
@@ -901,32 +842,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     if (!m_Computer->isSupportedServerVersion) {
         emit displayLaunchError(tr("The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.").arg(m_Computer->name));
         return false;
-    }
-
-    if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_AV1) {
-        if (m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport & SCM_MASK_AV1) == 0) {
-            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_AV1) {
-                emitLaunchWarning(tr("Your host software or GPU doesn't support encoding AV1."));
-            }
-
-            // Moonlight-common-c will handle this case already, but we want
-            // to set this explicitly here so we can do our hardware acceleration
-            // check below.
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_AV1);
-        }
-    }
-
-    if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_H265) {
-        if (m_Computer->maxLumaPixelsHEVC == 0) {
-            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_HEVC) {
-                emitLaunchWarning(tr("Your host PC doesn't support encoding HEVC."));
-            }
-
-            // Moonlight-common-c will handle this case already, but we want
-            // to set this explicitly here so we can do our hardware acceleration
-            // check below.
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265);
-        }
     }
 
     m_SupportedVideoFormats.removeByMask(

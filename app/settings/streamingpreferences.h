@@ -26,16 +26,6 @@ public:
     };
     Q_ENUM(AudioConfig)
 
-    enum VideoCodecConfig
-    {
-        VCC_AUTO,
-        VCC_FORCE_H264,
-        VCC_FORCE_HEVC,
-        VCC_FORCE_HEVC_HDR_DEPRECATED, // Kept for backwards compatibility
-        VCC_FORCE_AV1
-    };
-    Q_ENUM(VideoCodecConfig)
-
     enum VideoDecoderSelection
     {
         VDS_AUTO,
@@ -120,7 +110,6 @@ public:
     Q_PROPERTY(int networkMtu MEMBER networkMtu NOTIFY networkMtuChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
-    Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
     Q_PROPERTY(bool stationConnectAutoResolution MEMBER stationConnectAutoResolution NOTIFY stationConnectAutoResolutionChanged)
     Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
@@ -151,7 +140,6 @@ public:
     bool keepAwake;
     int networkMtu;
     AudioConfig audioConfig;
-    VideoCodecConfig videoCodecConfig;
     int identityGbrBitDepth;
     bool stationConnectAutoResolution;
     bool stationConnectToolbarPinned;
@@ -169,7 +157,6 @@ signals:
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void audioConfigChanged();
-    void videoCodecConfigChanged();
     void stationConnectAutoResolutionChanged();
     void stationConnectToolbarPinnedChanged();
     void videoDecoderSelectionChanged();
