@@ -20,6 +20,26 @@ QVector<const NvOutput*> orderedOutputs(const NvOutputTopology& topology)
     }
     return outputs;
 }
+
+QString hostLayoutFromChoice(int choice)
+{
+    switch (choice) {
+    case 0: return QString::fromLatin1(NvOutputTopology::ConfiguredHostLayout);
+    case 1: return QString::fromLatin1(NvOutputTopology::PhysicalHostLayout);
+    case 2: return QString::fromLatin1(NvOutputTopology::SingleHostLayout);
+    case 3: return QString::fromLatin1(NvOutputTopology::DualHorizontalHostLayout);
+    default: return QString();
+    }
+}
+
+QString virtualModeFromChoice(int choice)
+{
+    switch (choice) {
+    case 0: return QStringLiteral("1920x1080");
+    case 1: return QStringLiteral("3840x2160");
+    default: return QString();
+    }
+}
 }
 
 ComputerModel::ComputerModel(QObject* object)
@@ -210,8 +230,35 @@ int ComputerModel::stationConnectVideoProfile(int computerIndex) const
     return computer->stationConnectVideoProfile;
 }
 
+int ComputerModel::stationConnectHostLayoutChoice(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    if (computer->stationConnectHostLayout == NvOutputTopology::PhysicalHostLayout) {
+        return 1;
+    }
+    if (computer->stationConnectHostLayout == NvOutputTopology::SingleHostLayout) {
+        return 2;
+    }
+    if (computer->stationConnectHostLayout == NvOutputTopology::DualHorizontalHostLayout) {
+        return 3;
+    }
+    return 0;
+}
+
+int ComputerModel::stationConnectVirtualModeChoice(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return computer->stationConnectVirtualMode == QStringLiteral("3840x2160") ? 1 : 0;
+}
+
 bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                          QString nickname, int displayChoice,
+                                         int hostLayoutChoice,
+                                         int virtualModeChoice,
                                          int videoProfile)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
@@ -219,6 +266,11 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
     }
 
     NvComputer* computer = m_Computers[computerIndex];
+    const QString hostLayout = hostLayoutFromChoice(hostLayoutChoice);
+    const QString virtualMode = virtualModeFromChoice(virtualModeChoice);
+    if (hostLayout.isEmpty() || virtualMode.isEmpty()) {
+        return false;
+    }
     QString displayMode;
     QString selectedOutputId;
     {
@@ -254,7 +306,8 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
 
     return m_ComputerManager->editManualBookmark(computer, std::move(address),
                                                   std::move(nickname), displayMode,
-                                                  selectedOutputId, videoProfile);
+                                                  selectedOutputId, hostLayout,
+                                                  virtualMode, videoProfile);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

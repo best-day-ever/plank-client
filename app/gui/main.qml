@@ -422,6 +422,8 @@ ApplicationWindow {
             addressText.clear()
             nicknameText.clear()
             nicknameText.manuallyEdited = false
+            addHostLayout.currentIndex = 0
+            addVirtualMode.currentIndex = 0
             addDisplayChoice.currentIndex = 0
             addEncodingProfile.currentIndex = 3
         }
@@ -430,7 +432,9 @@ ApplicationWindow {
             if (addressText.text && nicknameText.text) {
                 ComputerManager.addNewHostManually(addressText.text.trim(),
                                                    nicknameText.text.trim(),
-                                                   addDisplayChoice.currentIndex === 0,
+                                                   addHostLayout.currentIndex,
+                                                   addVirtualMode.currentIndex,
+                                                   addDisplayChoice.currentIndex,
                                                    addEncodingProfileModel.get(
                                                        addEncodingProfile.currentIndex).val)
             }
@@ -517,7 +521,36 @@ ApplicationWindow {
             }
 
             Label {
-                text: qsTr("Workstation display")
+                text: qsTr("Host display layout")
+                font.bold: true
+            }
+
+            ComboBox {
+                id: addHostLayout
+                Layout.fillWidth: true
+                model: [
+                    qsTr("Use the host's configured layout"),
+                    qsTr("Physical displays"),
+                    qsTr("One virtual display"),
+                    qsTr("Two virtual displays (horizontal)")
+                ]
+            }
+
+            Label {
+                text: qsTr("Virtual display resolution")
+                font.bold: true
+                opacity: addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
+            }
+
+            ComboBox {
+                id: addVirtualMode
+                Layout.fillWidth: true
+                enabled: addHostLayout.currentIndex >= 2
+                model: [qsTr("1920×1080 per display"), qsTr("3840×2160 per display")]
+            }
+
+            Label {
+                text: qsTr("Client presentation")
                 font.bold: true
             }
 
@@ -529,7 +562,7 @@ ApplicationWindow {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("A specific monitor can be selected later after StationConnect has retrieved this workstation's monitor layout.")
+                text: qsTr("A specific host monitor can be selected later after StationConnect has retrieved its layout. Changing a host layout requires the workstation to be restarted before connecting.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

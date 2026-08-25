@@ -49,6 +49,7 @@ public:
     bool
     updateManualBookmark(NvAddress manualAddress, QString nickname,
                          QString displayMode, QString selectedOutputId,
+                         QString hostLayout, QString virtualMode,
                          int videoProfile);
 
     void
@@ -125,6 +126,8 @@ public:
     bool isNvidiaServerSoftware;
     QString selectedOutputId;
     QString selectedDisplayMode;
+    QString stationConnectHostLayout;
+    QString stationConnectVirtualMode;
     int stationConnectVideoProfile = 0;
     bool manualBookmark = false;
     QString serverUuid;

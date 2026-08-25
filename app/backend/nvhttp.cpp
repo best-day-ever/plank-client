@@ -261,6 +261,8 @@ NvHTTP::startApp(QString verb,
                  QString topologyGeneration,
                  int stationConnectProtocolVersion,
                  int stationConnectFeatureFlags,
+                 QString hostLayout,
+                 QString virtualMode,
                  QString& rtspSessionUrl)
 {
     int riKeyId;
@@ -274,6 +276,17 @@ NvHTTP::startApp(QString verb,
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
                 "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(selectedDisplayMode));
+        if ((stationConnectFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
+                !hostLayout.isEmpty()) {
+            stationConnectOutputArguments +=
+                    "&scHostLayout=" +
+                    QString::fromLatin1(QUrl::toPercentEncoding(hostLayout));
+            if (!virtualMode.isEmpty()) {
+                stationConnectOutputArguments +=
+                        "&scVirtualMode=" +
+                        QString::fromLatin1(QUrl::toPercentEncoding(virtualMode));
+            }
+        }
         if ((stationConnectFeatureFlags & NvOutputTopology::TopologyGenerationFeature) != 0 &&
                 !topologyGeneration.isEmpty()) {
             stationConnectOutputArguments +=

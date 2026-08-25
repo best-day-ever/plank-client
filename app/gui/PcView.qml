@@ -208,6 +208,10 @@ CenteredGridView {
                         editBookmarkDialog.originalNickname = model.name
                         editBookmarkDialog.choices = choices
                         editBookmarkDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
+                        editBookmarkDialog.hostLayoutIndex =
+                                computerModel.stationConnectHostLayoutChoice(index)
+                        editBookmarkDialog.virtualModeIndex =
+                                computerModel.stationConnectVirtualModeChoice(index)
                         editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
                         editBookmarkDialog.open()
                     }
@@ -353,6 +357,8 @@ CenteredGridView {
         property string originalNickname: ""
         property var choices: []
         property int choiceIndex: 0
+        property int hostLayoutIndex: 0
+        property int virtualModeIndex: 0
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
@@ -366,6 +372,8 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editDisplayChoice.model = choices
             editDisplayChoice.currentIndex = choiceIndex
+            editHostLayout.currentIndex = hostLayoutIndex
+            editVirtualMode.currentIndex = virtualModeIndex
             for (var i = 0; i < editEncodingProfileModel.count; i++) {
                 if (editEncodingProfileModel.get(i).val === originalProfile) {
                     editEncodingProfile.currentIndex = i
@@ -388,6 +396,8 @@ CenteredGridView {
                                                     editAddressText.text.trim(),
                                                     editNicknameText.text.trim(),
                                                     editDisplayChoice.currentIndex,
+                                                    editHostLayout.currentIndex,
+                                                    editVirtualMode.currentIndex,
                                                     editEncodingProfileModel.get(
                                                         editEncodingProfile.currentIndex).val)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
@@ -447,7 +457,34 @@ CenteredGridView {
             }
 
             Label {
-                text: qsTr("Workstation display")
+                text: qsTr("Host display layout")
+                font.bold: true
+            }
+            ComboBox {
+                id: editHostLayout
+                Layout.fillWidth: true
+                model: [
+                    qsTr("Use the host's configured layout"),
+                    qsTr("Physical displays"),
+                    qsTr("One virtual display"),
+                    qsTr("Two virtual displays (horizontal)")
+                ]
+            }
+
+            Label {
+                text: qsTr("Virtual display resolution")
+                font.bold: true
+                opacity: editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
+            }
+            ComboBox {
+                id: editVirtualMode
+                Layout.fillWidth: true
+                enabled: editHostLayout.currentIndex >= 2
+                model: [qsTr("1920×1080 per display"), qsTr("3840×2160 per display")]
+            }
+
+            Label {
+                text: qsTr("Client presentation")
                 font.bold: true
             }
             ComboBox {
@@ -457,7 +494,7 @@ CenteredGridView {
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Named monitors become available after StationConnect has retrieved this workstation's monitor layout.")
+                text: qsTr("Named host monitors become available after StationConnect has retrieved its layout. A requested host layout must already be active.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

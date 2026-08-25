@@ -4,6 +4,11 @@
 
 const char* NvOutputTopology::SingleOutputMode = "single-output";
 const char* NvOutputTopology::ScaledSpanMode = "scaled-span";
+const char* NvOutputTopology::SeparateDisplaysMode = "separate-displays";
+const char* NvOutputTopology::ConfiguredHostLayout = "configured";
+const char* NvOutputTopology::PhysicalHostLayout = "physical";
+const char* NvOutputTopology::SingleHostLayout = "single";
+const char* NvOutputTopology::DualHorizontalHostLayout = "dual-horizontal";
 
 namespace {
 bool requireInteger(const QJsonObject& object, const char* name, int& value)
@@ -16,6 +21,19 @@ bool requireInteger(const QJsonObject& object, const char* name, int& value)
     value = static_cast<int>(number);
     return number == value;
 }
+
+bool validLayoutKind(const QString& kind)
+{
+    return kind == NvOutputTopology::PhysicalHostLayout ||
+            kind == NvOutputTopology::SingleHostLayout ||
+            kind == NvOutputTopology::DualHorizontalHostLayout;
+}
+
+bool validVirtualMode(const QString& mode)
+{
+    return mode == QStringLiteral("1920x1080") ||
+            mode == QStringLiteral("3840x2160");
+}
 }
 
 bool NvOutputTopology::fromJson(const QJsonObject& object,
@@ -26,10 +44,17 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
             parsed.schemaVersion != ProtocolVersion ||
             !requireInteger(object, "feature_flags", parsed.featureFlags) ||
             (parsed.featureFlags & (OutputTopologyFeature | SelectedOutputFeature |
-                                    UnifiedAbsoluteInputFeature)) !=
+                                    UnifiedAbsoluteInputFeature |
+                                    HostLayoutMetadataFeature |
+                                    CompositeSourceRegionsFeature |
+                                    HostLayoutBindingFeature)) !=
                 (OutputTopologyFeature | SelectedOutputFeature |
-                 UnifiedAbsoluteInputFeature) ||
+                 UnifiedAbsoluteInputFeature |
+                 HostLayoutMetadataFeature |
+                 CompositeSourceRegionsFeature |
+                 HostLayoutBindingFeature) ||
             !object.value("generation").isString() ||
+            !object.value("layout").isObject() ||
             !object.value("desktop").isObject() ||
             !object.value("outputs").isArray()) {
         if (error != nullptr) {
@@ -38,6 +63,29 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
     parsed.generation = object.value("generation").toString();
+    const QJsonObject layout = object.value("layout").toObject();
+    int declaredOutputCount = 0;
+    parsed.layoutKind = layout.value("kind").toString();
+    parsed.virtualMode = layout.value("virtual_mode").toString();
+    if (!validLayoutKind(parsed.layoutKind) ||
+            !layout.value("virtual").isBool() ||
+            !requireInteger(layout, "output_count", declaredOutputCount) ||
+            declaredOutputCount <= 0) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Invalid host display layout metadata");
+        }
+        return false;
+    }
+    parsed.virtualLayout = layout.value("virtual").toBool();
+    if ((parsed.layoutKind == PhysicalHostLayout &&
+         (parsed.virtualLayout || !parsed.virtualMode.isEmpty())) ||
+            (parsed.layoutKind != PhysicalHostLayout &&
+             (!parsed.virtualLayout || !validVirtualMode(parsed.virtualMode)))) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Inconsistent host display layout metadata");
+        }
+        return false;
+    }
     const QJsonObject desktop = object.value("desktop").toObject();
     if (!requireInteger(desktop, "x", parsed.desktopX) ||
             !requireInteger(desktop, "y", parsed.desktopY) ||
@@ -65,7 +113,9 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
                 !requireInteger(entry, "height", output.height) ||
                 !requireInteger(entry, "rotation", output.rotation) ||
                 !requireInteger(entry, "refresh_millihz", output.refreshMillihz) ||
-                !entry.value("primary").isBool() || output.width <= 0 ||
+                !entry.value("primary").isBool() ||
+                !entry.value("virtual").isBool() ||
+                !entry.value("source_rect").isObject() || output.width <= 0 ||
                 output.height <= 0 || parsed.contains(output.id)) {
             if (error != nullptr) {
                 *error = QStringLiteral("Invalid or duplicate output entry");
@@ -73,9 +123,27 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
             return false;
         }
         output.primary = entry.value("primary").toBool();
+        output.virtualOutput = entry.value("virtual").toBool();
+        const QJsonObject sourceRect = entry.value("source_rect").toObject();
+        if (!requireInteger(sourceRect, "x", output.sourceX) ||
+                !requireInteger(sourceRect, "y", output.sourceY) ||
+                !requireInteger(sourceRect, "width", output.sourceWidth) ||
+                !requireInteger(sourceRect, "height", output.sourceHeight) ||
+                output.sourceX < 0 || output.sourceY < 0 ||
+                output.sourceWidth <= 0 || output.sourceHeight <= 0 ||
+                output.sourceX + output.sourceWidth > parsed.desktopWidth ||
+                output.sourceY + output.sourceHeight > parsed.desktopHeight ||
+                output.virtualOutput != parsed.virtualLayout) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Invalid composite source rectangle or output provenance");
+            }
+            return false;
+        }
         parsed.outputs.append(output);
     }
-    if (parsed.outputs.isEmpty()) {
+    if (parsed.outputs.isEmpty() || parsed.outputs.size() != declaredOutputCount ||
+            (parsed.layoutKind == SingleHostLayout && parsed.outputs.size() != 1) ||
+            (parsed.layoutKind == DualHorizontalHostLayout && parsed.outputs.size() != 2)) {
         if (error != nullptr) {
             *error = QStringLiteral("Host reported no connected outputs");
         }
@@ -96,12 +164,21 @@ QJsonObject NvOutputTopology::toJson() const
             {"rotation", output.rotation},
             {"refresh_millihz", output.refreshMillihz},
             {"primary", output.primary},
+            {"virtual", output.virtualOutput},
+            {"source_rect", QJsonObject {
+                {"x", output.sourceX}, {"y", output.sourceY},
+                {"width", output.sourceWidth}, {"height", output.sourceHeight},
+            }},
         });
     }
     return QJsonObject {
         {"schema_version", schemaVersion},
         {"feature_flags", featureFlags},
         {"generation", generation},
+        {"layout", QJsonObject {
+            {"kind", layoutKind}, {"virtual", virtualLayout},
+            {"virtual_mode", virtualMode}, {"output_count", outputs.size()},
+        }},
         {"desktop", QJsonObject {
             {"x", desktopX}, {"y", desktopY},
             {"width", desktopWidth}, {"height", desktopHeight},
@@ -138,8 +215,16 @@ bool NvOutputTopology::supportsScaledSpan() const
     return (featureFlags & ScaledSpanFeature) != 0 && outputs.size() > 1;
 }
 
+bool NvOutputTopology::supportsSeparateDisplays() const
+{
+    return (featureFlags & CompositeSourceRegionsFeature) != 0 && outputs.size() > 1;
+}
+
 QString NvOutputTopology::selectDisplayMode(QString persistedMode) const
 {
+    if (persistedMode == SeparateDisplaysMode && supportsSeparateDisplays()) {
+        return persistedMode;
+    }
     if (persistedMode == ScaledSpanMode && supportsScaledSpan()) {
         return persistedMode;
     }
@@ -147,4 +232,26 @@ QString NvOutputTopology::selectDisplayMode(QString persistedMode) const
         return persistedMode;
     }
     return supportsScaledSpan() ? QString(ScaledSpanMode) : QString(SingleOutputMode);
+}
+
+QString NvOutputTopology::resolveHostLayout(QString persistedLayout) const
+{
+    if (persistedLayout == ConfiguredHostLayout || !validLayoutKind(persistedLayout)) {
+        return layoutKind;
+    }
+    return persistedLayout;
+}
+
+QString NvOutputTopology::resolveVirtualMode(QString persistedLayout,
+                                             QString persistedVirtualMode) const
+{
+    const QString resolvedLayout = resolveHostLayout(persistedLayout);
+    if (resolvedLayout == PhysicalHostLayout) {
+        return QString();
+    }
+    if (persistedLayout == ConfiguredHostLayout ||
+            !validVirtualMode(persistedVirtualMode)) {
+        return virtualMode;
+    }
+    return persistedVirtualMode;
 }

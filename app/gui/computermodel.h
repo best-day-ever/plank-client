@@ -50,8 +50,14 @@ public:
 
     Q_INVOKABLE int stationConnectVideoProfile(int computerIndex) const;
 
+    Q_INVOKABLE int stationConnectHostLayoutChoice(int computerIndex) const;
+
+    Q_INVOKABLE int stationConnectVirtualModeChoice(int computerIndex) const;
+
     Q_INVOKABLE bool editComputerBookmark(int computerIndex, QString address,
                                           QString nickname, int displayChoice,
+                                          int hostLayoutChoice,
+                                          int virtualModeChoice,
                                           int videoProfile);
 
 signals:
