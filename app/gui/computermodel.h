@@ -52,12 +52,15 @@ public:
 
     Q_INVOKABLE int stationConnectHostLayoutChoice(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectVirtualModeChoice(int computerIndex) const;
+    Q_INVOKABLE int stationConnectVirtualMode1Choice(int computerIndex) const;
+
+    Q_INVOKABLE int stationConnectVirtualMode2Choice(int computerIndex) const;
 
     Q_INVOKABLE bool editComputerBookmark(int computerIndex, QString address,
                                           QString nickname, int displayChoice,
                                           int hostLayoutChoice,
-                                          int virtualModeChoice,
+                                          int virtualMode1Choice,
+                                          int virtualMode2Choice,
                                           int videoProfile);
 
 signals:

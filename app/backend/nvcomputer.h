@@ -49,7 +49,8 @@ public:
     bool
     updateManualBookmark(NvAddress manualAddress, QString nickname,
                          QString displayMode, QString selectedOutputId,
-                         QString hostLayout, QString virtualMode,
+                         QString hostLayout, QString virtualMode1,
+                         QString virtualMode2,
                          int videoProfile);
 
     void
@@ -127,7 +128,8 @@ public:
     QString selectedOutputId;
     QString selectedDisplayMode;
     QString stationConnectHostLayout;
-    QString stationConnectVirtualMode;
+    QString stationConnectVirtualMode1;
+    QString stationConnectVirtualMode2;
     int stationConnectVideoProfile = 0;
     bool manualBookmark = false;
     QString serverUuid;

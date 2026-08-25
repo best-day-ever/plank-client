@@ -393,6 +393,12 @@ ApplicationWindow {
     NavigableDialog {
         id: addPcDialog
         title: qsTr("Add workstation bookmark")
+        property var virtualModeChoices: [
+            qsTr("1024×2160"), qsTr("1280×720"), qsTr("1280×1024"),
+            qsTr("1280×2160"), qsTr("1920×1080"), qsTr("1920×1200"),
+            qsTr("2560×1440"), qsTr("2560×1600"), qsTr("3440×1440"),
+            qsTr("3840×1600"), qsTr("3840×2160"), qsTr("4096×2160")
+        ]
 
         // Give both connection fields enough room for real hostnames while
         // keeping the dialog inside smaller launcher windows. The dialog still
@@ -423,7 +429,8 @@ ApplicationWindow {
             nicknameText.clear()
             nicknameText.manuallyEdited = false
             addHostLayout.currentIndex = 0
-            addVirtualMode.currentIndex = 0
+            addVirtualMode1.currentIndex = 10
+            addVirtualMode2.currentIndex = 3
             addDisplayChoice.currentIndex = 0
             addEncodingProfile.currentIndex = 3
         }
@@ -433,7 +440,8 @@ ApplicationWindow {
                 ComputerManager.addNewHostManually(addressText.text.trim(),
                                                    nicknameText.text.trim(),
                                                    addHostLayout.currentIndex,
-                                                   addVirtualMode.currentIndex,
+                                                   addVirtualMode1.currentIndex,
+                                                   addVirtualMode2.currentIndex,
                                                    addDisplayChoice.currentIndex,
                                                    addEncodingProfileModel.get(
                                                        addEncodingProfile.currentIndex).val)
@@ -537,16 +545,31 @@ ApplicationWindow {
             }
 
             Label {
-                text: qsTr("Virtual display resolution")
+                text: qsTr("Virtual display 1 resolution")
                 font.bold: true
                 opacity: addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
 
             ComboBox {
-                id: addVirtualMode
+                id: addVirtualMode1
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex >= 2
-                model: [qsTr("1920×1080 per display"), qsTr("3840×2160 per display")]
+                currentIndex: 10
+                model: addPcDialog.virtualModeChoices
+            }
+
+            Label {
+                text: qsTr("Virtual display 2 resolution")
+                font.bold: true
+                opacity: addHostLayout.currentIndex === 3 ? 1.0 : 0.5
+            }
+
+            ComboBox {
+                id: addVirtualMode2
+                Layout.fillWidth: true
+                enabled: addHostLayout.currentIndex === 3
+                currentIndex: 3
+                model: addPcDialog.virtualModeChoices
             }
 
             Label {

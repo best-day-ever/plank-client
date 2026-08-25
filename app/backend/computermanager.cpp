@@ -39,11 +39,7 @@ QString hostLayoutFromChoice(int choice)
 
 QString virtualModeFromChoice(int choice)
 {
-    switch (choice) {
-    case 0: return QStringLiteral("1920x1080");
-    case 1: return QStringLiteral("3840x2160");
-    default: return QString();
-    }
+    return NvOutputTopology::qualifiedVirtualModes().value(choice);
 }
 
 QString presentationFromChoice(int choice)
@@ -817,15 +813,18 @@ void ComputerManager::stopPollingAsync()
 }
 
 void ComputerManager::addNewHostManually(QString address, QString nickname,
-                                         int hostLayoutChoice, int virtualModeChoice,
+                                         int hostLayoutChoice, int virtualMode1Choice,
+                                         int virtualMode2Choice,
                                          int presentationChoice, int videoProfile)
 {
     NvAddress manualAddress;
     const QString hostLayout = hostLayoutFromChoice(hostLayoutChoice);
-    const QString virtualMode = virtualModeFromChoice(virtualModeChoice);
+    const QString virtualMode1 = virtualModeFromChoice(virtualMode1Choice);
+    const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
     const QString presentation = presentationFromChoice(presentationChoice);
     if (parseManualAddress(address, manualAddress) &&
-            !hostLayout.isEmpty() && !virtualMode.isEmpty() &&
+            !hostLayout.isEmpty() && !virtualMode1.isEmpty() &&
+            !virtualMode2.isEmpty() &&
             !presentation.isEmpty() &&
             videoProfile >= StreamingPreferences::SCVP_H264_10BIT_444 &&
             videoProfile <= StreamingPreferences::SCVP_H264_10BIT_422) {
@@ -848,7 +847,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                 bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile);
                 bookmark->selectedDisplayMode = presentation;
                 bookmark->stationConnectHostLayout = hostLayout;
-                bookmark->stationConnectVirtualMode = virtualMode;
+                bookmark->stationConnectVirtualMode1 = virtualMode1;
+                bookmark->stationConnectVirtualMode2 = virtualMode2;
                 m_KnownHosts[bookmark->uuid] = bookmark;
                 startPollingComputer(bookmark);
             }
@@ -858,7 +858,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             QWriteLocker bookmarkLock(&bookmark->lock);
             bookmark->selectedDisplayMode = presentation;
             bookmark->stationConnectHostLayout = hostLayout;
-            bookmark->stationConnectVirtualMode = virtualMode;
+            bookmark->stationConnectVirtualMode1 = virtualMode1;
+            bookmark->stationConnectVirtualMode2 = virtualMode2;
             bookmark->stationConnectVideoProfile = videoProfile;
             if (presentation != NvOutputTopology::SingleOutputMode) {
                 bookmark->selectedOutputId.clear();
@@ -891,7 +892,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
 bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString nickname, QString displayMode,
                                          QString selectedOutputId,
-                                         QString hostLayout, QString virtualMode,
+                                         QString hostLayout, QString virtualMode1,
+                                         QString virtualMode2,
                                          int videoProfile)
 {
     NvAddress manualAddress;
@@ -903,8 +905,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
              hostLayout != NvOutputTopology::PhysicalHostLayout &&
              hostLayout != NvOutputTopology::SingleHostLayout &&
              hostLayout != NvOutputTopology::DualHorizontalHostLayout) ||
-            (virtualMode != QStringLiteral("1920x1080") &&
-             virtualMode != QStringLiteral("3840x2160")) ||
+            !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode1) ||
+            !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode2) ||
             !parseManualAddress(address, manualAddress)) {
         return false;
     }
@@ -940,7 +942,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
 
             computer->updateManualBookmark(manualAddress, nickname, displayMode,
                                            selectedOutputId, hostLayout,
-                                           virtualMode, videoProfile);
+                                           virtualMode1, virtualMode2,
+                                           videoProfile);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -959,7 +962,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     else {
         computer->updateManualBookmark(manualAddress, nickname, displayMode,
                                        selectedOutputId, hostLayout,
-                                       virtualMode, videoProfile);
+                                       virtualMode1, virtualMode2, videoProfile);
     }
 
     handleComputerStateChanged(computer);

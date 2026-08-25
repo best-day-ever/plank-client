@@ -1266,14 +1266,15 @@ bool Session::startConnectionAsync(bool reconnecting)
     try {
         NvHTTP http(m_Computer);
         QString hostLayout;
-        QString virtualMode;
+        QStringList virtualModes;
         {
             QReadLocker lock(&m_Computer->lock);
             hostLayout = m_Computer->outputTopology.resolveHostLayout(
                         m_Computer->stationConnectHostLayout);
-            virtualMode = m_Computer->outputTopology.resolveVirtualMode(
+            virtualModes = m_Computer->outputTopology.resolveVirtualModes(
                         m_Computer->stationConnectHostLayout,
-                        m_Computer->stationConnectVirtualMode);
+                        m_Computer->stationConnectVirtualMode1,
+                        m_Computer->stationConnectVirtualMode2);
         }
         const auto startApp = [&]() {
             http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
@@ -1288,7 +1289,8 @@ bool Session::startConnectionAsync(bool reconnecting)
                           m_Computer->stationConnectFeatureFlags &
                               NvOutputTopology::SupportedFeatureFlags,
                           hostLayout,
-                          virtualMode,
+                          virtualModes.value(0),
+                          virtualModes.value(1),
                           rtspSessionUrl);
         };
         try {

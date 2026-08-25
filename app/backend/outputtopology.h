@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QSize>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 struct NvOutput
@@ -16,6 +18,7 @@ struct NvOutput
     int refreshMillihz = 0;
     bool primary = false;
     bool virtualOutput = false;
+    QString configuredMode;
     int sourceX = 0;
     int sourceY = 0;
     int sourceWidth = 0;
@@ -24,7 +27,7 @@ struct NvOutput
 
 struct NvOutputTopology
 {
-    static const int ProtocolVersion = 2;
+    static const int ProtocolVersion = 3;
     static const int OutputTopologyFeature = 0x1;
     static const int SelectedOutputFeature = 0x2;
     static const int UnifiedAbsoluteInputFeature = 0x4;
@@ -33,6 +36,7 @@ struct NvOutputTopology
     static const int HostLayoutMetadataFeature = 0x20;
     static const int CompositeSourceRegionsFeature = 0x40;
     static const int HostLayoutBindingFeature = 0x80;
+    static const int IndependentVirtualModesFeature = 0x100;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
                                              UnifiedAbsoluteInputFeature |
@@ -40,7 +44,8 @@ struct NvOutputTopology
                                              TopologyGenerationFeature |
                                              HostLayoutMetadataFeature |
                                              CompositeSourceRegionsFeature |
-                                             HostLayoutBindingFeature;
+                                             HostLayoutBindingFeature |
+                                             IndependentVirtualModesFeature;
     static const char* SingleOutputMode;
     static const char* ScaledSpanMode;
     static const char* SeparateDisplaysMode;
@@ -56,8 +61,11 @@ struct NvOutputTopology
     QString selectOutput(QString persistedId) const;
     QString selectDisplayMode(QString persistedMode) const;
     QString resolveHostLayout(QString persistedLayout) const;
-    QString resolveVirtualMode(QString persistedLayout,
-                               QString persistedVirtualMode) const;
+    QStringList resolveVirtualModes(QString persistedLayout,
+                                    QString persistedMode1,
+                                    QString persistedMode2) const;
+    static QStringList qualifiedVirtualModes();
+    static QSize virtualModeSize(const QString& mode);
     bool supportsScaledSpan() const;
     bool supportsSeparateDisplays() const;
     bool contains(QString outputId) const;
@@ -71,6 +79,6 @@ struct NvOutputTopology
     int desktopHeight = 0;
     QString layoutKind;
     bool virtualLayout = false;
-    QString virtualMode;
+    QStringList virtualModes;
     QVector<NvOutput> outputs;
 };

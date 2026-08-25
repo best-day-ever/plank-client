@@ -210,8 +210,10 @@ CenteredGridView {
                         editBookmarkDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
                         editBookmarkDialog.hostLayoutIndex =
                                 computerModel.stationConnectHostLayoutChoice(index)
-                        editBookmarkDialog.virtualModeIndex =
-                                computerModel.stationConnectVirtualModeChoice(index)
+                        editBookmarkDialog.virtualMode1Index =
+                                computerModel.stationConnectVirtualMode1Choice(index)
+                        editBookmarkDialog.virtualMode2Index =
+                                computerModel.stationConnectVirtualMode2Choice(index)
                         editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
                         editBookmarkDialog.open()
                     }
@@ -358,7 +360,14 @@ CenteredGridView {
         property var choices: []
         property int choiceIndex: 0
         property int hostLayoutIndex: 0
-        property int virtualModeIndex: 0
+        property int virtualMode1Index: 10
+        property int virtualMode2Index: 3
+        property var virtualModeChoices: [
+            qsTr("1024×2160"), qsTr("1280×720"), qsTr("1280×1024"),
+            qsTr("1280×2160"), qsTr("1920×1080"), qsTr("1920×1200"),
+            qsTr("2560×1440"), qsTr("2560×1600"), qsTr("3440×1440"),
+            qsTr("3840×1600"), qsTr("3840×2160"), qsTr("4096×2160")
+        ]
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
@@ -373,7 +382,8 @@ CenteredGridView {
             editDisplayChoice.model = choices
             editDisplayChoice.currentIndex = choiceIndex
             editHostLayout.currentIndex = hostLayoutIndex
-            editVirtualMode.currentIndex = virtualModeIndex
+            editVirtualMode1.currentIndex = virtualMode1Index
+            editVirtualMode2.currentIndex = virtualMode2Index
             for (var i = 0; i < editEncodingProfileModel.count; i++) {
                 if (editEncodingProfileModel.get(i).val === originalProfile) {
                     editEncodingProfile.currentIndex = i
@@ -397,7 +407,8 @@ CenteredGridView {
                                                     editNicknameText.text.trim(),
                                                     editDisplayChoice.currentIndex,
                                                     editHostLayout.currentIndex,
-                                                    editVirtualMode.currentIndex,
+                                                    editVirtualMode1.currentIndex,
+                                                    editVirtualMode2.currentIndex,
                                                     editEncodingProfileModel.get(
                                                         editEncodingProfile.currentIndex).val)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
@@ -472,15 +483,27 @@ CenteredGridView {
             }
 
             Label {
-                text: qsTr("Virtual display resolution")
+                text: qsTr("Virtual display 1 resolution")
                 font.bold: true
                 opacity: editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
             ComboBox {
-                id: editVirtualMode
+                id: editVirtualMode1
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex >= 2
-                model: [qsTr("1920×1080 per display"), qsTr("3840×2160 per display")]
+                model: editBookmarkDialog.virtualModeChoices
+            }
+
+            Label {
+                text: qsTr("Virtual display 2 resolution")
+                font.bold: true
+                opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
+            }
+            ComboBox {
+                id: editVirtualMode2
+                Layout.fillWidth: true
+                enabled: editHostLayout.currentIndex === 3
+                model: editBookmarkDialog.virtualModeChoices
             }
 
             Label {

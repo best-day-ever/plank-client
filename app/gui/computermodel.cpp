@@ -34,11 +34,7 @@ QString hostLayoutFromChoice(int choice)
 
 QString virtualModeFromChoice(int choice)
 {
-    switch (choice) {
-    case 0: return QStringLiteral("1920x1080");
-    case 1: return QStringLiteral("3840x2160");
-    default: return QString();
-    }
+    return NvOutputTopology::qualifiedVirtualModes().value(choice);
 }
 }
 
@@ -247,18 +243,29 @@ int ComputerModel::stationConnectHostLayoutChoice(int computerIndex) const
     return 0;
 }
 
-int ComputerModel::stationConnectVirtualModeChoice(int computerIndex) const
+int ComputerModel::stationConnectVirtualMode1Choice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    return computer->stationConnectVirtualMode == QStringLiteral("3840x2160") ? 1 : 0;
+    return NvOutputTopology::qualifiedVirtualModes().indexOf(
+                computer->stationConnectVirtualMode1);
+}
+
+int ComputerModel::stationConnectVirtualMode2Choice(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return NvOutputTopology::qualifiedVirtualModes().indexOf(
+                computer->stationConnectVirtualMode2);
 }
 
 bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                          QString nickname, int displayChoice,
                                          int hostLayoutChoice,
-                                         int virtualModeChoice,
+                                         int virtualMode1Choice,
+                                         int virtualMode2Choice,
                                          int videoProfile)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
@@ -267,8 +274,9 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
 
     NvComputer* computer = m_Computers[computerIndex];
     const QString hostLayout = hostLayoutFromChoice(hostLayoutChoice);
-    const QString virtualMode = virtualModeFromChoice(virtualModeChoice);
-    if (hostLayout.isEmpty() || virtualMode.isEmpty()) {
+    const QString virtualMode1 = virtualModeFromChoice(virtualMode1Choice);
+    const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
+    if (hostLayout.isEmpty() || virtualMode1.isEmpty() || virtualMode2.isEmpty()) {
         return false;
     }
     QString displayMode;
@@ -307,7 +315,8 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
     return m_ComputerManager->editManualBookmark(computer, std::move(address),
                                                   std::move(nickname), displayMode,
                                                   selectedOutputId, hostLayout,
-                                                  virtualMode, videoProfile);
+                                                  virtualMode1, virtualMode2,
+                                                  videoProfile);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

@@ -25,7 +25,8 @@
 #define SER_SELECTEDOUTPUT "stationconnect-selected-output"
 #define SER_DISPLAYMODE "stationconnect-display-mode"
 #define SER_HOSTLAYOUT "stationconnect-host-layout"
-#define SER_VIRTUALMODE "stationconnect-virtual-mode"
+#define SER_VIRTUALMODE1 "stationconnect-virtual-mode-1"
+#define SER_VIRTUALMODE2 "stationconnect-virtual-mode-2"
 #define SER_VIDEOPROFILE "stationconnect-video-profile"
 #define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
 #define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
@@ -50,7 +51,8 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile)
     this->manualBookmark = true;
     this->stationConnectVideoProfile = videoProfile;
     this->stationConnectHostLayout = NvOutputTopology::ConfiguredHostLayout;
-    this->stationConnectVirtualMode = QStringLiteral("1920x1080");
+    this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
+    this->stationConnectVirtualMode2 = QStringLiteral("1280x2160");
     this->state = CS_UNKNOWN;
     this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
@@ -64,7 +66,8 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile)
 
 bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
                                       QString displayMode, QString outputId,
-                                      QString hostLayout, QString virtualMode,
+                                      QString hostLayout, QString virtualMode1,
+                                      QString virtualMode2,
                                       int videoProfile)
 {
     QWriteLocker writeLocker(&lock);
@@ -105,7 +108,8 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     selectedDisplayMode = displayMode;
     selectedOutputId = outputId;
     stationConnectHostLayout = hostLayout;
-    stationConnectVirtualMode = virtualMode;
+    stationConnectVirtualMode1 = virtualMode1;
+    stationConnectVirtualMode2 = virtualMode2;
     stationConnectVideoProfile = videoProfile;
     return addressChanged;
 }
@@ -135,11 +139,15 @@ NvComputer::NvComputer(QSettings& settings)
             this->stationConnectHostLayout != NvOutputTopology::DualHorizontalHostLayout) {
         this->stationConnectHostLayout = NvOutputTopology::ConfiguredHostLayout;
     }
-    this->stationConnectVirtualMode =
-            settings.value(SER_VIRTUALMODE, QStringLiteral("1920x1080")).toString();
-    if (this->stationConnectVirtualMode != QStringLiteral("1920x1080") &&
-            this->stationConnectVirtualMode != QStringLiteral("3840x2160")) {
-        this->stationConnectVirtualMode = QStringLiteral("1920x1080");
+    this->stationConnectVirtualMode1 =
+            settings.value(SER_VIRTUALMODE1, QStringLiteral("3840x2160")).toString();
+    this->stationConnectVirtualMode2 =
+            settings.value(SER_VIRTUALMODE2, QStringLiteral("1280x2160")).toString();
+    if (!NvOutputTopology::qualifiedVirtualModes().contains(this->stationConnectVirtualMode1)) {
+        this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
+    }
+    if (!NvOutputTopology::qualifiedVirtualModes().contains(this->stationConnectVirtualMode2)) {
+        this->stationConnectVirtualMode2 = QStringLiteral("1280x2160");
     }
     this->stationConnectVideoProfile = qBound(
             static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
@@ -211,7 +219,8 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
     settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
     settings.setValue(SER_HOSTLAYOUT, stationConnectHostLayout);
-    settings.setValue(SER_VIRTUALMODE, stationConnectVirtualMode);
+    settings.setValue(SER_VIRTUALMODE1, stationConnectVirtualMode1);
+    settings.setValue(SER_VIRTUALMODE2, stationConnectVirtualMode2);
     settings.setValue(SER_VIDEOPROFILE, stationConnectVideoProfile);
     settings.setValue(SER_MANUALBOOKMARK, manualBookmark);
     settings.setValue(SER_SERVERUUID, serverUuid);
@@ -247,7 +256,8 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->selectedOutputId == that.selectedOutputId &&
            this->selectedDisplayMode == that.selectedDisplayMode &&
            this->stationConnectHostLayout == that.stationConnectHostLayout &&
-           this->stationConnectVirtualMode == that.stationConnectVirtualMode &&
+           this->stationConnectVirtualMode1 == that.stationConnectVirtualMode1 &&
+           this->stationConnectVirtualMode2 == that.stationConnectVirtualMode2 &&
            this->stationConnectVideoProfile == that.stationConnectVideoProfile &&
            this->manualBookmark == that.manualBookmark &&
            this->serverUuid == that.serverUuid &&

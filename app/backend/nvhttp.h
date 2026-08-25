@@ -176,7 +176,8 @@ public:
              int stationConnectProtocolVersion,
              int stationConnectFeatureFlags,
              QString hostLayout,
-             QString virtualMode,
+             QString virtualMode1,
+             QString virtualMode2,
              QString& rtspSessionUrl);
 
     QVector<NvApp>
