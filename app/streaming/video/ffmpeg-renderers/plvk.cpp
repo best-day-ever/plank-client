@@ -10,8 +10,17 @@
 
 #include <SDL3/SDL_vulkan.h>
 
+extern "C" {
 #include <libavutil/hwcontext_vulkan.h>
+#include <libavutil/imgutils.h>
+}
 
+#include <algorithm>
+#include <cstdlib>
+#include <cstdint>
+#include <cstring>
+#include <new>
+#include <numeric>
 #include <vector>
 #include <set>
 
@@ -81,6 +90,51 @@ static void pl_log_cb(void*, enum pl_log_level level, const char *msg)
     }
 }
 
+namespace {
+
+constexpr uint64_t kImportedHostAllocationMagic = UINT64_C(0x535443484f535449);
+
+struct ImportedHostAllocation {
+    uint64_t magic = kImportedHostAllocationMagic;
+    pl_gpu gpu = nullptr;
+    pl_buf buffer = nullptr;
+    void* base = nullptr;
+};
+
+void freeImportedHostAllocation(void* opaque, uint8_t*)
+{
+    auto allocation = static_cast<ImportedHostAllocation*>(opaque);
+    SDL_assert(allocation != nullptr);
+    SDL_assert(allocation->magic == kImportedHostAllocationMagic);
+
+    pl_buf_destroy(allocation->gpu, &allocation->buffer);
+    SDL_aligned_free(allocation->base);
+    delete allocation;
+}
+
+ImportedHostAllocation* getImportedHostAllocation(const AVFrame* frame, int plane)
+{
+    AVBufferRef* buffer = av_frame_get_plane_buffer(const_cast<AVFrame*>(frame), plane);
+    if (buffer == nullptr) {
+        return nullptr;
+    }
+
+    auto allocation = static_cast<ImportedHostAllocation*>(av_buffer_get_opaque(buffer));
+    if (allocation == nullptr || allocation->magic != kImportedHostAllocationMagic) {
+        return nullptr;
+    }
+
+    return allocation;
+}
+
+size_t alignUp(size_t value, size_t alignment)
+{
+    SDL_assert(alignment != 0);
+    return (value + alignment - 1) & ~(alignment - 1);
+}
+
+} // namespace
+
 void PlVkRenderer::lockQueue(struct AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index)
 {
     auto me = (PlVkRenderer*)dev_ctx->user_opaque;
@@ -109,6 +163,110 @@ int PlVkRenderer::getMappedBuffer(AVCodecContext *context, AVFrame *frame, int f
     AVCodecContext mappedContext = *context;
     mappedContext.opaque = const_cast<pl_gpu*>(&renderer->m_Vulkan->gpu);
     return pl_get_buffer2(&mappedContext, frame, flags);
+}
+
+int PlVkRenderer::getImportedHostBuffer(AVCodecContext *context, AVFrame *frame, int flags)
+{
+    auto decoder = static_cast<FFmpegVideoDecoder*>(context->opaque);
+    auto renderer = static_cast<PlVkRenderer*>(decoder->getBackendRenderer());
+    pl_gpu gpu = renderer->m_Vulkan->gpu;
+    const AVPixelFormat pixelFormat = static_cast<AVPixelFormat>(frame->format);
+
+    if (!(context->codec->capabilities & AV_CODEC_CAP_DR1)) {
+        return avcodec_default_get_buffer2(context, frame, flags);
+    }
+
+    pl_plane_data planeData[4] = {};
+    const int planeCount = pl_plane_data_from_pixfmt(planeData, nullptr, pixelFormat);
+    if (planeCount <= 0) {
+        return avcodec_default_get_buffer2(context, frame, flags);
+    }
+
+    int alignment[AV_NUM_DATA_POINTERS] = {};
+    int width = frame->width;
+    int height = frame->height;
+    size_t planeSizes[4] = {};
+
+    std::memset(frame->data, 0, sizeof(frame->data));
+    std::memset(frame->linesize, 0, sizeof(frame->linesize));
+    std::memset(frame->buf, 0, sizeof(frame->buf));
+    frame->extended_data = frame->data;
+    frame->extended_buf = nullptr;
+
+    avcodec_align_dimensions2(context, &width, &height, alignment);
+    int result = av_image_fill_linesizes(frame->linesize, pixelFormat, width);
+    if (result < 0) {
+        return result;
+    }
+
+    for (int plane = 0; plane < planeCount; plane++) {
+        alignment[plane] = std::lcm(alignment[plane],
+                                    static_cast<int>(gpu->limits.align_tex_xfer_pitch));
+        alignment[plane] = std::lcm(alignment[plane],
+                                    static_cast<int>(gpu->limits.align_tex_xfer_offset));
+        alignment[plane] = std::lcm(alignment[plane],
+                                    static_cast<int>(planeData[plane].pixel_stride));
+        frame->linesize[plane] = static_cast<int>(alignUp(frame->linesize[plane],
+                                                          alignment[plane]));
+    }
+
+    const ptrdiff_t lineSizes[4] = {
+        frame->linesize[0], frame->linesize[1], frame->linesize[2], frame->linesize[3],
+    };
+    result = av_image_fill_plane_sizes(planeSizes, pixelFormat, height, lineSizes);
+    if (result < 0) {
+        return result;
+    }
+
+    const size_t hostAlignment = std::max<size_t>({
+        gpu->limits.align_host_ptr,
+        alignof(void*),
+        static_cast<size_t>(64),
+    });
+
+    for (int plane = 0; plane < planeCount; plane++) {
+        const size_t allocationSize = alignUp(planeSizes[plane], hostAlignment);
+        void* base = SDL_aligned_alloc(hostAlignment, allocationSize);
+        if (base == nullptr) {
+            av_frame_unref(frame);
+            return AVERROR(ENOMEM);
+        }
+
+        auto allocation = new (std::nothrow) ImportedHostAllocation;
+        if (allocation == nullptr) {
+            SDL_aligned_free(base);
+            av_frame_unref(frame);
+            return AVERROR(ENOMEM);
+        }
+
+        allocation->gpu = gpu;
+        allocation->base = base;
+        pl_buf_params bufferParams = {};
+        bufferParams.size = allocationSize;
+        bufferParams.import_handle = PL_HANDLE_HOST_PTR;
+        bufferParams.shared_mem.handle.ptr = base;
+        bufferParams.shared_mem.size = allocationSize;
+        allocation->buffer = pl_buf_create(gpu, &bufferParams);
+        if (allocation->buffer == nullptr) {
+            SDL_aligned_free(base);
+            delete allocation;
+            av_frame_unref(frame);
+            return AVERROR(ENOMEM);
+        }
+
+        frame->data[plane] = static_cast<uint8_t*>(base);
+        frame->buf[plane] = av_buffer_create(frame->data[plane], allocationSize,
+                                             freeImportedHostAllocation, allocation, 0);
+        if (frame->buf[plane] == nullptr) {
+            pl_buf_destroy(gpu, &allocation->buffer);
+            SDL_aligned_free(base);
+            delete allocation;
+            av_frame_unref(frame);
+            return AVERROR(ENOMEM);
+        }
+    }
+
+    return 0;
 }
 
 PlVkRenderer::PlVkRenderer(bool hwaccel, IFFmpegRenderer *backendRenderer) :
@@ -591,35 +749,145 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Using Vulkan renderer");
 
-        // Decode software frames directly into persistently mapped Vulkan
-        // transfer buffers. pl_map_avframe_ex() recognizes these allocations
-        // and uploads from the backing pl_buf without an extra host memcpy.
-        // Retain FFmpeg's default allocator if this GPU cannot support the
-        // thread-safe, cached mapped buffers required by pl_get_buffer2().
         const pl_gpu_limits& limits = m_Vulkan->gpu->limits;
-        if (limits.thread_safe && limits.max_mapped_size && limits.host_cached) {
-            context->get_buffer2 = getMappedBuffer;
+        const bool canUseMappedVulkan = limits.thread_safe &&
+            limits.max_mapped_size && limits.host_cached;
+        const bool canImportHostMemory = limits.thread_safe && limits.buf_transfer &&
+            limits.align_host_ptr &&
+            (m_Vulkan->gpu->import_caps.buf & PL_HANDLE_HOST_PTR);
+
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Vulkan software-frame capabilities: mapped=%s host-import=%s "
+                    "host-import-slow=%s host-alignment=%zu",
+                    canUseMappedVulkan ? "yes" : "no",
+                    canImportHostMemory ? "yes" : "no",
+                    limits.host_ptr_slow ? "yes" : "no",
+                    limits.align_host_ptr);
+
+        const QByteArray requestedAllocator =
+            qgetenv("STATIONCONNECT_VULKAN_FRAME_ALLOCATOR").trimmed().toLower();
+        if (requestedAllocator.isEmpty() || requestedAllocator == "system") {
+            m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Using persistently mapped Vulkan decode buffers");
+                        "Using system-memory FFmpeg decode buffers");
+        }
+        else if (requestedAllocator == "mapped") {
+            if (!canUseMappedVulkan) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Mapped Vulkan decode buffers were requested but are unavailable; "
+                            "using system-memory frames");
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
+            }
+            else {
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::MappedVulkan;
+                context->get_buffer2 = getMappedBuffer;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Using persistently mapped Vulkan decode buffers");
+            }
+        }
+        else if (requestedAllocator == "host-import") {
+            if (!canImportHostMemory) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Imported host decode buffers were requested but are unavailable; "
+                            "using system-memory frames");
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
+            }
+            else {
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::ImportedHost;
+                context->get_buffer2 = getImportedHostBuffer;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Using cacheable FFmpeg decode buffers imported into Vulkan%s",
+                            limits.host_ptr_slow ? " (driver reports slow host-pointer import)" : "");
+            }
         }
         else {
+            m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Persistently mapped Vulkan decode buffers are unavailable; using system-memory frames");
+                        "Unknown STATIONCONNECT_VULKAN_FRAME_ALLOCATOR value '%s'; "
+                        "using system-memory frames",
+                        requestedAllocator.constData());
         }
+
     }
 
     return true;
 }
 
-bool PlVkRenderer::mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFrame)
+bool PlVkRenderer::mapImportedHostFrameToPlacebo(const AVFrame *frame,
+                                                  pl_frame* mappedFrame)
 {
-    pl_avframe_params mapParams = {};
-    mapParams.frame = frame;
-    mapParams.tex = m_Textures;
-    if (!pl_map_avframe_ex(m_Vulkan->gpu, mappedFrame, &mapParams)) {
+    const AVPixelFormat pixelFormat = static_cast<AVPixelFormat>(frame->format);
+    const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(pixelFormat);
+    pl_plane_data planeData[4] = {};
+
+    pl_frame_from_avframe(mappedFrame, frame);
+    mappedFrame->user_data = nullptr;
+
+    const int planeCount = pl_plane_data_from_pixfmt(planeData,
+                                                      &mappedFrame->repr.bits,
+                                                      pixelFormat);
+    if (planeCount <= 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "pl_map_avframe_ex() failed");
+                     "pl_plane_data_from_pixfmt() failed for imported host frame");
         return false;
+    }
+
+    for (int plane = 0; plane < planeCount; plane++) {
+        ImportedHostAllocation* allocation = getImportedHostAllocation(frame, plane);
+        if (allocation == nullptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Imported host frame is missing plane %d allocation metadata",
+                         plane);
+            return false;
+        }
+
+        const bool isChroma = plane == 1 || plane == 2;
+        planeData[plane].width = AV_CEIL_RSHIFT(
+            frame->width, isChroma ? descriptor->log2_chroma_w : 0);
+        planeData[plane].height = AV_CEIL_RSHIFT(
+            frame->height, isChroma ? descriptor->log2_chroma_h : 0);
+        planeData[plane].row_stride = static_cast<size_t>(std::abs(frame->linesize[plane]));
+        planeData[plane].buf = allocation->buffer;
+        planeData[plane].buf_offset = static_cast<size_t>(
+            frame->data[plane] - static_cast<uint8_t*>(allocation->base));
+
+        if (frame->linesize[plane] < 0) {
+            planeData[plane].buf_offset += planeData[plane].row_stride *
+                (planeData[plane].height - 1);
+            mappedFrame->planes[plane].flipped = true;
+        }
+
+        if (!pl_upload_plane(m_Vulkan->gpu, &mappedFrame->planes[plane],
+                             &m_Textures[plane], &planeData[plane])) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "pl_upload_plane() failed for imported host plane %d",
+                         plane);
+            return false;
+        }
+        mappedFrame->planes[plane].texture = m_Textures[plane];
+    }
+
+    return true;
+}
+
+bool PlVkRenderer::mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFrame,
+                                       bool* importedHostFrame)
+{
+    *importedHostFrame = getImportedHostAllocation(frame, 0) != nullptr;
+    if (*importedHostFrame) {
+        if (!mapImportedHostFrameToPlacebo(frame, mappedFrame)) {
+            return false;
+        }
+    }
+    else {
+        pl_avframe_params mapParams = {};
+        mapParams.frame = frame;
+        mapParams.tex = m_Textures;
+        if (!pl_map_avframe_ex(m_Vulkan->gpu, mappedFrame, &mapParams)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "pl_map_avframe_ex() failed");
+            return false;
+        }
     }
 
     // libplacebo assumes a minimum luminance value of 0 means the actual value was unknown.
@@ -639,6 +907,14 @@ bool PlVkRenderer::mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFra
     mappedFrame->repr.levels = PL_COLOR_LEVELS_FULL;
 
     return true;
+}
+
+void PlVkRenderer::unmapAvFrameFromPlacebo(pl_frame* mappedFrame,
+                                            bool importedHostFrame)
+{
+    if (!importedHostFrame) {
+        pl_unmap_avframe(m_Vulkan->gpu, mappedFrame);
+    }
 }
 
 bool PlVkRenderer::getQueue(VkQueueFlags requiredFlags, uint32_t *queueIndex, uint32_t *queueCount)
@@ -764,6 +1040,7 @@ void PlVkRenderer::cleanupRenderContext()
 void PlVkRenderer::renderFrame(AVFrame *frame)
 {
     pl_frame mappedFrame, targetFrame;
+    bool importedHostFrame = false;
 
     // If waitToRender() failed to get the next swapchain frame, skip
     // rendering this frame. It probably means the window is occluded.
@@ -771,7 +1048,7 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
         return;
     }
 
-    if (!mapAvFrameToPlacebo(frame, &mappedFrame)) {
+    if (!mapAvFrameToPlacebo(frame, &mappedFrame, &importedHostFrame)) {
         // This function logs internally
         return;
     }
@@ -905,18 +1182,19 @@ UnmapExit:
         pl_tex_destroy(m_Vulkan->gpu, &texture);
     }
 
-    pl_unmap_avframe(m_Vulkan->gpu, &mappedFrame);
+    unmapAvFrameFromPlacebo(&mappedFrame, importedHostFrame);
 }
 
 bool PlVkRenderer::testRenderFrame(AVFrame *frame)
 {
     // Test if the frame can be mapped to libplacebo
     pl_frame mappedFrame;
-    if (!mapAvFrameToPlacebo(frame, &mappedFrame)) {
+    bool importedHostFrame = false;
+    if (!mapAvFrameToPlacebo(frame, &mappedFrame, &importedHostFrame)) {
         return false;
     }
 
-    pl_unmap_avframe(m_Vulkan->gpu, &mappedFrame);
+    unmapAvFrameFromPlacebo(&mappedFrame, importedHostFrame);
     return true;
 }
 
