@@ -573,6 +573,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_ReconnectRequested(false),
       m_Reconnecting(false),
       m_CanReconnect(false),
+      m_ConnectionStartCancelled(false),
+      m_WaitingForSessionCleanup(false),
       m_InputHandler(nullptr),
       m_FlushingWindowEventsRef(0),
       m_AsyncConnectionSuccess(false),
@@ -1368,7 +1370,77 @@ bool Session::startConnectionAsync(bool reconnecting)
         try {
             startApp();
         } catch (const GfeHttpResponseException& e) {
-            if (reconnecting && m_Computer->stationConnectAuthentication &&
+            const bool previousSessionStillActive =
+                    m_Computer->stationConnectAuthentication &&
+                    e.getStatusCode() == 400 &&
+                    QString::fromUtf8(e.getStatusMessage()) ==
+                        QStringLiteral("An app is already running on this host");
+            if (previousSessionStillActive) {
+                constexpr int RetryIntervalMs = 500;
+                constexpr int MaximumWaitMs = 30000;
+                constexpr int CancellationPollMs = 50;
+                bool started = false;
+
+                m_WaitingForSessionCleanup.store(true);
+                emit sessionCleanupWaitChanged(
+                            true,
+                            tr("Waiting for previous workstation session to finish..."));
+                qInfo() << "StationConnect previous session is still active; "
+                           "waiting up to" << MaximumWaitMs << "ms";
+
+                for (int elapsedMs = 0;
+                     elapsedMs < MaximumWaitMs && !started;
+                     elapsedMs += RetryIntervalMs) {
+                    for (int delayMs = 0;
+                         delayMs < RetryIntervalMs;
+                         delayMs += CancellationPollMs) {
+                        if (m_ConnectionStartCancelled.load()) {
+                            break;
+                        }
+                        SDL_Delay(CancellationPollMs);
+                    }
+                    if (m_ConnectionStartCancelled.load()) {
+                        break;
+                    }
+
+                    try {
+                        {
+                            QWriteLocker lock(&m_Computer->lock);
+                            m_Computer->currentGameId = 0;
+                        }
+                        startApp();
+                        started = true;
+                    } catch (const GfeHttpResponseException& retryError) {
+                        const bool stillActive =
+                                retryError.getStatusCode() == 400 &&
+                                QString::fromUtf8(retryError.getStatusMessage()) ==
+                                    QStringLiteral("An app is already running on this host");
+                        if (!stillActive) {
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            throw;
+                        }
+                    }
+                }
+
+                m_WaitingForSessionCleanup.store(false);
+                emit sessionCleanupWaitChanged(false, QString());
+
+                if (!started && m_ConnectionStartCancelled.load()) {
+                    qInfo() << "StationConnect connection cancelled while waiting for session cleanup";
+                    return false;
+                }
+                if (!started) {
+                    if (!reconnecting) {
+                        emit displayLaunchError(
+                                    tr("The previous workstation session did not finish within 30 seconds."));
+                    }
+                    return false;
+                }
+
+                qInfo() << "StationConnect previous session finished; launch retry succeeded";
+            }
+            else if (reconnecting && m_Computer->stationConnectAuthentication &&
                     m_Computer->currentGameId == 0 &&
                     e.getStatusCode() == 400) {
                 {
@@ -1538,6 +1610,11 @@ bool Session::startConnectionAsync(bool reconnecting)
     return true;
 }
 
+void Session::cancelConnectionStart()
+{
+    m_ConnectionStartCancelled.store(true);
+}
+
 bool Session::reconnectStationConnect()
 {
     if (m_StationConnectUsername.isEmpty() ||
@@ -1702,10 +1779,16 @@ void Session::exec(QWindow* qtWindow)
         // to update the Qt UI to allow warning messages to display and
         // make sure that the Qt window can hide itself.
         while (!execThread.wait(10) && m_Window == nullptr) {
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QCoreApplication::processEvents(
+                        m_WaitingForSessionCleanup.load() ?
+                            QEventLoop::AllEvents :
+                            QEventLoop::ExcludeUserInputEvents);
             QCoreApplication::sendPostedEvents();
         }
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QCoreApplication::processEvents(
+                    m_WaitingForSessionCleanup.load() ?
+                        QEventLoop::AllEvents :
+                        QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
 
         // SDL is in charge now. Wait until the streaming thread exits
@@ -1746,12 +1829,16 @@ void Session::execInternal()
                                          m_StreamConfig.width,
                                          m_StreamConfig.height);
 
+    m_ConnectionStartCancelled.store(false);
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {
         // Kick off the async connection thread while we sit here and pump the event loop
         asyncConnThread.start();
         while (!asyncConnThread.wait(10)) {
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QCoreApplication::processEvents(
+                        m_WaitingForSessionCleanup.load() ?
+                            QEventLoop::AllEvents :
+                            QEventLoop::ExcludeUserInputEvents);
             QCoreApplication::sendPostedEvents();
         }
 

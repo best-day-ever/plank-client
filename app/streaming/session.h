@@ -124,6 +124,8 @@ public:
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
+    Q_INVOKABLE void cancelConnectionStart();
+
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
@@ -158,6 +160,8 @@ signals:
     void stageFailed(QString stage, int errorCode, QString failingPorts);
 
     void connectionStarted();
+
+    void sessionCleanupWaitChanged(bool waiting, QString text);
 
     void displayLaunchError(QString text);
 
@@ -296,6 +300,8 @@ private:
     std::atomic_bool m_ReconnectRequested;
     std::atomic_bool m_Reconnecting;
     std::atomic_bool m_CanReconnect;
+    std::atomic_bool m_ConnectionStartCancelled;
+    std::atomic_bool m_WaitingForSessionCleanup;
     QString m_StationConnectUsername;
     QString m_StationConnectPassword;
     SdlInputHandler* m_InputHandler;

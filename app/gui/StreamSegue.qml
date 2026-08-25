@@ -40,6 +40,14 @@ Item {
         window.visible = false
     }
 
+    function sessionCleanupWaitChanged(waiting, text)
+    {
+        if (waiting) {
+            stageText = text
+        }
+        cancelWaitButton.visible = waiting
+    }
+
     function displayLaunchError(text)
     {
         // Display the error dialog after Session::exec() returns
@@ -113,6 +121,7 @@ Item {
         session.stageStarting.connect(stageStarting)
         session.stageFailed.connect(stageFailed)
         session.connectionStarted.connect(connectionStarted)
+        session.sessionCleanupWaitChanged.connect(sessionCleanupWaitChanged)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
         session.sessionFinished.connect(sessionFinished)
@@ -155,23 +164,36 @@ Item {
         sourceComponent: Item {}
     }
 
-    Row {
+    Column {
         anchors.centerIn: parent
-        spacing: 5
+        spacing: 12
 
-        BusyIndicator {
-            id: stageSpinner
-            running: false
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 5
+
+            BusyIndicator {
+                id: stageSpinner
+                running: false
+            }
+
+            Label {
+                id: stageLabel
+                height: stageSpinner.height
+                text: stageText
+                font.pointSize: 20
+                verticalAlignment: Text.AlignVCenter
+
+                wrapMode: Text.Wrap
+            }
         }
 
-        Label {
-            id: stageLabel
-            height: stageSpinner.height
-            text: stageText
-            font.pointSize: 20
-            verticalAlignment: Text.AlignVCenter
-
-            wrapMode: Text.Wrap
+        Button {
+            id: cancelWaitButton
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: false
+            text: qsTr("Cancel")
+            onClicked: session.cancelConnectionStart()
         }
     }
 
