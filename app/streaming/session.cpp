@@ -850,9 +850,10 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    // Automatic decoder selection may legitimately choose software for a
-    // profile that the GPU cannot decode. That is an expected capability
-    // result, so do not interrupt each connection with a warning.
+    // Internal exact-profile decoder selection may legitimately choose
+    // software when no hardware path reproduces the selected profile. That is
+    // an expected capability result, so do not interrupt each connection with
+    // a warning.
     while (!m_SupportedVideoFormats.isEmpty()) {
         const auto availability = getDecoderAvailability(
                     testWindow,
