@@ -32,6 +32,7 @@ public:
     virtual RendererType getRendererType() override;
 
 private:
+    static int getMappedBuffer(AVCodecContext *context, AVFrame *frame, int flags);
     static void lockQueue(AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index);
     static void unlockQueue(AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index);
     static void overlayUploadComplete(void* opaque);

@@ -1,4 +1,5 @@
 #include "plvk.h"
+#include "../ffmpeg.h"
 
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
@@ -95,6 +96,19 @@ void PlVkRenderer::unlockQueue(struct AVHWDeviceContext *dev_ctx, uint32_t queue
 void PlVkRenderer::overlayUploadComplete(void* opaque)
 {
     SDL_DestroySurface((SDL_Surface*)opaque);
+}
+
+int PlVkRenderer::getMappedBuffer(AVCodecContext *context, AVFrame *frame, int flags)
+{
+    auto decoder = static_cast<FFmpegVideoDecoder*>(context->opaque);
+    auto renderer = static_cast<PlVkRenderer*>(decoder->getBackendRenderer());
+
+    // FFmpegVideoDecoder owns AVCodecContext::opaque for ffGetFormat(). Give
+    // libplacebo an isolated view of the context with the GPU pointer it
+    // expects instead of mutating the live context from decoder worker threads.
+    AVCodecContext mappedContext = *context;
+    mappedContext.opaque = const_cast<pl_gpu*>(&renderer->m_Vulkan->gpu);
+    return pl_get_buffer2(&mappedContext, frame, flags);
 }
 
 PlVkRenderer::PlVkRenderer(bool hwaccel, IFFmpegRenderer *backendRenderer) :
@@ -576,6 +590,22 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
     else {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Using Vulkan renderer");
+
+        // Decode software frames directly into persistently mapped Vulkan
+        // transfer buffers. pl_map_avframe_ex() recognizes these allocations
+        // and uploads from the backing pl_buf without an extra host memcpy.
+        // Retain FFmpeg's default allocator if this GPU cannot support the
+        // thread-safe, cached mapped buffers required by pl_get_buffer2().
+        const pl_gpu_limits& limits = m_Vulkan->gpu->limits;
+        if (limits.thread_safe && limits.max_mapped_size && limits.host_cached) {
+            context->get_buffer2 = getMappedBuffer;
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Using persistently mapped Vulkan decode buffers");
+        }
+        else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Persistently mapped Vulkan decode buffers are unavailable; using system-memory frames");
+        }
     }
 
     return true;
