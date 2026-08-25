@@ -1288,54 +1288,6 @@ Flickable {
                 anchors.fill: parent
                 spacing: 5
 
-                Label {
-                    width: parent.width
-                    id: resVDSTitle
-                    text: qsTr("Video decoder")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
-                }
-
-                AutoResizingComboBox {
-                    // ignore setting the index at first, and actually set it when the component is loaded
-                    Component.onCompleted: {
-                        var saved_vds = StreamingPreferences.videoDecoderSelection
-                        currentIndex = 0
-                        for (var i = 0; i < decoderListModel.count; i++) {
-                            var el_vds = decoderListModel.get(i).val;
-                            if (saved_vds === el_vds) {
-                                currentIndex = i
-                                break
-                            }
-                        }
-                        activated(currentIndex)
-                    }
-
-                    id: decoderComboBox
-                    textRole: "text"
-                    model: ListModel {
-                        id: decoderListModel
-                        ListElement {
-                            text: qsTr("Automatic (Recommended)")
-                            val: StreamingPreferences.VDS_AUTO
-                        }
-                        ListElement {
-                            text: qsTr("Force software decoding")
-                            val: StreamingPreferences.VDS_FORCE_SOFTWARE
-                        }
-                        ListElement {
-                            text: qsTr("Force hardware decoding")
-                            val: StreamingPreferences.VDS_FORCE_HARDWARE
-                        }
-                    }
-                    // ::onActivated must be used, as it only listens for when the index is changed by a human
-                    onActivated: {
-                        if (enabled) {
-                            StreamingPreferences.videoDecoderSelection = decoderListModel.get(currentIndex).val
-                        }
-                    }
-                }
-
                 CheckBox {
                     id: enableMdns
                     width: parent.width

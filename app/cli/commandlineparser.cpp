@@ -262,11 +262,6 @@ StreamCommandLineParser::StreamCommandLineParser()
         {"5.1-surround", StreamingPreferences::AC_51_SURROUND},
         {"7.1-surround", StreamingPreferences::AC_71_SURROUND},
     };
-    m_VideoDecoderMap = {
-        {"auto",     StreamingPreferences::VDS_AUTO},
-        {"software", StreamingPreferences::VDS_FORCE_SOFTWARE},
-        {"hardware", StreamingPreferences::VDS_FORCE_HARDWARE},
-    };
     m_CaptureSysKeysModeMap = {
         {"never",      StreamingPreferences::CSK_OFF},
         {"fullscreen", StreamingPreferences::CSK_FULLSCREEN},
@@ -311,7 +306,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
-    parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
     parser.addValueOption("stationconnect-user", "StationConnect workstation username");
     parser.addFlagOption("stationconnect-password-stdin",
                          "StationConnect password read from standard input");
@@ -409,11 +403,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --capture-system-keys option
     if (parser.isSet("capture-system-keys")) {
         preferences->captureSysKeysMode = mapValue(m_CaptureSysKeysModeMap, parser.getChoiceOptionValue("capture-system-keys"));
-    }
-
-    // Resolve --video-decoder option
-    if (parser.isSet("video-decoder")) {
-        preferences->videoDecoderSelection = mapValue(m_VideoDecoderMap, parser.getChoiceOptionValue("video-decoder"));
     }
 
     const bool hasStationConnectUser = parser.isSet("stationconnect-user");

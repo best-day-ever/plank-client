@@ -217,12 +217,11 @@ private:
 
     static
     DecoderAvailability getDecoderAvailability(SDL_Window* window,
-                                               StreamingPreferences::VideoDecoderSelection vds,
                                                int videoFormat, int width, int height, int frameRate,
                                                bool enableIdentityGbr = false);
 
     static
-    bool chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
+    bool chooseDecoder(DecoderSelectionMode selectionMode,
                        SDL_Window* window, int videoFormat, int width, int height,
                        int frameRate, bool enableVsync, bool enableFramePacing,
                        bool testOnly,

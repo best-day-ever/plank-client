@@ -5,6 +5,7 @@
 #include <h264_stream.h>
 
 extern "C" {
+#include <libavutil/hwcontext.h>
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/pixdesc.h>
 }
@@ -669,7 +670,16 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             return false;
         }
 
-        // Allow the renderer to do any validation it wants on this frame
+        // Do not trust a codec-family capability claim by itself. Some hardware
+        // paths accept H.264 configuration but substitute an 8-bit or 4:2:0
+        // surface for a StationConnect High 10 or 4:4:4 profile. Validate the
+        // decoded test frame before allowing the renderer to accept the path.
+        if (!validateDecodedProfileFrame(frame, params)) {
+            av_frame_free(&frame);
+            return false;
+        }
+
+        // Allow the renderer to do any additional validation it wants on this frame
         if (!m_FrontendRenderer->testRenderFrame(frame)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Test decode failed (testRenderFrame)");
@@ -706,6 +716,86 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
         }
     }
 
+    return true;
+}
+
+bool FFmpegVideoDecoder::validateDecodedProfileFrame(const AVFrame* frame,
+                                                      PDECODER_PARAMETERS params)
+{
+    AVPixelFormat storageFormat = static_cast<AVPixelFormat>(frame->format);
+    if (frame->hw_frames_ctx != nullptr) {
+        const auto* framesContext = reinterpret_cast<const AVHWFramesContext*>(
+                    frame->hw_frames_ctx->data);
+        if (framesContext == nullptr || framesContext->sw_format == AV_PIX_FMT_NONE) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Exact profile validation failed: hardware surface storage format is unknown");
+            return false;
+        }
+        storageFormat = framesContext->sw_format;
+    }
+
+    const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(storageFormat);
+    if (descriptor == nullptr || descriptor->nb_components < 3) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Exact profile validation failed: unsupported decoded storage format %s",
+                    av_get_pix_fmt_name(storageFormat) != nullptr ?
+                        av_get_pix_fmt_name(storageFormat) : "unknown");
+        return false;
+    }
+
+    int decodedDepth = 0;
+    for (int component = 0; component < descriptor->nb_components; component++) {
+        decodedDepth = qMax(decodedDepth, descriptor->comp[component].depth);
+    }
+
+    const int requiredDepth =
+            (params->videoFormat & VIDEO_FORMAT_MASK_10BIT) ? 10 : 8;
+    const int requiredLog2ChromaWidth =
+            (params->videoFormat & VIDEO_FORMAT_MASK_YUV444) ? 0 : 1;
+    const int requiredLog2ChromaHeight =
+            (params->videoFormat &
+             (VIDEO_FORMAT_MASK_YUV444 | VIDEO_FORMAT_MASK_YUV422)) ? 0 : 1;
+
+    if (decodedDepth != requiredDepth ||
+            descriptor->log2_chroma_w != requiredLog2ChromaWidth ||
+            descriptor->log2_chroma_h != requiredLog2ChromaHeight) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Exact profile validation rejected decoded format %s: "
+                    "depth/chroma=%d/%d:%d required=%d/%d:%d",
+                    av_get_pix_fmt_name(storageFormat) != nullptr ?
+                        av_get_pix_fmt_name(storageFormat) : "unknown",
+                    decodedDepth,
+                    descriptor->log2_chroma_w,
+                    descriptor->log2_chroma_h,
+                    requiredDepth,
+                    requiredLog2ChromaWidth,
+                    requiredLog2ChromaHeight);
+        return false;
+    }
+
+    if (params->enableIdentityGbr &&
+            (frame->colorspace != AVCOL_SPC_RGB ||
+             frame->color_range != AVCOL_RANGE_JPEG)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Exact identity GBR validation rejected decoded color metadata: "
+                    "matrix=%d range=%d",
+                    frame->colorspace,
+                    frame->color_range);
+        return false;
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Exact profile validation passed: codec-format=0x%x storage=%s "
+                "depth=%d chroma=%d:%d matrix=%d range=%d decoder=%s",
+                params->videoFormat,
+                av_get_pix_fmt_name(storageFormat) != nullptr ?
+                    av_get_pix_fmt_name(storageFormat) : "unknown",
+                decodedDepth,
+                descriptor->log2_chroma_w,
+                descriptor->log2_chroma_h,
+                frame->colorspace,
+                frame->color_range,
+                isHardwareAccelerated() ? "hardware" : "software");
     return true;
 }
 
@@ -1593,72 +1683,13 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     // Increase log level until the first frame is decoded
     av_log_set_level(AV_LOG_DEBUG);
 
-    // First try decoders that the user has manually specified via environment variables.
-    // These must output surfaces in one of the formats that one of our renderers supports,
-    // which is currently:
-    // - AV_PIX_FMT_DRM_PRIME
-    // - AV_PIX_FMT_MMAL
-    // - AV_PIX_FMT_YUV420P
-    // - AV_PIX_FMT_YUVJ420P
-    // - AV_PIX_FMT_NV12
-    // - AV_PIX_FMT_NV21
-    {
-        QString h264DecoderHint = qgetenv("H264_DECODER_HINT");
-        if (!h264DecoderHint.isEmpty() && (params->videoFormat & VIDEO_FORMAT_MASK_H264)) {
-            QByteArray decoderString = h264DecoderHint.toLocal8Bit();
-            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString.constData()), params, true)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using custom H.264 decoder (H264_DECODER_HINT): %s",
-                            decoderString.constData());
-                return true;
-            }
-            else {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "Custom H.264 decoder (H264_DECODER_HINT) failed to load: %s",
-                             decoderString.constData());
-            }
-        }
-    }
-    {
-        QString hevcDecoderHint = qgetenv("HEVC_DECODER_HINT");
-        if (!hevcDecoderHint.isEmpty() && (params->videoFormat & VIDEO_FORMAT_MASK_H265)) {
-            QByteArray decoderString = hevcDecoderHint.toLocal8Bit();
-            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString.constData()), params, true)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using custom HEVC decoder (HEVC_DECODER_HINT): %s",
-                            decoderString.constData());
-                return true;
-            }
-            else {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "Custom HEVC decoder (HEVC_DECODER_HINT) failed to load: %s",
-                             decoderString.constData());
-            }
-        }
-    }
-    {
-        QString av1DecoderHint = qgetenv("AV1_DECODER_HINT");
-        if (!av1DecoderHint.isEmpty() && (params->videoFormat & VIDEO_FORMAT_MASK_AV1)) {
-            QByteArray decoderString = av1DecoderHint.toLocal8Bit();
-            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString.constData()), params, true)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using custom AV1 decoder (AV1_DECODER_HINT): %s",
-                            decoderString.constData());
-                return true;
-            }
-            else {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "Custom AV1 decoder (AV1_DECODER_HINT) failed to load: %s",
-                             decoderString.constData());
-            }
-        }
-    }
-
     const AVCodec* decoder;
     void* codecIterator;
 
-    // Look for a hardware decoder first unless software-only
-    if (params->vds != StreamingPreferences::VDS_FORCE_SOFTWARE) {
+    // Hardware is always attempted first. Each candidate must successfully
+    // decode and exactly validate the selected StationConnect profile before
+    // it can be accepted.
+    {
         QSet<const AVCodec*> terminallyFailedHardwareDecoders;
 
         // Try tier 1 hwaccel decoders first
@@ -1686,7 +1717,7 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     }
 
     // Iterate through all software decoders if allowed
-    if (params->vds != StreamingPreferences::VDS_FORCE_HARDWARE) {
+    if (params->selectionMode != DecoderSelectionMode::ExactHardwareOnly) {
         codecIterator = NULL;
         while ((decoder = av_codec_iterate(&codecIterator))) {
             // Skip codecs that aren't decoders

@@ -26,14 +26,6 @@ public:
     };
     Q_ENUM(AudioConfig)
 
-    enum VideoDecoderSelection
-    {
-        VDS_AUTO,
-        VDS_FORCE_HARDWARE,
-        VDS_FORCE_SOFTWARE
-    };
-    Q_ENUM(VideoDecoderSelection)
-
     enum StationConnectVideoProfile
     {
         SCVP_H264_10BIT_444,
@@ -112,7 +104,6 @@ public:
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(bool stationConnectAutoResolution MEMBER stationConnectAutoResolution NOTIFY stationConnectAutoResolutionChanged)
     Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
-    Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
@@ -143,7 +134,6 @@ public:
     int identityGbrBitDepth;
     bool stationConnectAutoResolution;
     bool stationConnectToolbarPinned;
-    VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
     Language language;
@@ -159,7 +149,6 @@ signals:
     void audioConfigChanged();
     void stationConnectAutoResolutionChanged();
     void stationConnectToolbarPinnedChanged();
-    void videoDecoderSelectionChanged();
     void windowModeChanged();
     void framePacingChanged();
     void connectionWarningsChanged();

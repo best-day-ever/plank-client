@@ -4,11 +4,16 @@
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
-#include "settings/streamingpreferences.h"
 
 #define SDL_CODE_FRAME_READY 0
 
 #define MAX_SLICES 4
+
+enum class DecoderSelectionMode
+{
+    PreferExactHardwareThenSoftware,
+    ExactHardwareOnly,
+};
 
 typedef struct _VIDEO_STATS {
     uint64_t receivedVideoBytes;
@@ -41,7 +46,7 @@ typedef struct _VIDEO_STATS {
 
 typedef struct _DECODER_PARAMETERS {
     SDL_Window* window;
-    StreamingPreferences::VideoDecoderSelection vds;
+    DecoderSelectionMode selectionMode;
 
     int videoFormat;
     int width;

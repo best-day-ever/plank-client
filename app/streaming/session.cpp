@@ -282,7 +282,7 @@ void Session::clVideoPacketLossUpdate(float packetLossPercent)
                 peakPacketLossPercent, std::memory_order_relaxed);
 }
 
-bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
+bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
                             SDL_Window* window, int videoFormat, int width, int height,
                             int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly,
                             IVideoDecoder*& chosenDecoder, bool enableIdentityGbr)
@@ -303,7 +303,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     params.enableFramePacing = enableFramePacing;
     params.enableIdentityGbr = enableIdentityGbr;
     params.testOnly = testOnly;
-    params.vds = vds;
+    params.selectionMode = selectionMode;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -432,7 +432,7 @@ void Session::getDecoderInfo(SDL_Window* window,
     // dialog indicating lack of hardware decoding support.
 
     // Try a regular hardware accelerated HEVC decoder now
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
+    if (chooseDecoder(DecoderSelectionMode::ExactHardwareOnly,
                       window, VIDEO_FORMAT_H265, 1920, 1080, 60,
                       false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
@@ -445,7 +445,7 @@ void Session::getDecoderInfo(SDL_Window* window,
 
 
 #if 0 // See AV1 comment at the top of this function
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
+    if (chooseDecoder(DecoderSelectionMode::ExactHardwareOnly,
                       window, VIDEO_FORMAT_AV1_MAIN8, 1920, 1080, 60,
                       false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
@@ -459,7 +459,7 @@ void Session::getDecoderInfo(SDL_Window* window,
 
     // If we still didn't find a hardware decoder, try H.264 now.
     // This will fall back to software decoding, so it should always work.
-    if (chooseDecoder(StreamingPreferences::VDS_AUTO,
+    if (chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                       window, VIDEO_FORMAT_H264, 1920, 1080, 60,
                       false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
@@ -476,13 +476,13 @@ void Session::getDecoderInfo(SDL_Window* window,
 
 Session::DecoderAvailability
 Session::getDecoderAvailability(SDL_Window* window,
-                                StreamingPreferences::VideoDecoderSelection vds,
                                 int videoFormat, int width, int height, int frameRate,
                                 bool enableIdentityGbr)
 {
     IVideoDecoder* decoder;
 
-    if (!chooseDecoder(vds, window, videoFormat, width, height, frameRate,
+    if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
+                       window, videoFormat, width, height, frameRate,
                        false, false, true, decoder, enableIdentityGbr)) {
         return DecoderAvailability::None;
     }
@@ -498,7 +498,7 @@ bool Session::populateDecoderProperties(SDL_Window* window)
 {
     IVideoDecoder* decoder;
 
-    if (!chooseDecoder(m_Preferences->videoDecoderSelection,
+    if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                        window,
                        m_SupportedVideoFormats.first(),
                        m_StreamConfig.width,
@@ -611,11 +611,10 @@ Session::Session(NvComputer* computer, NvApp& app,
                      StreamingPreferences::SCVP_H264_8BIT_422 ||
                  m_StationConnectVideoProfile ==
                      StreamingPreferences::SCVP_H264_8BIT_444) ? 8 : 10;
-        // Intel's hardware path cannot decode the qualified H.264 High 10
-        // 4:4:4 identity profile. Keep StationConnect on the proven FFmpeg
-        // software path instead of allowing automatic selection to downgrade
-        // the stream to an 8-bit profile.
-        m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;
+        // Decoder selection is internal and exact-profile constrained. Hardware
+        // is accepted only after a test frame proves the requested bit depth,
+        // chroma sampling, and identity mapping; otherwise the same profile
+        // falls back to FFmpeg software decoding without changing formats.
     }
 }
 
@@ -857,15 +856,12 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     while (!m_SupportedVideoFormats.isEmpty()) {
         const auto availability = getDecoderAvailability(
                     testWindow,
-                    m_Preferences->videoDecoderSelection,
                     m_SupportedVideoFormats.front(),
                     m_StreamConfig.width,
                     m_StreamConfig.height,
                     m_StreamConfig.fps,
                     isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.front()));
-        if (availability == DecoderAvailability::None ||
-                (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_HARDWARE &&
-                 availability != DecoderAvailability::Hardware)) {
+        if (availability == DecoderAvailability::None) {
             m_SupportedVideoFormats.removeFirst();
         }
         else {
@@ -2176,7 +2172,7 @@ void Session::execInternal()
 
                 // Choose a new decoder (hopefully the same one, but possibly
                 // not if a GPU was removed or something).
-                if (!chooseDecoder(m_Preferences->videoDecoderSelection,
+                if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                                    m_Window, m_ActiveVideoFormat, m_ActiveVideoWidth,
                                    m_ActiveVideoHeight, m_ActiveVideoFrameRate,
                                    enableVsync,

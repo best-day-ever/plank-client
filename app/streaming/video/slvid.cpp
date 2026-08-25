@@ -82,11 +82,6 @@ QSize SLVideoDecoder::getDecoderMaxResolution()
 bool
 SLVideoDecoder::initialize(PDECODER_PARAMETERS params)
 {
-    // SLVideo only supports hardware decoding
-    if (params->vds == StreamingPreferences::VDS_FORCE_SOFTWARE) {
-        return false;
-    }
-
     // SLVideo only supports H.264
     if (params->videoFormat != VIDEO_FORMAT_H264) {
         return false;

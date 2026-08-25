@@ -40,6 +40,9 @@ private:
                                 bool testFrame,
                                 bool useAlternateFrontend);
 
+    static bool validateDecodedProfileFrame(const AVFrame* frame,
+                                            PDECODER_PARAMETERS params);
+
     void stringifyVideoStats(VIDEO_STATS& stats, char* output, int length);
 
     void logVideoStats(VIDEO_STATS& stats, const char* title);
