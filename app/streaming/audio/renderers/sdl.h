@@ -3,11 +3,6 @@
 #include "renderer.h"
 #include "streaming/avsynccontroller.h"
 #include <SDL3/SDL.h>
-#include <vector>
-
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
-struct SwrContext;
-#endif
 
 class SdlAudioRenderer : public IAudioRenderer
 {
@@ -48,15 +43,12 @@ private:
     int m_SampleRate;
     int m_ChannelCount;
     bool m_EnableAvSyncCorrection;
+    float m_AudioFrequencyRatio;
     quint64 m_RawAudioFrames;
-    quint64 m_SubmittedAudioFrames;
+    double m_SubmittedAudioFrames;
     qint64 m_LastSubmittedAudioMediaTimeMs;
     quint64 m_SkippedAudioBlocks;
     StationConnectAvSync::AudioRateController m_AudioRateController;
     StationConnectAvSync::AudioBacklogController m_AudioBacklogController;
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
-    SwrContext* m_SwrContext;
-    std::vector<float> m_CorrectedAudioBuffer;
-#endif
 };

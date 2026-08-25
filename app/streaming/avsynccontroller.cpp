@@ -42,6 +42,23 @@ VideoClockSample readVideoClock()
     return latestVideoClock;
 }
 
+AudioFrequencyAdjustment calculateAudioFrequencyAdjustment(
+        int correctionPpm,
+        int sampleRate)
+{
+    AudioFrequencyAdjustment adjustment;
+    if (sampleRate <= 0) {
+        return adjustment;
+    }
+
+    adjustment.distance = sampleRate;
+    adjustment.sampleDelta = static_cast<int>(std::llround(
+        -static_cast<double>(correctionPpm) * sampleRate / 1000000.0));
+    adjustment.ratio = 1.0f -
+        static_cast<float>(adjustment.sampleDelta) / sampleRate;
+    return adjustment;
+}
+
 void AudioRateController::reset()
 {
     m_AudioPoints.clear();
