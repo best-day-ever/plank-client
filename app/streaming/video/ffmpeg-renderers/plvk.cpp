@@ -801,7 +801,26 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
 
         const QByteArray requestedAllocator =
             qgetenv("STATIONCONNECT_VULKAN_FRAME_ALLOCATOR").trimmed().toLower();
-        if (requestedAllocator.isEmpty() || requestedAllocator == "system") {
+        if (requestedAllocator.isEmpty()) {
+            if (canImportHostMemory && !limits.host_ptr_slow) {
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::ImportedHost;
+                context->get_buffer2 = getImportedHostBuffer;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Using pooled cacheable FFmpeg decode buffers imported into Vulkan");
+            }
+            else if (canUseMappedVulkan) {
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::MappedVulkan;
+                context->get_buffer2 = getMappedBuffer;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Using persistently mapped Vulkan decode buffers");
+            }
+            else {
+                m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Using system-memory FFmpeg decode buffers");
+            }
+        }
+        else if (requestedAllocator == "system") {
             m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Using system-memory FFmpeg decode buffers");
@@ -831,7 +850,7 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
                 m_SoftwareFrameAllocator = SoftwareFrameAllocator::ImportedHost;
                 context->get_buffer2 = getImportedHostBuffer;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using cacheable FFmpeg decode buffers imported into Vulkan%s",
+                            "Using pooled cacheable FFmpeg decode buffers imported into Vulkan%s",
                             limits.host_ptr_slow ? " (driver reports slow host-pointer import)" : "");
             }
         }
