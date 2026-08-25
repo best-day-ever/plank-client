@@ -121,7 +121,7 @@ private:
     bool m_NeedsSpsFixup;
     bool m_TestOnly;
     SDL_Thread* m_DecoderThread;
-    SDL_atomic_t m_DecoderThreadShouldQuit;
+    SDL_AtomicInt m_DecoderThreadShouldQuit;
 
     // Data buffers in the queued DU are not valid
     QQueue<DECODE_UNIT> m_FrameInfoQueue;

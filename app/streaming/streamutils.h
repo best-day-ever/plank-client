@@ -1,23 +1,30 @@
 #pragma once
 
-#include <SDL.h>
-
-// SDL_FRect wasn't added until 2.0.10
-#if !SDL_VERSION_ATLEAST(2, 0, 10)
-typedef struct SDL_FRect
-{
-    float x;
-    float y;
-    float w;
-    float h;
-} SDL_FRect;
-#endif
+#include <SDL3/SDL.h>
 
 class StreamUtils
 {
 public:
     static
     Uint32 getPlatformWindowFlags();
+
+    static
+    SDL_Window* createTestWindow();
+
+    static
+    int getDisplayCount();
+
+    static
+    SDL_DisplayID getDisplayId(int displayIndex);
+
+    static
+    int getDisplayIndex(SDL_DisplayID display);
+
+    static
+    int getDisplayModeCount(int displayIndex);
+
+    static
+    bool getDisplayMode(int displayIndex, int modeIndex, SDL_DisplayMode* mode);
 
     static
     void scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst);
@@ -36,4 +43,16 @@ public:
 
     static
     bool hasFastAes();
+
+    static
+    int getDrmFdForWindow(SDL_Window* window, bool* needsClose);
+
+    static
+    int getDrmFd(bool preferRenderNode);
+
+    static
+    void enterAsyncLoggingMode();
+
+    static
+    void exitAsyncLoggingMode();
 };

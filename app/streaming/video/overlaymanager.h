@@ -2,8 +2,8 @@
 
 #include <QString>
 
-#include <SDL.h>
-#include <SDL_ttf.h>
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #include <atomic>
 
@@ -47,6 +47,12 @@ public:
 
 private:
     void notifyOverlayUpdated(OverlayType type);
+    static SDL_Surface* RenderTextOutlinedWrapped(TTF_Font* font,
+                                                  const char* text,
+                                                  SDL_Color textColor,
+                                                  SDL_Color outlineColor,
+                                                  int outlineWidth,
+                                                  int wrapWidth);
 
     struct {
         bool enabled;

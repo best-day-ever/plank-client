@@ -10,8 +10,8 @@
 #include <Limelight.h>
 #include <unistd.h>
 
-#include <SDL_render.h>
-#include <SDL_syswm.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_system.h>
 
 // These are extensions, so some platform headers may not provide them
 #ifndef EGL_PLATFORM_WAYLAND_KHR
@@ -130,7 +130,7 @@ EGLRenderer::~EGLRenderer()
                 glDeleteBuffers(1, &m_OverlayVbos[i]);
             }
         }
-        SDL_GL_DeleteContext(m_Context);
+        SDL_GL_DestroyContext(m_Context);
     }
 
     if (m_DummyRenderer) {
@@ -163,7 +163,7 @@ void EGLRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
     if (!Session::get()->getOverlayManager().isOverlayEnabled(type)) {
         // If the overlay has been disabled, mark the data as invalid/stale.
-        SDL_AtomicSet(&m_OverlayHasValidData[type], 0);
+        SDL_SetAtomicInt(&m_OverlayHasValidData[type], 0);
         return;
     }
 }
@@ -207,28 +207,33 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
     SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
     if (newSurface != nullptr) {
         SDL_assert(!SDL_MUSTLOCK(newSurface));
-        SDL_assert(newSurface->format->format == SDL_PIXELFORMAT_ARGB8888);
+        SDL_assert(newSurface->format == SDL_PIXELFORMAT_ARGB8888);
+
+        const SDL_PixelFormatDetails* formatDetails =
+            SDL_GetPixelFormatDetails(newSurface->format);
+        SDL_assert(formatDetails != nullptr);
+        const int bytesPerPixel = formatDetails->bytes_per_pixel;
 
         glBindTexture(GL_TEXTURE_2D, m_OverlayTextures[type]);
 
         void* packedPixelData = nullptr;
         if (m_GlesMajorVersion >= 3 || m_HasExtUnpackSubimage) {
             // If we are GLES 3.0+ or have GL_EXT_unpack_subimage, GL can handle any pitch
-            SDL_assert(newSurface->pitch % newSurface->format->BytesPerPixel == 0);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, newSurface->pitch / newSurface->format->BytesPerPixel);
+            SDL_assert(newSurface->pitch % bytesPerPixel == 0);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, newSurface->pitch / bytesPerPixel);
         }
-        else if (newSurface->pitch != newSurface->w * newSurface->format->BytesPerPixel) {
+        else if (newSurface->pitch != newSurface->w * bytesPerPixel) {
             // If we can't use GL_UNPACK_ROW_LENGTH and the surface isn't tightly packed,
             // we must allocate a tightly packed buffer and copy our pixels there.
-            packedPixelData = malloc(newSurface->w * newSurface->h * newSurface->format->BytesPerPixel);
+            packedPixelData = malloc(newSurface->w * newSurface->h * bytesPerPixel);
             if (!packedPixelData) {
-                SDL_FreeSurface(newSurface);
+                SDL_DestroySurface(newSurface);
                 return;
             }
 
             SDL_ConvertPixels(newSurface->w, newSurface->h,
-                              newSurface->format->format, newSurface->pixels, newSurface->pitch,
-                              newSurface->format->format, packedPixelData, newSurface->w * newSurface->format->BytesPerPixel);
+                              newSurface->format, newSurface->pixels, newSurface->pitch,
+                              newSurface->format, packedPixelData, newSurface->w * bytesPerPixel);
         }
 
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, newSurface->w, newSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
@@ -266,7 +271,7 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
         overlayRect.w = newSurface->w;
         overlayRect.h = newSurface->h;
 
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
 
         // Convert screen space to normalized device coordinates
         StreamUtils::screenSpaceToNormalizedDeviceCoords(&overlayRect, viewportWidth, viewportHeight);
@@ -284,10 +289,10 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
         glBindBuffer(GL_ARRAY_BUFFER, m_OverlayVbos[type]);
         glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
 
-        SDL_AtomicSet(&m_OverlayHasValidData[type], 1);
+        SDL_SetAtomicInt(&m_OverlayHasValidData[type], 1);
     }
 
-    if (!SDL_AtomicGet(&m_OverlayHasValidData[type])) {
+    if (!SDL_GetAtomicInt(&m_OverlayHasValidData[type])) {
         // If the overlay is not populated yet or is stale, don't render it.
         return;
     }
@@ -418,16 +423,6 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
 {
     m_Window = params->window;
 
-    // It's not safe to attempt to opportunistically create a GLES2
-    // renderer prior to 2.0.10. If GLES2 isn't available, SDL will
-    // attempt to dereference a null pointer and crash Moonlight.
-    // https://bugzilla.libsdl.org/show_bug.cgi?id=4350
-    // https://hg.libsdl.org/SDL/rev/84618d571795
-    if (!SDL_VERSION_ATLEAST(2, 0, 10)) {
-        EGL_LOG(Error, "Not supported until SDL 2.0.10");
-        return false;
-    }
-
     // This renderer doesn't support HDR, so pick a different one.
     // HACK: This avoids a deadlock in SDL_CreateRenderer() if
     // Vulkan was used before and SDL is trying to load EGL.
@@ -458,25 +453,23 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
-    int renderIndex;
+    const char* renderDriver = nullptr;
     int maxRenderers = SDL_GetNumRenderDrivers();
     SDL_assert(maxRenderers >= 0);
 
-    SDL_RendererInfo renderInfo;
-    for (renderIndex = 0; renderIndex < maxRenderers; ++renderIndex) {
-        if (SDL_GetRenderDriverInfo(renderIndex, &renderInfo))
-            continue;
-        if (!strcmp(renderInfo.name, "opengles2")) {
-            SDL_assert(renderInfo.flags & SDL_RENDERER_ACCELERATED);
+    for (int renderIndex = 0; renderIndex < maxRenderers; ++renderIndex) {
+        const char* candidate = SDL_GetRenderDriver(renderIndex);
+        if (candidate != nullptr && !strcmp(candidate, "opengles2")) {
+            renderDriver = candidate;
             break;
         }
     }
-    if (renderIndex == maxRenderers) {
+    if (renderDriver == nullptr) {
         EGL_LOG(Error, "Could not find a suitable SDL_Renderer");
         return false;
     }
 
-    m_DummyRenderer = SDL_CreateRenderer(m_Window, renderIndex, SDL_RENDERER_ACCELERATED);
+    m_DummyRenderer = SDL_CreateRenderer(m_Window, renderDriver);
     if (!m_DummyRenderer) {
         // Print the error here (before it gets clobbered), but ensure that we flush window
         // events just in case SDL re-created the window before eventually failing.
@@ -497,7 +490,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     else {
         // If we get here prior to the start of a session, just pump and flush ourselves.
         SDL_PumpEvents();
-        SDL_FlushEvent(SDL_WINDOWEVENT);
+        SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
     }
 
     // Now we finally bail if we failed during SDL_CreateRenderer() above.
@@ -507,18 +500,15 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(params->window, &info)) {
-        EGL_LOG(Error, "SDL_GetWindowWMInfo() failed: %s", SDL_GetError());
-        return false;
-    }
+    const bool isWayland = strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
+    const bool isKmsDrm = strcmp(SDL_GetCurrentVideoDriver(), "kmsdrm") == 0 ||
+                          strcmp(SDL_GetCurrentVideoDriver(), "KMSDRM") == 0;
 
     if (!(m_Context = SDL_GL_CreateContext(params->window))) {
         EGL_LOG(Error, "Cannot create OpenGL context: %s", SDL_GetError());
         return false;
     }
-    if (SDL_GL_MakeCurrent(params->window, m_Context)) {
+    if (!SDL_GL_MakeCurrent(params->window, m_Context)) {
         EGL_LOG(Error, "Cannot use created EGL context: %s", SDL_GetError());
         return false;
     }
@@ -620,18 +610,18 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     // to resize the window. This seems to happen significantly more often
     // with vsync enabled, so this also mitigates that problem too.
     if (params->enableVsync
-#ifdef SDL_VIDEO_DRIVER_WAYLAND
-            && info.subsystem != SDL_SYSWM_WAYLAND
+#ifdef HAS_WAYLAND
+            && !isWayland
 #endif
             ) {
         SDL_GL_SetSwapInterval(1);
 
-#if SDL_VERSION_ATLEAST(2, 0, 15) && defined(SDL_VIDEO_DRIVER_KMSDRM)
+#if defined(HAVE_DRM)
         // The SDL KMSDRM backend already enforces double buffering (due to
         // SDL_HINT_VIDEO_DOUBLE_BUFFER=1), so calling glFinish() after
         // SDL_GL_SwapWindow() will block an extra frame and lock rendering
         // at 1/2 the display refresh rate.
-        if (info.subsystem != SDL_SYSWM_KMSDRM)
+        if (!isKmsDrm)
 #endif
         {
             m_BlockingSwapBuffers = true;
@@ -859,7 +849,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
             // XWayland. Other strategies like calling glGetError() don't seem
             // to be able to detect this situation for some reason.
             SDL_Event event;
-            event.type = SDL_RENDER_TARGETS_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
 
             return;
@@ -878,7 +868,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
     glClear(GL_COLOR_BUFFER_BIT);
 
     int drawableWidth, drawableHeight;
-    SDL_GL_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+    SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight);
 
     // Set the viewport to the size of the aspect-ratio-scaled video
     SDL_Rect src, dst;

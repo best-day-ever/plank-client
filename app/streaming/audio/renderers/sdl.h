@@ -2,7 +2,7 @@
 
 #include "renderer.h"
 #include "streaming/avsynccontroller.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <vector>
 
 #if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
@@ -35,13 +35,13 @@ public:
     virtual int getAudioBacklogCorrectionPpm() override;
 
     virtual quint64 getSkippedAudioBlockCount() override;
-
     virtual AudioFormat getAudioBufferFormat();
 
 private:
-    SDL_AudioDeviceID m_AudioDevice;
+    SDL_AudioStream* m_AudioStream;
     void* m_AudioBuffer;
     int m_FrameSize;
+    int m_FrameDurationMs;
     int m_BytesPerSampleFrame;
     int m_BytesPerSecond;
     int m_DeviceBufferDurationMs;

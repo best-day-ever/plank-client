@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "streaming/video/decoder.h"
 #include "streaming/video/overlaymanager.h"
@@ -16,7 +16,7 @@ extern "C" {
 #ifdef HAVE_EGL
 #define MESA_EGL_NO_X11_HEADERS
 #define EGL_NO_X11
-#include <SDL_egl.h>
+#include <SDL3/SDL_egl.h>
 
 #ifndef EGL_VERSION_1_5
 typedef intptr_t EGLAttrib;

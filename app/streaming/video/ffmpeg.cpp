@@ -139,7 +139,7 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
 
         if (!isHardwareAccelerated()) {
             // Slice up to 4 times for parallel CPU decoding, once slice per core
-            int slices = qMin(MAX_SLICES, SDL_GetCPUCount());
+            int slices = qMin(MAX_SLICES, SDL_GetNumLogicalCPUCores());
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Encoder configured for %d slices per frame",
                         slices);
@@ -249,10 +249,9 @@ FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
     SDL_zero(m_LastWndVideoStats);
     SDL_zero(m_GlobalVideoStats);
 
-    SDL_AtomicSet(&m_DecoderThreadShouldQuit, 0);
+    SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 0);
 
     // Use linear filtering when renderer scaling is required
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 }
 
 FFmpegVideoDecoder::~FFmpegVideoDecoder()
@@ -278,10 +277,10 @@ void FFmpegVideoDecoder::reset()
     // Terminate the decoder thread before doing anything else.
     // It might be touching things we're about to free.
     if (m_DecoderThread != nullptr) {
-        SDL_AtomicSet(&m_DecoderThreadShouldQuit, 1);
+        SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
         LiWakeWaitForVideoFrame();
         SDL_WaitThread(m_DecoderThread, NULL);
-        SDL_AtomicSet(&m_DecoderThreadShouldQuit, 0);
+        SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 0);
         m_DecoderThread = nullptr;
     }
 
@@ -513,7 +512,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     // Enable slice multi-threading for software decoding
     if (!isHardwareAccelerated()) {
         m_VideoDecoderCtx->thread_type = FF_THREAD_SLICE;
-        m_VideoDecoderCtx->thread_count = qMin(MAX_SLICES, SDL_GetCPUCount());
+        m_VideoDecoderCtx->thread_count = qMin(MAX_SLICES, SDL_GetNumLogicalCPUCores());
     }
     else {
         // No threading for HW decode
@@ -637,7 +636,12 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
 
             // A few FFmpeg decoders (h264_mmal) process here using a "pull" model.
             // Those decoders will fail here if the format is not supported.
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(62, 28, 100)
+            err = avcodec_receive_frame_flags(m_VideoDecoderCtx, frame,
+                                              AV_CODEC_RECEIVE_FRAME_FLAG_SYNCHRONOUS);
+#else
             err = avcodec_receive_frame(m_VideoDecoderCtx, frame);
+#endif
             if (err == AVERROR(EAGAIN)) {
                 // Wait a little while to let the hardware work
                 SDL_Delay(100);
@@ -734,7 +738,7 @@ void FFmpegVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
         SDL_assert(dst.lastRtt > 0);
     }
 
-    Uint32 now = SDL_GetTicks();
+    Uint64 now = SDL_GetTicks();
 
     // Initialize the measurement start point if this is the first video stat window
     if (!dst.measurementStartTimestamp) {
@@ -1751,7 +1755,7 @@ int FFmpegVideoDecoder::decoderThreadProcThunk(void *context)
 
 void FFmpegVideoDecoder::decoderThreadProc()
 {
-    while (!SDL_AtomicGet(&m_DecoderThreadShouldQuit)) {
+    while (!SDL_GetAtomicInt(&m_DecoderThreadShouldQuit)) {
         if (m_FramesIn == m_FramesOut) {
             VIDEO_FRAME_HANDLE handle;
             PDECODE_UNIT du;
@@ -1837,7 +1841,8 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         // Count time in avcodec_send_packet() and avcodec_receive_frame()
                         // as time spent decoding. Also count time spent in the decode unit
                         // queue because that's directly caused by decoder latency.
-                        const uint32_t decodeLatencyMs = LiGetMillis() - du.enqueueTimeMs;
+                        const uint32_t decodeLatencyMs = static_cast<uint32_t>(
+                            (LiGetMicroseconds() - du.enqueueTimeUs) / 1000);
                         m_ActiveWndVideoStats.totalDecodeTime += decodeLatencyMs;
                         m_DecodeLatencyHistogram[std::min<uint32_t>(
                             decodeLatencyMs,
@@ -1845,7 +1850,7 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         m_MaxDecodeLatencyMs = std::max(m_MaxDecodeLatencyMs, decodeLatencyMs);
 
                         // Store the presentation time
-                        frame->pts = du.presentationTimeMs;
+                        frame->pts = du.presentationTimeUs / 1000;
                     }
 
                     m_ActiveWndVideoStats.decodedFrames++;
@@ -1884,18 +1889,18 @@ void FFmpegVideoDecoder::decoderThreadProc()
                                      "Resetting decoder due to consistent failure");
 
                         SDL_Event event;
-                        event.type = SDL_RENDER_DEVICE_RESET;
+                        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
                         SDL_PushEvent(&event);
 
                         // Don't consume any additional data
-                        SDL_AtomicSet(&m_DecoderThreadShouldQuit, 1);
+                        SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
                     }
 
                     // Just in case the error resulted in the loss of the frame,
                     // request an IDR frame to reset our decoder state.
                     LiRequestIdrFrame();
                 }
-            } while (err == AVERROR(EAGAIN) && !SDL_AtomicGet(&m_DecoderThreadShouldQuit));
+            } while (err == AVERROR(EAGAIN) && !SDL_GetAtomicInt(&m_DecoderThreadShouldQuit));
 
             if (err != 0) {
                 // Free the frame if we failed to submit it
@@ -1929,7 +1934,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     }
 
     // Flip stats windows roughly every second
-    if (SDL_TICKS_PASSED(SDL_GetTicks(), m_ActiveWndVideoStats.measurementStartTimestamp + 1000)) {
+    if (SDL_GetTicks() >= m_ActiveWndVideoStats.measurementStartTimestamp + 1000) {
         VIDEO_STATS lastTwoWndStats = {};
         addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
         addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
@@ -2002,7 +2007,8 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         m_Pkt->flags = 0;
     }
 
-    m_ActiveWndVideoStats.totalReassemblyTime += du->enqueueTimeMs - du->receiveTimeMs;
+    m_ActiveWndVideoStats.totalReassemblyTime += static_cast<uint32_t>(
+        (du->enqueueTimeUs - du->receiveTimeUs) / 1000);
 
     err = avcodec_send_packet(m_VideoDecoderCtx, m_Pkt);
     if (err < 0) {
@@ -2021,11 +2027,11 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
                          "Resetting decoder due to consistent failure");
 
             SDL_Event event;
-            event.type = SDL_RENDER_DEVICE_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
 
             // Don't consume any additional data
-            SDL_AtomicSet(&m_DecoderThreadShouldQuit, 1);
+            SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
         }
 
         return DR_NEED_IDR;

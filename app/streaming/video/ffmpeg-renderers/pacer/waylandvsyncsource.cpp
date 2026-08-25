@@ -1,10 +1,6 @@
 #include "waylandvsyncsource.h"
 
-#include <SDL_syswm.h>
-
-#ifndef SDL_VIDEO_DRIVER_WAYLAND
-#warning Unable to use WaylandVsyncSource without SDL support
-#else
+#include <SDL3/SDL_system.h>
 
 const struct wl_callback_listener WaylandVsyncSource::s_FrameListener = {
     .done = WaylandVsyncSource::frameDone,
@@ -29,22 +25,23 @@ WaylandVsyncSource::~WaylandVsyncSource()
 
 bool WaylandVsyncSource::initialize(SDL_Window* window, int)
 {
-    SDL_SysWMinfo info;
-
-    SDL_VERSION(&info.version);
-
-    if (!SDL_GetWindowWMInfo(window, &info)) {
+    const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
+    if (properties == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_GetWindowWMInfo() failed: %s",
+                     "SDL_GetWindowProperties() failed: %s",
                      SDL_GetError());
         return false;
     }
 
-    // Pacer should not create us for non-Wayland windows
-    SDL_assert(info.subsystem == SDL_SYSWM_WAYLAND);
-
-    m_Display = info.info.wl.display;
-    m_Surface = info.info.wl.surface;
+    m_Display = static_cast<wl_display*>(SDL_GetPointerProperty(
+        properties, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr));
+    m_Surface = static_cast<wl_surface*>(SDL_GetPointerProperty(
+        properties, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr));
+    if (m_Display == nullptr || m_Surface == nullptr) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "SDL Wayland window properties are unavailable");
+        return false;
+    }
 
     // Enqueue our first frame callback
     m_Callback = wl_surface_frame(m_Surface);
@@ -77,5 +74,3 @@ void WaylandVsyncSource::frameDone(void* data, struct wl_callback* oldCb, uint32
     wl_surface_commit(me->m_Surface);
     wl_display_flush(me->m_Display);
 }
-
-#endif

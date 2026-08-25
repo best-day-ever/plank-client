@@ -23,10 +23,10 @@ OverlayManager::OverlayManager() :
     // the lifetime of a new Session object.
     //SDL_assert(TTF_WasInit() == 0);
 
-    if (TTF_Init() != 0) {
+    if (!TTF_Init()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "TTF_Init() failed: %s",
-                    TTF_GetError());
+                    SDL_GetError());
         return;
     }
 }
@@ -35,7 +35,7 @@ OverlayManager::~OverlayManager()
 {
     for (int i = 0; i < OverlayType::OverlayMax; i++) {
         if (m_Overlays[i].surface != nullptr) {
-            SDL_FreeSurface(m_Overlays[i].surface);
+            SDL_DestroySurface(m_Overlays[i].surface);
         }
         if (m_Overlays[i].font != nullptr) {
             TTF_CloseFont(m_Overlays[i].font);
@@ -63,9 +63,7 @@ char* OverlayManager::getOverlayText(OverlayType type)
 
 void OverlayManager::updateOverlayText(OverlayType type, const char* text)
 {
-    strncpy(m_Overlays[type].text, text, sizeof(m_Overlays[0].text));
-    m_Overlays[type].text[getOverlayMaxTextLength() - 1] = '\0';
-
+    SDL_utf8strlcpy(m_Overlays[type].text, text, sizeof(m_Overlays[0].text));
     setOverlayTextUpdated(type);
 }
 
@@ -83,7 +81,7 @@ SDL_Surface* OverlayManager::getUpdatedOverlaySurface(OverlayType type)
 {
     // If a new surface is available, return it. If not, return nullptr.
     // Caller must free the surface on success.
-    return (SDL_Surface*)SDL_AtomicSetPtr((void**)&m_Overlays[type].surface, nullptr);
+    return (SDL_Surface*)SDL_SetAtomicPointer((void**)&m_Overlays[type].surface, nullptr);
 }
 
 void OverlayManager::setOverlayTextUpdated(OverlayType type)
@@ -97,10 +95,10 @@ void OverlayManager::setOverlayTextUpdated(OverlayType type)
 
 void OverlayManager::updateOverlaySurface(OverlayType type, SDL_Surface* surface)
 {
-    SDL_Surface* oldSurface = (SDL_Surface*)SDL_AtomicSetPtr(
+    SDL_Surface* oldSurface = (SDL_Surface*)SDL_SetAtomicPointer(
                 (void**)&m_Overlays[type].surface, surface);
     if (oldSurface != nullptr) {
-        SDL_FreeSurface(oldSurface);
+        SDL_DestroySurface(oldSurface);
     }
 
     if (m_Overlays[type].enabled && m_Renderer != nullptr) {
@@ -165,35 +163,81 @@ void OverlayManager::notifyOverlayUpdated(OverlayType type)
         }
 
         // m_FontData must stay around until the font is closed
-        m_Overlays[type].font = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.constData(), m_FontData.size()),
-                                               1,
-                                               m_Overlays[type].fontSize);
+        m_Overlays[type].font = TTF_OpenFontIO(
+            SDL_IOFromConstMem(m_FontData.constData(), m_FontData.size()),
+            true,
+            static_cast<float>(m_Overlays[type].fontSize));
         if (m_Overlays[type].font == nullptr) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "TTF_OpenFont() failed: %s",
-                        TTF_GetError());
+                        SDL_GetError());
 
             // Can't proceed without a font
             return;
         }
     }
 
-    SDL_Surface* oldSurface = (SDL_Surface*)SDL_AtomicSetPtr((void**)&m_Overlays[type].surface, nullptr);
-
-    // Free the old surface
-    if (oldSurface != nullptr) {
-        SDL_FreeSurface(oldSurface);
-    }
-
-    if (m_Overlays[type].enabled) {
-        // The _Wrapped variant is required for line breaks to work
-        SDL_Surface* surface = TTF_RenderText_Blended_Wrapped(m_Overlays[type].font,
-                                                              m_Overlays[type].text,
-                                                              m_Overlays[type].color,
-                                                              1024);
-        SDL_AtomicSetPtr((void**)&m_Overlays[type].surface, surface);
-    }
+    SDL_Surface* oldSurface = (SDL_Surface*)SDL_SetAtomicPointer(
+        (void**)&m_Overlays[type].surface,
+        m_Overlays[type].enabled ?
+            RenderTextOutlinedWrapped(m_Overlays[type].font,
+                                      m_Overlays[type].text,
+                                      m_Overlays[type].color,
+                                      {0, 0, 0, 255},
+                                      4,
+                                      1024)
+            : nullptr);
 
     // Notify the renderer
     m_Renderer->notifyOverlayUpdated(type);
+
+    if (oldSurface != nullptr) {
+        SDL_DestroySurface(oldSurface);
+    }
+}
+
+SDL_Surface* OverlayManager::RenderTextOutlinedWrapped(TTF_Font* font,
+                                                        const char* text,
+                                                        SDL_Color textColor,
+                                                        SDL_Color outlineColor,
+                                                        int outlineWidth,
+                                                        int wrapWidth)
+{
+    if (text == nullptr || text[0] == '\0') {
+        return nullptr;
+    }
+
+    const int oldOutline = TTF_GetFontOutline(font);
+    TTF_SetFontOutline(font, outlineWidth);
+
+    for (const QString& line : QString(text).split('\n')) {
+        const QByteArray utf8Line = line.toUtf8();
+        int extent;
+        size_t count;
+        if (TTF_MeasureString(font, utf8Line.constData(), utf8Line.size(),
+                              wrapWidth, &extent, &count) &&
+                count < static_cast<size_t>(utf8Line.size())) {
+            TTF_SetFontOutline(font, oldOutline);
+            return TTF_RenderText_Blended_Wrapped(font, text, strlen(text),
+                                                   textColor, wrapWidth);
+        }
+    }
+
+    SDL_Surface* outlineSurface = TTF_RenderText_Blended_Wrapped(
+        font, text, strlen(text), outlineColor, wrapWidth);
+    TTF_SetFontOutline(font, 0);
+    SDL_Surface* textSurface = TTF_RenderText_Blended_Wrapped(
+        font, text, strlen(text), textColor, wrapWidth);
+    TTF_SetFontOutline(font, oldOutline);
+
+    if (outlineSurface == nullptr || textSurface == nullptr) {
+        SDL_DestroySurface(outlineSurface);
+        SDL_DestroySurface(textSurface);
+        return nullptr;
+    }
+
+    SDL_Rect dst = {outlineWidth, outlineWidth, textSurface->w, textSurface->h};
+    SDL_BlitSurface(textSurface, nullptr, outlineSurface, &dst);
+    SDL_DestroySurface(textSurface);
+    return outlineSurface;
 }

@@ -1,10 +1,6 @@
 #include "../session.h"
 #include "renderers/renderer.h"
 
-#ifdef HAVE_SOUNDIO
-#include "renderers/soundioaudiorenderer.h"
-#endif
-
 #ifdef HAVE_SLAUDIO
 #include "renderers/slaud.h"
 #endif
@@ -30,12 +26,6 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
                           m_Computer->stationConnectAuthentication)
         return nullptr;
     }
-#ifdef HAVE_SOUNDIO
-    else if (mlAudio == "libsoundio") {
-        TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
-        return nullptr;
-    }
-#endif
 #if defined(HAVE_SLAUDIO)
     else if (mlAudio == "slaudio") {
         TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
@@ -56,12 +46,9 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
 #endif
 
-    // Default to SDL and use libsoundio as a fallback
+    // StationConnect uses SDL as its sole audio renderer.
     TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
                       m_Computer->stationConnectAuthentication)
-#ifdef HAVE_SOUNDIO
-    TRY_INIT_RENDERER(SoundIoAudioRenderer, opusConfig)
-#endif
 
     return nullptr;
 }
@@ -110,21 +97,17 @@ bool Session::initializeAudioRenderer()
 
 int Session::getAudioRendererCapabilities(int audioConfiguration)
 {
-    // Build a fake OPUS_MULTISTREAM_CONFIGURATION to give
-    // the renderer the channel count and sample rate.
-    OPUS_MULTISTREAM_CONFIGURATION opusConfig = {};
-    opusConfig.sampleRate = 48000;
-    opusConfig.samplesPerFrame = 240;
-    opusConfig.channelCount = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(audioConfiguration);
+    int caps = 0;
 
-    IAudioRenderer* audioRenderer = createAudioRenderer(&opusConfig);
-    if (audioRenderer == nullptr) {
-        return 0;
-    }
+    Q_UNUSED(audioConfiguration);
 
-    int caps = audioRenderer->getCapabilities();
+    // All audio renderers support arbitrary audio duration
+    caps |= CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
 
-    delete audioRenderer;
+#ifdef STEAM_LINK
+    // Steam Link devices have slow Opus decoders
+    caps |= CAPABILITY_SLOW_OPUS_DECODER;
+#endif
 
     return caps;
 }
@@ -177,7 +160,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
     // of other threads due to severely restricted CPU time available,
     // so we will skip it on that platform.
     if (s_ActiveSession->m_AudioSampleCount == 0) {
-        if (SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH) < 0) {
+        if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Unable to set audio thread to high priority: %s",
                         SDL_GetError());
@@ -187,7 +170,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 
     // See if we need to drop this sample
     if (s_ActiveSession->m_DropAudioEndTime != 0) {
-        if (SDL_TICKS_PASSED(SDL_GetTicks(), s_ActiveSession->m_DropAudioEndTime)) {
+        if (SDL_GetTicks() >= s_ActiveSession->m_DropAudioEndTime) {
             // Avoid calling SDL_GetTicks() now
             s_ActiveSession->m_DropAudioEndTime = 0;
 
@@ -253,7 +236,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
             s_ActiveSession->m_AudioRenderer = nullptr;
         }
         else if (s_ActiveSession->m_AvSyncTelemetryEnabled) {
-            const Uint32 now = SDL_GetTicks();
+            const Uint64 now = SDL_GetTicks();
             if (s_ActiveSession->m_LastAudioTelemetryTime == 0 ||
                     now - s_ActiveSession->m_LastAudioTelemetryTime >= 1000) {
                 const quint64 uncorrectedMediaTimeMs =
@@ -268,9 +251,9 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
                     s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
                     s_ActiveSession->m_ActiveAudioConfig.sampleRate;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio clock: media=%llu submit=%u queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
+                            "StationConnect A/V audio clock: media=%llu submit=%llu queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
                             static_cast<unsigned long long>(mediaTimeMs),
-                            now,
+                            static_cast<unsigned long long>(now),
                             s_ActiveSession->m_AudioRenderer->getQueuedAudioDurationMs(),
                             s_ActiveSession->m_AudioRenderer->getDeviceBufferDurationMs(),
                             LiGetPendingAudioDuration(),
@@ -293,14 +276,15 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
         // Since we're doing this inline and audio initialization takes time, we need
         // to drop samples to account for the time we've spent blocking audio rendering
         // so we return to real-time playback and don't accumulate latency.
-        Uint32 audioReinitStartTime = SDL_GetTicks();
+        Uint64 audioReinitStartTime = SDL_GetTicks();
         if (s_ActiveSession->initializeAudioRenderer()) {
-            Uint32 audioReinitStopTime = SDL_GetTicks();
+            Uint64 audioReinitStopTime = SDL_GetTicks();
 
             s_ActiveSession->m_DropAudioEndTime = audioReinitStopTime + (audioReinitStopTime - audioReinitStartTime);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Audio reinitialization took %d ms - starting drop window",
-                        audioReinitStopTime - audioReinitStartTime);
+                        "Audio reinitialization took %llu ms - starting drop window",
+                        static_cast<unsigned long long>(
+                            audioReinitStopTime - audioReinitStartTime));
         }
     }
 }

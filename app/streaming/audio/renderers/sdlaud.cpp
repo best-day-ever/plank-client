@@ -1,7 +1,6 @@
 #include "sdl.h"
 
 #include <Limelight.h>
-#include <SDL.h>
 #include <cmath>
 
 #if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
@@ -14,9 +13,10 @@ extern "C" {
 #endif
 
 SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
-    : m_AudioDevice(0),
+    : m_AudioStream(nullptr),
       m_AudioBuffer(nullptr),
       m_FrameSize(0),
+      m_FrameDurationMs(0),
       m_BytesPerSampleFrame(0),
       m_BytesPerSecond(0),
       m_DeviceBufferDurationMs(0),
@@ -33,7 +33,12 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
 {
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+#ifdef Q_OS_LINUX
+    // The qualified StationConnect Linux client talks to PipeWire directly.
+    SDL_SetHintWithPriority(SDL_HINT_AUDIO_DRIVER, "pipewire", SDL_HINT_OVERRIDE);
+#endif
+
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_AUDIO) failed: %s",
                      SDL_GetError());
@@ -43,54 +48,52 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
 
 bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* opusConfig)
 {
-    SDL_AudioSpec want, have;
+    SDL_AudioSpec want = {};
 
-    SDL_zero(want);
     want.freq = opusConfig->sampleRate;
-    want.format = AUDIO_F32SYS;
+    want.format = SDL_AUDIO_F32;
     want.channels = opusConfig->channelCount;
 
-    // On PulseAudio systems, setting a value too small can cause underruns for other
-    // applications sharing this output device. We impose a floor of 480 samples (10 ms)
-    // to mitigate this issue. Otherwise, we will buffer up to 3 frames of audio which
-    // is 15 ms at regular 5 ms frames and 30 ms at 10 ms frames for slow connections.
-    // The buffering helps avoid audio underruns due to network jitter.
-#ifndef Q_OS_DARWIN
-    want.samples = SDL_max(480, opusConfig->samplesPerFrame * 3);
-#else
-    // HACK: Changing the buffer size can lead to Bluetooth HFP
-    // audio issues on macOS, so we're leaving this alone.
-    // https://github.com/moonlight-stream/moonlight-qt/issues/1071
-    want.samples = SDL_max(480, opusConfig->samplesPerFrame);
-#endif
-
+    m_FrameDurationMs = opusConfig->samplesPerFrame / (opusConfig->sampleRate / 1000);
     m_FrameSize = opusConfig->samplesPerFrame *
                   opusConfig->channelCount *
                   getAudioBufferSampleSize();
 
-    m_AudioDevice = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (m_AudioDevice == 0) {
+    m_AudioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                              &want, nullptr, nullptr);
+    if (m_AudioStream == nullptr) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to open audio device: %s",
                      SDL_GetError());
         return false;
     }
 
-    m_BytesPerSecond = have.freq * have.channels * getAudioBufferSampleSize();
-    m_BytesPerSampleFrame = have.channels * getAudioBufferSampleSize();
-    m_DeviceBufferDurationMs = have.samples * 1000 / have.freq;
-    m_SampleRate = have.freq;
-    m_ChannelCount = have.channels;
+    SDL_AudioSpec deviceSpec = {};
+    int deviceSampleFrames = 0;
+    const SDL_AudioDeviceID device = SDL_GetAudioStreamDevice(m_AudioStream);
+    if (!SDL_GetAudioDeviceFormat(device, &deviceSpec, &deviceSampleFrames)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to query audio device format: %s", SDL_GetError());
+        return false;
+    }
+
+    // SDL3's device stream converts from this source format to the physical
+    // device format. Queue accounting remains in source-format bytes.
+    m_BytesPerSecond = want.freq * want.channels * getAudioBufferSampleSize();
+    m_BytesPerSampleFrame = want.channels * getAudioBufferSampleSize();
+    m_DeviceBufferDurationMs = deviceSampleFrames * 1000 / deviceSpec.freq;
+    m_SampleRate = want.freq;
+    m_ChannelCount = want.channels;
 
 #if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
     if (m_EnableAvSyncCorrection) {
         AVChannelLayout channelLayout;
-        av_channel_layout_default(&channelLayout, have.channels);
+        av_channel_layout_default(&channelLayout, want.channels);
         const int allocationResult = swr_alloc_set_opts2(
             &m_SwrContext,
             &channelLayout,
             AV_SAMPLE_FMT_FLT,
-            have.freq,
+            want.freq,
             &channelLayout,
             AV_SAMPLE_FMT_FLT,
             opusConfig->sampleRate,
@@ -127,31 +130,35 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Desired audio buffer: %u samples (%u bytes)",
-                want.samples,
-                want.samples * want.channels * getAudioBufferSampleSize());
+                "Decoded audio block: %u samples (%u bytes)",
+                opusConfig->samplesPerFrame,
+                m_FrameSize);
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Obtained audio buffer: %u samples (%u bytes)",
-                have.samples,
-                have.size);
+                "PipeWire device buffer: %u samples (%u ms)",
+                deviceSampleFrames,
+                m_DeviceBufferDurationMs);
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "SDL audio driver: %s",
                 SDL_GetCurrentAudioDriver());
 
     // Start playback
-    SDL_PauseAudioDevice(m_AudioDevice, 0);
+    if (!SDL_ResumeAudioStreamDevice(m_AudioStream)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to start audio stream: %s", SDL_GetError());
+        return false;
+    }
 
     return true;
 }
 
 SdlAudioRenderer::~SdlAudioRenderer()
 {
-    if (m_AudioDevice != 0) {
+    if (m_AudioStream != nullptr) {
         // Stop playback
-        SDL_PauseAudioDevice(m_AudioDevice, 1);
-        SDL_CloseAudioDevice(m_AudioDevice);
+        SDL_PauseAudioStreamDevice(m_AudioStream);
+        SDL_DestroyAudioStream(m_AudioStream);
     }
 
     if (m_AudioBuffer != nullptr) {
@@ -201,12 +208,12 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
     for (int i = 0; i < 100; i++) {
         // Our device may enter a permanent error status upon removal, so we need
         // to recreate the audio device to pick up the new default audio device.
-        if (SDL_GetAudioDeviceStatus(m_AudioDevice) == SDL_AUDIO_STOPPED) {
+        if (SDL_GetAudioStreamDevice(m_AudioStream) == 0) {
             return false;
         }
 
-        // Only queue more samples where there are 10 frames or less in SDL's queue
-        if (SDL_GetQueuedAudioSize(m_AudioDevice) / m_FrameSize <= 10) {
+        // Only queue more samples where there is 50 ms or less in SDL's queue
+        if (SDL_GetAudioStreamQueued(m_AudioStream) / m_FrameSize * m_FrameDurationMs <= 50) {
             break;
         }
 
@@ -280,7 +287,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
 #endif
 
     m_RawAudioFrames += inputFrames;
-    if (SDL_QueueAudio(m_AudioDevice, queuedBuffer, queuedBytes) < 0) {
+    if (!SDL_PutAudioStreamData(m_AudioStream, queuedBuffer, queuedBytes)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to queue audio sample: %s",
                      SDL_GetError());
@@ -302,11 +309,11 @@ int SdlAudioRenderer::getCapabilities()
 
 int SdlAudioRenderer::getQueuedAudioDurationMs()
 {
-    if (m_AudioDevice == 0 || m_BytesPerSecond == 0) {
+    if (m_AudioStream == nullptr || m_BytesPerSecond == 0) {
         return -1;
     }
 
-    return static_cast<int>(SDL_GetQueuedAudioSize(m_AudioDevice) * 1000ULL /
+    return static_cast<int>(SDL_GetAudioStreamQueued(m_AudioStream) * 1000ULL /
                             m_BytesPerSecond);
 }
 
@@ -334,7 +341,6 @@ quint64 SdlAudioRenderer::getSkippedAudioBlockCount()
 {
     return m_SkippedAudioBlocks;
 }
-
 IAudioRenderer::AudioFormat SdlAudioRenderer::getAudioBufferFormat()
 {
     return AudioFormat::Float32NE;

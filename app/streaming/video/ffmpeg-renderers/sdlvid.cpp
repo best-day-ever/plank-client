@@ -5,7 +5,7 @@
 
 #include <Limelight.h>
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 
 extern "C" {
 #include <libavutil/pixdesc.h>
@@ -75,14 +75,13 @@ void SdlRenderer::prepareToRender()
 
 bool SdlRenderer::isRenderThreadSupported()
 {
-    SDL_RendererInfo info;
-    SDL_GetRendererInfo(m_Renderer, &info);
+    const char* rendererName = SDL_GetRendererName(m_Renderer);
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "SDL renderer backend: %s",
-                info.name);
+                rendererName != nullptr ? rendererName : "unknown");
 
-    if (info.name != QString("direct3d") && info.name != QString("metal")) {
+    if (QString(rendererName) != "direct3d" && QString(rendererName) != "metal") {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "SDL renderer backend requires main thread rendering");
         return false;
@@ -94,7 +93,7 @@ bool SdlRenderer::isRenderThreadSupported()
 bool SdlRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFormat)
 {
     if (videoFormat & (VIDEO_FORMAT_MASK_10BIT | VIDEO_FORMAT_MASK_YUV444)) {
-        // SDL2 can't natively handle textures with these formats, but we can perform
+        // SDL can't natively handle textures with these formats, but we can perform
         // conversion on the CPU using swscale then upload them as an RGB texture.
         const AVPixFmtDescriptor* formatDesc = av_pix_fmt_desc_get(pixelFormat);
         if (!formatDesc) {
@@ -130,7 +129,7 @@ bool SdlRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFor
 
 bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
 {
-    Uint32 rendererFlags = SDL_RENDERER_ACCELERATED;
+    bool enableVsync = false;
 
     m_VideoFormat = params->videoFormat;
     m_SwFrameMapper.setVideoFormat(m_VideoFormat);
@@ -140,36 +139,25 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    SDL_SysWMinfo info;
-    SDL_VERSION(&info.version);
-    if (!SDL_GetWindowWMInfo(params->window, &info)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_GetWindowWMInfo() failed: %s",
-                     SDL_GetError());
-        return false;
-    }
+    const QString videoDriver = SDL_GetCurrentVideoDriver();
 
     // Only set SDL_RENDERER_PRESENTVSYNC if we know we'll get tearing otherwise.
     // Since we don't use V-Sync to pace our frame rate, we want non-blocking
     // presents to reduce video latency.
-    switch (info.subsystem) {
-    case SDL_SYSWM_WINDOWS:
+    if (videoDriver == "windows") {
         // DWM is always tear-free except in full-screen exclusive mode
-        if ((SDL_GetWindowFlags(params->window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN) {
+        if ((SDL_GetWindowFlags(params->window) & SDL_WINDOW_FULLSCREEN) != 0) {
             if (params->enableVsync) {
-                rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
+                enableVsync = true;
             }
         }
-        break;
-    case SDL_SYSWM_WAYLAND:
+    }
+    else if (videoDriver == "wayland") {
         // Wayland is always tear-free in all modes
-        break;
-    default:
+    }
+    else {
         // For other subsystems, just set SDL_RENDERER_PRESENTVSYNC if asked
-        if (params->enableVsync) {
-            rendererFlags |= SDL_RENDERER_PRESENTVSYNC;
-        }
-        break;
+        enableVsync = params->enableVsync;
     }
 
 #ifdef Q_OS_WIN32
@@ -180,12 +168,18 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
     SDL_SetHintWithPriority(SDL_HINT_RENDER_DIRECT3D_THREADSAFE, "1", SDL_HINT_OVERRIDE);
 #endif
 
-    m_Renderer = SDL_CreateRenderer(params->window, -1, rendererFlags);
+    m_Renderer = SDL_CreateRenderer(params->window, nullptr);
     if (!m_Renderer) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_CreateRenderer() failed: %s",
                      SDL_GetError());
         return false;
+    }
+
+    if (!SDL_SetRenderVSync(m_Renderer, enableVsync ? 1 : SDL_RENDERER_VSYNC_DISABLED)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "SDL_SetRenderVSync() failed: %s",
+                    SDL_GetError());
     }
 
     // SDL_CreateRenderer() can end up having to recreate our window (SDL_RecreateWindow())
@@ -202,7 +196,7 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
     else {
         // If we get here prior to the start of a session, just pump and flush ourselves.
         SDL_PumpEvents();
-        SDL_FlushEvent(SDL_WINDOWEVENT);
+        SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
     }
 
 #ifdef Q_OS_WIN32
@@ -232,7 +226,7 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
             if (type == Overlay::OverlayStatusUpdate) {
                 // Bottom Left
                 SDL_Rect viewportRect;
-                SDL_RenderGetViewport(m_Renderer, &viewportRect);
+                SDL_GetRenderViewport(m_Renderer, &viewportRect);
                 m_OverlayRects[type].x = 0;
                 m_OverlayRects[type].y = viewportRect.h - newSurface->h;
             }
@@ -244,7 +238,7 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
             else if (type == Overlay::OverlayToolbar) {
                 // User-positionable along the top edge
                 SDL_Rect viewportRect;
-                SDL_RenderGetViewport(m_Renderer, &viewportRect);
+                SDL_GetRenderViewport(m_Renderer, &viewportRect);
                 m_OverlayRects[type].x = SDL_round(
                     Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *
                     SDL_max(0, viewportRect.w - newSurface->w));
@@ -255,12 +249,12 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
             m_OverlayRects[type].h = newSurface->h;
 
             m_OverlayTextures[type] = SDL_CreateTextureFromSurface(m_Renderer, newSurface);
-            SDL_FreeSurface(newSurface);
+            SDL_DestroySurface(newSurface);
         }
 
         // If we have an overlay texture, render it too
         if (m_OverlayTextures[type] != nullptr) {
-            SDL_RenderCopy(m_Renderer, m_OverlayTextures[type], nullptr, &m_OverlayRects[type]);
+            SDL_RenderTexture(m_Renderer, m_OverlayTextures[type], nullptr, &m_OverlayRects[type]);
         }
     }
 }
@@ -312,15 +306,16 @@ ReadbackRetry:
 
     // Recreate the texture if the frame changed in size
     if (m_Texture != nullptr) {
-        int width, height;
-        if (SDL_QueryTexture(m_Texture, nullptr, nullptr, &width, &height) == 0 && (frame->width != width || frame->height != height)) {
+        float width, height;
+        if (SDL_GetTextureSize(m_Texture, &width, &height) &&
+                (frame->width != static_cast<int>(width) || frame->height != static_cast<int>(height))) {
             SDL_DestroyTexture(m_Texture);
             m_Texture = nullptr;
         }
     }
 
     if (m_Texture == nullptr) {
-        Uint32 sdlFormat;
+        SDL_PixelFormat sdlFormat;
 
         // Remember to keep this in sync with SdlRenderer::isPixelFormatSupported()!
         m_NeedsYuvToRgbConversion = false;
@@ -368,7 +363,7 @@ ReadbackRetry:
             av_dict_set_int(&options, "dstw", m_RgbFrame->width, 0);
             av_dict_set_int(&options, "dsth", m_RgbFrame->height, 0);
             av_dict_set_int(&options, "dst_format", m_RgbFrame->format, 0);
-            av_dict_set_int(&options, "threads", std::min(SDL_GetCPUCount(), 4), 0); // Up to 4 threads
+            av_dict_set_int(&options, "threads", std::min(SDL_GetNumLogicalCPUCores(), 4), 0); // Up to 4 threads
 
             err = av_opt_set_dict(m_SwsContext, &options);
             av_dict_free(&options);
@@ -402,39 +397,38 @@ ReadbackRetry:
             }
 #endif
         }
-        else {
-            // SDL will perform YUV conversion on the GPU
-            switch (colorspace)
-            {
+        SDL_Colorspace textureColorspace = SDL_COLORSPACE_SRGB;
+        if (!m_NeedsYuvToRgbConversion) {
+            switch (colorspace) {
             case COLORSPACE_REC_709:
-                SDL_assert(!isFrameFullRange(frame));
-                SDL_SetYUVConversionMode(SDL_YUV_CONVERSION_BT709);
+                textureColorspace = isFrameFullRange(frame) ?
+                    SDL_COLORSPACE_BT709_FULL : SDL_COLORSPACE_BT709_LIMITED;
                 break;
             case COLORSPACE_REC_601:
-                if (isFrameFullRange(frame)) {
-                    // SDL's JPEG mode is Rec 601 Full Range
-                    SDL_SetYUVConversionMode(SDL_YUV_CONVERSION_JPEG);
-                }
-                else {
-                    SDL_SetYUVConversionMode(SDL_YUV_CONVERSION_BT601);
-                }
+                textureColorspace = isFrameFullRange(frame) ?
+                    SDL_COLORSPACE_BT601_FULL : SDL_COLORSPACE_BT601_LIMITED;
                 break;
             default:
+                textureColorspace = SDL_COLORSPACE_YUV_DEFAULT;
                 break;
             }
         }
 
-        m_Texture = SDL_CreateTexture(m_Renderer,
-                                      sdlFormat,
-                                      SDL_TEXTUREACCESS_STREAMING,
-                                      frame->width,
-                                      frame->height);
+        SDL_PropertiesID textureProperties = SDL_CreateProperties();
+        SDL_SetNumberProperty(textureProperties, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, sdlFormat);
+        SDL_SetNumberProperty(textureProperties, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_STREAMING);
+        SDL_SetNumberProperty(textureProperties, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, frame->width);
+        SDL_SetNumberProperty(textureProperties, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, frame->height);
+        SDL_SetNumberProperty(textureProperties, SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER, textureColorspace);
+        m_Texture = SDL_CreateTextureWithProperties(m_Renderer, textureProperties);
+        SDL_DestroyProperties(textureProperties);
         if (!m_Texture) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_CreateTexture() failed: %s",
                          SDL_GetError());
             goto Exit;
         }
+        SDL_SetTextureScaleMode(m_Texture, SDL_SCALEMODE_LINEAR);
 
 #ifdef HAVE_CUDA
         if (frame->format == AV_PIX_FMT_CUDA) {
@@ -473,23 +467,19 @@ ReadbackRetry:
                              frame->linesize[2]);
     }
     else if (!m_NeedsYuvToRgbConversion) {
-#if SDL_VERSION_ATLEAST(2, 0, 15)
         // SDL_UpdateNVTexture is not supported on all renderer backends,
-        // (notably not DX9), so we must have a fallback in case it's not
-        // supported and for earlier versions of SDL.
-        if (SDL_UpdateNVTexture(m_Texture,
+        // (notably not DX9), so we must have a fallback when it is unavailable.
+        if (!SDL_UpdateNVTexture(m_Texture,
                                 nullptr,
                                 frame->data[0],
                                 frame->linesize[0],
                                 frame->data[1],
-                                frame->linesize[1]) != 0)
-#endif
+                                frame->linesize[1]))
         {
             char* pixels;
             int texturePitch;
 
-            err = SDL_LockTexture(m_Texture, nullptr, (void**)&pixels, &texturePitch);
-            if (err < 0) {
+            if (!SDL_LockTexture(m_Texture, nullptr, (void**)&pixels, &texturePitch)) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "SDL_LockTexture() failed: %s",
                              SDL_GetError());
@@ -537,8 +527,7 @@ ReadbackRetry:
         uint8_t* pixels;
         int texturePitch;
 
-        err = SDL_LockTexture(m_Texture, nullptr, (void**)&pixels, &texturePitch);
-        if (err < 0) {
+        if (!SDL_LockTexture(m_Texture, nullptr, (void**)&pixels, &texturePitch)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL_LockTexture() failed: %s",
                          SDL_GetError());
@@ -580,17 +569,17 @@ ReadbackRetry:
     src.w = frame->width;
     src.h = frame->height;
     dst.x = dst.y = 0;
-    SDL_GetRendererOutputSize(m_Renderer, &dst.w, &dst.h);
+    SDL_GetCurrentRenderOutputSize(m_Renderer, &dst.w, &dst.h);
     StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
 
     // Ensure the viewport is set to the desired video region
-    SDL_RenderSetViewport(m_Renderer, &dst);
+    SDL_SetRenderViewport(m_Renderer, &dst);
 
     // Draw the video content itself
-    SDL_RenderCopy(m_Renderer, m_Texture, nullptr, nullptr);
+    SDL_RenderTexture(m_Renderer, m_Texture, nullptr, nullptr);
 
     // Reset the viewport to the full window for overlay rendering
-    SDL_RenderSetViewport(m_Renderer, nullptr);
+    SDL_SetRenderViewport(m_Renderer, nullptr);
 
     // Draw the overlays
     for (int i = 0; i < Overlay::OverlayMax; i++) {

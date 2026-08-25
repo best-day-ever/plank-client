@@ -77,7 +77,7 @@ extern "C" {
 #undef SDL_VIDEO_DRIVER_X11
 #endif
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 
 #include <QDir>
 
@@ -268,7 +268,7 @@ void DrmRenderer::prepareToRender()
     // operation that the KMSDRM backend keeps pending until the next
     // time we swap buffers. We have to do this before we enumerate
     // CRTC modes below.
-    SDL_Renderer* renderer = SDL_CreateRenderer(m_Window, -1, SDL_RENDERER_SOFTWARE);
+    SDL_Renderer* renderer = SDL_CreateRenderer(m_Window, "software");
     if (renderer != nullptr) {
         // SDL_CreateRenderer() can end up having to recreate our window (SDL_RecreateWindow())
         // to ensure it's compatible with the renderer's OpenGL context. If that happens, we
@@ -284,7 +284,7 @@ void DrmRenderer::prepareToRender()
         else {
             // If we get here prior to the start of a session, just pump and flush ourselves.
             SDL_PumpEvents();
-            SDL_FlushEvent(SDL_WINDOWEVENT);
+            SDL_FlushEvents(SDL_EVENT_WINDOW_FIRST, SDL_EVENT_WINDOW_LAST);
         }
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -325,24 +325,24 @@ bool DrmRenderer::initialize(PDECODER_PARAMETERS params)
     m_VideoFormat = params->videoFormat;
     m_SwFrameMapper.setVideoFormat(params->videoFormat);
 
-#if SDL_VERSION_ATLEAST(2, 0, 15)
-    SDL_SysWMinfo info;
+#if defined(HAVE_DRM)
+    const char* videoDriver = SDL_GetCurrentVideoDriver();
+    if (videoDriver != nullptr &&
+            (strcmp(videoDriver, "kmsdrm") == 0 || strcmp(videoDriver, "KMSDRM") == 0)) {
+        const SDL_PropertiesID properties = SDL_GetWindowProperties(params->window);
+        if (properties == 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "SDL_GetWindowProperties() failed: %s",
+                         SDL_GetError());
+            return false;
+        }
 
-    SDL_VERSION(&info.version);
-
-    if (!SDL_GetWindowWMInfo(params->window, &info)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_GetWindowWMInfo() failed: %s",
-                     SDL_GetError());
-        return false;
-    }
-
-    if (info.subsystem == SDL_SYSWM_KMSDRM) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Sharing DRM FD with SDL");
 
-        SDL_assert(info.info.kmsdrm.drm_fd >= 0);
-        m_DrmFd = info.info.kmsdrm.drm_fd;
+        m_DrmFd = static_cast<int>(SDL_GetNumberProperty(
+            properties, SDL_PROP_WINDOW_KMSDRM_DRM_FD_NUMBER, -1));
+        SDL_assert(m_DrmFd >= 0);
         m_SdlOwnsDrmFd = true;
     }
     else

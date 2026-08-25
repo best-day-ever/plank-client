@@ -65,7 +65,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_DeviceContext;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_RenderTargetView;
     SupportedFenceType m_FenceType;
-    SDL_mutex* m_ContextLock;
+    SDL_Mutex* m_ContextLock;
     bool m_BindDecoderOutputTextures;
     bool m_UseFenceHack;
 

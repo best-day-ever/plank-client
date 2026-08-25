@@ -46,9 +46,22 @@ ApplicationWindow {
 
     }
   
-    // This configures the maximum width of the singleton attached QML ToolTip. If left unconstrained,
-    // it will never insert a line break and just extend on forever.
-    ToolTip.toolTip.contentWidth: ToolTip.toolTip.implicitContentWidth < 400 ? ToolTip.toolTip.implicitContentWidth : 400
+    // ToolTip is an attached property and must be hosted on an Item rather
+    // than directly on ApplicationWindow under Qt 6.10.
+    Item {
+        visible: false
+        width: 0
+        height: 0
+
+        Text {
+            id: tooltipTextLayoutHelper
+            visible: false
+            font: ToolTip.toolTip.font
+            text: ToolTip.toolTip.text
+        }
+
+        ToolTip.toolTip.contentWidth: Math.min(tooltipTextLayoutHelper.width, 400)
+    }
 
     function goBack() {
         if (clearOnBack) {
@@ -158,6 +171,9 @@ ApplicationWindow {
     //
     // Based on https://stackoverflow.com/questions/13923794/how-to-do-a-is-a-typeof-or-instanceof-in-qml
     function qmltypeof(obj, className) { // QtObject, string -> bool
+        if (obj === null || obj === undefined) {
+            return false
+        }
         // className plus "(" is the class instance without modification
         // className plus "_QML" is the class instance with user-defined properties
         var str = obj.toString();
@@ -194,7 +210,7 @@ ApplicationWindow {
             id: titleLabel
             visible: toolBar.width > 700
             anchors.fill: parent
-            text: stackView.currentItem.objectName
+            text: stackView.currentItem ? stackView.currentItem.objectName : ""
             font.pointSize: 20
             elide: Label.ElideRight
             horizontalAlignment: Qt.AlignHCenter
@@ -241,7 +257,7 @@ ApplicationWindow {
                 // We need this label to always be visible so it can occupy
                 // the remaining space in the RowLayout. To "hide" it, we
                 // just set the text to empty string.
-                text: !titleLabel.visible ? stackView.currentItem.objectName : ""
+                text: !titleLabel.visible && stackView.currentItem ? stackView.currentItem.objectName : ""
             }
 
             NavigableToolButton {

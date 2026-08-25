@@ -2,7 +2,7 @@
 
 #include <Limelight.h>
 #include <StationConnect.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <QtEndian>
 #include <libudev.h>
 

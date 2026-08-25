@@ -3,7 +3,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #ifdef HAVE_LIBINPUT_TABLET
 #include <memory>
@@ -69,21 +69,26 @@ private:
         KeyComboToggleMinimize,
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
+        KeyComboToggleKeyboardGrab,
         KeyComboMax
     };
 
     void performSpecialKeyCombo(KeyCombo combo);
 
     SDL_Window* m_Window;
+    bool m_NeedsManualCaptureOnLeave;
     bool m_MouseWasInVideoRegion;
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
 
     QSet<short> m_KeysDown;
-    bool m_FakeCaptureActive;
+    bool m_FakeMouseCaptureActive;
+    bool m_KeyboardCaptureActive;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
-    int m_MouseCursorCapturedVisibilityState;
+    bool m_MouseCursorCapturedVisibilityState;
+
+    void setCursorVisible(bool visible);
 
     struct {
         KeyCombo keyCombo;

@@ -2,8 +2,8 @@ import QtQuick 2.0
 import QtQuick.Controls 2.2
 
 MenuItem {
-    // Qt 5.10 has a menu property, but we need to support 5.9
-    // so we must make our own.
+    // StationConnect menus pass the owning menu explicitly. This keeps menu
+    // dismissal deterministic across Qt versions and asynchronous Loaders.
     property Menu parentMenu
 
     // Ensure focus can't be given to an invisible item

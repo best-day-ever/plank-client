@@ -5,7 +5,7 @@
 #include "pacer/pacer.h"
 #undef AVMediaType
 
-#include <SDL_syswm.h>
+#include <SDL3/SDL_system.h>
 #include <Limelight.h>
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
@@ -136,7 +136,7 @@ public:
           m_LastDrawableWidth(-1),
           m_LastDrawableHeight(-1),
           m_PresentationMutex(SDL_CreateMutex()),
-          m_PresentationCond(SDL_CreateCond()),
+          m_PresentationCond(SDL_CreateCondition()),
           m_PendingPresentationCount(0)
     {
     }
@@ -144,7 +144,7 @@ public:
     virtual ~VTMetalRenderer() override
     { @autoreleasepool {
         if (m_PresentationCond != nullptr) {
-            SDL_DestroyCond(m_PresentationCond);
+            SDL_DestroyCondition(m_PresentationCond);
         }
 
         if (m_PresentationMutex != nullptr) {
@@ -223,7 +223,7 @@ public:
                 // Pace ourselves by waiting if too many frames are pending presentation
                 SDL_LockMutex(m_PresentationMutex);
                 if (m_PendingPresentationCount > 2) {
-                    if (SDL_CondWaitTimeout(m_PresentationCond, m_PresentationMutex, 100) == SDL_MUTEX_TIMEDOUT) {
+                    if (SDL_WaitConditionTimeout(m_PresentationCond, m_PresentationMutex, 100) == SDL_MUTEX_TIMEDOUT) {
                         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                                     "Presentation wait timed out after 100 ms");
                     }
@@ -485,7 +485,7 @@ public:
         if (!updateColorSpaceForFrame(frame)) {
             // Trigger the main thread to recreate the decoder
             SDL_Event event;
-            event.type = SDL_RENDER_DEVICE_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -494,7 +494,7 @@ public:
         if (!updateVideoRegionSizeForFrame(frame)) {
             // Trigger the main thread to recreate the decoder
             SDL_Event event;
-            event.type = SDL_RENDER_DEVICE_RESET;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
             SDL_PushEvent(&event);
             return;
         }
@@ -587,9 +587,9 @@ public:
             id<MTLTexture> overlayTexture = nullptr;
 
             // Try to acquire a reference on the overlay texture
-            SDL_AtomicLock(&m_OverlayLock);
+            SDL_LockSpinlock(&m_OverlayLock);
             overlayTexture = [m_OverlayTextures[i] retain];
-            SDL_AtomicUnlock(&m_OverlayLock);
+            SDL_UnlockSpinlock(&m_OverlayLock);
 
             if (overlayTexture) {
                 SDL_FRect renderRect = {};
@@ -637,7 +637,7 @@ public:
             [m_NextDrawable addPresentedHandler:^(id<MTLDrawable>) {
                 SDL_LockMutex(m_PresentationMutex);
                 m_PendingPresentationCount--;
-                SDL_CondSignal(m_PresentationCond);
+                SDL_SignalCondition(m_PresentationCond);
                 SDL_UnlockMutex(m_PresentationMutex);
             }];
         }
@@ -787,16 +787,16 @@ public:
             return;
         }
 
-        SDL_AtomicLock(&m_OverlayLock);
+        SDL_LockSpinlock(&m_OverlayLock);
         auto oldTexture = m_OverlayTextures[type];
         m_OverlayTextures[type] = nullptr;
-        SDL_AtomicUnlock(&m_OverlayLock);
+        SDL_UnlockSpinlock(&m_OverlayLock);
 
         [oldTexture release];
 
         // If the overlay is disabled, we're done
         if (!overlayEnabled) {
-            SDL_FreeSurface(newSurface);
+            SDL_DestroySurface(newSurface);
             return;
         }
 
@@ -819,12 +819,12 @@ public:
                       bytesPerRow:newSurface->pitch];
 
         // The surface is no longer required
-        SDL_FreeSurface(newSurface);
+        SDL_DestroySurface(newSurface);
         newSurface = nullptr;
 
-        SDL_AtomicLock(&m_OverlayLock);
+        SDL_LockSpinlock(&m_OverlayLock);
         m_OverlayTextures[type] = newTexture;
-        SDL_AtomicUnlock(&m_OverlayLock);
+        SDL_UnlockSpinlock(&m_OverlayLock);
     }}
 
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override
@@ -936,8 +936,8 @@ private:
     int m_LastFrameHeight;
     int m_LastDrawableWidth;
     int m_LastDrawableHeight;
-    SDL_mutex* m_PresentationMutex;
-    SDL_cond* m_PresentationCond;
+    SDL_Mutex* m_PresentationMutex;
+    SDL_Condition* m_PresentationCond;
     int m_PendingPresentationCount;
 };
 

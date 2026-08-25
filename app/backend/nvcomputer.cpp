@@ -193,7 +193,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
         settings.beginWriteArray(SER_APPLIST);
         for (int i = 0; i < appList.count(); i++) {
             settings.setArrayIndex(i);
-            appList[i].serialize(settings);
+            appList.at(i).serialize(settings);
         }
         settings.endArray();
     }
@@ -330,13 +330,15 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         Q_ASSERT(!s.localAddress().isNull());
         Q_ASSERT(!s.peerAddress().isNull());
 
-        for (const QNetworkInterface& nic : QNetworkInterface::allInterfaces()) {
+        const auto allInterfaces = QNetworkInterface::allInterfaces();
+        for (const QNetworkInterface& nic : allInterfaces) {
             // Ensure the interface is up
             if ((nic.flags() & QNetworkInterface::IsUp) == 0) {
                 continue;
             }
 
-            for (const QNetworkAddressEntry& addr : nic.addressEntries()) {
+            const auto allInterfaceAddresses = nic.addressEntries();
+            for (const QNetworkAddressEntry& addr : allInterfaceAddresses) {
                 if (addr.ip() == s.localAddress()) {
                     qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
 
@@ -420,7 +422,7 @@ bool NvComputer::updateAppList(QVector<NvApp> newAppList) {
     }
 
     // Propagate client-side attributes to the new app list
-    for (const NvApp& existingApp : appList) {
+    for (const NvApp& existingApp : std::as_const(appList)) {
         for (NvApp& newApp : newAppList) {
             if (existingApp.id == newApp.id) {
                 newApp.hidden = existingApp.hidden;
