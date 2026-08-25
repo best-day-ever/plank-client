@@ -37,6 +37,7 @@ QStringList NvOutputTopology::qualifiedVirtualModes()
             QStringLiteral("1280x1024"), QStringLiteral("1280x2160"),
             QStringLiteral("1920x1080"), QStringLiteral("1920x1200"),
             QStringLiteral("2560x1440"), QStringLiteral("2560x1600"),
+            QStringLiteral("2560x2160"),
             QStringLiteral("3440x1440"), QStringLiteral("3840x1600"),
             QStringLiteral("3840x2160"), QStringLiteral("4096x2160")};
 }
