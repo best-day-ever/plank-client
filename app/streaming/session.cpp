@@ -1375,8 +1375,13 @@ bool Session::startConnectionAsync(bool reconnecting)
                             emit sessionCleanupWaitChanged(false, QString());
                             throw;
                         }
+                        const bool transitionRouteNotReady =
+                                retryError.getStatusCode() == 403 &&
+                                QString::fromUtf8(retryError.getStatusMessage()) ==
+                                    QStringLiteral("StationConnect requires an approved VPN route");
                         if (retryError.getStatusCode() != 425 &&
-                                retryError.getStatusCode() != 503) {
+                                retryError.getStatusCode() != 503 &&
+                                !transitionRouteNotReady) {
                             m_WaitingForSessionCleanup.store(false);
                             emit sessionCleanupWaitChanged(false, QString());
                             throw;
