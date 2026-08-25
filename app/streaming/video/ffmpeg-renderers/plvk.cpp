@@ -119,7 +119,8 @@ ImportedHostAllocation* getImportedHostAllocation(const AVFrame* frame, int plan
         return nullptr;
     }
 
-    auto allocation = static_cast<ImportedHostAllocation*>(av_buffer_get_opaque(buffer));
+    auto allocation = static_cast<ImportedHostAllocation*>(
+        av_buffer_pool_buffer_get_opaque(buffer));
     if (allocation == nullptr || allocation->magic != kImportedHostAllocationMagic) {
         return nullptr;
     }
@@ -163,6 +164,64 @@ int PlVkRenderer::getMappedBuffer(AVCodecContext *context, AVFrame *frame, int f
     AVCodecContext mappedContext = *context;
     mappedContext.opaque = const_cast<pl_gpu*>(&renderer->m_Vulkan->gpu);
     return pl_get_buffer2(&mappedContext, frame, flags);
+}
+
+AVBufferRef* PlVkRenderer::allocateImportedHostBuffer(void* opaque, size_t size)
+{
+    auto renderer = static_cast<PlVkRenderer*>(opaque);
+    pl_gpu gpu = renderer->m_Vulkan->gpu;
+    const size_t hostAlignment = std::max<size_t>({
+        gpu->limits.align_host_ptr,
+        alignof(void*),
+        static_cast<size_t>(64),
+    });
+    void* base = SDL_aligned_alloc(hostAlignment, size);
+    if (base == nullptr) {
+        return nullptr;
+    }
+
+    auto allocation = new (std::nothrow) ImportedHostAllocation;
+    if (allocation == nullptr) {
+        SDL_aligned_free(base);
+        return nullptr;
+    }
+
+    allocation->gpu = gpu;
+    allocation->base = base;
+    pl_buf_params bufferParams = {};
+    bufferParams.size = size;
+    bufferParams.import_handle = PL_HANDLE_HOST_PTR;
+    bufferParams.shared_mem.handle.ptr = base;
+    bufferParams.shared_mem.size = size;
+    allocation->buffer = pl_buf_create(gpu, &bufferParams);
+    if (allocation->buffer == nullptr) {
+        SDL_aligned_free(base);
+        delete allocation;
+        return nullptr;
+    }
+
+    AVBufferRef* buffer = av_buffer_create(static_cast<uint8_t*>(base), size,
+                                           freeImportedHostAllocation, allocation, 0);
+    if (buffer == nullptr) {
+        pl_buf_destroy(gpu, &allocation->buffer);
+        SDL_aligned_free(base);
+        delete allocation;
+    }
+    return buffer;
+}
+
+AVBufferRef* PlVkRenderer::getImportedHostBufferRef(size_t size)
+{
+    std::lock_guard<std::mutex> lock(m_ImportedHostPoolMutex);
+    AVBufferPool*& pool = m_ImportedHostPools[size];
+    if (pool == nullptr) {
+        pool = av_buffer_pool_init2(size, this, allocateImportedHostBuffer, nullptr);
+        if (pool == nullptr) {
+            m_ImportedHostPools.erase(size);
+            return nullptr;
+        }
+    }
+    return av_buffer_pool_get(pool);
 }
 
 int PlVkRenderer::getImportedHostBuffer(AVCodecContext *context, AVFrame *frame, int flags)
@@ -226,44 +285,12 @@ int PlVkRenderer::getImportedHostBuffer(AVCodecContext *context, AVFrame *frame,
 
     for (int plane = 0; plane < planeCount; plane++) {
         const size_t allocationSize = alignUp(planeSizes[plane], hostAlignment);
-        void* base = SDL_aligned_alloc(hostAlignment, allocationSize);
-        if (base == nullptr) {
-            av_frame_unref(frame);
-            return AVERROR(ENOMEM);
-        }
-
-        auto allocation = new (std::nothrow) ImportedHostAllocation;
-        if (allocation == nullptr) {
-            SDL_aligned_free(base);
-            av_frame_unref(frame);
-            return AVERROR(ENOMEM);
-        }
-
-        allocation->gpu = gpu;
-        allocation->base = base;
-        pl_buf_params bufferParams = {};
-        bufferParams.size = allocationSize;
-        bufferParams.import_handle = PL_HANDLE_HOST_PTR;
-        bufferParams.shared_mem.handle.ptr = base;
-        bufferParams.shared_mem.size = allocationSize;
-        allocation->buffer = pl_buf_create(gpu, &bufferParams);
-        if (allocation->buffer == nullptr) {
-            SDL_aligned_free(base);
-            delete allocation;
-            av_frame_unref(frame);
-            return AVERROR(ENOMEM);
-        }
-
-        frame->data[plane] = static_cast<uint8_t*>(base);
-        frame->buf[plane] = av_buffer_create(frame->data[plane], allocationSize,
-                                             freeImportedHostAllocation, allocation, 0);
+        frame->buf[plane] = renderer->getImportedHostBufferRef(allocationSize);
         if (frame->buf[plane] == nullptr) {
-            pl_buf_destroy(gpu, &allocation->buffer);
-            SDL_aligned_free(base);
-            delete allocation;
             av_frame_unref(frame);
             return AVERROR(ENOMEM);
         }
+        frame->data[plane] = frame->buf[plane]->data;
     }
 
     return 0;
@@ -293,6 +320,14 @@ PlVkRenderer::~PlVkRenderer()
 {
     // The render context must have been cleaned up by now
     SDL_assert(!m_HasPendingSwapchainFrame);
+
+    {
+        std::lock_guard<std::mutex> lock(m_ImportedHostPoolMutex);
+        for (auto& entry : m_ImportedHostPools) {
+            av_buffer_pool_uninit(&entry.second);
+        }
+        m_ImportedHostPools.clear();
+    }
 
     if (m_Vulkan != nullptr) {
         for (int i = 0; i < (int)SDL_arraysize(m_Overlays); i++) {
@@ -873,7 +908,7 @@ bool PlVkRenderer::mapImportedHostFrameToPlacebo(const AVFrame *frame,
 bool PlVkRenderer::mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFrame,
                                        bool* importedHostFrame)
 {
-    *importedHostFrame = getImportedHostAllocation(frame, 0) != nullptr;
+    *importedHostFrame = m_SoftwareFrameAllocator == SoftwareFrameAllocator::ImportedHost;
     if (*importedHostFrame) {
         if (!mapImportedHostFrameToPlacebo(frame, mappedFrame)) {
             return false;

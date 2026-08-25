@@ -10,6 +10,9 @@
 #include <libplacebo/renderer.h>
 #include <libplacebo/vulkan.h>
 
+#include <mutex>
+#include <unordered_map>
+
 class PlVkRenderer : public IFFmpegRenderer {
 public:
     PlVkRenderer(bool hwaccel = false, IFFmpegRenderer *backendRenderer = nullptr);
@@ -40,6 +43,7 @@ private:
 
     static int getMappedBuffer(AVCodecContext *context, AVFrame *frame, int flags);
     static int getImportedHostBuffer(AVCodecContext *context, AVFrame *frame, int flags);
+    static AVBufferRef* allocateImportedHostBuffer(void* opaque, size_t size);
     static void lockQueue(AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index);
     static void unlockQueue(AVHWDeviceContext *dev_ctx, uint32_t queue_family, uint32_t index);
     static void overlayUploadComplete(void* opaque);
@@ -48,6 +52,7 @@ private:
                              bool* importedHostFrame);
     bool mapImportedHostFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFrame);
     void unmapAvFrameFromPlacebo(pl_frame* mappedFrame, bool importedHostFrame);
+    AVBufferRef* getImportedHostBufferRef(size_t size);
     bool getQueue(VkQueueFlags requiredFlags, uint32_t* queueIndex, uint32_t* queueCount);
     bool chooseVulkanDevice(PDECODER_PARAMETERS params, bool hdrOutputRequired);
     bool tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDeviceProperties* deviceProps,
@@ -74,6 +79,8 @@ private:
     pl_tex m_Textures[PL_MAX_PLANES] = {};
     pl_color_space m_LastColorspace = {};
     SoftwareFrameAllocator m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
+    std::mutex m_ImportedHostPoolMutex;
+    std::unordered_map<size_t, AVBufferPool*> m_ImportedHostPools;
 
     // Pending swapchain state shared between waitToRender(), renderFrame(), and cleanupRenderContext()
     pl_swapchain_frame m_SwapchainFrame = {};
