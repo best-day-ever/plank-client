@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QStringList>
 #include <SDL3/SDL.h>
 
 #include "streaming/video/decoder.h"
@@ -232,12 +233,16 @@ public:
         if (videoFormat & VIDEO_FORMAT_MASK_10BIT) {
             return (videoFormat & VIDEO_FORMAT_MASK_YUV444) ?
                 AV_PIX_FMT_YUV444P10 : // 10-bit 3-plane YUV 4:4:4
-                AV_PIX_FMT_P010;       // 10-bit 2-plane YUV 4:2:0
+                (videoFormat & VIDEO_FORMAT_MASK_YUV422) ?
+                    AV_PIX_FMT_YUV422P10 : // 10-bit 3-plane YUV 4:2:2
+                    AV_PIX_FMT_P010;       // 10-bit 2-plane YUV 4:2:0
         }
         else {
             return (videoFormat & VIDEO_FORMAT_MASK_YUV444) ?
                        AV_PIX_FMT_YUV444P : // 8-bit 3-plane YUV 4:4:4
-                       AV_PIX_FMT_YUV420P;  // 8-bit 3-plane YUV 4:2:0
+                       (videoFormat & VIDEO_FORMAT_MASK_YUV422) ?
+                           AV_PIX_FMT_YUV422P : // 8-bit 3-plane YUV 4:2:2
+                           AV_PIX_FMT_YUV420P;  // 8-bit 3-plane YUV 4:2:0
         }
     }
 

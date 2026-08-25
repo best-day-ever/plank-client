@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>la.instinctual.StationConnect</id>
+  <id>la.instinctual.StationConnect.Client</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>StationConnect</name>
+  <name>StationConnect Client</name>
   <summary>Connect to a StationConnect workstation</summary>
   <description>
     <p>
@@ -16,9 +16,9 @@
     <category>RemoteAccess</category>
   </categories>
   <developer_name>Instinctual</developer_name>
-  <launchable type="desktop-id">la.instinctual.StationConnect.desktop</launchable>
+  <launchable type="desktop-id">la.instinctual.StationConnect.Client.desktop</launchable>
   <provides>
-    <binary>moonlight</binary>
+    <binary>stationconnect-client</binary>
   </provides>
   <releases>
     <release version="0.1.0" date="2026-08-23" />

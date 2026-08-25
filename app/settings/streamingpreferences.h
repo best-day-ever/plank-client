@@ -26,23 +26,14 @@ public:
     };
     Q_ENUM(AudioConfig)
 
-    enum VideoCodecConfig
+    enum StationConnectVideoProfile
     {
-        VCC_AUTO,
-        VCC_FORCE_H264,
-        VCC_FORCE_HEVC,
-        VCC_FORCE_HEVC_HDR_DEPRECATED, // Kept for backwards compatibility
-        VCC_FORCE_AV1
+        SCVP_H264_10BIT_444,
+        SCVP_H264_8BIT_422,
+        SCVP_H264_8BIT_444,
+        SCVP_H264_10BIT_422,
     };
-    Q_ENUM(VideoCodecConfig)
-
-    enum VideoDecoderSelection
-    {
-        VDS_AUTO,
-        VDS_FORCE_HARDWARE,
-        VDS_FORCE_SOFTWARE
-    };
-    Q_ENUM(VideoDecoderSelection)
+    Q_ENUM(StationConnectVideoProfile)
 
     enum WindowMode
     {
@@ -111,10 +102,8 @@ public:
     Q_PROPERTY(int networkMtu MEMBER networkMtu NOTIFY networkMtuChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
-    Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
     Q_PROPERTY(bool stationConnectAutoResolution MEMBER stationConnectAutoResolution NOTIFY stationConnectAutoResolutionChanged)
     Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
-    Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
@@ -142,11 +131,9 @@ public:
     bool keepAwake;
     int networkMtu;
     AudioConfig audioConfig;
-    VideoCodecConfig videoCodecConfig;
     int identityGbrBitDepth;
     bool stationConnectAutoResolution;
     bool stationConnectToolbarPinned;
-    VideoDecoderSelection videoDecoderSelection;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
     Language language;
@@ -160,10 +147,8 @@ signals:
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void audioConfigChanged();
-    void videoCodecConfigChanged();
     void stationConnectAutoResolutionChanged();
     void stationConnectToolbarPinnedChanged();
-    void videoDecoderSelectionChanged();
     void windowModeChanged();
     void framePacingChanged();
     void connectionWarningsChanged();

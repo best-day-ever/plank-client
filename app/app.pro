@@ -2,7 +2,7 @@ QT += core quick network quickcontrols2 svg
 CONFIG += c++17
 
 unix:!macx {
-    TARGET = moonlight
+    TARGET = stationconnect-client
 } else {
     # On macOS, this is the name displayed in the global menu bar
     TARGET = Moonlight
@@ -527,13 +527,13 @@ unix:!macx: {
 
     target.path = $$PREFIX/$$BINDIR/
 
-    desktop.files = deploy/linux/la.instinctual.StationConnect.desktop
+    desktop.files = deploy/linux/la.instinctual.StationConnect.Client.desktop
     desktop.path = $$PREFIX/$$DATADIR/applications/
 
     icons.files = res/stationconnect-logo.png
     icons.path = $$PREFIX/$$DATADIR/icons/hicolor/512x512/apps/
 
-    appstream.files = deploy/linux/la.instinctual.StationConnect.appdata.xml
+    appstream.files = deploy/linux/la.instinctual.StationConnect.Client.appdata.xml
     appstream.path = $$PREFIX/$$DATADIR/metainfo/
 
     INSTALLS += target desktop icons appstream

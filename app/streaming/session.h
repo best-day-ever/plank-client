@@ -75,7 +75,9 @@ public:
 
         const QMap<int, int> mapping = {
             {SCM_H264, VIDEO_FORMAT_H264},
+            {SCM_H264_HIGH8_422, VIDEO_FORMAT_H264_HIGH8_422},
             {SCM_H264_HIGH8_444, VIDEO_FORMAT_H264_HIGH8_444},
+            {SCM_H264_HIGH10_422, VIDEO_FORMAT_H264_HIGH10_422},
             {SCM_H264_HIGH10_444, VIDEO_FORMAT_H264_HIGH10_444},
             {SCM_HEVC, VIDEO_FORMAT_H265},
             {SCM_HEVC_MAIN10, VIDEO_FORMAT_H265_MAIN10},
@@ -122,6 +124,8 @@ public:
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
+    Q_INVOKABLE void cancelConnectionStart();
+
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
@@ -156,6 +160,8 @@ signals:
     void stageFailed(QString stage, int errorCode, QString failingPorts);
 
     void connectionStarted();
+
+    void sessionCleanupWaitChanged(bool waiting, QString text);
 
     void displayLaunchError(QString text);
 
@@ -211,12 +217,11 @@ private:
 
     static
     DecoderAvailability getDecoderAvailability(SDL_Window* window,
-                                               StreamingPreferences::VideoDecoderSelection vds,
                                                int videoFormat, int width, int height, int frameRate,
                                                bool enableIdentityGbr = false);
 
     static
-    bool chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
+    bool chooseDecoder(DecoderSelectionMode selectionMode,
                        SDL_Window* window, int videoFormat, int width, int height,
                        int frameRate, bool enableVsync, bool enableFramePacing,
                        bool testOnly,
@@ -279,6 +284,7 @@ private:
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
+    StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
     ComputerManager* m_ComputerManager;
     NvApp m_App;
     SDL_Window* m_Window;
@@ -293,6 +299,8 @@ private:
     std::atomic_bool m_ReconnectRequested;
     std::atomic_bool m_Reconnecting;
     std::atomic_bool m_CanReconnect;
+    std::atomic_bool m_ConnectionStartCancelled;
+    std::atomic_bool m_WaitingForSessionCleanup;
     QString m_StationConnectUsername;
     QString m_StationConnectPassword;
     SdlInputHandler* m_InputHandler;

@@ -1,6 +1,7 @@
 #include "nvcomputer.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
+#include "settings/streamingpreferences.h"
 #include "stationconnectnetwork.h"
 
 #include <QCryptographicHash>
@@ -23,6 +24,7 @@
 #define SER_NVIDIASOFTWARE "nvidiasw"
 #define SER_SELECTEDOUTPUT "stationconnect-selected-output"
 #define SER_DISPLAYMODE "stationconnect-display-mode"
+#define SER_VIDEOPROFILE "stationconnect-video-profile"
 #define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
 #define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
 #define SER_SERVERUUID "stationconnect-server-uuid"
@@ -37,13 +39,14 @@ QString manualBookmarkUuid(const NvAddress& address)
 }
 }
 
-NvComputer::NvComputer(NvAddress address, QString nickname)
+NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile)
 {
     this->uuid = manualBookmarkUuid(address);
     this->name = nickname;
     this->hasCustomName = true;
     this->manualAddress = address;
     this->manualBookmark = true;
+    this->stationConnectVideoProfile = videoProfile;
     this->state = CS_UNKNOWN;
     this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
@@ -56,7 +59,8 @@ NvComputer::NvComputer(NvAddress address, QString nickname)
 }
 
 bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
-                                      QString displayMode, QString outputId)
+                                      QString displayMode, QString outputId,
+                                      int videoProfile)
 {
     QWriteLocker writeLocker(&lock);
     Q_ASSERT(manualBookmark);
@@ -95,6 +99,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     hasCustomName = true;
     selectedDisplayMode = displayMode;
     selectedOutputId = outputId;
+    stationConnectVideoProfile = videoProfile;
     return addressChanged;
 }
 
@@ -114,6 +119,11 @@ NvComputer::NvComputer(QSettings& settings)
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
     this->selectedOutputId = settings.value(SER_SELECTEDOUTPUT).toString();
     this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
+    this->stationConnectVideoProfile = qBound(
+            static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
+            settings.value(SER_VIDEOPROFILE,
+                           static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444)).toInt(),
+            static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_422));
     this->manualBookmark = settings.value(SER_MANUALBOOKMARK, false).toBool();
     this->serverUuid = settings.value(SER_SERVERUUID).toString();
     const QJsonDocument serializedTopology = QJsonDocument::fromJson(
@@ -178,6 +188,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
     settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
     settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
+    settings.setValue(SER_VIDEOPROFILE, stationConnectVideoProfile);
     settings.setValue(SER_MANUALBOOKMARK, manualBookmark);
     settings.setValue(SER_SERVERUUID, serverUuid);
     if (!outputTopology.outputs.isEmpty()) {
@@ -211,6 +222,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
            this->selectedOutputId == that.selectedOutputId &&
            this->selectedDisplayMode == that.selectedDisplayMode &&
+           this->stationConnectVideoProfile == that.stationConnectVideoProfile &&
            this->manualBookmark == that.manualBookmark &&
            this->serverUuid == that.serverUuid &&
            this->outputTopology.toJson() == that.outputTopology.toJson() &&

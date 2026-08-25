@@ -282,7 +282,7 @@ void Session::clVideoPacketLossUpdate(float packetLossPercent)
                 peakPacketLossPercent, std::memory_order_relaxed);
 }
 
-bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
+bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
                             SDL_Window* window, int videoFormat, int width, int height,
                             int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly,
                             IVideoDecoder*& chosenDecoder, bool enableIdentityGbr)
@@ -303,7 +303,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
     params.enableFramePacing = enableFramePacing;
     params.enableIdentityGbr = enableIdentityGbr;
     params.testOnly = testOnly;
-    params.vds = vds;
+    params.selectionMode = selectionMode;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -381,6 +381,13 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
                         videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
         }
     }
+    else if (videoFormat == VIDEO_FORMAT_H264_HIGH8_422 ||
+             videoFormat == VIDEO_FORMAT_H264_HIGH10_422) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Video precision: 8-bit source -> %s H.264 4:2:2 -> "
+                    "BT.709 full-range YCbCr presentation",
+                    videoFormat == VIDEO_FORMAT_H264_HIGH10_422 ? "10-bit" : "8-bit");
+    }
 
     return 0;
 }
@@ -425,7 +432,7 @@ void Session::getDecoderInfo(SDL_Window* window,
     // dialog indicating lack of hardware decoding support.
 
     // Try a regular hardware accelerated HEVC decoder now
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
+    if (chooseDecoder(DecoderSelectionMode::ExactHardwareOnly,
                       window, VIDEO_FORMAT_H265, 1920, 1080, 60,
                       false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
@@ -438,7 +445,7 @@ void Session::getDecoderInfo(SDL_Window* window,
 
 
 #if 0 // See AV1 comment at the top of this function
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
+    if (chooseDecoder(DecoderSelectionMode::ExactHardwareOnly,
                       window, VIDEO_FORMAT_AV1_MAIN8, 1920, 1080, 60,
                       false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
@@ -452,7 +459,7 @@ void Session::getDecoderInfo(SDL_Window* window,
 
     // If we still didn't find a hardware decoder, try H.264 now.
     // This will fall back to software decoding, so it should always work.
-    if (chooseDecoder(StreamingPreferences::VDS_AUTO,
+    if (chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                       window, VIDEO_FORMAT_H264, 1920, 1080, 60,
                       false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
@@ -469,13 +476,13 @@ void Session::getDecoderInfo(SDL_Window* window,
 
 Session::DecoderAvailability
 Session::getDecoderAvailability(SDL_Window* window,
-                                StreamingPreferences::VideoDecoderSelection vds,
                                 int videoFormat, int width, int height, int frameRate,
                                 bool enableIdentityGbr)
 {
     IVideoDecoder* decoder;
 
-    if (!chooseDecoder(vds, window, videoFormat, width, height, frameRate,
+    if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
+                       window, videoFormat, width, height, frameRate,
                        false, false, true, decoder, enableIdentityGbr)) {
         return DecoderAvailability::None;
     }
@@ -491,7 +498,7 @@ bool Session::populateDecoderProperties(SDL_Window* window)
 {
     IVideoDecoder* decoder;
 
-    if (!chooseDecoder(m_Preferences->videoDecoderSelection,
+    if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                        window,
                        m_SupportedVideoFormats.first(),
                        m_StreamConfig.width,
@@ -550,6 +557,10 @@ Session::Session(NvComputer* computer, NvApp& app,
     : m_Preferences(preferences ? preferences : StreamingPreferences::get()),
       m_IsFullScreen(m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED || !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer),
+      m_StationConnectVideoProfile(static_cast<StreamingPreferences::StationConnectVideoProfile>(
+              qBound(static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
+                     computer->stationConnectVideoProfile,
+                     static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_422)))),
       m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
@@ -562,6 +573,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_ReconnectRequested(false),
       m_Reconnecting(false),
       m_CanReconnect(false),
+      m_ConnectionStartCancelled(false),
+      m_WaitingForSessionCleanup(false),
       m_InputHandler(nullptr),
       m_FlushingWindowEventsRef(0),
       m_AsyncConnectionSuccess(false),
@@ -593,13 +606,15 @@ Session::Session(NvComputer* computer, NvApp& app,
         // Keep bitrateKbps user-controlled: SettingsView persists the bitrate
         // slider value and initialize() copies it into the stream configuration.
         m_Preferences->fps = 60;
-        m_Preferences->identityGbrBitDepth = 10;
-        m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
-        // Intel's hardware path cannot decode the qualified H.264 High 10
-        // 4:4:4 identity profile. Keep StationConnect on the proven FFmpeg
-        // software path instead of allowing automatic selection to downgrade
-        // the stream to an 8-bit profile.
-        m_Preferences->videoDecoderSelection = StreamingPreferences::VDS_FORCE_SOFTWARE;
+        m_Preferences->identityGbrBitDepth =
+                (m_StationConnectVideoProfile ==
+                     StreamingPreferences::SCVP_H264_8BIT_422 ||
+                 m_StationConnectVideoProfile ==
+                     StreamingPreferences::SCVP_H264_8BIT_444) ? 8 : 10;
+        // Decoder selection is internal and exact-profile constrained. Hardware
+        // is accepted only after a test frame proves the requested bit depth,
+        // chroma sampling, and identity mapping; otherwise the same profile
+        // falls back to FFmpeg software decoding without changing formats.
     }
 }
 
@@ -755,72 +770,28 @@ bool Session::initialize()
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // StationConnect has one qualified identity profile. Do not silently
-    // downgrade to 8-bit or 4:2:0 when decoder probing fails.
-    if (m_Preferences->identityGbrBitDepth == 10 &&
-            isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H264_HIGH10_444)) {
-        m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH10_444);
-    }
-
-    switch (m_Preferences->videoCodecConfig)
-    {
-    case StreamingPreferences::VCC_AUTO:
-    {
-        // Codecs are checked in order of ascending decode complexity to ensure
-        // the the deprioritized list prefers lighter codecs for software decoding
-
-        // H.264 is already the lowest priority codec, so we don't need to do
-        // any probing for deprioritization for it here.
-
-        const bool identityGbr = isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H265_REXT10_444);
-        auto hevcDA = getDecoderAvailability(testWindow,
-                                             m_Preferences->videoDecoderSelection,
-                                             identityGbr ? VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_REXT8_444,
-                                             m_StreamConfig.width,
-                                             m_StreamConfig.height,
-                                             m_StreamConfig.fps,
-                                             identityGbr);
-
-        if (hevcDA != DecoderAvailability::Hardware) {
-            m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_H265);
-        }
-
-        // AV1 host support remains less broadly available than H.264/HEVC.
-        m_SupportedVideoFormats.deprioritizeByMask(VIDEO_FORMAT_MASK_AV1);
-
-#ifdef Q_OS_DARWIN
-        {
-            // Prior to GFE 3.11, GFE did not allow us to constrain
-            // the number of reference frames, so we have to fixup the SPS
-            // to allow decoding via VideoToolbox on macOS. Since we don't
-            // have fixup code for HEVC, just avoid it if GFE is too old.
-            QVector<int> gfeVersion = NvHTTP::parseQuad(m_Computer->gfeVersion);
-            if (gfeVersion.isEmpty() || // Very old versions don't have GfeVersion at all
-                    gfeVersion[0] < 3 ||
-                    (gfeVersion[0] == 3 && gfeVersion[1] < 11)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Disabling HEVC on macOS due to old GFE version");
-                m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265);
-            }
-        }
-#endif
+    // StationConnect advertises exactly the selected profile. Do not silently
+    // substitute another bit depth or chroma format when probing fails.
+    int selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_444;
+    switch (m_StationConnectVideoProfile) {
+    case StreamingPreferences::SCVP_H264_8BIT_422:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_422;
+        break;
+    case StreamingPreferences::SCVP_H264_8BIT_444:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_444;
+        break;
+    case StreamingPreferences::SCVP_H264_10BIT_422:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_422;
+        break;
+    case StreamingPreferences::SCVP_H264_10BIT_444:
         break;
     }
-    case StreamingPreferences::VCC_FORCE_H264:
-        m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H264);
-        break;
-    case StreamingPreferences::VCC_FORCE_HEVC:
-    case StreamingPreferences::VCC_FORCE_HEVC_HDR_DEPRECATED:
-        m_SupportedVideoFormats.removeByMask(~VIDEO_FORMAT_MASK_H265);
-        break;
-    case StreamingPreferences::VCC_FORCE_AV1:
-        // We'll try to fall back to HEVC first if AV1 fails. We'd rather not fall back
-        // straight to H.264 if the user asked for AV1 and the host doesn't support it.
-        m_SupportedVideoFormats.removeByMask(~(VIDEO_FORMAT_MASK_AV1 | VIDEO_FORMAT_MASK_H265));
-        break;
+    if (!(selectedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ||
+            isIdentityGbrEnabledForFormat(selectedVideoFormat)) {
+        m_SupportedVideoFormats.append(selectedVideoFormat);
     }
 
-    SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_YUV444) == 0);
+    SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) == 0);
 
     // Check for validation errors/warnings and emit
     // signals for them, if appropriate
@@ -872,63 +843,26 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    if (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_SOFTWARE) {
-        emitLaunchWarning(tr("Your settings selection to force software decoding may cause poor streaming performance."));
-    }
-
-    if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_AV1) {
-        if (m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport & SCM_MASK_AV1) == 0) {
-            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_AV1) {
-                emitLaunchWarning(tr("Your host software or GPU doesn't support encoding AV1."));
-            }
-
-            // Moonlight-common-c will handle this case already, but we want
-            // to set this explicitly here so we can do our hardware acceleration
-            // check below.
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_AV1);
-        }
-    }
-
-    if (m_SupportedVideoFormats & VIDEO_FORMAT_MASK_H265) {
-        if (m_Computer->maxLumaPixelsHEVC == 0) {
-            if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_FORCE_HEVC) {
-                emitLaunchWarning(tr("Your host PC doesn't support encoding HEVC."));
-            }
-
-            // Moonlight-common-c will handle this case already, but we want
-            // to set this explicitly here so we can do our hardware acceleration
-            // check below.
-            m_SupportedVideoFormats.removeByMask(VIDEO_FORMAT_MASK_H265);
-        }
-    }
-
-    if (!(m_Computer->serverCodecModeSupport & SCM_MASK_YUV444)) {
-        emit displayLaunchError(tr("This host does not support StationConnect's required 4:4:4 video profile."));
-        return false;
-    }
-
     m_SupportedVideoFormats.removeByMask(
                 ~m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport));
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("The selected codec has no StationConnect 4:4:4 profile shared by this host and client."));
+        emit displayLaunchError(tr("The selected StationConnect encoding profile is not supported by both this host and client."));
         return false;
     }
 
-    // Automatic decoder selection may legitimately choose software for a
-    // profile that the GPU cannot decode. That is an expected capability
-    // result, so do not interrupt each connection with a warning.
+    // Internal exact-profile decoder selection may legitimately choose
+    // software when no hardware path reproduces the selected profile. That is
+    // an expected capability result, so do not interrupt each connection with
+    // a warning.
     while (!m_SupportedVideoFormats.isEmpty()) {
         const auto availability = getDecoderAvailability(
                     testWindow,
-                    m_Preferences->videoDecoderSelection,
                     m_SupportedVideoFormats.front(),
                     m_StreamConfig.width,
                     m_StreamConfig.height,
                     m_StreamConfig.fps,
                     isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.front()));
-        if (availability == DecoderAvailability::None ||
-                (m_Preferences->videoDecoderSelection == StreamingPreferences::VDS_FORCE_HARDWARE &&
-                 availability != DecoderAvailability::Hardware)) {
+        if (availability == DecoderAvailability::None) {
             m_SupportedVideoFormats.removeFirst();
         }
         else {
@@ -936,7 +870,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         }
     }
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("This client cannot decode any StationConnect 4:4:4 profile offered by the host."));
+        emit displayLaunchError(tr("This client cannot decode the selected StationConnect encoding profile."));
         return false;
     }
 
@@ -1348,7 +1282,77 @@ bool Session::startConnectionAsync(bool reconnecting)
         try {
             startApp();
         } catch (const GfeHttpResponseException& e) {
-            if (reconnecting && m_Computer->stationConnectAuthentication &&
+            const bool previousSessionStillActive =
+                    m_Computer->stationConnectAuthentication &&
+                    e.getStatusCode() == 400 &&
+                    QString::fromUtf8(e.getStatusMessage()) ==
+                        QStringLiteral("An app is already running on this host");
+            if (previousSessionStillActive) {
+                constexpr int RetryIntervalMs = 500;
+                constexpr int MaximumWaitMs = 30000;
+                constexpr int CancellationPollMs = 50;
+                bool started = false;
+
+                m_WaitingForSessionCleanup.store(true);
+                emit sessionCleanupWaitChanged(
+                            true,
+                            tr("Waiting for previous workstation session to finish..."));
+                qInfo() << "StationConnect previous session is still active; "
+                           "waiting up to" << MaximumWaitMs << "ms";
+
+                for (int elapsedMs = 0;
+                     elapsedMs < MaximumWaitMs && !started;
+                     elapsedMs += RetryIntervalMs) {
+                    for (int delayMs = 0;
+                         delayMs < RetryIntervalMs;
+                         delayMs += CancellationPollMs) {
+                        if (m_ConnectionStartCancelled.load()) {
+                            break;
+                        }
+                        SDL_Delay(CancellationPollMs);
+                    }
+                    if (m_ConnectionStartCancelled.load()) {
+                        break;
+                    }
+
+                    try {
+                        {
+                            QWriteLocker lock(&m_Computer->lock);
+                            m_Computer->currentGameId = 0;
+                        }
+                        startApp();
+                        started = true;
+                    } catch (const GfeHttpResponseException& retryError) {
+                        const bool stillActive =
+                                retryError.getStatusCode() == 400 &&
+                                QString::fromUtf8(retryError.getStatusMessage()) ==
+                                    QStringLiteral("An app is already running on this host");
+                        if (!stillActive) {
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            throw;
+                        }
+                    }
+                }
+
+                m_WaitingForSessionCleanup.store(false);
+                emit sessionCleanupWaitChanged(false, QString());
+
+                if (!started && m_ConnectionStartCancelled.load()) {
+                    qInfo() << "StationConnect connection cancelled while waiting for session cleanup";
+                    return false;
+                }
+                if (!started) {
+                    if (!reconnecting) {
+                        emit displayLaunchError(
+                                    tr("The previous workstation session did not finish within 30 seconds."));
+                    }
+                    return false;
+                }
+
+                qInfo() << "StationConnect previous session finished; launch retry succeeded";
+            }
+            else if (reconnecting && m_Computer->stationConnectAuthentication &&
                     m_Computer->currentGameId == 0 &&
                     e.getStatusCode() == 400) {
                 {
@@ -1518,6 +1522,11 @@ bool Session::startConnectionAsync(bool reconnecting)
     return true;
 }
 
+void Session::cancelConnectionStart()
+{
+    m_ConnectionStartCancelled.store(true);
+}
+
 bool Session::reconnectStationConnect()
 {
     if (m_StationConnectUsername.isEmpty() ||
@@ -1682,10 +1691,16 @@ void Session::exec(QWindow* qtWindow)
         // to update the Qt UI to allow warning messages to display and
         // make sure that the Qt window can hide itself.
         while (!execThread.wait(10) && m_Window == nullptr) {
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QCoreApplication::processEvents(
+                        m_WaitingForSessionCleanup.load() ?
+                            QEventLoop::AllEvents :
+                            QEventLoop::ExcludeUserInputEvents);
             QCoreApplication::sendPostedEvents();
         }
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QCoreApplication::processEvents(
+                    m_WaitingForSessionCleanup.load() ?
+                        QEventLoop::AllEvents :
+                        QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
 
         // SDL is in charge now. Wait until the streaming thread exits
@@ -1726,12 +1741,16 @@ void Session::execInternal()
                                          m_StreamConfig.width,
                                          m_StreamConfig.height);
 
+    m_ConnectionStartCancelled.store(false);
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {
         // Kick off the async connection thread while we sit here and pump the event loop
         asyncConnThread.start();
         while (!asyncConnThread.wait(10)) {
-            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            QCoreApplication::processEvents(
+                        m_WaitingForSessionCleanup.load() ?
+                            QEventLoop::AllEvents :
+                            QEventLoop::ExcludeUserInputEvents);
             QCoreApplication::sendPostedEvents();
         }
 
@@ -2154,7 +2173,7 @@ void Session::execInternal()
 
                 // Choose a new decoder (hopefully the same one, but possibly
                 // not if a GPU was removed or something).
-                if (!chooseDecoder(m_Preferences->videoDecoderSelection,
+                if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                                    m_Window, m_ActiveVideoFormat, m_ActiveVideoWidth,
                                    m_ActiveVideoHeight, m_ActiveVideoFrameRate,
                                    enableVsync,

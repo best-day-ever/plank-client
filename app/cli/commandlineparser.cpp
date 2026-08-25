@@ -218,7 +218,7 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
         "  list            List the available apps on a host\n"
         "  stream          Start streaming an app\n"
         "\n"
-        "See 'moonlight <action> --help' for help of specific action."
+        "See 'stationconnect-client <action> --help' for help of specific action."
     );
     parser.addPositionalArgument("action", "Action to execute", "<action>");
     parser.parse(args);
@@ -261,17 +261,6 @@ StreamCommandLineParser::StreamCommandLineParser()
         {"stereo",       StreamingPreferences::AC_STEREO},
         {"5.1-surround", StreamingPreferences::AC_51_SURROUND},
         {"7.1-surround", StreamingPreferences::AC_71_SURROUND},
-    };
-    m_VideoCodecMap = {
-        {"auto",  StreamingPreferences::VCC_AUTO},
-        {"H.264", StreamingPreferences::VCC_FORCE_H264},
-        {"HEVC",  StreamingPreferences::VCC_FORCE_HEVC},
-        {"AV1", StreamingPreferences::VCC_FORCE_AV1},
-    };
-    m_VideoDecoderMap = {
-        {"auto",     StreamingPreferences::VDS_AUTO},
-        {"software", StreamingPreferences::VDS_FORCE_SOFTWARE},
-        {"hardware", StreamingPreferences::VDS_FORCE_HARDWARE},
     };
     m_CaptureSysKeysModeMap = {
         {"never",      StreamingPreferences::CSK_OFF},
@@ -316,10 +305,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
-    parser.addChoiceOption("identity-bit-depth", "identity RGB codec bit depth", {"8", "10"});
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
-    parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
-    parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
     parser.addValueOption("stationconnect-user", "StationConnect workstation username");
     parser.addFlagOption("stationconnect-password-stdin",
                          "StationConnect password read from standard input");
@@ -414,23 +400,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --performance-overlay and --no-performance-overlay options
     preferences->showPerformanceOverlay = parser.getToggleOptionValue("performance-overlay", preferences->showPerformanceOverlay);
 
-    if (parser.isSet("identity-bit-depth")) {
-        preferences->identityGbrBitDepth = parser.getChoiceOptionValue("identity-bit-depth").toInt();
-    }
-    
     // Resolve --capture-system-keys option
     if (parser.isSet("capture-system-keys")) {
         preferences->captureSysKeysMode = mapValue(m_CaptureSysKeysModeMap, parser.getChoiceOptionValue("capture-system-keys"));
-    }
-
-    // Resolve --video-codec option
-    if (parser.isSet("video-codec")) {
-        preferences->videoCodecConfig = mapValue(m_VideoCodecMap, parser.getChoiceOptionValue("video-codec"));
-    }
-
-    // Resolve --video-decoder option
-    if (parser.isSet("video-decoder")) {
-        preferences->videoDecoderSelection = mapValue(m_VideoDecoderMap, parser.getChoiceOptionValue("video-decoder"));
     }
 
     const bool hasStationConnectUser = parser.isSet("stationconnect-user");

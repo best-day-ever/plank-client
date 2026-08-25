@@ -208,6 +208,7 @@ CenteredGridView {
                         editBookmarkDialog.originalNickname = model.name
                         editBookmarkDialog.choices = choices
                         editBookmarkDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
+                        editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
                         editBookmarkDialog.open()
                     }
                 }
@@ -352,6 +353,7 @@ CenteredGridView {
         property string originalNickname: ""
         property var choices: []
         property int choiceIndex: 0
+        property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         dim: false
@@ -364,6 +366,12 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editDisplayChoice.model = choices
             editDisplayChoice.currentIndex = choiceIndex
+            for (var i = 0; i < editEncodingProfileModel.count; i++) {
+                if (editEncodingProfileModel.get(i).val === originalProfile) {
+                    editEncodingProfile.currentIndex = i
+                    break
+                }
+            }
             editAddressText.forceActiveFocus()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
@@ -379,7 +387,9 @@ CenteredGridView {
             if (!computerModel.editComputerBookmark(pcIndex,
                                                     editAddressText.text.trim(),
                                                     editNicknameText.text.trim(),
-                                                    editDisplayChoice.currentIndex)) {
+                                                    editDisplayChoice.currentIndex,
+                                                    editEncodingProfileModel.get(
+                                                        editEncodingProfile.currentIndex).val)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.helpText = ""
                 errorDialog.open()
@@ -405,6 +415,35 @@ CenteredGridView {
             TextField {
                 id: editNicknameText
                 Layout.fillWidth: true
+            }
+
+            Label {
+                text: qsTr("Encoding profile")
+                font.bold: true
+            }
+            ComboBox {
+                id: editEncodingProfile
+                Layout.fillWidth: true
+                textRole: "text"
+                model: ListModel {
+                    id: editEncodingProfileModel
+                    ListElement {
+                        text: qsTr("H.264 8-bit 4:2:2")
+                        val: StreamingPreferences.SCVP_H264_8BIT_422
+                    }
+                    ListElement {
+                        text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
+                        val: StreamingPreferences.SCVP_H264_8BIT_444
+                    }
+                    ListElement {
+                        text: qsTr("H.264 10-bit 4:2:2")
+                        val: StreamingPreferences.SCVP_H264_10BIT_422
+                    }
+                    ListElement {
+                        text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                        val: StreamingPreferences.SCVP_H264_10BIT_444
+                    }
+                }
             }
 
             Label {

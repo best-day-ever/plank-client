@@ -202,8 +202,17 @@ int ComputerModel::stationConnectDisplayChoice(int computerIndex) const
     return 0;
 }
 
+int ComputerModel::stationConnectVideoProfile(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return computer->stationConnectVideoProfile;
+}
+
 bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
-                                         QString nickname, int displayChoice)
+                                         QString nickname, int displayChoice,
+                                         int videoProfile)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         return false;
@@ -245,7 +254,7 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
 
     return m_ComputerManager->editManualBookmark(computer, std::move(address),
                                                   std::move(nickname), displayMode,
-                                                  selectedOutputId);
+                                                  selectedOutputId, videoProfile);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

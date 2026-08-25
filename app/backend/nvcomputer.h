@@ -44,11 +44,12 @@ public:
 
     explicit NvComputer(QSettings& settings);
 
-    NvComputer(NvAddress manualAddress, QString nickname);
+    NvComputer(NvAddress manualAddress, QString nickname, int videoProfile = 0);
 
     bool
     updateManualBookmark(NvAddress manualAddress, QString nickname,
-                         QString displayMode, QString selectedOutputId);
+                         QString displayMode, QString selectedOutputId,
+                         int videoProfile);
 
     void
     setRemoteAddress(QHostAddress);
@@ -124,6 +125,7 @@ public:
     bool isNvidiaServerSoftware;
     QString selectedOutputId;
     QString selectedDisplayMode;
+    int stationConnectVideoProfile = 0;
     bool manualBookmark = false;
     QString serverUuid;
     // Remember to update isEqualSerialized() when adding fields here!

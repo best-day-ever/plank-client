@@ -48,8 +48,11 @@ public:
 
     Q_INVOKABLE int stationConnectDisplayChoice(int computerIndex) const;
 
+    Q_INVOKABLE int stationConnectVideoProfile(int computerIndex) const;
+
     Q_INVOKABLE bool editComputerBookmark(int computerIndex, QString address,
-                                          QString nickname, int displayChoice);
+                                          QString nickname, int displayChoice,
+                                          int videoProfile);
 
 signals:
     void authenticationCompleted(QVariant error);
