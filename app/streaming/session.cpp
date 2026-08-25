@@ -1658,9 +1658,19 @@ bool Session::reconnectStationConnect()
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
 
     m_InputHandler->raiseAllKeys();
+    const int previousVideoFormat = m_ActiveVideoFormat;
+    const int previousVideoWidth = m_ActiveVideoWidth;
+    const int previousVideoHeight = m_ActiveVideoHeight;
+    const int previousVideoFrameRate = m_ActiveVideoFrameRate;
+    bool retainedRenderer = false;
     SDL_LockSpinlock(&m_DecoderLock);
-    delete m_VideoDecoder;
-    m_VideoDecoder = nullptr;
+    if (m_VideoDecoder != nullptr) {
+        retainedRenderer = m_VideoDecoder->suspendForReconnect();
+        if (!retainedRenderer) {
+            delete m_VideoDecoder;
+            m_VideoDecoder = nullptr;
+        }
+    }
     SDL_UnlockSpinlock(&m_DecoderLock);
     LiStopConnection();
 
@@ -1713,6 +1723,18 @@ bool Session::reconnectStationConnect()
             }
 
             if (startConnectionAsync(true)) {
+                const bool streamConfigurationUnchanged =
+                        previousVideoFormat == m_ActiveVideoFormat &&
+                        previousVideoWidth == m_ActiveVideoWidth &&
+                        previousVideoHeight == m_ActiveVideoHeight &&
+                        previousVideoFrameRate == m_ActiveVideoFrameRate;
+                bool resumedRenderer = false;
+                if (retainedRenderer && streamConfigurationUnchanged) {
+                    SDL_LockSpinlock(&m_DecoderLock);
+                    resumedRenderer = m_VideoDecoder != nullptr &&
+                            m_VideoDecoder->resumeAfterReconnect();
+                    SDL_UnlockSpinlock(&m_DecoderLock);
+                }
                 m_InputHandler->resetRawHidAfterReconnect();
                 m_Reconnecting.store(false);
                 m_ReconnectRequested = false;
@@ -1720,12 +1742,17 @@ bool Session::reconnectStationConnect()
                 m_OverlayManager.setOverlayState(
                             Overlay::OverlayStatusUpdate, false);
 
-                SDL_Event resetEvent = {};
-                resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
-                SDL_PushEvent(&resetEvent);
+                if (!resumedRenderer) {
+                    SDL_Event resetEvent = {};
+                    resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+                    SDL_PushEvent(&resetEvent);
+                } else {
+                    LiRequestIdrFrame();
+                }
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect reconnect completed on attempt %d",
-                            attempt);
+                            "StationConnect reconnect completed on attempt %d (%s renderer)",
+                            attempt,
+                            resumedRenderer ? "retained" : "recreated");
                 return true;
             }
         } catch (const GfeHttpResponseException& error) {

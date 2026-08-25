@@ -133,6 +133,21 @@ Pacer::~Pacer()
     }
 }
 
+void Pacer::discardQueuedFrames()
+{
+    QMutexLocker lock(&m_FrameQueueLock);
+    while (!m_RenderQueue.isEmpty()) {
+        AVFrame* frame = m_RenderQueue.dequeue();
+        av_frame_free(&frame);
+    }
+    while (!m_PacingQueue.isEmpty()) {
+        AVFrame* frame = m_PacingQueue.dequeue();
+        av_frame_free(&frame);
+    }
+    m_PacingQueueHistory.clear();
+    m_RenderQueueHistory.clear();
+}
+
 void Pacer::renderOnMainThread()
 {
     // Ignore this call for renderers that work on a dedicated render thread

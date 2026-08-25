@@ -30,6 +30,8 @@ public:
     virtual void renderFrameOnMainThread() override;
     virtual void setHdrMode(bool enabled) override;
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) override;
+    virtual bool suspendForReconnect() override;
+    virtual bool resumeAfterReconnect() override;
 
     virtual IFFmpegRenderer* getBackendRenderer();
 

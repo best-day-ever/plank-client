@@ -89,4 +89,11 @@ public:
     virtual void renderFrameOnMainThread() = 0;
     virtual void setHdrMode(bool enabled) = 0;
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) = 0;
+
+    // StationConnect may replace the host media worker when GDM hands the
+    // display to an authenticated desktop. Decoders that support it can pause
+    // their transport-facing thread while retaining the renderer and its last
+    // presented frame, keeping the native stream window continuously mapped.
+    virtual bool suspendForReconnect() { return false; }
+    virtual bool resumeAfterReconnect() { return false; }
 };

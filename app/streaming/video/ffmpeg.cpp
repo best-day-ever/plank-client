@@ -124,6 +124,52 @@ bool FFmpegVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
     return m_FrontendRenderer->notifyWindowChanged(info);
 }
 
+bool FFmpegVideoDecoder::suspendForReconnect()
+{
+    if (m_TestOnly || m_DecoderThread == nullptr || m_VideoDecoderCtx == nullptr) {
+        return false;
+    }
+
+    SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
+    LiWakeWaitForVideoFrame();
+    SDL_WaitThread(m_DecoderThread, nullptr);
+    m_DecoderThread = nullptr;
+    SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 0);
+
+    if (m_Pacer != nullptr) {
+        m_Pacer->discardQueuedFrames();
+    }
+    avcodec_flush_buffers(m_VideoDecoderCtx);
+    m_FramesIn = 0;
+    m_FramesOut = 0;
+    m_LastFrameNumber = 0;
+    m_ConsecutiveFailedDecodes = 0;
+    m_FrameInfoQueue.clear();
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Paused FFmpeg decode while retaining the stream renderer");
+    return true;
+}
+
+bool FFmpegVideoDecoder::resumeAfterReconnect()
+{
+    if (m_TestOnly || m_DecoderThread != nullptr || m_VideoDecoderCtx == nullptr ||
+            m_Pacer == nullptr || m_FrontendRenderer == nullptr) {
+        return false;
+    }
+
+    m_DecoderThread = SDL_CreateThread(FFmpegVideoDecoder::decoderThreadProcThunk,
+                                       "FFDecoder", this);
+    if (m_DecoderThread == nullptr) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to resume FFmpeg decoder thread: %s", SDL_GetError());
+        return false;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Resumed FFmpeg decode with the existing stream renderer");
+    return true;
+}
+
 int FFmpegVideoDecoder::getDecoderCapabilities()
 {
     bool ok;

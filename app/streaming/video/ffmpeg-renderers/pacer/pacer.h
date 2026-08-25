@@ -38,6 +38,8 @@ public:
 
     void renderOnMainThread();
 
+    void discardQueuedFrames();
+
 private:
     static int vsyncThread(void* context);
 
