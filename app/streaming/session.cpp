@@ -1322,6 +1322,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                             tr("Applying workstation display layout..."));
                 qInfo() << "StationConnect host display transition started; waiting up to"
                         << MaximumWaitMs << "ms";
+                bool authenticationRefreshRequired = false;
 
                 for (int elapsedMs = 0;
                      elapsedMs < MaximumWaitMs && !started;
@@ -1334,23 +1335,37 @@ bool Session::startConnectionAsync(bool reconnecting)
                     }
                     if (m_ConnectionStartCancelled.load()) break;
 
-                    try {
-                        {
-                            QWriteLocker lock(&m_Computer->lock);
-                            m_Computer->sessionToken.fill(QChar('\0'));
-                            m_Computer->sessionToken.clear();
-                            m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
-                            m_Computer->currentGameId = 0;
+                    if (authenticationRefreshRequired) {
+                        try {
+                            {
+                                QWriteLocker lock(&m_Computer->lock);
+                                m_Computer->sessionToken.fill(QChar('\0'));
+                                m_Computer->sessionToken.clear();
+                                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+                                m_Computer->currentGameId = 0;
+                            }
+                            http = std::make_unique<NvHTTP>(m_Computer);
+                            const QString token = http->authenticate(
+                                        m_StationConnectUsername,
+                                        m_StationConnectPassword);
+                            {
+                                QWriteLocker lock(&m_Computer->lock);
+                                m_Computer->sessionToken = token;
+                                m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
+                            }
+                            authenticationRefreshRequired = false;
+                            qInfo() << "StationConnect authenticated to the replacement display worker";
+                        } catch (const QtNetworkReplyException& retryError) {
+                            qInfo() << "StationConnect replacement display worker is not ready for authentication:"
+                                    << retryError.toQString();
+                            continue;
                         }
-                        http = std::make_unique<NvHTTP>(m_Computer);
-                        const QString token = http->authenticate(
-                                    m_StationConnectUsername,
-                                    m_StationConnectPassword);
+                    }
+
+                    try {
                         const NvOutputTopology topology = http->getOutputTopology();
                         {
                             QWriteLocker lock(&m_Computer->lock);
-                            m_Computer->sessionToken = token;
-                            m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             m_Computer->outputTopology = topology;
                             m_Computer->selectedOutputId =
                                     topology.selectOutput(m_Computer->selectedOutputId);
@@ -1367,6 +1382,12 @@ bool Session::startConnectionAsync(bool reconnecting)
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                         }
+                        if (topology.layoutKind != hostLayout ||
+                                topology.virtualModes != virtualModes) {
+                            qInfo() << "StationConnect display transition is still pending:"
+                                    << topology.layoutKind << topology.virtualModes;
+                            continue;
+                        }
                         startApp();
                         started = true;
                     } catch (const GfeHttpResponseException& retryError) {
@@ -1374,6 +1395,11 @@ bool Session::startConnectionAsync(bool reconnecting)
                             m_WaitingForSessionCleanup.store(false);
                             emit sessionCleanupWaitChanged(false, QString());
                             throw;
+                        }
+                        if (retryError.getStatusCode() == 401) {
+                            authenticationRefreshRequired = true;
+                            qInfo() << "StationConnect display worker changed; authentication will be refreshed once";
+                            continue;
                         }
                         if (retryError.getStatusCode() != 425 &&
                                 retryError.getStatusCode() != 503) {
