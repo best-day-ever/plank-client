@@ -16,9 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtEndian>
-#include <QNetworkInterface>
 #include <QNetworkProxy>
-#include <QTcpSocket>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -109,42 +107,6 @@ void NvHTTP::setStationConnectAuthentication(bool enabled, QString sessionToken)
 {
     m_StationConnectAuthentication = enabled;
     m_SessionToken = std::move(sessionToken);
-}
-
-bool NvHTTP::isApprovedStationConnectRoute() const
-{
-    QTcpSocket socket;
-    socket.setProxy(QNetworkProxy::NoProxy);
-    socket.connectToHost(m_Address.address(), m_BaseUrlHttps.port());
-    if (!socket.waitForConnected(3000)) {
-        return false;
-    }
-    if (socket.localAddress().isLoopback()) {
-        return true;
-    }
-    for (const QNetworkInterface& interface : QNetworkInterface::allInterfaces()) {
-        if ((interface.flags() & QNetworkInterface::IsUp) == 0) {
-            continue;
-        }
-        bool ownsAddress = false;
-        for (const QNetworkAddressEntry& address : interface.addressEntries()) {
-            if (address.ip() == socket.localAddress()) {
-                ownsAddress = true;
-                break;
-            }
-        }
-        if (!ownsAddress) {
-            continue;
-        }
-        const QString configuredInterface =
-                qEnvironmentVariable("STATIONCONNECT_VPN_INTERFACE");
-        if (!configuredInterface.isEmpty()) {
-            return interface.name() == configuredInterface;
-        }
-        return interface.name().startsWith("zt") ||
-               interface.humanReadableName().startsWith("ZeroTier");
-    }
-    return false;
 }
 
 NvAddress NvHTTP::address()
@@ -505,10 +467,7 @@ NvHTTP::getXmlString(QString xml,
 
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
-    if (!m_StationConnectAuthentication || !isApprovedStationConnectRoute()) {
-        if (m_StationConnectAuthentication) {
-            qWarning() << "Rejecting StationConnect TLS certificate outside the approved VPN route";
-        }
+    if (!m_StationConnectAuthentication) {
         return;
     }
     const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
@@ -601,8 +560,7 @@ QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& b
         throw QtNetworkReplyException(QNetworkReply::UnknownNetworkError, message);
     }
     const QSslConfiguration negotiatedSsl = reply->sslConfiguration();
-    if (!isApprovedStationConnectRoute() ||
-            !isStationConnectCertificate(negotiatedSsl.peerCertificate()) ||
+    if (!isStationConnectCertificate(negotiatedSsl.peerCertificate()) ||
             negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
         delete reply;
         throw GfeHttpResponseException(401,
@@ -620,8 +578,8 @@ QString NvHTTP::authenticate(QString username, QString password)
 {
     SecureStringGuard passwordGuard(password);
     if (!m_StationConnectAuthentication || !m_SessionToken.isEmpty() ||
-            username.isEmpty() || !isApprovedStationConnectRoute()) {
-        throw GfeHttpResponseException(403, "StationConnect requires an approved VPN route");
+            username.isEmpty()) {
+        throw GfeHttpResponseException(400, "Invalid StationConnect authentication state");
     }
 
     QJsonObject result = postStationConnectJson("start", {{"username", username}});
@@ -785,15 +743,12 @@ NvHTTP::openConnection(QUrl baseUrl,
     }
 
     const bool stationConnectTls = baseUrl.scheme() == "https";
-    const bool approvedRoute = !stationConnectTls ||
-            isApprovedStationConnectRoute();
     const bool approvedCertificate = !stationConnectTls ||
             isStationConnectCertificate(reply->sslConfiguration().peerCertificate());
     const bool approvedProtocol = !stationConnectTls ||
             reply->sslConfiguration().sessionProtocol() == QSsl::TlsV1_3;
-    if (!approvedRoute || !approvedCertificate || !approvedProtocol) {
+    if (!approvedCertificate || !approvedProtocol) {
         qWarning() << "Rejecting StationConnect TLS session"
-                   << "route" << approvedRoute
                    << "certificate" << approvedCertificate
                    << "tls13" << approvedProtocol;
         GfeHttpResponseException exception(401, "Invalid StationConnect TLS session");

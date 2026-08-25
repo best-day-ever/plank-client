@@ -89,8 +89,7 @@ private:
             }
 
             // StationConnect authorization is deliberately not persisted.
-            // Rediscover the protocol marker over minimal HTTP serverinfo,
-            // then require the approved route before accepting the host.
+            // Rediscover the protocol marker over minimal HTTP serverinfo.
             try {
                 NvHTTP discoveryHttp(address, 0);
                 const QString discoveryInfo = discoveryHttp.getServerInfo(
@@ -99,7 +98,6 @@ private:
                 discoveryHttp.setStationConnectAuthentication(
                             discoveredState.stationConnectAuthentication);
                 if (!discoveredState.stationConnectAuthentication ||
-                        !discoveryHttp.isApprovedStationConnectRoute() ||
                         !m_Computer->acceptsServerUuid(discoveredState.uuid)) {
                     return false;
                 }
@@ -112,8 +110,7 @@ private:
 
         NvComputer newState(http, serverInfo);
 
-        if (!newState.stationConnectAuthentication ||
-                !http.isApprovedStationConnectRoute()) {
+        if (!newState.stationConnectAuthentication) {
             return false;
         }
 
@@ -1081,9 +1078,8 @@ private:
         // Create the initial host state from discovery data.
         NvComputer* newComputer = new NvComputer(http, serverInfo);
 
-        if (!newComputer->stationConnectAuthentication ||
-                !http.isApprovedStationConnectRoute()) {
-            qWarning() << "Rejecting a host outside the StationConnect protocol or approved VPN route";
+        if (!newComputer->stationConnectAuthentication) {
+            qWarning() << "Rejecting a host outside the StationConnect protocol";
             delete newComputer;
             if (!m_Mdns) {
                 emit computerAddCompleted(false, false);

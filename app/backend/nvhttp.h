@@ -151,8 +151,6 @@ public:
     QString authenticate(QString username, QString password);
     NvOutputTopology getOutputTopology();
 
-    bool isApprovedStationConnectRoute() const;
-
     NvAddress address();
 
     uint16_t httpPort();
