@@ -809,6 +809,15 @@ void ComputerManager::stopPollingAsync()
     }
 }
 
+QStringList ComputerManager::stationConnectVirtualModeChoices() const
+{
+    QStringList choices = NvOutputTopology::qualifiedVirtualModes();
+    for (QString& choice : choices) {
+        choice.replace(QLatin1Char('x'), QChar(0x00D7));
+    }
+    return choices;
+}
+
 void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          int hostLayoutChoice, int virtualMode1Choice,
                                          int virtualMode2Choice,

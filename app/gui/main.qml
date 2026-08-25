@@ -18,7 +18,8 @@ ApplicationWindow {
 
     id: window
     width: 1280
-    height: 600
+    height: 820
+    minimumHeight: 720
 
     Component.onCompleted: {
         // Override the background color to Material 2 colors for Qt 6.5+
@@ -393,12 +394,7 @@ ApplicationWindow {
     NavigableDialog {
         id: addPcDialog
         title: qsTr("Add workstation bookmark")
-        property var virtualModeChoices: [
-            qsTr("1024×2160"), qsTr("1280×720"), qsTr("1280×1024"),
-            qsTr("1280×2160"), qsTr("1920×1080"), qsTr("1920×1200"),
-            qsTr("2560×1440"), qsTr("2560×1600"), qsTr("3440×1440"),
-            qsTr("3840×1600"), qsTr("3840×2160"), qsTr("4096×2160")
-        ]
+        property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
 
         // Give both connection fields enough room for real hostnames while
         // keeping the dialog inside smaller launcher windows. The dialog still
@@ -429,7 +425,7 @@ ApplicationWindow {
             nicknameText.clear()
             nicknameText.manuallyEdited = false
             addHostLayout.currentIndex = 0
-            addVirtualMode1.currentIndex = 10
+            addVirtualMode1.currentIndex = 11
             addVirtualMode2.currentIndex = 3
             addDisplayChoice.currentIndex = 0
             addEncodingProfile.currentIndex = 3
@@ -554,7 +550,7 @@ ApplicationWindow {
                 id: addVirtualMode1
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex >= 2
-                currentIndex: 10
+                currentIndex: 11
                 model: addPcDialog.virtualModeChoices
             }
 

@@ -111,6 +111,10 @@ void TestOutputTopology::rejectsConfiguredModeMismatch()
 
 void TestOutputTopology::acceptsTallCinemaModes()
 {
+    const QStringList modes = NvOutputTopology::qualifiedVirtualModes();
+    QCOMPARE(modes.size(), 13);
+    QCOMPARE(modes.at(8), QStringLiteral("2560x2160"));
+    QCOMPARE(modes.at(11), QStringLiteral("3840x2160"));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("1024x2160")),
              QSize(1024, 2160));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("4096x2160")),

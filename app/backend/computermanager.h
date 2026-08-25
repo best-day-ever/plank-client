@@ -226,8 +226,10 @@ public:
 
     Q_INVOKABLE void stopPollingAsync();
 
+    Q_INVOKABLE QStringList stationConnectVirtualModeChoices() const;
+
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
-                                        int hostLayout = 0, int virtualMode1 = 10,
+                                        int hostLayout = 0, int virtualMode1 = 11,
                                         int virtualMode2 = 3,
                                         int presentation = 0, int videoProfile = 0);
 

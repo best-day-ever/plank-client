@@ -360,14 +360,9 @@ CenteredGridView {
         property var choices: []
         property int choiceIndex: 0
         property int hostLayoutIndex: 0
-        property int virtualMode1Index: 10
+        property int virtualMode1Index: 11
         property int virtualMode2Index: 3
-        property var virtualModeChoices: [
-            qsTr("1024×2160"), qsTr("1280×720"), qsTr("1280×1024"),
-            qsTr("1280×2160"), qsTr("1920×1080"), qsTr("1920×1200"),
-            qsTr("2560×1440"), qsTr("2560×1600"), qsTr("3440×1440"),
-            qsTr("3840×1600"), qsTr("3840×2160"), qsTr("4096×2160")
-        ]
+        property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
