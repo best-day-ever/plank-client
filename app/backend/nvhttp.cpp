@@ -636,6 +636,14 @@ NvOutputTopology NvHTTP::getOutputTopology()
                 m_BaseUrlHttps, "stationconnect/topology", nullptr,
                 REQUEST_TIMEOUT_MS, NvLogLevel::NVLL_VERBOSE);
     const QJsonDocument document = QJsonDocument::fromJson(response.toUtf8());
+    if (!document.isObject() && response.trimmed().startsWith(QLatin1Char('<'))) {
+        // GameStream authorization failures use an XML status envelope even
+        // for this StationConnect JSON endpoint. This is expected after a
+        // display transition replaces the media worker and its in-memory
+        // bearer sessions. Preserve the 401 so the bounded transition loop
+        // can authenticate once to the replacement worker.
+        verifyResponseStatus(response);
+    }
     NvOutputTopology topology;
     QString error;
     if (!document.isObject() ||
