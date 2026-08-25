@@ -19,17 +19,6 @@ void publishVideoClock(std::int64_t mediaTimeMs,
 
 VideoClockSample readVideoClock();
 
-struct AudioFrequencyAdjustment
-{
-    int sampleDelta = 0;
-    int distance = 0;
-    float ratio = 1.0f;
-};
-
-AudioFrequencyAdjustment calculateAudioFrequencyAdjustment(
-    int correctionPpm,
-    int sampleRate);
-
 class AudioRateController
 {
 public:
