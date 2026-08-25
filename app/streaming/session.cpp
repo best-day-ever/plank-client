@@ -381,6 +381,13 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
                         videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
         }
     }
+    else if (videoFormat == VIDEO_FORMAT_H264_HIGH8_422 ||
+             videoFormat == VIDEO_FORMAT_H264_HIGH10_422) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Video precision: 8-bit source -> %s H.264 4:2:2 -> "
+                    "BT.709 full-range YCbCr presentation",
+                    videoFormat == VIDEO_FORMAT_H264_HIGH10_422 ? "10-bit" : "8-bit");
+    }
 
     return 0;
 }
@@ -593,7 +600,11 @@ Session::Session(NvComputer* computer, NvApp& app,
         // Keep bitrateKbps user-controlled: SettingsView persists the bitrate
         // slider value and initialize() copies it into the stream configuration.
         m_Preferences->fps = 60;
-        m_Preferences->identityGbrBitDepth = 10;
+        m_Preferences->identityGbrBitDepth =
+                (m_Preferences->stationConnectVideoProfile ==
+                     StreamingPreferences::SCVP_H264_8BIT_422 ||
+                 m_Preferences->stationConnectVideoProfile ==
+                     StreamingPreferences::SCVP_H264_8BIT_444) ? 8 : 10;
         m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
         // Intel's hardware path cannot decode the qualified H.264 High 10
         // 4:4:4 identity profile. Keep StationConnect on the proven FFmpeg
@@ -755,11 +766,25 @@ bool Session::initialize()
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // StationConnect has one qualified identity profile. Do not silently
-    // downgrade to 8-bit or 4:2:0 when decoder probing fails.
-    if (m_Preferences->identityGbrBitDepth == 10 &&
-            isIdentityGbrEnabledForFormat(VIDEO_FORMAT_H264_HIGH10_444)) {
-        m_SupportedVideoFormats.append(VIDEO_FORMAT_H264_HIGH10_444);
+    // StationConnect advertises exactly the selected profile. Do not silently
+    // substitute another bit depth or chroma format when probing fails.
+    int selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_444;
+    switch (m_Preferences->stationConnectVideoProfile) {
+    case StreamingPreferences::SCVP_H264_8BIT_422:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_422;
+        break;
+    case StreamingPreferences::SCVP_H264_8BIT_444:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_444;
+        break;
+    case StreamingPreferences::SCVP_H264_10BIT_422:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_422;
+        break;
+    case StreamingPreferences::SCVP_H264_10BIT_444:
+        break;
+    }
+    if (!(selectedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ||
+            isIdentityGbrEnabledForFormat(selectedVideoFormat)) {
+        m_SupportedVideoFormats.append(selectedVideoFormat);
     }
 
     switch (m_Preferences->videoCodecConfig)
@@ -820,7 +845,7 @@ bool Session::initialize()
         break;
     }
 
-    SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_YUV444) == 0);
+    SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) == 0);
 
     // Check for validation errors/warnings and emit
     // signals for them, if appropriate
@@ -902,15 +927,10 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         }
     }
 
-    if (!(m_Computer->serverCodecModeSupport & SCM_MASK_YUV444)) {
-        emit displayLaunchError(tr("This host does not support StationConnect's required 4:4:4 video profile."));
-        return false;
-    }
-
     m_SupportedVideoFormats.removeByMask(
                 ~m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport));
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("The selected codec has no StationConnect 4:4:4 profile shared by this host and client."));
+        emit displayLaunchError(tr("The selected StationConnect encoding profile is not supported by both this host and client."));
         return false;
     }
 
@@ -936,7 +956,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         }
     }
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("This client cannot decode any StationConnect 4:4:4 profile offered by the host."));
+        emit displayLaunchError(tr("This client cannot decode the selected StationConnect encoding profile."));
         return false;
     }
 

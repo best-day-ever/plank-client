@@ -44,6 +44,15 @@ public:
     };
     Q_ENUM(VideoDecoderSelection)
 
+    enum StationConnectVideoProfile
+    {
+        SCVP_H264_10BIT_444,
+        SCVP_H264_8BIT_422,
+        SCVP_H264_8BIT_444,
+        SCVP_H264_10BIT_422,
+    };
+    Q_ENUM(StationConnectVideoProfile)
+
     enum WindowMode
     {
         // Preserve the historical numeric values stored in QSettings.
@@ -112,6 +121,7 @@ public:
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(VideoCodecConfig videoCodecConfig MEMBER videoCodecConfig NOTIFY videoCodecConfigChanged)
+    Q_PROPERTY(StationConnectVideoProfile stationConnectVideoProfile MEMBER stationConnectVideoProfile NOTIFY stationConnectVideoProfileChanged)
     Q_PROPERTY(bool stationConnectAutoResolution MEMBER stationConnectAutoResolution NOTIFY stationConnectAutoResolutionChanged)
     Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
     Q_PROPERTY(VideoDecoderSelection videoDecoderSelection MEMBER videoDecoderSelection NOTIFY videoDecoderSelectionChanged)
@@ -143,6 +153,7 @@ public:
     int networkMtu;
     AudioConfig audioConfig;
     VideoCodecConfig videoCodecConfig;
+    StationConnectVideoProfile stationConnectVideoProfile;
     int identityGbrBitDepth;
     bool stationConnectAutoResolution;
     bool stationConnectToolbarPinned;
@@ -161,6 +172,7 @@ signals:
     void enableMdnsChanged();
     void audioConfigChanged();
     void videoCodecConfigChanged();
+    void stationConnectVideoProfileChanged();
     void stationConnectAutoResolutionChanged();
     void stationConnectToolbarPinnedChanged();
     void videoDecoderSelectionChanged();

@@ -92,7 +92,8 @@ bool SdlRenderer::isRenderThreadSupported()
 
 bool SdlRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFormat)
 {
-    if (videoFormat & (VIDEO_FORMAT_MASK_10BIT | VIDEO_FORMAT_MASK_YUV444)) {
+    if (videoFormat & (VIDEO_FORMAT_MASK_10BIT | VIDEO_FORMAT_MASK_YUV444 |
+                       VIDEO_FORMAT_MASK_YUV422)) {
         // SDL can't natively handle textures with these formats, but we can perform
         // conversion on the CPU using swscale then upload them as an RGB texture.
         const AVPixFmtDescriptor* formatDesc = av_pix_fmt_desc_get(pixelFormat);
@@ -103,7 +104,8 @@ bool SdlRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFor
 
         const int expectedPixelDepth = (videoFormat & VIDEO_FORMAT_MASK_10BIT) ? 10 : 8;
         const int expectedLog2ChromaW = (videoFormat & VIDEO_FORMAT_MASK_YUV444) ? 0 : 1;
-        const int expectedLog2ChromaH = (videoFormat & VIDEO_FORMAT_MASK_YUV444) ? 0 : 1;
+        const int expectedLog2ChromaH =
+            (videoFormat & (VIDEO_FORMAT_MASK_YUV444 | VIDEO_FORMAT_MASK_YUV422)) ? 0 : 1;
 
         return formatDesc->comp[0].depth == expectedPixelDepth &&
                formatDesc->log2_chroma_w == expectedLog2ChromaW &&

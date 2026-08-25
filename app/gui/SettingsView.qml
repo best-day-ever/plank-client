@@ -1360,9 +1360,48 @@ Flickable {
 
                 Label {
                     width: parent.width
-                    text: qsTr("StationConnect currently uses H.264 High 10 4:4:4.")
-                    font.pointSize: 9
+                    text: qsTr("Encoding profile")
+                    font.pointSize: 12
                     wrapMode: Text.Wrap
+                }
+
+                AutoResizingComboBox {
+                    id: stationConnectProfileComboBox
+                    textRole: "text"
+                    model: ListModel {
+                        id: stationConnectProfileListModel
+                        ListElement {
+                            text: qsTr("H.264 8-bit 4:2:2")
+                            val: StreamingPreferences.SCVP_H264_8BIT_422
+                        }
+                        ListElement {
+                            text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
+                            val: StreamingPreferences.SCVP_H264_8BIT_444
+                        }
+                        ListElement {
+                            text: qsTr("H.264 10-bit 4:2:2")
+                            val: StreamingPreferences.SCVP_H264_10BIT_422
+                        }
+                        ListElement {
+                            text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                            val: StreamingPreferences.SCVP_H264_10BIT_444
+                        }
+                    }
+
+                    Component.onCompleted: {
+                        var savedProfile = StreamingPreferences.stationConnectVideoProfile
+                        for (var i = 0; i < stationConnectProfileListModel.count; i++) {
+                            if (stationConnectProfileListModel.get(i).val === savedProfile) {
+                                currentIndex = i
+                                break
+                            }
+                        }
+                    }
+
+                    onActivated: {
+                        StreamingPreferences.stationConnectVideoProfile =
+                                stationConnectProfileListModel.get(currentIndex).val
+                    }
                 }
 
                 CheckBox {

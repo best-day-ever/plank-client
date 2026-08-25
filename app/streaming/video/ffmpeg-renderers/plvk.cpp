@@ -1413,6 +1413,28 @@ bool PlVkRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFo
                 }
             }
         }
+        else if (videoFormat & VIDEO_FORMAT_MASK_YUV422) {
+            if (videoFormat & VIDEO_FORMAT_MASK_10BIT) {
+                switch (pixelFormat) {
+                case AV_PIX_FMT_P210:
+                case AV_PIX_FMT_YUV422P10:
+                    return true;
+                default:
+                    return false;
+                }
+            }
+            else {
+                switch (pixelFormat) {
+                case AV_PIX_FMT_NV16:
+                case AV_PIX_FMT_NV61:
+                case AV_PIX_FMT_YUV422P:
+                case AV_PIX_FMT_YUVJ422P:
+                    return true;
+                default:
+                    return false;
+                }
+            }
+        }
         else if (videoFormat & VIDEO_FORMAT_MASK_10BIT) {
             switch (pixelFormat) {
             case AV_PIX_FMT_P010:

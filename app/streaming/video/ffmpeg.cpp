@@ -559,6 +559,14 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             m_Pkt->data = (uint8_t*)k_H264TestFrame;
             m_Pkt->size = sizeof(k_H264TestFrame);
             break;
+        case VIDEO_FORMAT_H264_HIGH8_422:
+            m_Pkt->data = (uint8_t*)k_H264High8_422TestFrame;
+            m_Pkt->size = sizeof(k_H264High8_422TestFrame);
+            break;
+        case VIDEO_FORMAT_H264_HIGH10_422:
+            m_Pkt->data = (uint8_t*)k_H264High10_422TestFrame;
+            m_Pkt->size = sizeof(k_H264High10_422TestFrame);
+            break;
         case VIDEO_FORMAT_H265:
             m_Pkt->data = (uint8_t*)k_HEVCMainTestFrame;
             m_Pkt->size = sizeof(k_HEVCMainTestFrame);
@@ -773,12 +781,20 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         codecString = "H.264";
         break;
 
+    case VIDEO_FORMAT_H264_HIGH8_422:
+        codecString = "H.264 8-bit SDR 4:2:2";
+        break;
+
     case VIDEO_FORMAT_H264_HIGH8_444:
-        codecString = "H.264 4:4:4";
+        codecString = "H.264 8-bit SDR 4:4:4";
         break;
 
     case VIDEO_FORMAT_H264_HIGH10_444:
         codecString = "H.264 10-bit SDR 4:4:4";
+        break;
+
+    case VIDEO_FORMAT_H264_HIGH10_422:
+        codecString = "H.264 10-bit SDR 4:2:2";
         break;
 
     case VIDEO_FORMAT_H265:

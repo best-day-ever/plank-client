@@ -20,6 +20,7 @@
 #define SER_VIDEOCFG "videocfg"
 #define SER_STATIONCONNECT_AUTO_RESOLUTION "stationconnectautoresolution"
 #define SER_STATIONCONNECT_TOOLBAR_PINNED "stationconnecttoolbarpinned"
+#define SER_STATIONCONNECT_VIDEO_PROFILE "stationconnect-video-profile"
 #define SER_VIDEODEC "videodec"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
@@ -89,6 +90,13 @@ void StreamingPreferences::reload()
     height = settings.value(SER_HEIGHT, 720).toInt();
     fps = settings.value(SER_FPS, 60).toInt();
     identityGbrBitDepth = 10;
+    const int savedVideoProfile = settings.value(
+                SER_STATIONCONNECT_VIDEO_PROFILE,
+                static_cast<int>(SCVP_H264_10BIT_444)).toInt();
+    stationConnectVideoProfile = static_cast<StationConnectVideoProfile>(
+                qBound(static_cast<int>(SCVP_H264_10BIT_444),
+                       savedVideoProfile,
+                       static_cast<int>(SCVP_H264_10BIT_422)));
     stationConnectAutoResolution = settings.value(SER_STATIONCONNECT_AUTO_RESOLUTION, true).toBool();
     stationConnectToolbarPinned = settings.value(SER_STATIONCONNECT_TOOLBAR_PINNED, false).toBool();
     bitrateKbps = qBound(10000,
@@ -282,6 +290,8 @@ void StreamingPreferences::save()
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
     settings.setValue(SER_STATIONCONNECT_AUTO_RESOLUTION, stationConnectAutoResolution);
     settings.setValue(SER_STATIONCONNECT_TOOLBAR_PINNED, stationConnectToolbarPinned);
+    settings.setValue(SER_STATIONCONNECT_VIDEO_PROFILE,
+                      static_cast<int>(stationConnectVideoProfile));
     settings.setValue(SER_VIDEOCFG, static_cast<int>(videoCodecConfig));
     settings.setValue(SER_VIDEODEC, static_cast<int>(videoDecoderSelection));
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
