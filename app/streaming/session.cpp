@@ -1264,7 +1264,7 @@ bool Session::startConnectionAsync(bool reconnecting)
     QString rtspSessionUrl;
 
     try {
-        NvHTTP http(m_Computer);
+        std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
         QString hostLayout;
         QStringList virtualModes;
         {
@@ -1277,7 +1277,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                         m_Computer->stationConnectVirtualMode2);
         }
         const auto startApp = [&]() {
-            http.startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
+            http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                           m_App.id, &m_StreamConfig,
                           m_Preferences->playAudioOnHost,
                           0,
@@ -1296,12 +1296,115 @@ bool Session::startConnectionAsync(bool reconnecting)
         try {
             startApp();
         } catch (const GfeHttpResponseException& e) {
+            const bool displayTransitionStarted =
+                    m_Computer->stationConnectAuthentication &&
+                    e.getStatusCode() == 425 &&
+                    QString::fromUtf8(e.getStatusMessage()) ==
+                        QStringLiteral("StationConnect host display transition started");
             const bool previousSessionStillActive =
                     m_Computer->stationConnectAuthentication &&
                     e.getStatusCode() == 400 &&
                     QString::fromUtf8(e.getStatusMessage()) ==
                         QStringLiteral("An app is already running on this host");
-            if (previousSessionStillActive) {
+            if (displayTransitionStarted) {
+                constexpr int RetryIntervalMs = 500;
+                constexpr int MaximumWaitMs = 45000;
+                constexpr int CancellationPollMs = 50;
+                bool started = false;
+
+                if (m_StationConnectUsername.isEmpty() ||
+                        m_StationConnectPassword.isEmpty()) {
+                    throw;
+                }
+                m_WaitingForSessionCleanup.store(true);
+                emit sessionCleanupWaitChanged(
+                            true,
+                            tr("Applying workstation display layout..."));
+                qInfo() << "StationConnect host display transition started; waiting up to"
+                        << MaximumWaitMs << "ms";
+
+                for (int elapsedMs = 0;
+                     elapsedMs < MaximumWaitMs && !started;
+                     elapsedMs += RetryIntervalMs) {
+                    for (int delayMs = 0;
+                         delayMs < RetryIntervalMs;
+                         delayMs += CancellationPollMs) {
+                        if (m_ConnectionStartCancelled.load()) break;
+                        SDL_Delay(CancellationPollMs);
+                    }
+                    if (m_ConnectionStartCancelled.load()) break;
+
+                    try {
+                        {
+                            QWriteLocker lock(&m_Computer->lock);
+                            m_Computer->sessionToken.fill(QChar('\0'));
+                            m_Computer->sessionToken.clear();
+                            m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+                            m_Computer->currentGameId = 0;
+                        }
+                        http = std::make_unique<NvHTTP>(m_Computer);
+                        const QString token = http->authenticate(
+                                    m_StationConnectUsername,
+                                    m_StationConnectPassword);
+                        const NvOutputTopology topology = http->getOutputTopology();
+                        {
+                            QWriteLocker lock(&m_Computer->lock);
+                            m_Computer->sessionToken = token;
+                            m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
+                            m_Computer->outputTopology = topology;
+                            m_Computer->selectedOutputId =
+                                    topology.selectOutput(m_Computer->selectedOutputId);
+                            m_Computer->selectedDisplayMode =
+                                    topology.selectDisplayMode(
+                                        m_Computer->selectedDisplayMode);
+                            hostLayout = topology.resolveHostLayout(
+                                        m_Computer->stationConnectHostLayout);
+                            virtualModes = topology.resolveVirtualModes(
+                                        m_Computer->stationConnectHostLayout,
+                                        m_Computer->stationConnectVirtualMode1,
+                                        m_Computer->stationConnectVirtualMode2);
+                        }
+                        if (m_ComputerManager != nullptr) {
+                            m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+                        }
+                        startApp();
+                        started = true;
+                    } catch (const GfeHttpResponseException& retryError) {
+                        if (retryError.getStatusCode() == 423) {
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            throw;
+                        }
+                        if (retryError.getStatusCode() != 425 &&
+                                retryError.getStatusCode() != 503) {
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            throw;
+                        }
+                        qInfo() << "StationConnect display transition wait attempt failed:"
+                                << retryError.toQString();
+                    } catch (const QtNetworkReplyException& retryError) {
+                        qInfo() << "StationConnect display transition worker is not ready:"
+                                << retryError.toQString();
+                    }
+                }
+
+                m_WaitingForSessionCleanup.store(false);
+                emit sessionCleanupWaitChanged(false, QString());
+                if (!started && m_ConnectionStartCancelled.load()) {
+                    qInfo() << "StationConnect connection cancelled during display transition";
+                    return false;
+                }
+                if (!started) {
+                    if (!reconnecting) {
+                        emit displayLaunchError(
+                                    tr("The workstation display layout did not become ready within 45 seconds."));
+                    }
+                    return false;
+                }
+                qInfo() << "StationConnect display transition completed; launch succeeded";
+            }
+            else if (previousSessionStillActive) {
                 constexpr int RetryIntervalMs = 500;
                 constexpr int MaximumWaitMs = 30000;
                 constexpr int CancellationPollMs = 50;
@@ -1396,7 +1499,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                     throw;
                 }
 
-                const NvOutputTopology topology = http.getOutputTopology();
+                const NvOutputTopology topology = http->getOutputTopology();
                 {
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->outputTopology = topology;

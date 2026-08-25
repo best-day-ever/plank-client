@@ -27,7 +27,7 @@ struct NvOutput
 
 struct NvOutputTopology
 {
-    static const int ProtocolVersion = 3;
+    static const int ProtocolVersion = 4;
     static const int OutputTopologyFeature = 0x1;
     static const int SelectedOutputFeature = 0x2;
     static const int UnifiedAbsoluteInputFeature = 0x4;
@@ -37,6 +37,7 @@ struct NvOutputTopology
     static const int CompositeSourceRegionsFeature = 0x40;
     static const int HostLayoutBindingFeature = 0x80;
     static const int IndependentVirtualModesFeature = 0x100;
+    static const int DynamicHostLayoutFeature = 0x200;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
                                              UnifiedAbsoluteInputFeature |
@@ -45,7 +46,8 @@ struct NvOutputTopology
                                              HostLayoutMetadataFeature |
                                              CompositeSourceRegionsFeature |
                                              HostLayoutBindingFeature |
-                                             IndependentVirtualModesFeature;
+                                             IndependentVirtualModesFeature |
+                                             DynamicHostLayoutFeature;
     static const char* SingleOutputMode;
     static const char* ScaledSpanMode;
     static const char* SeparateDisplaysMode;
