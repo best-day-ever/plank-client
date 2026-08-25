@@ -210,29 +210,26 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
         if (correction.updated || backlogCorrection.updated) {
             const int appliedCorrectionPpm =
                 correction.correctionPpm + backlogCorrection.correctionPpm;
-            const auto adjustment =
-                StationConnectAvSync::calculateAudioFrequencyAdjustment(
-                    appliedCorrectionPpm,
-                    m_SampleRate);
-            if (adjustment.ratio != m_AudioFrequencyRatio &&
+            const float frequencyRatio =
+                StationConnectAvSync::calculateAudioFrequencyRatio(
+                    appliedCorrectionPpm);
+            if (frequencyRatio != m_AudioFrequencyRatio &&
                     !SDL_SetAudioStreamFrequencyRatio(m_AudioStream,
-                                                      adjustment.ratio)) {
+                                                      frequencyRatio)) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Unable to update StationConnect SDL audio correction: %s",
                             SDL_GetError());
             }
             else {
-                m_AudioFrequencyRatio = adjustment.ratio;
+                m_AudioFrequencyRatio = frequencyRatio;
             }
             if (correction.updated &&
                     (m_RawAudioFrames / m_SampleRate) % 10 == 0) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio correction: ppm=%d catchup=%d applied=%d delta=%d distance=%d ratio=%.9f",
+                            "StationConnect A/V audio correction: ppm=%d catchup=%d applied=%d ratio=%.9f",
                             correction.correctionPpm,
                             backlogCorrection.correctionPpm,
                             appliedCorrectionPpm,
-                            adjustment.sampleDelta,
-                            adjustment.distance,
                             m_AudioFrequencyRatio);
             }
         }
