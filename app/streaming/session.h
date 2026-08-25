@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -14,6 +15,7 @@
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
 #include "video/overlaymanager.h"
+#include "videopacketlosswindow.h"
 
 class ComputerManager;
 class StationConnectToolbar;
@@ -319,6 +321,8 @@ private:
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
     std::atomic<float> m_CurrentVideoPacketLossPercent;
+    std::mutex m_VideoPacketLossSamplesLock;
+    VideoPacketLossPeakWindow m_VideoPacketLossPeakWindow;
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
     std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
     std::atomic<int> m_ConfirmedBitratePeakKbps {0};

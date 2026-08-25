@@ -261,13 +261,25 @@ void Session::clVideoBitrateApplied(
 
 void Session::clVideoPacketLossUpdate(float packetLossPercent)
 {
-    if (s_ActiveSession == nullptr) {
+    Session* session = s_ActiveSession;
+    if (session == nullptr) {
         return;
     }
 
-    s_ActiveSession->m_CurrentVideoPacketLossPercent.store(
-                qBound(0.0f, packetLossPercent, 100.0f),
-                std::memory_order_relaxed);
+    const Uint64 now = SDL_GetTicks();
+    const float currentPacketLossPercent =
+            qBound(0.0f, packetLossPercent, 100.0f);
+    float peakPacketLossPercent;
+
+    {
+        std::lock_guard<std::mutex> lock(session->m_VideoPacketLossSamplesLock);
+        peakPacketLossPercent = session->m_VideoPacketLossPeakWindow.addSample(
+                    now, currentPacketLossPercent);
+    }
+
+    // The toolbar and on-screen statistics both load this authoritative value.
+    session->m_CurrentVideoPacketLossPercent.store(
+                peakPacketLossPercent, std::memory_order_relaxed);
 }
 
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
