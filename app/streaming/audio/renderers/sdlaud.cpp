@@ -22,9 +22,7 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
       m_DeviceBufferDurationMs(0),
       m_SampleRate(0),
       m_ChannelCount(0),
-      m_EnableAvSyncCorrection(enableAvSyncCorrection &&
-                               qEnvironmentVariableIntValue(
-                                   "STATIONCONNECT_DISABLE_AV_SYNC_CORRECTION") == 0),
+      m_EnableAvSyncCorrection(enableAvSyncCorrection),
       m_RawAudioFrames(0),
       m_SubmittedAudioFrames(0),
       m_LastSubmittedAudioMediaTimeMs(-1),
@@ -34,11 +32,6 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
 #endif
 {
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
-
-    if (enableAvSyncCorrection && !m_EnableAvSyncCorrection) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect A/V audio correction disabled by diagnostic environment override");
-    }
 
 #ifdef Q_OS_LINUX
     // The qualified StationConnect Linux client talks to PipeWire directly.
