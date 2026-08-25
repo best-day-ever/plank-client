@@ -15,7 +15,7 @@ private slots:
     void boundsExtremeCorrection();
     void ignoresStaleVideoClock();
     void boundsLongRunPhaseError();
-    void calculatesNativeAudioFrequencyRatio();
+    void quantizesNativeAudioFrequencyRatio();
     void leavesSmallAudioBacklogUnchanged();
     void catchesUpBoundedAudioBacklog();
     void removesCatchUpAfterBacklogDrains();
@@ -124,25 +124,25 @@ void TestAvSyncController::boundsLongRunPhaseError()
     QVERIFY(std::abs(relativePhaseErrorMs) < 20.0);
 }
 
-void TestAvSyncController::calculatesNativeAudioFrequencyRatio()
+void TestAvSyncController::quantizesNativeAudioFrequencyRatio()
 {
-    const float unchanged =
-        StationConnectAvSync::calculateAudioFrequencyRatio(0);
-    QCOMPARE(unchanged, 1.0f);
+    const auto unchanged =
+        StationConnectAvSync::calculateAudioFrequencyAdjustment(0, 48000);
+    QCOMPARE(unchanged.sampleDelta, 0);
+    QCOMPARE(unchanged.distance, 48000);
+    QCOMPARE(unchanged.ratio, 1.0f);
 
-    const float faster =
-        StationConnectAvSync::calculateAudioFrequencyRatio(22);
-    QVERIFY(faster > 1.0f);
-    QVERIFY(std::abs(faster - 1.000022f) < 0.0000001f);
+    const auto faster =
+        StationConnectAvSync::calculateAudioFrequencyAdjustment(22, 48000);
+    QCOMPARE(faster.sampleDelta, -1);
+    QVERIFY(faster.ratio > 1.0f);
+    QVERIFY(std::abs(faster.ratio - (1.0f + 1.0f / 48000.0f)) < 0.000001f);
 
-    const float slower =
-        StationConnectAvSync::calculateAudioFrequencyRatio(-22);
-    QVERIFY(slower < 1.0f);
-    QVERIFY(std::abs(slower - 0.999978f) < 0.0000001f);
-
-    const float backlogCatchup =
-        StationConnectAvSync::calculateAudioFrequencyRatio(10000);
-    QVERIFY(std::abs(backlogCatchup - 1.01f) < 0.0000001f);
+    const auto slower =
+        StationConnectAvSync::calculateAudioFrequencyAdjustment(-22, 48000);
+    QCOMPARE(slower.sampleDelta, 1);
+    QVERIFY(slower.ratio < 1.0f);
+    QVERIFY(std::abs(slower.ratio - (1.0f - 1.0f / 48000.0f)) < 0.000001f);
 }
 
 void TestAvSyncController::leavesSmallAudioBacklogUnchanged()

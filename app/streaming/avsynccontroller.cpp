@@ -42,14 +42,21 @@ VideoClockSample readVideoClock()
     return latestVideoClock;
 }
 
-float calculateAudioFrequencyRatio(int correctionPpm)
+AudioFrequencyAdjustment calculateAudioFrequencyAdjustment(
+        int correctionPpm,
+        int sampleRate)
 {
-    // SDL accepts a continuous floating-point playback ratio. Do not quantize
-    // the controller output to whole samples over a one-second interval as the
-    // former swresample path required: at 48 kHz that would collapse every
-    // correction below roughly 10 ppm to 1.0 and force the rest into coarse
-    // 20.8 ppm steps.
-    return 1.0f + static_cast<float>(correctionPpm) / 1000000.0f;
+    AudioFrequencyAdjustment adjustment;
+    if (sampleRate <= 0) {
+        return adjustment;
+    }
+
+    adjustment.distance = sampleRate;
+    adjustment.sampleDelta = static_cast<int>(std::llround(
+        -static_cast<double>(correctionPpm) * sampleRate / 1000000.0));
+    adjustment.ratio = 1.0f -
+        static_cast<float>(adjustment.sampleDelta) / sampleRate;
+    return adjustment;
 }
 
 void AudioRateController::reset()
