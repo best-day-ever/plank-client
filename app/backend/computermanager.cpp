@@ -786,10 +786,13 @@ void ComputerManager::stopPollingAsync()
     }
 }
 
-void ComputerManager::addNewHostManually(QString address, QString nickname, bool scaledSpan)
+void ComputerManager::addNewHostManually(QString address, QString nickname,
+                                         bool scaledSpan, int videoProfile)
 {
     NvAddress manualAddress;
-    if (parseManualAddress(address, manualAddress)) {
+    if (parseManualAddress(address, manualAddress) &&
+            videoProfile >= StreamingPreferences::SCVP_H264_10BIT_444 &&
+            videoProfile <= StreamingPreferences::SCVP_H264_10BIT_422) {
         if (nickname.trimmed().isEmpty()) {
             nickname = manualAddress.address();
         }
@@ -806,7 +809,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname, bool
             }
 
             if (bookmark == nullptr) {
-                bookmark = new NvComputer(manualAddress, nickname.trimmed());
+                bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile);
                 bookmark->selectedDisplayMode = scaledSpan ?
                             NvOutputTopology::ScaledSpanMode :
                             NvOutputTopology::SingleOutputMode;
@@ -820,6 +823,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname, bool
             bookmark->selectedDisplayMode = scaledSpan ?
                         NvOutputTopology::ScaledSpanMode :
                         NvOutputTopology::SingleOutputMode;
+            bookmark->stationConnectVideoProfile = videoProfile;
             if (!scaledSpan) {
                 bookmark->selectedOutputId.clear();
             }
@@ -850,11 +854,14 @@ void ComputerManager::addNewHostManually(QString address, QString nickname, bool
 
 bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString nickname, QString displayMode,
-                                         QString selectedOutputId)
+                                         QString selectedOutputId,
+                                         int videoProfile)
 {
     NvAddress manualAddress;
     nickname = nickname.trimmed();
     if (computer == nullptr || nickname.isEmpty() ||
+            videoProfile < StreamingPreferences::SCVP_H264_10BIT_444 ||
+            videoProfile > StreamingPreferences::SCVP_H264_10BIT_422 ||
             !parseManualAddress(address, manualAddress)) {
         return false;
     }
@@ -889,7 +896,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
             }
 
             computer->updateManualBookmark(manualAddress, nickname, displayMode,
-                                           selectedOutputId);
+                                           selectedOutputId, videoProfile);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -907,7 +914,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     }
     else {
         computer->updateManualBookmark(manualAddress, nickname, displayMode,
-                                       selectedOutputId);
+                                       selectedOutputId, videoProfile);
     }
 
     handleComputerStateChanged(computer);

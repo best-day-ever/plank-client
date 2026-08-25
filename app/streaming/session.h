@@ -281,6 +281,7 @@ private:
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
+    StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
     ComputerManager* m_ComputerManager;
     NvApp m_App;
     SDL_Window* m_Window;

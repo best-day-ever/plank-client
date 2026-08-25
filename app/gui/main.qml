@@ -423,13 +423,16 @@ ApplicationWindow {
             nicknameText.clear()
             nicknameText.manuallyEdited = false
             addDisplayChoice.currentIndex = 0
+            addEncodingProfile.currentIndex = 3
         }
 
         onAccepted: {
             if (addressText.text && nicknameText.text) {
                 ComputerManager.addNewHostManually(addressText.text.trim(),
                                                    nicknameText.text.trim(),
-                                                   addDisplayChoice.currentIndex === 0)
+                                                   addDisplayChoice.currentIndex === 0,
+                                                   addEncodingProfileModel.get(
+                                                       addEncodingProfile.currentIndex).val)
             }
         }
 
@@ -478,6 +481,37 @@ ApplicationWindow {
                 Keys.onEnterPressed: {
                     if (addressText.text && text) {
                         addPcDialog.accept()
+                    }
+                }
+            }
+
+            Label {
+                text: qsTr("Encoding profile")
+                font.bold: true
+            }
+
+            ComboBox {
+                id: addEncodingProfile
+                Layout.fillWidth: true
+                textRole: "text"
+                currentIndex: 3
+                model: ListModel {
+                    id: addEncodingProfileModel
+                    ListElement {
+                        text: qsTr("H.264 8-bit 4:2:2")
+                        val: StreamingPreferences.SCVP_H264_8BIT_422
+                    }
+                    ListElement {
+                        text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
+                        val: StreamingPreferences.SCVP_H264_8BIT_444
+                    }
+                    ListElement {
+                        text: qsTr("H.264 10-bit 4:2:2")
+                        val: StreamingPreferences.SCVP_H264_10BIT_422
+                    }
+                    ListElement {
+                        text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                        val: StreamingPreferences.SCVP_H264_10BIT_444
                     }
                 }
             }

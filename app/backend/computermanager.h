@@ -227,10 +227,11 @@ public:
     Q_INVOKABLE void stopPollingAsync();
 
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
-                                        bool scaledSpan = true);
+                                        bool scaledSpan = true, int videoProfile = 0);
 
     bool editManualBookmark(NvComputer* computer, QString address, QString nickname,
-                            QString displayMode, QString selectedOutputId);
+                            QString displayMode, QString selectedOutputId,
+                            int videoProfile);
 
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 

@@ -557,6 +557,10 @@ Session::Session(NvComputer* computer, NvApp& app,
     : m_Preferences(preferences ? preferences : StreamingPreferences::get()),
       m_IsFullScreen(m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED || !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer),
+      m_StationConnectVideoProfile(static_cast<StreamingPreferences::StationConnectVideoProfile>(
+              qBound(static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
+                     computer->stationConnectVideoProfile,
+                     static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_422)))),
       m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
@@ -601,9 +605,9 @@ Session::Session(NvComputer* computer, NvApp& app,
         // slider value and initialize() copies it into the stream configuration.
         m_Preferences->fps = 60;
         m_Preferences->identityGbrBitDepth =
-                (m_Preferences->stationConnectVideoProfile ==
+                (m_StationConnectVideoProfile ==
                      StreamingPreferences::SCVP_H264_8BIT_422 ||
-                 m_Preferences->stationConnectVideoProfile ==
+                 m_StationConnectVideoProfile ==
                      StreamingPreferences::SCVP_H264_8BIT_444) ? 8 : 10;
         m_Preferences->videoCodecConfig = StreamingPreferences::VCC_FORCE_H264;
         // Intel's hardware path cannot decode the qualified H.264 High 10
@@ -769,7 +773,7 @@ bool Session::initialize()
     // StationConnect advertises exactly the selected profile. Do not silently
     // substitute another bit depth or chroma format when probing fails.
     int selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_444;
-    switch (m_Preferences->stationConnectVideoProfile) {
+    switch (m_StationConnectVideoProfile) {
     case StreamingPreferences::SCVP_H264_8BIT_422:
         selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_422;
         break;

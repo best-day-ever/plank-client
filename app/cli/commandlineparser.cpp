@@ -316,7 +316,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
-    parser.addChoiceOption("identity-bit-depth", "identity RGB codec bit depth", {"8", "10"});
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
     parser.addChoiceOption("video-codec", "video codec", m_VideoCodecMap.keys());
     parser.addChoiceOption("video-decoder", "video decoder", m_VideoDecoderMap.keys());
@@ -414,10 +413,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     // Resolve --performance-overlay and --no-performance-overlay options
     preferences->showPerformanceOverlay = parser.getToggleOptionValue("performance-overlay", preferences->showPerformanceOverlay);
 
-    if (parser.isSet("identity-bit-depth")) {
-        preferences->identityGbrBitDepth = parser.getChoiceOptionValue("identity-bit-depth").toInt();
-    }
-    
     // Resolve --capture-system-keys option
     if (parser.isSet("capture-system-keys")) {
         preferences->captureSysKeysMode = mapValue(m_CaptureSysKeysModeMap, parser.getChoiceOptionValue("capture-system-keys"));
