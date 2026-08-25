@@ -1426,7 +1426,6 @@ bool PlVkRenderer::isPixelFormatSupported(int videoFormat, AVPixelFormat pixelFo
             else {
                 switch (pixelFormat) {
                 case AV_PIX_FMT_NV16:
-                case AV_PIX_FMT_NV61:
                 case AV_PIX_FMT_YUV422P:
                 case AV_PIX_FMT_YUVJ422P:
                     return true;
