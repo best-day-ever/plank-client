@@ -281,6 +281,10 @@ void StationConnectToolbar::notifyWindowChanged()
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setGeometry(toolbarLeft(), 0,
                                       m_Width, ToolbarHeight);
+        // Renderer recreation can replace SDL's parent wl_surface. The new
+        // subsurface starts unmapped, so restore the model's pinned/visible
+        // state after its retained image and geometry have been published.
+        m_WaylandToolbar->setVisible(m_Visible);
     }
 
     if (oldLogicalWidth != m_WindowWidth ||
