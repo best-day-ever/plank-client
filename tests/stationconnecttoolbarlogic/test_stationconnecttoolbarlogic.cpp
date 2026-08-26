@@ -16,7 +16,8 @@ private slots:
     void preservesHorizontalPositionAcrossScaleChanges();
     void keepsNativeChildCoordinatesIndependentOfDisplayScale_data();
     void keepsNativeChildCoordinatesIndependentOfDisplayScale();
-    void derivesNativeDragFromFixedPressOrigin();
+    void isolatesVisibleNativeChildFromParentMotion();
+    void keepsNativeButtonSequenceOutOfSdlPath();
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
@@ -99,14 +100,26 @@ void TestStationConnectToolbarLogic::keepsNativeChildCoordinatesIndependentOfDis
                  toolbarLeft, localPointerX), 2982);
 }
 
-void TestStationConnectToolbarLogic::derivesNativeDragFromFixedPressOrigin()
+void TestStationConnectToolbarLogic::isolatesVisibleNativeChildFromParentMotion()
 {
-    QCOMPARE(StationConnectToolbarLogic::nativeDragFinalLeft(
-                 1200, 24, 224, 3840, 607), 1400);
-    QCOMPARE(StationConnectToolbarLogic::nativeDragFinalLeft(
-                 1200, 24, -2000, 3840, 607), 0);
-    QCOMPARE(StationConnectToolbarLogic::nativeDragFinalLeft(
-                 1200, 24, 4000, 3840, 607), 3233);
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                false, true, false));
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, false, false));
+    QVERIFY(StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, true, false));
+}
+
+void TestStationConnectToolbarLogic::keepsNativeButtonSequenceOutOfSdlPath()
+{
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                false, true, true));
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, false, false));
+    QVERIFY(StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, true, false));
+    QVERIFY(StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, false, true));
 }
 
 void TestStationConnectToolbarLogic::keepsRemotePressReleaseTogether()

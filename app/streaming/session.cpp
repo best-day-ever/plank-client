@@ -2557,6 +2557,8 @@ void Session::execInternal()
             m_InputHandler->handleMouseButtonEvent(&event.button);
             break;
         case SDL_EVENT_MOUSE_MOTION:
+        {
+            bool toolbarConsumedMotion = false;
             if (m_StationConnectToolbar) {
                 // The ordinary input path batches queued motion for efficient
                 // transport. Aggregate it here when the toolbar is present so
@@ -2580,11 +2582,15 @@ void Session::execInternal()
                 // coordinates, but motion always remains remote-desktop input.
                 // Only toolbar button and wheel events have exclusive local
                 // ownership.
-                m_StationConnectToolbar->observeMouseMotion(event.motion);
+                toolbarConsumedMotion =
+                        m_StationConnectToolbar->observeMouseMotion(event.motion);
             }
-            m_InputHandler->handleMouseMotionEvent(
-                        &event.motion, !m_StationConnectToolbar);
+            if (!toolbarConsumedMotion) {
+                m_InputHandler->handleMouseMotionEvent(
+                            &event.motion, !m_StationConnectToolbar);
+            }
             break;
+        }
         case SDL_EVENT_MOUSE_WHEEL:
             if (m_StationConnectToolbar &&
                     m_StationConnectToolbar->handleMouseWheel(event.wheel)) {
