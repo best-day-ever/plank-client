@@ -16,7 +16,7 @@
 
 namespace {
 constexpr int ToolbarPreferredWidth = 539;
-constexpr int ToolbarHeight = 43;
+constexpr int ToolbarHeight = 39;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
@@ -263,17 +263,9 @@ bool StationConnectToolbar::createToolbarWindow()
     const SDL_WindowFlags flags = SDL_WINDOW_POPUP_MENU |
             SDL_WINDOW_NOT_FOCUSABLE |
             SDL_WINDOW_HIGH_PIXEL_DENSITY |
-            SDL_WINDOW_TRANSPARENT |
             SDL_WINDOW_HIDDEN;
     m_ToolbarWindow = SDL_CreatePopupWindow(
                 m_Window, toolbarLeft(), 0, m_Width, ToolbarHeight, flags);
-    if (m_ToolbarWindow == nullptr) {
-        // Transparency is cosmetic. Retain the native input-window design on
-        // compositors that cannot provide an alpha-capable popup surface.
-        m_ToolbarWindow = SDL_CreatePopupWindow(
-                    m_Window, toolbarLeft(), 0, m_Width, ToolbarHeight,
-                    flags & ~SDL_WINDOW_TRANSPARENT);
-    }
     if (m_ToolbarWindow == nullptr) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to create native StationConnect toolbar window: %s",
@@ -719,18 +711,24 @@ void StationConnectToolbar::redraw()
 
     QImage image(static_cast<uchar*>(surface->pixels), surface->w, surface->h,
                  surface->pitch, QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
+    // The remote host cursor is already composited into the video frame. The
+    // local Wayland cursor becomes visible when this popup owns the pointer,
+    // so the toolbar must be opaque or the frozen remote cursor shows through
+    // as a distracting second pointer. Painting every row also ensures that
+    // the native window never presents uninitialized pixels below the UI.
+    image.fill(QColor(22, 27, 34));
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.scale(m_PixelDensity, m_PixelDensity);
     // Paint the background through the first pixel row so the toolbar meets
     // the physical top edge without an antialiased one-pixel gap.
-    painter.fillRect(QRect(0, 0, m_Width, ToolbarHeight - 4),
-                     QColor(22, 27, 34, 238));
+    painter.fillRect(QRect(0, 0, m_Width, ToolbarHeight),
+                     QColor(22, 27, 34));
     painter.setPen(QPen(QColor(255, 255, 255, 42), 1));
     painter.setBrush(Qt::NoBrush);
-    painter.drawRoundedRect(QRectF(0.5, 0.5, m_Width - 1.0, ToolbarHeight - 5.0), 0, 0);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, m_Width - 1.0,
+                                   ToolbarHeight - 1.0), 0, 0);
 
     QFont labelFont;
     labelFont.setPixelSize(10);
@@ -1024,7 +1022,7 @@ bool StationConnectToolbar::pinContains(int x, int y) const
 bool StationConnectToolbar::handleContains(int x, int y) const
 {
     return x >= toolbarLeft() && x <= toolbarLeft() + 22 &&
-           y >= 0 && y <= ToolbarHeight - 5;
+           y >= 0 && y < ToolbarHeight;
 }
 
 bool StationConnectToolbar::minimizeContains(int x, int y) const
