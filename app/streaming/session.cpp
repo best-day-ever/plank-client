@@ -2555,13 +2555,15 @@ DispatchDeferredCleanup:
     // Raise any keys that are still down
     m_InputHandler->raiseAllKeys();
 
+    // The toolbar owns a reference to the input handler, so destroy it before
+    // releasing the handler itself.
+    m_StationConnectToolbar.reset();
+
     // Destroy the input handler now. This must be destroyed
     // before allowing the UI to continue execution.
     delete m_InputHandler;
     m_InputHandler = nullptr;
     clearStationConnectReconnectCredentials();
-
-    m_StationConnectToolbar.reset();
 
     // Destroy the decoder, since this must be done on the main thread
     // NB: This must happen before LiStopConnection() for pull-based

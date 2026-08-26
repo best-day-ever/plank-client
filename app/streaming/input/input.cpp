@@ -22,6 +22,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false),
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
+      m_LocalToolbarAvailable(false),
       m_FakeMouseCaptureActive(false),
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
@@ -240,6 +241,16 @@ void SdlInputHandler::setToolbarInteractionActive(bool active)
     // receiver cursor only while receiver UI owns input, then restore the
     // user's captured-cursor state when routing resumes to the host.
     setCursorVisible(active ? true : m_MouseCursorCapturedVisibilityState);
+}
+
+void SdlInputHandler::setLocalToolbarAvailable(bool available)
+{
+    if (m_LocalToolbarAvailable == available) {
+        return;
+    }
+
+    m_LocalToolbarAvailable = available;
+    updatePointerRegionLock();
 }
 
 void SdlInputHandler::updateKeyboardGrabState()

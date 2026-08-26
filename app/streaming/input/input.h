@@ -50,6 +50,8 @@ public:
 
     void setToolbarInteractionActive(bool active);
 
+    void setLocalToolbarAvailable(bool available);
+
     bool isSystemKeyCaptureActive();
 
     void setCaptureActive(bool active);
@@ -82,6 +84,7 @@ private:
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
+    bool m_LocalToolbarAvailable;
 
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;

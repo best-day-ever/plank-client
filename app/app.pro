@@ -221,6 +221,7 @@ HEADERS += \
     settings/streamingpreferences.h \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
+    streaming/input/stationconnectpointerlogic.h \
     streaming/session.h \
     streaming/stationconnectpacketsize.h \
     streaming/stationconnectdisplaymode.h \

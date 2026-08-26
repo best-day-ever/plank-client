@@ -108,6 +108,7 @@ StationConnectToolbar::StationConnectToolbar(
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
     }
+    m_InputHandler.setLocalToolbarAvailable(true);
     notifyWindowChanged();
     redraw();
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
@@ -120,6 +121,7 @@ StationConnectToolbar::StationConnectToolbar(
 StationConnectToolbar::~StationConnectToolbar()
 {
     endLocalPointerInteraction();
+    m_InputHandler.setLocalToolbarAvailable(false);
     m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
 }
 
