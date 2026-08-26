@@ -885,7 +885,6 @@ Flickable {
 
         GroupBox {
             id: networkSettingsGroupBox
-            parent: settingsColumn1
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             padding: 12
             title: "<font color=\"skyblue\">" + qsTr("Network Settings") + "</font>"
