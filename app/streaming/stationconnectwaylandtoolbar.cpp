@@ -1,4 +1,5 @@
 #include "stationconnectwaylandtoolbar.h"
+#include "stationconnecttoolbarlogic.h"
 
 #ifdef HAS_WAYLAND
 
@@ -267,7 +268,15 @@ private:
                              wl_surface* surface, wl_fixed_t x, wl_fixed_t y)
     {
         auto* self = static_cast<Impl*>(data);
+        self->m_PointerFocusSurface = surface;
         if (surface != self->m_Surface) {
+            self->m_PointerInside = false;
+            if (surface == self->m_ParentSurface &&
+                    self->m_PressedButtonCount != 0 &&
+                    self->m_Callbacks.motion) {
+                self->m_Callbacks.motion(wl_fixed_to_int(x),
+                                         wl_fixed_to_int(y));
+            }
             return;
         }
         self->m_PointerInside = true;
@@ -276,7 +285,11 @@ private:
         wl_pointer_set_cursor(pointer, serial, self->m_CursorSurface, 1, 1);
         wl_display_flush(self->m_Display);
         if (self->m_Callbacks.enter) {
-            self->m_Callbacks.enter(self->m_PointerX, self->m_PointerY);
+            self->m_Callbacks.enter(
+                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
+                            true, self->m_X, self->m_PointerX),
+                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
+                            true, self->m_Y, self->m_PointerY));
         }
     }
 
@@ -284,6 +297,9 @@ private:
                              wl_surface* surface)
     {
         auto* self = static_cast<Impl*>(data);
+        if (surface == self->m_PointerFocusSurface) {
+            self->m_PointerFocusSurface = nullptr;
+        }
         if (surface != self->m_Surface) {
             return;
         }
@@ -297,13 +313,22 @@ private:
                               wl_fixed_t x, wl_fixed_t y)
     {
         auto* self = static_cast<Impl*>(data);
-        if (!self->m_PointerInside && self->m_PressedButtonCount == 0) {
+        const bool childCoordinates =
+                self->m_PointerFocusSurface == self->m_Surface;
+        const bool parentCoordinates =
+                self->m_PointerFocusSurface == self->m_ParentSurface;
+        if (!childCoordinates &&
+                !(parentCoordinates && self->m_PressedButtonCount != 0)) {
             return;
         }
         self->m_PointerX = wl_fixed_to_int(x);
         self->m_PointerY = wl_fixed_to_int(y);
         if (self->m_Callbacks.motion) {
-            self->m_Callbacks.motion(self->m_PointerX, self->m_PointerY);
+            self->m_Callbacks.motion(
+                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
+                            childCoordinates, self->m_X, self->m_PointerX),
+                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
+                            childCoordinates, self->m_Y, self->m_PointerY));
         }
     }
 
@@ -445,6 +470,7 @@ private:
     wl_shm* m_Shm = nullptr;
     wl_seat* m_Seat = nullptr;
     wl_pointer* m_Pointer = nullptr;
+    wl_surface* m_PointerFocusSurface = nullptr;
     wl_surface* m_Surface = nullptr;
     wl_subsurface* m_Subsurface = nullptr;
     wl_surface* m_CursorSurface = nullptr;

@@ -14,8 +14,7 @@ private slots:
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
     void preservesHorizontalPositionAcrossScaleChanges();
-    void keepsNativeChildCoordinatesIndependentOfDisplayScale_data();
-    void keepsNativeChildCoordinatesIndependentOfDisplayScale();
+    void normalizesNativeSurfaceCoordinateChanges();
     void isolatesVisibleNativeChildFromParentMotion();
     void keepsNativeButtonSequenceOutOfSdlPath();
     void keepsRemotePressReleaseTogether();
@@ -81,23 +80,12 @@ void TestStationConnectToolbarLogic::preservesHorizontalPositionAcrossScaleChang
                      newLeft, newWindowWidth, toolbarWidth) - position) < 0.001f);
 }
 
-void TestStationConnectToolbarLogic::keepsNativeChildCoordinatesIndependentOfDisplayScale_data()
+void TestStationConnectToolbarLogic::normalizesNativeSurfaceCoordinateChanges()
 {
-    QTest::addColumn<float>("displayScale");
-    QTest::newRow("100-percent") << 1.0f;
-    QTest::newRow("125-percent") << 1.25f;
-    QTest::newRow("200-percent") << 2.0f;
-}
-
-void TestStationConnectToolbarLogic::keepsNativeChildCoordinatesIndependentOfDisplayScale()
-{
-    QFETCH(float, displayScale);
-    Q_UNUSED(displayScale);
-
-    constexpr int toolbarLeft = 2671;
-    constexpr int localPointerX = 311;
-    QCOMPARE(StationConnectToolbarLogic::nativePointerParentCoordinate(
-                 toolbarLeft, localPointerX), 2982);
+    QCOMPARE(StationConnectToolbarLogic::normalizeNativePointerCoordinate(
+                 true, 1611, 14), 1625);
+    QCOMPARE(StationConnectToolbarLogic::normalizeNativePointerCoordinate(
+                 false, 1611, 1624), 1624);
 }
 
 void TestStationConnectToolbarLogic::isolatesVisibleNativeChildFromParentMotion()

@@ -883,11 +883,10 @@ void StationConnectToolbar::redraw()
     }
 }
 
-void StationConnectToolbar::nativePointerEnter(int localX, int localY)
+void StationConnectToolbar::nativePointerEnter(int parentX, int parentY)
 {
-    m_PointerX = StationConnectToolbarLogic::nativePointerParentCoordinate(
-                toolbarLeft(), localX);
-    m_PointerY = localY;
+    m_PointerX = parentX;
+    m_PointerY = parentY;
     m_PointerInside = true;
     m_HideDeadline = 0;
     beginLocalPointerInteraction();
@@ -905,21 +904,18 @@ void StationConnectToolbar::nativePointerLeave()
     redraw();
 }
 
-void StationConnectToolbar::nativePointerMotion(int localX, int localY)
+void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
 {
     const Uint64 now = SDL_GetTicks();
-    m_PointerX = StationConnectToolbarLogic::nativePointerParentCoordinate(
-                toolbarLeft(), localX);
-    m_PointerY = localY;
+    m_PointerX = parentX;
+    m_PointerY = parentY;
     m_PointerInside = true;
     m_HideDeadline = 0;
     forwardNativePointerPosition();
 
     if (m_DraggingToolbar) {
-        // The child-local coordinate plus the child's current parent origin is
-        // the pointer's parent-relative position. Re-evaluate it after every
-        // compositor motion event so the toolbar follows live without any
-        // screen, video, or pixel-density transform.
+        // The Wayland boundary normalizes child- and parent-surface events to
+        // parent-relative coordinates before they reach the toolbar.
         const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
                                    std::max(0, m_WindowWidth - m_Width));
         if (newLeft != m_ToolbarLeft) {

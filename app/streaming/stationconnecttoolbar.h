@@ -62,9 +62,9 @@ private:
     void redraw();
     void updateBitrateFromPointer(int x, Uint64 now, bool forceSend);
     void queueBitrateRequest(Uint64 now, bool forceSend);
-    void nativePointerEnter(int localX, int localY);
+    void nativePointerEnter(int parentX, int parentY);
     void nativePointerLeave();
-    void nativePointerMotion(int localX, int localY);
+    void nativePointerMotion(int parentX, int parentY);
     void nativePointerButton(uint32_t button, bool down);
     void nativePointerWheel(int verticalSteps);
     void forwardNativePointerPosition();
