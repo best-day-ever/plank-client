@@ -45,6 +45,7 @@ struct NvOutputTopology
     static const int HostLayoutBindingFeature = 0x80;
     static const int IndependentVirtualModesFeature = 0x100;
     static const int DynamicHostLayoutFeature = 0x200;
+    static const int MaximumVirtualCanvasWidth = 5120;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
                                              UnifiedAbsoluteInputFeature |

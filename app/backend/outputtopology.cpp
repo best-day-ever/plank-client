@@ -68,8 +68,11 @@ QSize NvOutputTopology::virtualCanvasSize(const QString& hostLayout,
     if (!second.isValid()) {
         return QSize();
     }
-    return QSize(first.width() + second.width(),
-                 qMax(first.height(), second.height()));
+    const int width = first.width() + second.width();
+    if (width > MaximumVirtualCanvasWidth) {
+        return QSize();
+    }
+    return QSize(width, qMax(first.height(), second.height()));
 }
 
 bool NvOutputTopology::fromJson(const QJsonObject& object,

@@ -116,6 +116,13 @@ void TestOutputTopology::acceptsTallCinemaModes()
                  QStringLiteral("dual-horizontal"),
                  {QStringLiteral("3840x2160"), QStringLiteral("1280x2160")}),
              QSize(5120, 2160));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"),
+                 {QStringLiteral("4096x2160"), QStringLiteral("1024x2160")}),
+             QSize(5120, 2160));
+    QVERIFY(!NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"),
+                 {QStringLiteral("4096x2160"), QStringLiteral("1280x2160")}).isValid());
     QVERIFY(!NvOutputTopology::virtualCanvasSize(
                  QStringLiteral("dual-horizontal"),
                  {QStringLiteral("3840x2160"), QStringLiteral("5120x2160")}).isValid());
