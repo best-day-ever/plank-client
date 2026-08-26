@@ -67,6 +67,7 @@ private:
     void nativePointerMotion(int localX, int localY);
     void nativePointerButton(uint32_t button, bool down);
     void nativePointerWheel(int verticalSteps);
+    void forwardNativePointerPosition();
     bool contains(int x, int y) const;
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
@@ -101,6 +102,8 @@ private:
     int m_Width;
     int m_ToolbarLeft;
     int m_ToolbarDragOffsetX;
+    int m_ToolbarDragStartLeft;
+    int m_PendingToolbarLeft;
     int m_PointerX;
     int m_PointerY;
     Control m_PressedControl;

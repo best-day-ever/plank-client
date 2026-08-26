@@ -89,6 +89,8 @@ StationConnectToolbar::StationConnectToolbar(
       m_Width(ToolbarPreferredWidth),
       m_ToolbarLeft(-1),
       m_ToolbarDragOffsetX(0),
+      m_ToolbarDragStartLeft(0),
+      m_PendingToolbarLeft(0),
       m_PointerX(0),
       m_PointerY(0),
       m_PressedControl(Control::None),
@@ -440,6 +442,8 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         if (m_PressedControl == Control::Handle) {
             m_DraggingToolbar = true;
             m_ToolbarDragOffsetX = pointerX - toolbarLeft();
+            m_ToolbarDragStartLeft = toolbarLeft();
+            m_PendingToolbarLeft = toolbarLeft();
             redraw();
         } else if (m_PressedControl == Control::Slider &&
                    m_BitrateSupported) {
@@ -455,6 +459,11 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
 
     if (m_DraggingToolbar) {
         m_DraggingToolbar = false;
+        if (m_WaylandToolbar && m_PendingToolbarLeft != m_ToolbarLeft) {
+            m_ToolbarLeft = m_PendingToolbarLeft;
+            m_WaylandToolbar->setGeometry(m_ToolbarLeft, 0,
+                                          m_Width, ToolbarHeight);
+        }
         redraw();
     }
     if (m_DraggingSlider) {
@@ -855,6 +864,7 @@ void StationConnectToolbar::nativePointerEnter(int localX, int localY)
     m_PointerInside = true;
     m_HideDeadline = 0;
     beginLocalPointerInteraction();
+    forwardNativePointerPosition();
     redraw();
 }
 
@@ -876,24 +886,37 @@ void StationConnectToolbar::nativePointerMotion(int localX, int localY)
     m_PointerY = localY;
     m_PointerInside = true;
     m_HideDeadline = 0;
+    forwardNativePointerPosition();
 
     if (m_DraggingToolbar) {
-        const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
-                                   std::max(0, m_WindowWidth - m_Width));
-        if (newLeft != m_ToolbarLeft) {
-            m_ToolbarLeft = newLeft;
-            m_WaylandToolbar->setGeometry(m_ToolbarLeft, 0,
-                                          m_Width, ToolbarHeight);
-            if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
-                redraw();
-                m_LastToolbarMoveDrawTime = now;
-            }
-        }
+        // Keep the child stationary while Wayland's implicit button grab is
+        // active. Its local coordinate can then be compared directly with the
+        // press-local coordinate. Apply the one final surface move on release.
+        m_PendingToolbarLeft =
+                StationConnectToolbarLogic::nativeDragFinalLeft(
+                    m_ToolbarDragStartLeft,
+                    m_ToolbarDragOffsetX,
+                    localX,
+                    m_WindowWidth,
+                    m_Width);
     } else if (m_DraggingSlider) {
         updateBitrateFromPointer(m_PointerX, now, false);
     } else {
         redraw();
     }
+}
+
+void StationConnectToolbar::forwardNativePointerPosition()
+{
+    // The native child receives pointer motion instead of SDL's parent
+    // surface while the pointer is over the toolbar. Forward the identical
+    // parent-relative position so the host cursor remains directly beneath
+    // the opaque toolbar rather than appearing as a second, stale cursor.
+    SDL_MouseMotionEvent event{};
+    event.timestamp = SDL_GetTicks();
+    event.x = static_cast<float>(m_PointerX);
+    event.y = static_cast<float>(m_PointerY);
+    m_InputHandler.handleMouseMotionEvent(&event, false);
 }
 
 void StationConnectToolbar::nativePointerButton(uint32_t button, bool down)

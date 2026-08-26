@@ -16,6 +16,7 @@ private slots:
     void preservesHorizontalPositionAcrossScaleChanges();
     void keepsNativeChildCoordinatesIndependentOfDisplayScale_data();
     void keepsNativeChildCoordinatesIndependentOfDisplayScale();
+    void derivesNativeDragFromFixedPressOrigin();
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
@@ -96,6 +97,16 @@ void TestStationConnectToolbarLogic::keepsNativeChildCoordinatesIndependentOfDis
     constexpr int localPointerX = 311;
     QCOMPARE(StationConnectToolbarLogic::nativePointerParentCoordinate(
                  toolbarLeft, localPointerX), 2982);
+}
+
+void TestStationConnectToolbarLogic::derivesNativeDragFromFixedPressOrigin()
+{
+    QCOMPARE(StationConnectToolbarLogic::nativeDragFinalLeft(
+                 1200, 24, 224, 3840, 607), 1400);
+    QCOMPARE(StationConnectToolbarLogic::nativeDragFinalLeft(
+                 1200, 24, -2000, 3840, 607), 0);
+    QCOMPARE(StationConnectToolbarLogic::nativeDragFinalLeft(
+                 1200, 24, 4000, 3840, 607), 3233);
 }
 
 void TestStationConnectToolbarLogic::keepsRemotePressReleaseTogether()

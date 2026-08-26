@@ -67,6 +67,22 @@ inline int nativePointerParentCoordinate(int childOrigin, int localCoordinate)
     return childOrigin + localCoordinate;
 }
 
+// Wayland intentionally does not expose a root-window pointer coordinate to a
+// child surface. Keep the child fixed for the duration of the implicit button
+// grab and derive the final parent-relative origin from the press-local and
+// release-local coordinates. Moving the child while using its changing local
+// coordinates creates a feedback loop and can clamp the toolbar to an edge.
+inline int nativeDragFinalLeft(int startLeft,
+                               int pressLocalX,
+                               int currentLocalX,
+                               int logicalWindowWidth,
+                               int logicalToolbarWidth)
+{
+    return std::clamp(startLeft + currentLocalX - pressLocalX,
+                      0,
+                      std::max(0, logicalWindowWidth - logicalToolbarWidth));
+}
+
 class ButtonRouter
 {
 public:
