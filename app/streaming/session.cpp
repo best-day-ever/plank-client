@@ -2246,7 +2246,22 @@ void Session::execInternal()
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
                         m_CurrentVideoPacketLossPercent.load(
                             std::memory_order_relaxed));
-            m_StationConnectToolbar->update(SDL_GetTicks());
+            const auto action = m_StationConnectToolbar->update(SDL_GetTicks());
+            if (action == StationConnectToolbar::Action::Disconnect) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect toolbar disconnect requested");
+                goto DispatchDeferredCleanup;
+            }
+            if (action == StationConnectToolbar::Action::ToggleFullscreen) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect toolbar fullscreen toggle requested");
+                toggleFullscreen();
+                m_StationConnectToolbar->notifyWindowChanged();
+            } else if (action == StationConnectToolbar::Action::Minimize) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect toolbar minimize requested");
+                SDL_MinimizeWindow(m_Window);
+            }
         }
         const int eventWaitTimeout = m_StationConnectToolbar ?
                     m_StationConnectToolbar->eventWaitTimeout() : 1000;

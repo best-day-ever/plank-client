@@ -192,6 +192,7 @@ SOURCES += \
     streaming/avsynccontroller.cpp \
     streaming/stationconnectdisplaymode.cpp \
     streaming/stationconnecttoolbar.cpp \
+    streaming/stationconnectwaylandtoolbar.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
@@ -442,7 +443,9 @@ wayland {
 
     DEFINES += HAS_WAYLAND
     SOURCES += streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.cpp
-    HEADERS += streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.h
+    HEADERS += \
+        streaming/stationconnectwaylandtoolbar.h \
+        streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.h
 }
 
 RESOURCES += \

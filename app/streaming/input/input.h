@@ -85,7 +85,6 @@ private:
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
     bool m_LocalToolbarAvailable;
-    bool m_ToolbarInteractionActive;
 
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;

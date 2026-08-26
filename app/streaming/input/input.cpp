@@ -23,7 +23,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
       m_LocalToolbarAvailable(false),
-      m_ToolbarInteractionActive(false),
       m_FakeMouseCaptureActive(false),
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
@@ -238,13 +237,9 @@ bool SdlInputHandler::isCaptureActive()
 
 void SdlInputHandler::setToolbarInteractionActive(bool active)
 {
-    // Keep the Wayland compositor cursor hidden while the local toolbar owns
-    // interaction. The toolbar paints a receiver-side pointer at the exact SDL
-    // coordinate used for hit testing, avoiding a second independently timed
-    // cursor alongside the host cursor already present in the video frame.
-    // Pointer capture and absolute host input remain unchanged.
-    m_ToolbarInteractionActive = active;
-    setCursorVisible(active ? false :
+    // The fallback toolbar is drawn inside the streaming window. Its local
+    // interaction exposes the compositor cursor without changing capture.
+    setCursorVisible(active ? true :
                      (!m_MouseWasInVideoRegion ||
                       m_MouseCursorCapturedVisibilityState));
 }

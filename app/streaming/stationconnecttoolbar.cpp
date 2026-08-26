@@ -1,4 +1,5 @@
 #include "stationconnecttoolbar.h"
+#include "stationconnectwaylandtoolbar.h"
 
 #include "input/input.h"
 #include "settings/streamingpreferences.h"
@@ -14,6 +15,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+
+#ifdef HAS_WAYLAND
+#include <linux/input-event-codes.h>
+#endif
 
 namespace {
 constexpr int ToolbarPreferredWidth = 539;
@@ -63,6 +69,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_OverlayManager(overlayManager),
       m_InputHandler(inputHandler),
       m_Preferences(preferences),
+      m_PendingAction(Action::None),
       m_Visible(preferences.stationConnectToolbarPinned),
       m_Pinned(preferences.stationConnectToolbarPinned),
       m_DraggingToolbar(false),
@@ -104,6 +111,8 @@ StationConnectToolbar::StationConnectToolbar(
       m_LastRedrawTime(0),
       m_EdgeHoverStartTime(0)
 {
+    createWaylandToolbar();
+
     if (m_Preferences.bitrateKbps != m_BitrateKbps) {
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
@@ -111,11 +120,36 @@ StationConnectToolbar::StationConnectToolbar(
     m_InputHandler.setLocalToolbarAvailable(true);
     notifyWindowChanged();
     redraw();
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->setVisible(m_Visible);
+    } else {
+        m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
+    }
     // The host receives the exact target in RTSP. Send it over the live
     // control stream too, then retry until the host confirms its applied
     // target.
     queueBitrateRequest(SDL_GetTicks(), true);
+}
+
+void StationConnectToolbar::createWaylandToolbar()
+{
+    StationConnectWaylandToolbar::Callbacks callbacks;
+    callbacks.enter = [this](int x, int y) { nativePointerEnter(x, y); };
+    callbacks.leave = [this]() { nativePointerLeave(); };
+    callbacks.motion = [this](int x, int y) { nativePointerMotion(x, y); };
+    callbacks.button = [this](uint32_t button, bool down) {
+        nativePointerButton(button, down);
+    };
+    callbacks.wheel = [this](int steps) { nativePointerWheel(steps); };
+    m_WaylandToolbar = StationConnectWaylandToolbar::create(
+                m_Window, std::move(callbacks));
+    if (m_WaylandToolbar) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect toolbar using a native Wayland subsurface");
+    } else {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect toolbar using the SDL overlay fallback");
+    }
 }
 
 StationConnectToolbar::~StationConnectToolbar()
@@ -157,8 +191,12 @@ void StationConnectToolbar::setAppliedBitrate(
     redraw();
 }
 
-void StationConnectToolbar::update(Uint64 now)
+StationConnectToolbar::Action StationConnectToolbar::update(Uint64 now)
 {
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->dispatchPending();
+    }
+
     if (!m_Visible && !m_LocalPointerInteraction &&
             m_EdgeHoverStartTime != 0 &&
             m_PointerY <= EdgeRevealHeight &&
@@ -186,10 +224,25 @@ void StationConnectToolbar::update(Uint64 now)
     }
 
     queueBitrateRequest(now, false);
+
+    const Action action = m_PendingAction;
+    m_PendingAction = Action::None;
+    return action;
 }
 
 void StationConnectToolbar::notifyWindowChanged()
 {
+    if (m_WaylandToolbar && !m_WaylandToolbar->isAttachedTo(m_Window)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Recreating StationConnect toolbar for a replacement Wayland parent surface");
+        m_WaylandToolbar.reset();
+        createWaylandToolbar();
+        if (!m_WaylandToolbar) {
+            m_OverlayManager.setOverlayState(Overlay::OverlayToolbar,
+                                             m_Visible);
+        }
+    }
+
     const int oldLogicalWidth = m_WindowWidth;
     const int oldLogicalHeight = m_WindowHeight;
     const int oldPixelWidth = m_WindowPixelWidth;
@@ -223,6 +276,11 @@ void StationConnectToolbar::notifyWindowChanged()
     }
     if (m_Visible) {
         redraw();
+    }
+
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->setGeometry(toolbarLeft(), 0,
+                                      m_Width, ToolbarHeight);
     }
 
     if (oldLogicalWidth != m_WindowWidth ||
@@ -283,6 +341,13 @@ void StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event
     const bool pointerEnteredVisibleToolbar =
             m_Visible && m_PointerY > EdgeRevealHeight &&
             contains(m_PointerX, m_PointerY);
+
+    // A native child surface receives authoritative surface-local input from
+    // the compositor. Parent-window motion remains useful only for detecting
+    // the reveal edge; it must never be transformed into toolbar hit tests.
+    if (m_WaylandToolbar) {
+        return;
+    }
 
     if (!m_Visible) {
         return;
@@ -469,7 +534,11 @@ void StationConnectToolbar::show(Uint64 now)
     m_EdgeHoverStartTime = 0;
     m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
     redraw();
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, true);
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->setVisible(true);
+    } else {
+        m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, true);
+    }
 }
 
 void StationConnectToolbar::hide()
@@ -479,7 +548,11 @@ void StationConnectToolbar::hide()
     m_EdgeHoverStartTime = 0;
     m_PointerInside = false;
     m_HideDeadline = 0;
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->setVisible(false);
+    } else {
+        m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
+    }
 }
 
 void StationConnectToolbar::beginLocalPointerInteraction()
@@ -488,10 +561,9 @@ void StationConnectToolbar::beginLocalPointerInteraction()
         return;
     }
 
-    // Keep the stream's absolute input mode untouched. The same main-window
-    // coordinate drives host motion, toolbar hit testing, and the single
-    // receiver-side pointer painted into the toolbar overlay.
-    m_InputHandler.setToolbarInteractionActive(true);
+    if (!m_WaylandToolbar) {
+        m_InputHandler.setToolbarInteractionActive(true);
+    }
 
     m_LocalPointerInteraction = true;
     m_PointerInside = true;
@@ -514,16 +586,18 @@ void StationConnectToolbar::endLocalPointerInteraction()
 
     // The next absolute event resumes host routing at the same coordinate; no
     // warp, flush, capture toggle, or synthetic synchronization event.
-    m_InputHandler.setToolbarInteractionActive(false);
+    if (!m_WaylandToolbar) {
+        m_InputHandler.setToolbarInteractionActive(false);
+    }
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
                  "StationConnect toolbar routed pointer to remote desktop");
 }
 
 void StationConnectToolbar::redraw()
 {
-    const int surfaceWidth =
+    const int surfaceWidth = m_WaylandToolbar ? m_Width :
             StationConnectToolbarLogic::physicalExtent(m_Width, m_PixelDensity);
-    const int surfaceHeight =
+    const int surfaceHeight = m_WaylandToolbar ? ToolbarHeight :
             StationConnectToolbarLogic::physicalExtent(ToolbarHeight,
                                                        m_PixelDensity);
     SDL_Surface* surface = SDL_CreateSurface(
@@ -544,7 +618,9 @@ void StationConnectToolbar::redraw()
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.scale(m_PixelDensity, m_PixelDensity);
+    if (!m_WaylandToolbar) {
+        painter.scale(m_PixelDensity, m_PixelDensity);
+    }
     // Paint the background through the first pixel row so the toolbar meets
     // the physical top edge without an antialiased one-pixel gap.
     painter.fillRect(QRect(0, 0, m_Width, ToolbarHeight),
@@ -747,38 +823,112 @@ void StationConnectToolbar::redraw()
                          "Host update required for live control");
     }
 
-    if (m_LocalPointerInteraction && m_PointerInside) {
-        // Use one pointer whose hotspot is exactly the coordinate used by all
-        // toolbar controls. This avoids a Wayland cursor show/hide transition
-        // and makes pointer feedback independent of the delayed host cursor.
-        const qreal cursorX = m_PointerX - toolbarLeft();
-        const qreal cursorY = m_PointerY;
-        QPainterPath cursor;
-        cursor.moveTo(cursorX, cursorY);
-        cursor.lineTo(cursorX + 1.0, cursorY + 18.0);
-        cursor.lineTo(cursorX + 5.2, cursorY + 13.7);
-        cursor.lineTo(cursorX + 9.1, cursorY + 22.0);
-        cursor.lineTo(cursorX + 12.0, cursorY + 20.6);
-        cursor.lineTo(cursorX + 8.1, cursorY + 12.3);
-        cursor.lineTo(cursorX + 14.0, cursorY + 12.0);
-        cursor.closeSubpath();
-        painter.setPen(QPen(QColor(20, 20, 20), 1.4,
-                            Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.setBrush(QColor(248, 248, 248));
-        painter.drawPath(cursor);
-    }
-
     painter.end();
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
     m_LastDrawnPacketLossPercent = m_PacketLossPercent;
     m_LastRedrawTime = SDL_GetTicks();
-    const float horizontalPosition =
-            StationConnectToolbarLogic::horizontalPosition(
-                m_ToolbarLeft, m_WindowWidth, m_Width);
-    m_OverlayManager.setOverlayHorizontalPosition(Overlay::OverlayToolbar,
-                                                   horizontalPosition);
-    m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->setGeometry(toolbarLeft(), 0,
+                                      m_Width, ToolbarHeight);
+        m_WaylandToolbar->present(image.copy());
+        SDL_DestroySurface(surface);
+    } else {
+        const float horizontalPosition =
+                StationConnectToolbarLogic::horizontalPosition(
+                    m_ToolbarLeft, m_WindowWidth, m_Width);
+        m_OverlayManager.setOverlayHorizontalPosition(Overlay::OverlayToolbar,
+                                                       horizontalPosition);
+        m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
+    }
+}
+
+void StationConnectToolbar::nativePointerEnter(int localX, int localY)
+{
+    m_PointerX = StationConnectToolbarLogic::nativePointerParentCoordinate(
+                toolbarLeft(), localX);
+    m_PointerY = localY;
+    m_PointerInside = true;
+    m_HideDeadline = 0;
+    beginLocalPointerInteraction();
+    redraw();
+}
+
+void StationConnectToolbar::nativePointerLeave()
+{
+    m_PointerInside = false;
+    if (!m_ButtonRouter.hasLocalButtons()) {
+        endLocalPointerInteraction();
+        m_HideDeadline = m_Pinned ? 0 : SDL_GetTicks() + AutoHideDelayMs;
+    }
+    redraw();
+}
+
+void StationConnectToolbar::nativePointerMotion(int localX, int localY)
+{
+    const Uint64 now = SDL_GetTicks();
+    m_PointerX = StationConnectToolbarLogic::nativePointerParentCoordinate(
+                toolbarLeft(), localX);
+    m_PointerY = localY;
+    m_PointerInside = true;
+    m_HideDeadline = 0;
+
+    if (m_DraggingToolbar) {
+        const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
+                                   std::max(0, m_WindowWidth - m_Width));
+        if (newLeft != m_ToolbarLeft) {
+            m_ToolbarLeft = newLeft;
+            m_WaylandToolbar->setGeometry(m_ToolbarLeft, 0,
+                                          m_Width, ToolbarHeight);
+            if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
+                redraw();
+                m_LastToolbarMoveDrawTime = now;
+            }
+        }
+    } else if (m_DraggingSlider) {
+        updateBitrateFromPointer(m_PointerX, now, false);
+    } else {
+        redraw();
+    }
+}
+
+void StationConnectToolbar::nativePointerButton(uint32_t button, bool down)
+{
+#ifdef HAS_WAYLAND
+    uint8_t sdlButton = 0;
+    switch (button) {
+    case BTN_LEFT: sdlButton = SDL_BUTTON_LEFT; break;
+    case BTN_MIDDLE: sdlButton = SDL_BUTTON_MIDDLE; break;
+    case BTN_RIGHT: sdlButton = SDL_BUTTON_RIGHT; break;
+    case BTN_SIDE: sdlButton = SDL_BUTTON_X1; break;
+    case BTN_EXTRA: sdlButton = SDL_BUTTON_X2; break;
+    default: return;
+    }
+    SDL_MouseButtonEvent event{};
+    event.button = sdlButton;
+    event.down = down;
+    event.x = m_PointerX;
+    event.y = m_PointerY;
+    const Action action = handleMouseButton(event);
+    if (action != Action::None && action != Action::Consumed) {
+        m_PendingAction = action;
+    }
+#else
+    (void) button;
+    (void) down;
+#endif
+}
+
+void StationConnectToolbar::nativePointerWheel(int verticalSteps)
+{
+    if (verticalSteps == 0) {
+        return;
+    }
+    SDL_MouseWheelEvent event{};
+    event.y = static_cast<float>(verticalSteps);
+    event.mouse_x = static_cast<float>(m_PointerX);
+    event.mouse_y = static_cast<float>(m_PointerY);
+    handleMouseWheel(event);
 }
 
 void StationConnectToolbar::updateBitrateFromPointer(int x, Uint64 now, bool forceSend)

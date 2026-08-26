@@ -14,6 +14,8 @@ private slots:
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
     void preservesHorizontalPositionAcrossScaleChanges();
+    void keepsNativeChildCoordinatesIndependentOfDisplayScale_data();
+    void keepsNativeChildCoordinatesIndependentOfDisplayScale();
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
@@ -75,6 +77,25 @@ void TestStationConnectToolbarLogic::preservesHorizontalPositionAcrossScaleChang
 
     QVERIFY(qAbs(StationConnectToolbarLogic::horizontalPosition(
                      newLeft, newWindowWidth, toolbarWidth) - position) < 0.001f);
+}
+
+void TestStationConnectToolbarLogic::keepsNativeChildCoordinatesIndependentOfDisplayScale_data()
+{
+    QTest::addColumn<float>("displayScale");
+    QTest::newRow("100-percent") << 1.0f;
+    QTest::newRow("125-percent") << 1.25f;
+    QTest::newRow("200-percent") << 2.0f;
+}
+
+void TestStationConnectToolbarLogic::keepsNativeChildCoordinatesIndependentOfDisplayScale()
+{
+    QFETCH(float, displayScale);
+    Q_UNUSED(displayScale);
+
+    constexpr int toolbarLeft = 2671;
+    constexpr int localPointerX = 311;
+    QCOMPARE(StationConnectToolbarLogic::nativePointerParentCoordinate(
+                 toolbarLeft, localPointerX), 2982);
 }
 
 void TestStationConnectToolbarLogic::keepsRemotePressReleaseTogether()

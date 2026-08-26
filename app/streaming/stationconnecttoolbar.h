@@ -2,10 +2,13 @@
 
 #include <SDL3/SDL.h>
 
+#include <memory>
+
 #include "stationconnecttoolbarlogic.h"
 
 class StreamingPreferences;
 class SdlInputHandler;
+class StationConnectWaylandToolbar;
 
 namespace Overlay {
 class OverlayManager;
@@ -30,7 +33,7 @@ public:
 
     void setRenderedStats(float fps, float videoMbps, float packetLossPercent);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
-    void update(Uint64 now);
+    Action update(Uint64 now);
     void notifyWindowChanged();
     void notifyFocusLost();
 
@@ -55,9 +58,15 @@ private:
     void hide();
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
+    void createWaylandToolbar();
     void redraw();
     void updateBitrateFromPointer(int x, Uint64 now, bool forceSend);
     void queueBitrateRequest(Uint64 now, bool forceSend);
+    void nativePointerEnter(int localX, int localY);
+    void nativePointerLeave();
+    void nativePointerMotion(int localX, int localY);
+    void nativePointerButton(uint32_t button, bool down);
+    void nativePointerWheel(int verticalSteps);
     bool contains(int x, int y) const;
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
@@ -74,6 +83,8 @@ private:
     Overlay::OverlayManager& m_OverlayManager;
     SdlInputHandler& m_InputHandler;
     StreamingPreferences& m_Preferences;
+    std::unique_ptr<StationConnectWaylandToolbar> m_WaylandToolbar;
+    Action m_PendingAction;
     bool m_Visible;
     bool m_Pinned;
     bool m_DraggingToolbar;
