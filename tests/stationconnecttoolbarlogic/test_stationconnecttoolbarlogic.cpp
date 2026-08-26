@@ -14,6 +14,8 @@ private slots:
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
     void preservesHorizontalPositionAcrossScaleChanges();
+    void isolatesVisibleNativeChildFromParentMotion();
+    void keepsNativeButtonSequenceOutOfSdlPath();
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
@@ -75,6 +77,28 @@ void TestStationConnectToolbarLogic::preservesHorizontalPositionAcrossScaleChang
 
     QVERIFY(qAbs(StationConnectToolbarLogic::horizontalPosition(
                      newLeft, newWindowWidth, toolbarWidth) - position) < 0.001f);
+}
+
+void TestStationConnectToolbarLogic::isolatesVisibleNativeChildFromParentMotion()
+{
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                false, true, false));
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, false, false));
+    QVERIFY(StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, true, false));
+}
+
+void TestStationConnectToolbarLogic::keepsNativeButtonSequenceOutOfSdlPath()
+{
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                false, true, true));
+    QVERIFY(!StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, false, false));
+    QVERIFY(StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, true, false));
+    QVERIFY(StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
+                true, false, true));
 }
 
 void TestStationConnectToolbarLogic::keepsRemotePressReleaseTogether()

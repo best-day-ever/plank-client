@@ -37,7 +37,6 @@ public:
     void notifyWindowChanged();
     void notifyFocusLost();
 
-    bool handleNativeWindowEvent(const SDL_Event& event, Action& action);
     bool observeMouseMotion(const SDL_MouseMotionEvent& event);
     Action handleMouseButton(const SDL_MouseButtonEvent& event);
     bool handleMouseWheel(const SDL_MouseWheelEvent& event);
@@ -66,6 +65,9 @@ private:
     void nativePointerEnter(int parentX, int parentY);
     void nativePointerLeave();
     void nativePointerMotion(int parentX, int parentY);
+    void nativePointerButton(uint32_t button, bool down);
+    void nativePointerWheel(int verticalSteps);
+    void forwardNativePointerPosition();
     Action handlePointerButton(const SDL_MouseButtonEvent& event);
     bool handlePointerWheel(const SDL_MouseWheelEvent& event);
     bool contains(int x, int y) const;
@@ -85,6 +87,7 @@ private:
     SdlInputHandler& m_InputHandler;
     StreamingPreferences& m_Preferences;
     std::unique_ptr<StationConnectWaylandToolbar> m_WaylandToolbar;
+    Action m_PendingAction;
     bool m_Visible;
     bool m_Pinned;
     bool m_DraggingToolbar;
