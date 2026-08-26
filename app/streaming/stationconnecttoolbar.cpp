@@ -15,11 +15,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <utility>
-
-#ifdef HAS_WAYLAND
-#include <linux/input-event-codes.h>
-#endif
 
 namespace {
 constexpr int ToolbarPreferredWidth = 539;
@@ -69,7 +64,6 @@ StationConnectToolbar::StationConnectToolbar(
       m_OverlayManager(overlayManager),
       m_InputHandler(inputHandler),
       m_Preferences(preferences),
-      m_PendingAction(Action::None),
       m_Visible(preferences.stationConnectToolbarPinned),
       m_Pinned(preferences.stationConnectToolbarPinned),
       m_DraggingToolbar(false),
@@ -133,16 +127,7 @@ StationConnectToolbar::StationConnectToolbar(
 
 void StationConnectToolbar::createWaylandToolbar()
 {
-    StationConnectWaylandToolbar::Callbacks callbacks;
-    callbacks.enter = [this](int x, int y) { nativePointerEnter(x, y); };
-    callbacks.leave = [this]() { nativePointerLeave(); };
-    callbacks.motion = [this](int x, int y) { nativePointerMotion(x, y); };
-    callbacks.button = [this](uint32_t button, bool down) {
-        nativePointerButton(button, down);
-    };
-    callbacks.wheel = [this](int steps) { nativePointerWheel(steps); };
-    m_WaylandToolbar = StationConnectWaylandToolbar::create(
-                m_Window, std::move(callbacks));
+    m_WaylandToolbar = StationConnectWaylandToolbar::create(m_Window);
     if (m_WaylandToolbar) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "StationConnect toolbar using a native Wayland subsurface");
@@ -225,9 +210,7 @@ StationConnectToolbar::Action StationConnectToolbar::update(Uint64 now)
 
     queueBitrateRequest(now, false);
 
-    const Action action = m_PendingAction;
-    m_PendingAction = Action::None;
-    return action;
+    return Action::None;
 }
 
 void StationConnectToolbar::notifyWindowChanged()
@@ -315,21 +298,74 @@ void StationConnectToolbar::notifyFocusLost()
     endLocalPointerInteraction();
 }
 
+bool StationConnectToolbar::handleNativeWindowEvent(
+        const SDL_Event& event, Action& action)
+{
+    action = Action::None;
+    if (!m_WaylandToolbar) {
+        return false;
+    }
+
+    SDL_WindowID eventWindowId = 0;
+    if (event.type >= SDL_EVENT_WINDOW_FIRST &&
+            event.type <= SDL_EVENT_WINDOW_LAST) {
+        eventWindowId = event.window.windowID;
+    } else {
+        switch (event.type) {
+        case SDL_EVENT_MOUSE_MOTION:
+            eventWindowId = event.motion.windowID;
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            eventWindowId = event.button.windowID;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            eventWindowId = event.wheel.windowID;
+            break;
+        default:
+            return false;
+        }
+    }
+
+    if (eventWindowId == 0 ||
+            eventWindowId != m_WaylandToolbar->windowId()) {
+        return false;
+    }
+
+    switch (event.type) {
+    case SDL_EVENT_WINDOW_MOUSE_ENTER:
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+        SDL_GetMouseState(&x, &y);
+        nativePointerEnter(qRound(x), qRound(y));
+        break;
+    }
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        nativePointerLeave();
+        break;
+    case SDL_EVENT_MOUSE_MOTION:
+        nativePointerMotion(qRound(event.motion.x), qRound(event.motion.y));
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        action = handlePointerButton(event.button);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        handlePointerWheel(event.wheel);
+        break;
+    default:
+        // Window lifecycle and geometry events for the imported child must not
+        // drive renderer recreation or parent-window focus handling.
+        break;
+    }
+    return true;
+}
+
 bool StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event)
 {
     if (event.which == SDL_TOUCH_MOUSEID) {
         return false;
-    }
-
-    // SDL also sees seat motion delivered for the toolbar's native child, but
-    // that coordinate is child-local. Consume that duplicate here: the native
-    // listener owns the exclusive local toolbar sequence and no corresponding
-    // motion is sent to the host.
-    if (StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
-                m_WaylandToolbar != nullptr,
-                m_PointerInside,
-                m_ButtonRouter.hasLocalButtons())) {
-        return true;
     }
 
     const Uint64 now = SDL_GetTicks();
@@ -416,14 +452,10 @@ bool StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event
 StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         const SDL_MouseButtonEvent& event)
 {
-    // SDL receives a duplicate seat event for the visible native child. The
-    // native listener owns this sequence and will invoke handlePointerButton()
-    // with the authoritative parent-relative coordinate.
-    if (StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
-                m_WaylandToolbar != nullptr,
-                m_PointerInside,
-                m_ButtonRouter.hasLocalButtons())) {
-        return Action::Consumed;
+    if (m_WaylandToolbar) {
+        // Events owned by the imported native child are routed by its distinct
+        // SDL window ID before the parent stream event switch reaches here.
+        return Action::None;
     }
     return handlePointerButton(event);
 }
@@ -518,10 +550,8 @@ StationConnectToolbar::Action StationConnectToolbar::handlePointerButton(
 
 bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 {
-    // Consume SDL's duplicate child-surface wheel event. The native callback
-    // below owns scrolling while the compositor pointer is in the toolbar.
-    if (m_WaylandToolbar && m_PointerInside) {
-        return true;
+    if (m_WaylandToolbar) {
+        return false;
     }
     return handlePointerWheel(event);
 }
@@ -597,9 +627,7 @@ void StationConnectToolbar::beginLocalPointerInteraction()
         return;
     }
 
-    if (!m_WaylandToolbar) {
-        m_InputHandler.setToolbarInteractionActive(true);
-    }
+    m_InputHandler.setToolbarInteractionActive(true);
 
     m_LocalPointerInteraction = true;
     m_PointerInside = true;
@@ -622,9 +650,7 @@ void StationConnectToolbar::endLocalPointerInteraction()
 
     // The next absolute event resumes host routing at the same coordinate; no
     // warp, flush, capture toggle, or synthetic synchronization event.
-    if (!m_WaylandToolbar) {
-        m_InputHandler.setToolbarInteractionActive(false);
-    }
+    m_InputHandler.setToolbarInteractionActive(false);
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
                  "StationConnect toolbar routed pointer to remote desktop");
 }
@@ -924,45 +950,6 @@ void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
     } else {
         redraw();
     }
-}
-
-void StationConnectToolbar::nativePointerButton(uint32_t button, bool down)
-{
-#ifdef HAS_WAYLAND
-    uint8_t sdlButton = 0;
-    switch (button) {
-    case BTN_LEFT: sdlButton = SDL_BUTTON_LEFT; break;
-    case BTN_MIDDLE: sdlButton = SDL_BUTTON_MIDDLE; break;
-    case BTN_RIGHT: sdlButton = SDL_BUTTON_RIGHT; break;
-    case BTN_SIDE: sdlButton = SDL_BUTTON_X1; break;
-    case BTN_EXTRA: sdlButton = SDL_BUTTON_X2; break;
-    default: return;
-    }
-    SDL_MouseButtonEvent event{};
-    event.button = sdlButton;
-    event.down = down;
-    event.x = m_PointerX;
-    event.y = m_PointerY;
-    const Action action = handlePointerButton(event);
-    if (action != Action::None && action != Action::Consumed) {
-        m_PendingAction = action;
-    }
-#else
-    (void) button;
-    (void) down;
-#endif
-}
-
-void StationConnectToolbar::nativePointerWheel(int verticalSteps)
-{
-    if (verticalSteps == 0) {
-        return;
-    }
-    SDL_MouseWheelEvent event{};
-    event.y = static_cast<float>(verticalSteps);
-    event.mouse_x = static_cast<float>(m_PointerX);
-    event.mouse_y = static_cast<float>(m_PointerY);
-    handlePointerWheel(event);
 }
 
 void StationConnectToolbar::updateBitrateFromPointer(int x, Uint64 now, bool forceSend)

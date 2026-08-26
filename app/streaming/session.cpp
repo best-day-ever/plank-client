@@ -2268,6 +2268,29 @@ void Session::execInternal()
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
             continue;
         }
+        if (m_StationConnectToolbar) {
+            StationConnectToolbar::Action toolbarAction;
+            if (m_StationConnectToolbar->handleNativeWindowEvent(
+                        event, toolbarAction)) {
+                if (toolbarAction == StationConnectToolbar::Action::Disconnect) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "StationConnect toolbar disconnect requested");
+                    goto DispatchDeferredCleanup;
+                }
+                if (toolbarAction == StationConnectToolbar::Action::ToggleFullscreen) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "StationConnect toolbar fullscreen toggle requested");
+                    toggleFullscreen();
+                    m_StationConnectToolbar->notifyWindowChanged();
+                } else if (toolbarAction ==
+                           StationConnectToolbar::Action::Minimize) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                "StationConnect toolbar minimize requested");
+                    SDL_MinimizeWindow(m_Window);
+                }
+                continue;
+            }
+        }
         switch (event.type) {
         case SDL_EVENT_QUIT:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
