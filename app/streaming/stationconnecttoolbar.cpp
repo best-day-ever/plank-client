@@ -274,13 +274,15 @@ void StationConnectToolbar::notifyWindowChanged()
         m_PointerX = qBound(0, m_PointerX, std::max(0, m_WindowWidth - 1));
         m_PointerY = qBound(0, m_PointerY, std::max(0, m_WindowHeight - 1));
     }
+    if (m_WaylandToolbar) {
+        m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
+                                    m_Width, ToolbarHeight);
+    }
     if (m_Visible) {
         redraw();
     }
 
     if (m_WaylandToolbar) {
-        m_WaylandToolbar->setGeometry(toolbarLeft(), 0,
-                                      m_Width, ToolbarHeight);
         // Renderer recreation can replace SDL's parent wl_surface. The new
         // subsurface starts unmapped, so restore the model's pinned/visible
         // state after its retained image and geometry have been published.
@@ -869,8 +871,8 @@ void StationConnectToolbar::redraw()
     m_LastDrawnPacketLossPercent = m_PacketLossPercent;
     m_LastRedrawTime = SDL_GetTicks();
     if (m_WaylandToolbar) {
-        m_WaylandToolbar->setGeometry(toolbarLeft(), 0,
-                                      m_Width, ToolbarHeight);
+        m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
+                                    m_Width, ToolbarHeight);
         m_WaylandToolbar->present(image.copy());
         SDL_DestroySurface(surface);
     } else {
@@ -914,14 +916,12 @@ void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
     forwardNativePointerPosition();
 
     if (m_DraggingToolbar) {
-        // The Wayland boundary normalizes child- and parent-surface events to
-        // parent-relative coordinates before they reach the toolbar.
         const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
                                    std::max(0, m_WindowWidth - m_Width));
         if (newLeft != m_ToolbarLeft) {
             m_ToolbarLeft = newLeft;
-            m_WaylandToolbar->setGeometry(m_ToolbarLeft, 0,
-                                          m_Width, ToolbarHeight);
+            m_WaylandToolbar->setLayout(m_WindowWidth, m_ToolbarLeft,
+                                        m_Width, ToolbarHeight);
             if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
                 redraw();
                 m_LastToolbarMoveDrawTime = now;

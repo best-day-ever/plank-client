@@ -14,7 +14,6 @@ private slots:
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
     void preservesHorizontalPositionAcrossScaleChanges();
-    void normalizesNativeSurfaceCoordinateChanges();
     void isolatesVisibleNativeChildFromParentMotion();
     void keepsNativeButtonSequenceOutOfSdlPath();
     void keepsRemotePressReleaseTogether();
@@ -78,14 +77,6 @@ void TestStationConnectToolbarLogic::preservesHorizontalPositionAcrossScaleChang
 
     QVERIFY(qAbs(StationConnectToolbarLogic::horizontalPosition(
                      newLeft, newWindowWidth, toolbarWidth) - position) < 0.001f);
-}
-
-void TestStationConnectToolbarLogic::normalizesNativeSurfaceCoordinateChanges()
-{
-    QCOMPARE(StationConnectToolbarLogic::normalizeNativePointerCoordinate(
-                 true, 1611, 14), 1625);
-    QCOMPARE(StationConnectToolbarLogic::normalizeNativePointerCoordinate(
-                 false, 1611, 1624), 1624);
 }
 
 void TestStationConnectToolbarLogic::isolatesVisibleNativeChildFromParentMotion()

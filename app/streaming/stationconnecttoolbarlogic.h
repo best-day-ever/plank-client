@@ -59,17 +59,6 @@ inline int logicalLeftFromPosition(float position,
                 std::clamp(position, 0.0f, 1.0f) * availableWidth));
 }
 
-// wl_pointer coordinates are relative to whichever surface currently has
-// focus. Normalize child-surface and parent-surface events at the Wayland
-// boundary so toolbar input always uses the parent's logical coordinates.
-inline int normalizeNativePointerCoordinate(bool childCoordinates,
-                                             int childOrigin,
-                                             int surfaceCoordinate)
-{
-    return childCoordinates ? childOrigin + surfaceCoordinate
-                            : surfaceCoordinate;
-}
-
 // SDL and the dedicated Wayland listener both observe the same seat. While the
 // native child owns the pointer or an implicit button grab, its listener is the
 // only valid source of toolbar coordinates and forwards one authoritative

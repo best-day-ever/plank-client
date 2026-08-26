@@ -24,7 +24,8 @@ public:
 
     void dispatchPending();
     bool isAttachedTo(SDL_Window* parentWindow) const;
-    void setGeometry(int x, int y, int width, int height);
+    void setLayout(int parentWidth, int toolbarX,
+                   int toolbarWidth, int toolbarHeight);
     void setVisible(bool visible);
     void present(const QImage& image);
 

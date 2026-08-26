@@ -1,5 +1,4 @@
 #include "stationconnectwaylandtoolbar.h"
-#include "stationconnecttoolbarlogic.h"
 
 #ifdef HAS_WAYLAND
 
@@ -135,6 +134,7 @@ public:
         }
         wl_proxy_set_queue(reinterpret_cast<wl_proxy*>(m_Subsurface), m_Queue);
         wl_subsurface_set_desync(m_Subsurface);
+        wl_subsurface_set_position(m_Subsurface, 0, 0);
 
         QImage cursorImage(24, 24, QImage::Format_ARGB32_Premultiplied);
         cursorImage.fill(Qt::transparent);
@@ -182,16 +182,16 @@ public:
                     nullptr));
     }
 
-    void setGeometry(int x, int y, int width, int height)
+    void setLayout(int parentWidth, int toolbarX,
+                   int toolbarWidth, int toolbarHeight)
     {
-        m_X = x;
-        m_Y = y;
-        m_Width = width;
-        m_Height = height;
-        if (m_Subsurface != nullptr) {
-            wl_subsurface_set_position(m_Subsurface, m_X, m_Y);
-            wl_display_flush(m_Display);
-        }
+        m_ParentWidth = std::max(1, parentWidth);
+        m_ToolbarWidth = std::clamp(toolbarWidth, 1, m_ParentWidth);
+        m_ToolbarX = std::clamp(toolbarX, 0,
+                                m_ParentWidth - m_ToolbarWidth);
+        m_Height = std::max(1, toolbarHeight);
+        updateInputRegion();
+        wl_display_flush(m_Display);
     }
 
     void setVisible(bool visible)
@@ -203,7 +203,7 @@ public:
         if (!m_Visible) {
             wl_surface_attach(m_Surface, nullptr, 0, 0);
             wl_surface_commit(m_Surface);
-        } else if (!m_LatestImage.isNull()) {
+        } else if (!m_LatestToolbarImage.isNull()) {
             publishLatestImage();
         }
         wl_display_flush(m_Display);
@@ -211,7 +211,7 @@ public:
 
     void present(const QImage& image)
     {
-        m_LatestImage = image.convertToFormat(
+        m_LatestToolbarImage = image.convertToFormat(
                 QImage::Format_ARGB32_Premultiplied);
         if (m_Visible) {
             publishLatestImage();
@@ -268,15 +268,7 @@ private:
                              wl_surface* surface, wl_fixed_t x, wl_fixed_t y)
     {
         auto* self = static_cast<Impl*>(data);
-        self->m_PointerFocusSurface = surface;
         if (surface != self->m_Surface) {
-            self->m_PointerInside = false;
-            if (surface == self->m_ParentSurface &&
-                    self->m_PressedButtonCount != 0 &&
-                    self->m_Callbacks.motion) {
-                self->m_Callbacks.motion(wl_fixed_to_int(x),
-                                         wl_fixed_to_int(y));
-            }
             return;
         }
         self->m_PointerInside = true;
@@ -285,11 +277,7 @@ private:
         wl_pointer_set_cursor(pointer, serial, self->m_CursorSurface, 1, 1);
         wl_display_flush(self->m_Display);
         if (self->m_Callbacks.enter) {
-            self->m_Callbacks.enter(
-                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
-                            true, self->m_X, self->m_PointerX),
-                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
-                            true, self->m_Y, self->m_PointerY));
+            self->m_Callbacks.enter(self->m_PointerX, self->m_PointerY);
         }
     }
 
@@ -297,9 +285,6 @@ private:
                              wl_surface* surface)
     {
         auto* self = static_cast<Impl*>(data);
-        if (surface == self->m_PointerFocusSurface) {
-            self->m_PointerFocusSurface = nullptr;
-        }
         if (surface != self->m_Surface) {
             return;
         }
@@ -313,22 +298,13 @@ private:
                               wl_fixed_t x, wl_fixed_t y)
     {
         auto* self = static_cast<Impl*>(data);
-        const bool childCoordinates =
-                self->m_PointerFocusSurface == self->m_Surface;
-        const bool parentCoordinates =
-                self->m_PointerFocusSurface == self->m_ParentSurface;
-        if (!childCoordinates &&
-                !(parentCoordinates && self->m_PressedButtonCount != 0)) {
+        if (!self->m_PointerInside && self->m_PressedButtonCount == 0) {
             return;
         }
         self->m_PointerX = wl_fixed_to_int(x);
         self->m_PointerY = wl_fixed_to_int(y);
         if (self->m_Callbacks.motion) {
-            self->m_Callbacks.motion(
-                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
-                            childCoordinates, self->m_X, self->m_PointerX),
-                    StationConnectToolbarLogic::normalizeNativePointerCoordinate(
-                            childCoordinates, self->m_Y, self->m_PointerY));
+            self->m_Callbacks.motion(self->m_PointerX, self->m_PointerY);
         }
     }
 
@@ -441,16 +417,40 @@ private:
         }
     }
 
+    void updateInputRegion()
+    {
+        if (m_Surface == nullptr || m_Compositor == nullptr) {
+            return;
+        }
+        wl_region* region = wl_compositor_create_region(m_Compositor);
+        if (region == nullptr) {
+            return;
+        }
+        wl_region_add(region, m_ToolbarX, 0, m_ToolbarWidth, m_Height);
+        wl_surface_set_input_region(m_Surface, region);
+        wl_region_destroy(region);
+    }
+
     void publishLatestImage()
     {
+        if (m_ParentWidth <= 0 || m_Height <= 0 ||
+                m_LatestToolbarImage.isNull()) {
+            return;
+        }
         collectReleasedBuffers();
-        Buffer* buffer = createBuffer(m_LatestImage, false);
+        QImage surfaceImage(m_ParentWidth, m_Height,
+                            QImage::Format_ARGB32_Premultiplied);
+        surfaceImage.fill(Qt::transparent);
+        QPainter painter(&surfaceImage);
+        painter.drawImage(m_ToolbarX, 0, m_LatestToolbarImage);
+        painter.end();
+        Buffer* buffer = createBuffer(surfaceImage, false);
         if (buffer == nullptr) {
             return;
         }
         wl_surface_attach(m_Surface, buffer->object, 0, 0);
         wl_surface_damage(m_Surface, 0, 0,
-                          m_LatestImage.width(), m_LatestImage.height());
+                          surfaceImage.width(), surfaceImage.height());
         wl_surface_commit(m_Surface);
         wl_display_flush(m_Display);
     }
@@ -470,20 +470,19 @@ private:
     wl_shm* m_Shm = nullptr;
     wl_seat* m_Seat = nullptr;
     wl_pointer* m_Pointer = nullptr;
-    wl_surface* m_PointerFocusSurface = nullptr;
     wl_surface* m_Surface = nullptr;
     wl_subsurface* m_Subsurface = nullptr;
     wl_surface* m_CursorSurface = nullptr;
     std::vector<Buffer*> m_Buffers;
-    QImage m_LatestImage;
+    QImage m_LatestToolbarImage;
     bool m_Visible = false;
     bool m_PointerInside = false;
     int m_PointerX = 0;
     int m_PointerY = 0;
     unsigned int m_PressedButtonCount = 0;
-    int m_X = 0;
-    int m_Y = 0;
-    int m_Width = 0;
+    int m_ParentWidth = 0;
+    int m_ToolbarX = 0;
+    int m_ToolbarWidth = 0;
     int m_Height = 0;
 };
 
@@ -566,16 +565,18 @@ bool StationConnectWaylandToolbar::isAttachedTo(SDL_Window* parentWindow) const
 #endif
 }
 
-void StationConnectWaylandToolbar::setGeometry(
-        int x, int y, int width, int height)
+void StationConnectWaylandToolbar::setLayout(
+        int parentWidth, int toolbarX,
+        int toolbarWidth, int toolbarHeight)
 {
 #ifdef HAS_WAYLAND
-    m_Impl->setGeometry(x, y, width, height);
+    m_Impl->setLayout(parentWidth, toolbarX,
+                      toolbarWidth, toolbarHeight);
 #else
-    (void) x;
-    (void) y;
-    (void) width;
-    (void) height;
+    (void) parentWidth;
+    (void) toolbarX;
+    (void) toolbarWidth;
+    (void) toolbarHeight;
 #endif
 }
 
