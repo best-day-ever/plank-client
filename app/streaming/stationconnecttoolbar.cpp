@@ -2,7 +2,6 @@
 
 #include "input/input.h"
 #include "settings/streamingpreferences.h"
-#include "video/overlaymanager.h"
 
 #include <Limelight.h>
 #include <QColor>
@@ -56,14 +55,14 @@ QColor packetLossColor(float packetLossPercent)
 
 StationConnectToolbar::StationConnectToolbar(
         SDL_Window* window,
-        Overlay::OverlayManager& overlayManager,
         SdlInputHandler& inputHandler,
         StreamingPreferences& preferences)
     : m_Window(window),
-      m_OverlayManager(overlayManager),
+      m_ToolbarWindow(nullptr),
+      m_ToolbarWindowId(0),
       m_InputHandler(inputHandler),
       m_Preferences(preferences),
-      m_Visible(preferences.stationConnectToolbarPinned),
+      m_Visible(false),
       m_Pinned(preferences.stationConnectToolbarPinned),
       m_DraggingToolbar(false),
       m_DraggingSlider(false),
@@ -81,7 +80,6 @@ StationConnectToolbar::StationConnectToolbar(
       m_PixelDensity(1.0f),
       m_Width(ToolbarPreferredWidth),
       m_ToolbarLeft(-1),
-      m_ToolbarDragOffsetX(0),
       m_PointerX(0),
       m_PointerY(0),
       m_PressedControl(Control::None),
@@ -108,10 +106,13 @@ StationConnectToolbar::StationConnectToolbar(
         m_Preferences.bitrateKbps = m_BitrateKbps;
         m_Preferences.save();
     }
-    m_InputHandler.setLocalToolbarAvailable(true);
     notifyWindowChanged();
-    redraw();
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
+    if (createToolbarWindow()) {
+        m_InputHandler.setLocalToolbarAvailable(true);
+        if (m_Pinned) {
+            show(SDL_GetTicks());
+        }
+    }
     // The host receives the exact target in RTSP. Send it over the live
     // control stream too, then retry until the host confirms its applied
     // target.
@@ -122,7 +123,11 @@ StationConnectToolbar::~StationConnectToolbar()
 {
     endLocalPointerInteraction();
     m_InputHandler.setLocalToolbarAvailable(false);
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
+    if (m_ToolbarWindow != nullptr) {
+        SDL_DestroyWindow(m_ToolbarWindow);
+        m_ToolbarWindow = nullptr;
+        m_ToolbarWindowId = 0;
+    }
 }
 
 void StationConnectToolbar::setRenderedStats(
@@ -202,10 +207,6 @@ void StationConnectToolbar::notifyWindowChanged()
     SDL_GetWindowSize(m_Window, &m_WindowWidth, &m_WindowHeight);
     SDL_GetWindowSizeInPixels(m_Window, &m_WindowPixelWidth,
                               &m_WindowPixelHeight);
-    m_PixelDensity = StationConnectToolbarLogic::resolvePixelDensity(
-                SDL_GetWindowPixelDensity(m_Window),
-                m_WindowWidth, m_WindowHeight,
-                m_WindowPixelWidth, m_WindowPixelHeight);
     m_Width = std::min(ToolbarPreferredWidth, std::max(m_WindowWidth, 1));
     if (m_ToolbarLeft < 0) {
         m_ToolbarLeft = std::max(0, (m_WindowWidth - m_Width) / 2);
@@ -221,8 +222,23 @@ void StationConnectToolbar::notifyWindowChanged()
         m_PointerX = qBound(0, m_PointerX, std::max(0, m_WindowWidth - 1));
         m_PointerY = qBound(0, m_PointerY, std::max(0, m_WindowHeight - 1));
     }
-    if (m_Visible) {
-        redraw();
+    if (m_ToolbarWindow != nullptr) {
+        if (!SDL_SetWindowSize(m_ToolbarWindow, m_Width, ToolbarHeight)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to resize StationConnect toolbar window: %s",
+                        SDL_GetError());
+        }
+        positionToolbarWindow();
+        updateToolbarWindowMetrics();
+        if (m_Visible) {
+            redraw();
+        }
+    }
+    else {
+        m_PixelDensity = StationConnectToolbarLogic::resolvePixelDensity(
+                    SDL_GetWindowPixelDensity(m_Window),
+                    m_WindowWidth, m_WindowHeight,
+                    m_WindowPixelWidth, m_WindowPixelHeight);
     }
 
     if (oldLogicalWidth != m_WindowWidth ||
@@ -242,6 +258,76 @@ void StationConnectToolbar::notifyWindowChanged()
     }
 }
 
+bool StationConnectToolbar::createToolbarWindow()
+{
+    const SDL_WindowFlags flags = SDL_WINDOW_POPUP_MENU |
+            SDL_WINDOW_NOT_FOCUSABLE |
+            SDL_WINDOW_HIGH_PIXEL_DENSITY |
+            SDL_WINDOW_TRANSPARENT |
+            SDL_WINDOW_HIDDEN;
+    m_ToolbarWindow = SDL_CreatePopupWindow(
+                m_Window, toolbarLeft(), 0, m_Width, ToolbarHeight, flags);
+    if (m_ToolbarWindow == nullptr) {
+        // Transparency is cosmetic. Retain the native input-window design on
+        // compositors that cannot provide an alpha-capable popup surface.
+        m_ToolbarWindow = SDL_CreatePopupWindow(
+                    m_Window, toolbarLeft(), 0, m_Width, ToolbarHeight,
+                    flags & ~SDL_WINDOW_TRANSPARENT);
+    }
+    if (m_ToolbarWindow == nullptr) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to create native StationConnect toolbar window: %s",
+                     SDL_GetError());
+        return false;
+    }
+
+    m_ToolbarWindowId = SDL_GetWindowID(m_ToolbarWindow);
+    SDL_SetWindowTitle(m_ToolbarWindow, "StationConnect Toolbar");
+    if (!SDL_SetWindowFocusable(m_ToolbarWindow, false)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to make StationConnect toolbar non-focusable: %s",
+                    SDL_GetError());
+    }
+    positionToolbarWindow();
+    updateToolbarWindowMetrics();
+    redraw();
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Created native StationConnect toolbar window: id=%u logical=%dx%d density=%.3f",
+                m_ToolbarWindowId, m_Width, ToolbarHeight, m_PixelDensity);
+    return true;
+}
+
+void StationConnectToolbar::positionToolbarWindow()
+{
+    if (m_ToolbarWindow == nullptr) {
+        return;
+    }
+    if (!SDL_SetWindowPosition(m_ToolbarWindow, toolbarLeft(), 0)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to position StationConnect toolbar window: %s",
+                    SDL_GetError());
+    }
+}
+
+void StationConnectToolbar::updateToolbarWindowMetrics()
+{
+    if (m_ToolbarWindow == nullptr) {
+        return;
+    }
+
+    int logicalWidth = m_Width;
+    int logicalHeight = ToolbarHeight;
+    int pixelWidth = StationConnectToolbarLogic::physicalExtent(
+                logicalWidth, m_PixelDensity);
+    int pixelHeight = StationConnectToolbarLogic::physicalExtent(
+                logicalHeight, m_PixelDensity);
+    SDL_GetWindowSize(m_ToolbarWindow, &logicalWidth, &logicalHeight);
+    SDL_GetWindowSizeInPixels(m_ToolbarWindow, &pixelWidth, &pixelHeight);
+    m_PixelDensity = StationConnectToolbarLogic::resolvePixelDensity(
+                SDL_GetWindowPixelDensity(m_ToolbarWindow),
+                logicalWidth, logicalHeight, pixelWidth, pixelHeight);
+}
+
 void StationConnectToolbar::notifyFocusLost()
 {
     m_ButtonRouter.reset();
@@ -251,55 +337,126 @@ void StationConnectToolbar::notifyFocusLost()
     endLocalPointerInteraction();
 }
 
-bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
+bool StationConnectToolbar::handleWindowEvent(const SDL_Event& event)
 {
-    if (event.which == SDL_TOUCH_MOUSEID) {
+    switch (event.type) {
+    case SDL_EVENT_WINDOW_SHOWN:
+    case SDL_EVENT_WINDOW_HIDDEN:
+    case SDL_EVENT_WINDOW_EXPOSED:
+    case SDL_EVENT_WINDOW_MOVED:
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+    case SDL_EVENT_WINDOW_MOUSE_ENTER:
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+        break;
+    default:
+        return false;
+    }
+
+    if (event.window.windowID != m_ToolbarWindowId ||
+            m_ToolbarWindowId == 0) {
         return false;
     }
 
     const Uint64 now = SDL_GetTicks();
-    // StationConnect sessions use absolute desktop input. SDL's window
-    // coordinates are the single source of truth for both the remote pointer
-    // and the receiver toolbar.
-    m_PointerX = event.x;
-    m_PointerY = event.y;
+    switch (event.type) {
+    case SDL_EVENT_WINDOW_MOUSE_ENTER:
+        m_PointerInside = true;
+        m_HideDeadline = 0;
+        beginLocalPointerInteraction();
+        break;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        m_PointerInside = false;
+        if (!m_ButtonRouter.hasLocalButtons()) {
+            endLocalPointerInteraction();
+            m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+        }
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        m_ButtonRouter.reset();
+        m_PressedControl = Control::None;
+        m_DraggingToolbar = false;
+        m_DraggingSlider = false;
+        endLocalPointerInteraction();
+        break;
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+        updateToolbarWindowMetrics();
+        redraw();
+        break;
+    case SDL_EVENT_WINDOW_SHOWN:
+    case SDL_EVENT_WINDOW_EXPOSED:
+        redraw();
+        break;
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        hide();
+        break;
+    default:
+        break;
+    }
+    return true;
+}
 
-    // The edge must be held continuously for one second. Leaving the edge
-    // cancels the activation, so ordinary host UI at the top remains usable.
-    if (!m_Visible && !m_LocalPointerInteraction) {
-        if (m_PointerY <= EdgeRevealHeight) {
-            if (m_EdgeHoverStartTime == 0) {
-                m_EdgeHoverStartTime = now;
-            } else if (now >= m_EdgeHoverStartTime + EdgeActivationDelayMs) {
-                show(now);
+bool StationConnectToolbar::handleMouseMotion(SDL_MouseMotionEvent& event)
+{
+    const bool fromToolbar = event.windowID == m_ToolbarWindowId &&
+            m_ToolbarWindowId != 0;
+    if (event.which == SDL_TOUCH_MOUSEID) {
+        return fromToolbar;
+    }
+
+    const Uint64 now = SDL_GetTicks();
+    if (fromToolbar) {
+        m_PointerX = StationConnectToolbarLogic::parentXFromPopup(
+                    qRound(event.x), toolbarLeft());
+        m_PointerY = qRound(event.y);
+        m_PointerInside = true;
+        m_HideDeadline = 0;
+    }
+    else if (m_ButtonRouter.hasLocalButtons()) {
+        // A local drag may cross the popup boundary. Continue it from relative
+        // motion so it never depends on the parent window's absolute viewport.
+        m_PointerX = qBound(0, m_PointerX + qRound(event.xrel),
+                            std::max(0, m_WindowWidth - 1));
+        m_PointerY = qBound(0, m_PointerY + qRound(event.yrel),
+                            std::max(0, m_WindowHeight - 1));
+        m_PointerInside = false;
+    }
+    else {
+        m_PointerX = qRound(event.x);
+        m_PointerY = qRound(event.y);
+
+        // The parent video window is responsible only for the one-second
+        // top-edge dwell. Once shown, the native child window owns its own hit
+        // testing and pointer events.
+        if (!m_Visible && !m_LocalPointerInteraction) {
+            if (m_PointerY <= EdgeRevealHeight) {
+                if (m_EdgeHoverStartTime == 0) {
+                    m_EdgeHoverStartTime = now;
+                } else if (now >= m_EdgeHoverStartTime +
+                           EdgeActivationDelayMs) {
+                    show(now);
+                }
+            } else {
+                m_EdgeHoverStartTime = 0;
             }
-        } else {
-            m_EdgeHoverStartTime = 0;
         }
     }
 
-    // Revealing does not claim the pointer. The user must move down from the
-    // edge into the visible toolbar before local interaction begins.
-    const bool pointerEnteredVisibleToolbar =
-            m_Visible && m_PointerY > EdgeRevealHeight &&
-            contains(m_PointerX, m_PointerY);
-
-    if (!m_Visible) {
-        return false;
-    }
-
-    m_PointerInside = contains(m_PointerX, m_PointerY);
-    if (m_PointerInside || m_ButtonRouter.hasLocalButtons()) {
-        m_HideDeadline = 0;
-    } else {
-        m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
-    }
-
-    const auto owner = m_ButtonRouter.routeMotion(
-                pointerEnteredVisibleToolbar);
+    const auto owner = m_ButtonRouter.routeMotion(fromToolbar);
     if (owner == StationConnectToolbarLogic::ButtonRouter::Owner::Remote) {
-        if (!m_ButtonRouter.hasLocalButtons()) {
-            endLocalPointerInteraction();
+        if (fromToolbar) {
+            // Preserve a remote press/release sequence that crosses the child
+            // window by translating its motion back into parent coordinates.
+            event.x = static_cast<float>(m_PointerX);
+            event.y = static_cast<float>(m_PointerY);
         }
         return false;
     }
@@ -309,10 +466,11 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     }
 
     if (m_DraggingToolbar) {
-        const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
-                                   std::max(0, m_WindowWidth - m_Width));
+        const int newLeft = StationConnectToolbarLogic::movedPopupLeft(
+                    m_ToolbarLeft, event.xrel, m_WindowWidth, m_Width);
         if (newLeft != m_ToolbarLeft) {
             m_ToolbarLeft = newLeft;
+            positionToolbarWindow();
             if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
                 redraw();
                 m_LastToolbarMoveDrawTime = now;
@@ -332,14 +490,19 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
 }
 
 StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
-        const SDL_MouseButtonEvent& event)
+        SDL_MouseButtonEvent& event)
 {
-    m_PointerX = event.x;
-    m_PointerY = event.y;
+    const bool fromToolbar = event.windowID == m_ToolbarWindowId &&
+            m_ToolbarWindowId != 0;
+    if (fromToolbar) {
+        event.x += static_cast<float>(toolbarLeft());
+    }
+    m_PointerX = qRound(event.x);
+    m_PointerY = qRound(event.y);
     const int pointerX = m_PointerX;
     const int pointerY = m_PointerY;
     const Uint64 now = SDL_GetTicks();
-    const bool pointerInside = m_Visible && contains(pointerX, pointerY);
+    const bool pointerInside = m_Visible && fromToolbar;
     const auto owner = m_ButtonRouter.routeButton(
                 event.button, event.down, pointerInside);
     if (owner == StationConnectToolbarLogic::ButtonRouter::Owner::Remote) {
@@ -361,10 +524,10 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
     }
 
     if (event.down) {
-        m_PressedControl = controlAt(pointerX, pointerY);
+        m_PressedControl = fromToolbar ?
+                    controlAt(pointerX, pointerY) : Control::None;
         if (m_PressedControl == Control::Handle) {
             m_DraggingToolbar = true;
-            m_ToolbarDragOffsetX = pointerX - toolbarLeft();
             redraw();
         } else if (m_PressedControl == Control::Slider &&
                    m_BitrateSupported) {
@@ -374,7 +537,8 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         return Action::Consumed;
     }
 
-    const Control releasedControl = controlAt(pointerX, pointerY);
+    const Control releasedControl = fromToolbar ?
+                controlAt(pointerX, pointerY) : Control::None;
     const Control pressedControl = m_PressedControl;
     m_PressedControl = Control::None;
 
@@ -412,24 +576,27 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         }
     }
 
-    if (!m_ButtonRouter.hasLocalButtons() && !pointerInside) {
+    if (!m_ButtonRouter.hasLocalButtons() && !fromToolbar) {
         m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
         endLocalPointerInteraction();
     }
     return action;
 }
 
-bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
+bool StationConnectToolbar::handleMouseWheel(SDL_MouseWheelEvent& event)
 {
-    const int mouseX = qRound(event.mouse_x);
+    const bool fromToolbar = event.windowID == m_ToolbarWindowId &&
+            m_ToolbarWindowId != 0;
+    if (!fromToolbar) {
+        return false;
+    }
+
+    const int mouseX = StationConnectToolbarLogic::parentXFromPopup(
+                qRound(event.mouse_x), toolbarLeft());
     const int mouseY = qRound(event.mouse_y);
     m_PointerX = mouseX;
     m_PointerY = mouseY;
     if (!m_Visible) {
-        return false;
-    }
-    if (!contains(mouseX, mouseY)) {
-        endLocalPointerInteraction();
         return false;
     }
     if (!m_LocalPointerInteraction) {
@@ -459,21 +626,37 @@ int StationConnectToolbar::eventWaitTimeout() const
 
 void StationConnectToolbar::show(Uint64 now)
 {
+    if (m_ToolbarWindow == nullptr) {
+        return;
+    }
+
+    positionToolbarWindow();
+    redraw();
+    if (!SDL_ShowWindow(m_ToolbarWindow)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to show StationConnect toolbar window: %s",
+                    SDL_GetError());
+        return;
+    }
+
     m_Visible = true;
     m_EdgeHoverStartTime = 0;
     m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
-    redraw();
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, true);
 }
 
 void StationConnectToolbar::hide()
 {
+    if (m_ToolbarWindow != nullptr &&
+            !SDL_HideWindow(m_ToolbarWindow)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to hide StationConnect toolbar window: %s",
+                    SDL_GetError());
+    }
     endLocalPointerInteraction();
     m_Visible = false;
     m_EdgeHoverStartTime = 0;
     m_PointerInside = false;
     m_HideDeadline = 0;
-    m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, false);
 }
 
 void StationConnectToolbar::beginLocalPointerInteraction()
@@ -515,6 +698,11 @@ void StationConnectToolbar::endLocalPointerInteraction()
 
 void StationConnectToolbar::redraw()
 {
+    if (m_ToolbarWindow == nullptr) {
+        return;
+    }
+
+    updateToolbarWindowMetrics();
     const int surfaceWidth =
             StationConnectToolbarLogic::physicalExtent(m_Width, m_PixelDensity);
     const int surfaceHeight =
@@ -742,12 +930,29 @@ void StationConnectToolbar::redraw()
     m_LastDrawnVideoMbps = m_VideoMbps;
     m_LastDrawnPacketLossPercent = m_PacketLossPercent;
     m_LastRedrawTime = SDL_GetTicks();
-    const float horizontalPosition =
-            StationConnectToolbarLogic::horizontalPosition(
-                m_ToolbarLeft, m_WindowWidth, m_Width);
-    m_OverlayManager.setOverlayHorizontalPosition(Overlay::OverlayToolbar,
-                                                   horizontalPosition);
-    m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
+
+    SDL_Surface* windowSurface = SDL_GetWindowSurface(m_ToolbarWindow);
+    if (windowSurface == nullptr) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to acquire StationConnect toolbar window surface: %s",
+                    SDL_GetError());
+        SDL_DestroySurface(surface);
+        return;
+    }
+    if (!SDL_BlitSurfaceScaled(surface, nullptr, windowSurface, nullptr,
+                               SDL_SCALEMODE_LINEAR)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to paint StationConnect toolbar window: %s",
+                    SDL_GetError());
+        SDL_DestroySurface(surface);
+        return;
+    }
+    SDL_DestroySurface(surface);
+    if (!SDL_UpdateWindowSurface(m_ToolbarWindow)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to present StationConnect toolbar window: %s",
+                    SDL_GetError());
+    }
 }
 
 void StationConnectToolbar::updateBitrateFromPointer(int x, Uint64 now, bool forceSend)

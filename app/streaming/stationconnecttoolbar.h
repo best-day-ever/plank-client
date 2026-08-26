@@ -7,10 +7,6 @@
 class StreamingPreferences;
 class SdlInputHandler;
 
-namespace Overlay {
-class OverlayManager;
-}
-
 class StationConnectToolbar
 {
 public:
@@ -23,7 +19,6 @@ public:
     };
 
     StationConnectToolbar(SDL_Window* window,
-                          Overlay::OverlayManager& overlayManager,
                           SdlInputHandler& inputHandler,
                           StreamingPreferences& preferences);
     ~StationConnectToolbar();
@@ -33,10 +28,11 @@ public:
     void update(Uint64 now);
     void notifyWindowChanged();
     void notifyFocusLost();
+    bool handleWindowEvent(const SDL_Event& event);
 
-    bool handleMouseMotion(const SDL_MouseMotionEvent& event);
-    Action handleMouseButton(const SDL_MouseButtonEvent& event);
-    bool handleMouseWheel(const SDL_MouseWheelEvent& event);
+    bool handleMouseMotion(SDL_MouseMotionEvent& event);
+    Action handleMouseButton(SDL_MouseButtonEvent& event);
+    bool handleMouseWheel(SDL_MouseWheelEvent& event);
 
     int eventWaitTimeout() const;
 
@@ -53,6 +49,9 @@ private:
 
     void show(Uint64 now);
     void hide();
+    bool createToolbarWindow();
+    void positionToolbarWindow();
+    void updateToolbarWindowMetrics();
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
     void redraw();
@@ -71,7 +70,8 @@ private:
     int sliderRight() const;
 
     SDL_Window* m_Window;
-    Overlay::OverlayManager& m_OverlayManager;
+    SDL_Window* m_ToolbarWindow;
+    SDL_WindowID m_ToolbarWindowId;
     SdlInputHandler& m_InputHandler;
     StreamingPreferences& m_Preferences;
     bool m_Visible;
@@ -89,7 +89,6 @@ private:
     float m_PixelDensity;
     int m_Width;
     int m_ToolbarLeft;
-    int m_ToolbarDragOffsetX;
     int m_PointerX;
     int m_PointerY;
     Control m_PressedControl;

@@ -1200,6 +1200,26 @@ void Session::getWindowDimensions(int& x, int& y,
 
 void Session::updateOptimalWindowDisplayMode()
 {
+    // A StationConnect Wayland session is a desktop surface, not a monitor
+    // mode switch. Let the compositor size the fullscreen surface and keep
+    // SDL's window and pointer coordinates in the same space. SDL 3.4.2 can
+    // otherwise retain the pre-fullscreen viewport for pointer events while
+    // exposing the fullscreen mode dimensions through SDL_GetWindowSize().
+    // Our renderer already performs the required aspect scaling and
+    // letterboxing, so an exclusive Wayland display mode adds no value.
+    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
+        if (!SDL_SetWindowFullscreenMode(m_Window, nullptr)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to select Wayland desktop fullscreen mode: %s",
+                        SDL_GetError());
+        }
+        else {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Using compositor-native Wayland fullscreen mode");
+        }
+        return;
+    }
+
     SDL_DisplayMode desktopMode, bestMode, mode;
     const SDL_DisplayID display = SDL_GetDisplayForWindow(m_Window);
     const int displayIndex = StreamUtils::getDisplayIndex(display);
@@ -2008,6 +2028,33 @@ void Session::execInternal()
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
 
+    const bool createWaylandFullscreen =
+            m_IsFullScreen &&
+            strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
+    if (createWaylandFullscreen) {
+        SDL_Rect displayBounds;
+        const SDL_DisplayID display = StreamUtils::getDisplayId(
+                    getTargetDisplayIndex());
+        if (SDL_GetDisplayBounds(display, &displayBounds)) {
+            // SDL 3.4.2 can retain the initially requested Wayland viewport
+            // as its absolute-pointer coordinate range after a later
+            // fullscreen configure. Request the compositor's complete logical
+            // output size from the first surface configure so there is no
+            // coordinate-space transition to retain.
+            width = displayBounds.w;
+            height = displayBounds.h;
+            x = y = SDL_WINDOWPOS_CENTERED_DISPLAY(display);
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Creating Wayland fullscreen surface at %dx%d",
+                        width, height);
+        }
+        else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to query Wayland fullscreen bounds: %s",
+                        SDL_GetError());
+        }
+    }
+
 #ifdef STEAM_LINK
     // We need a little delay before creating the window or we will trigger some kind
     // of graphics driver bug on Steam Link that causes a jagged overlay to appear in
@@ -2022,6 +2069,12 @@ void Session::execInternal()
 
     // We always want a resizable window with High DPI enabled
     Uint32 defaultWindowFlags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE;
+    if (createWaylandFullscreen) {
+        // Enter compositor-native fullscreen on the initial configure. This
+        // prevents SDL from binding pointer input to an intermediate windowed
+        // viewport before the fullscreen surface exists.
+        defaultWindowFlags |= m_FullScreenFlag;
+    }
 
     // We use only the computer name on macOS to match Apple conventions where the
     // app name is featured in the menu bar and the document name is in the title bar.
@@ -2180,7 +2233,7 @@ void Session::execInternal()
 
     if (m_Computer->stationConnectAuthentication) {
         m_StationConnectToolbar.reset(new StationConnectToolbar(
-                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences));
+                    m_Window, *m_InputHandler, *m_Preferences));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
@@ -2198,6 +2251,10 @@ void Session::execInternal()
         const int eventWaitTimeout = m_StationConnectToolbar ?
                     m_StationConnectToolbar->eventWaitTimeout() : 1000;
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
+            continue;
+        }
+        if (m_StationConnectToolbar &&
+                m_StationConnectToolbar->handleWindowEvent(event)) {
             continue;
         }
         switch (event.type) {
@@ -2495,9 +2552,16 @@ void Session::execInternal()
                 // the toolbar tracker and host receive the identical delta.
                 if (event.motion.which != SDL_TOUCH_MOUSEID) {
                     SDL_Event nextMotionEvent;
-                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
+                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_PEEKEVENT,
                                           SDL_EVENT_MOUSE_MOTION,
-                                          SDL_EVENT_MOUSE_MOTION) > 0) {
+                                          SDL_EVENT_MOUSE_MOTION) > 0 &&
+                           nextMotionEvent.motion.windowID ==
+                               event.motion.windowID) {
+                        if (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
+                                           SDL_EVENT_MOUSE_MOTION,
+                                           SDL_EVENT_MOUSE_MOTION) <= 0) {
+                            break;
+                        }
                         if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
                             event.motion.timestamp =
                                     nextMotionEvent.motion.timestamp;

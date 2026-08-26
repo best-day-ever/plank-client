@@ -14,6 +14,8 @@ private slots:
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
     void preservesHorizontalPositionAcrossScaleChanges();
+    void mapsNativePopupCoordinatesWithoutParentScaling();
+    void movesNativePopupAcrossDynamicResolutions();
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
@@ -75,6 +77,24 @@ void TestStationConnectToolbarLogic::preservesHorizontalPositionAcrossScaleChang
 
     QVERIFY(qAbs(StationConnectToolbarLogic::horizontalPosition(
                      newLeft, newWindowWidth, toolbarWidth) - position) < 0.001f);
+}
+
+void TestStationConnectToolbarLogic::mapsNativePopupCoordinatesWithoutParentScaling()
+{
+    QCOMPARE(StationConnectToolbarLogic::parentXFromPopup(100, 2671), 2771);
+    QCOMPARE(StationConnectToolbarLogic::parentXFromPopup(538, 0), 538);
+}
+
+void TestStationConnectToolbarLogic::movesNativePopupAcrossDynamicResolutions()
+{
+    QCOMPARE(StationConnectToolbarLogic::movedPopupLeft(
+                 100, 20.4f, 1920, 539), 120);
+    QCOMPARE(StationConnectToolbarLogic::movedPopupLeft(
+                 100, -150.0f, 2560, 539), 0);
+    QCOMPARE(StationConnectToolbarLogic::movedPopupLeft(
+                 4500, 500.0f, 5120, 539), 4581);
+    QCOMPARE(StationConnectToolbarLogic::movedPopupLeft(
+                 900, 25.0f, 400, 539), 0);
 }
 
 void TestStationConnectToolbarLogic::keepsRemotePressReleaseTogether()
