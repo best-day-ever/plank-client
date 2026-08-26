@@ -237,10 +237,14 @@ bool SdlInputHandler::isCaptureActive()
 
 void SdlInputHandler::setToolbarInteractionActive(bool active)
 {
-    // Absolute desktop mode does not need a capture transition. Show the
-    // receiver cursor only while receiver UI owns input, then restore the
-    // user's captured-cursor state when routing resumes to the host.
-    setCursorVisible(active ? true : m_MouseCursorCapturedVisibilityState);
+    // The StationConnect toolbar draws its own pointer from the exact native
+    // popup coordinates used for hit testing. Keep SDL's Wayland cursor hidden
+    // while the popup owns input so there is never a second cursor with a
+    // different ownership history. When routing returns to the parent window,
+    // restore the normal video/letterbox visibility policy.
+    setCursorVisible(active ? false :
+                     (!m_MouseWasInVideoRegion ||
+                      m_MouseCursorCapturedVisibilityState));
 }
 
 void SdlInputHandler::setLocalToolbarAvailable(bool available)

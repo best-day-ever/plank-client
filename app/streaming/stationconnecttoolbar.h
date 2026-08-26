@@ -80,6 +80,7 @@ private:
     bool m_DraggingSlider;
     bool m_PointerInside;
     bool m_PointerInitialized;
+    bool m_PopupPointerPositionValid;
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
     int m_WindowWidth;

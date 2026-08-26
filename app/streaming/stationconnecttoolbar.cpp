@@ -68,6 +68,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_DraggingSlider(false),
       m_PointerInside(false),
       m_PointerInitialized(false),
+      m_PopupPointerPositionValid(false),
       m_LocalPointerInteraction(false),
       m_BitrateSupported(
               (LiGetHostFeatureFlags() &
@@ -359,11 +360,17 @@ bool StationConnectToolbar::handleWindowEvent(const SDL_Event& event)
     switch (event.type) {
     case SDL_EVENT_WINDOW_MOUSE_ENTER:
         m_PointerInside = true;
+        // SDL's enter event carries no pointer coordinate. Do not reuse the
+        // last parent-window position because that recreates the very cursor
+        // jump this native popup is intended to eliminate. The first popup
+        // motion/button/wheel event establishes the authoritative position.
+        m_PopupPointerPositionValid = false;
         m_HideDeadline = 0;
         beginLocalPointerInteraction();
         break;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         m_PointerInside = false;
+        m_PopupPointerPositionValid = false;
         if (!m_ButtonRouter.hasLocalButtons()) {
             endLocalPointerInteraction();
             m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
@@ -374,6 +381,7 @@ bool StationConnectToolbar::handleWindowEvent(const SDL_Event& event)
         m_PressedControl = Control::None;
         m_DraggingToolbar = false;
         m_DraggingSlider = false;
+        m_PopupPointerPositionValid = false;
         endLocalPointerInteraction();
         break;
     case SDL_EVENT_WINDOW_RESIZED:
@@ -410,6 +418,7 @@ bool StationConnectToolbar::handleMouseMotion(SDL_MouseMotionEvent& event)
                     qRound(event.x), toolbarLeft());
         m_PointerY = qRound(event.y);
         m_PointerInside = true;
+        m_PopupPointerPositionValid = true;
         m_HideDeadline = 0;
     }
     else if (m_ButtonRouter.hasLocalButtons()) {
@@ -488,6 +497,7 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
             m_ToolbarWindowId != 0;
     if (fromToolbar) {
         event.x += static_cast<float>(toolbarLeft());
+        m_PopupPointerPositionValid = true;
     }
     m_PointerX = qRound(event.x);
     m_PointerY = qRound(event.y);
@@ -588,6 +598,7 @@ bool StationConnectToolbar::handleMouseWheel(SDL_MouseWheelEvent& event)
     const int mouseY = qRound(event.mouse_y);
     m_PointerX = mouseX;
     m_PointerY = mouseY;
+    m_PopupPointerPositionValid = true;
     if (!m_Visible) {
         return false;
     }
@@ -648,6 +659,7 @@ void StationConnectToolbar::hide()
     m_Visible = false;
     m_EdgeHoverStartTime = 0;
     m_PointerInside = false;
+    m_PopupPointerPositionValid = false;
     m_HideDeadline = 0;
 }
 
@@ -658,8 +670,8 @@ void StationConnectToolbar::beginLocalPointerInteraction()
     }
 
     // This is the equivalent of RGS routing an event to its toolbar widget:
-    // keep the stream's input mode untouched and expose the receiver cursor
-    // while the toolbar owns the pointer.
+    // keep the stream's input mode untouched while the native popup and its
+    // software-drawn pointer own local interaction.
     m_InputHandler.setToolbarInteractionActive(true);
 
     m_LocalPointerInteraction = true;
@@ -680,10 +692,14 @@ void StationConnectToolbar::endLocalPointerInteraction()
     m_DraggingToolbar = false;
     m_DraggingSlider = false;
     m_PointerInside = false;
+    m_PopupPointerPositionValid = false;
 
     // The next absolute event resumes host routing at the same coordinate; no
     // warp, flush, capture toggle, or synthetic synchronization event.
     m_InputHandler.setToolbarInteractionActive(false);
+    if (m_Visible) {
+        redraw();
+    }
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
                  "StationConnect toolbar routed pointer to remote desktop");
 }
@@ -711,10 +727,9 @@ void StationConnectToolbar::redraw()
 
     QImage image(static_cast<uchar*>(surface->pixels), surface->w, surface->h,
                  surface->pitch, QImage::Format_ARGB32_Premultiplied);
-    // The remote host cursor is already composited into the video frame. The
-    // local Wayland cursor becomes visible when this popup owns the pointer,
-    // so the toolbar must be opaque or the frozen remote cursor shows through
-    // as a distracting second pointer. Painting every row also ensures that
+    // The remote host cursor is already composited into the video frame. Keep
+    // the popup opaque so that cursor cannot show through beneath the single
+    // receiver-side pointer drawn below. Painting every row also ensures that
     // the native window never presents uninitialized pixels below the UI.
     image.fill(QColor(22, 27, 34));
 
@@ -738,6 +753,7 @@ void StationConnectToolbar::redraw()
 
     // Six-dot grip for moving the toolbar horizontally along the top edge.
     const bool handleHovered = m_LocalPointerInteraction &&
+                               m_PopupPointerPositionValid &&
                                handleContains(m_PointerX, m_PointerY);
     painter.setPen(Qt::NoPen);
     painter.setBrush(handleHovered || m_DraggingToolbar ?
@@ -750,6 +766,7 @@ void StationConnectToolbar::redraw()
     // RGS-style upright outline thumbtack. A slash indicates auto-hide mode;
     // the unmodified thumbtack indicates that the toolbar is pinned.
     const bool pinHovered = m_LocalPointerInteraction &&
+                            m_PopupPointerPositionValid &&
                             pinContains(m_PointerX, m_PointerY);
     QPainterPath pin;
     pin.moveTo(31, 11);
@@ -839,6 +856,7 @@ void StationConnectToolbar::redraw()
                                 WindowButtonSize,
                                 WindowButtonSize);
     const bool fullscreenHovered = m_LocalPointerInteraction &&
+                                   m_PopupPointerPositionValid &&
                                    fullscreenContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(104, 116, 131), 1));
     painter.setBrush(fullscreenHovered ? QColor(68, 78, 90, 230) :
@@ -876,6 +894,7 @@ void StationConnectToolbar::redraw()
                               WindowButtonSize,
                               WindowButtonSize);
     const bool minimizeHovered = m_LocalPointerInteraction &&
+                                 m_PopupPointerPositionValid &&
                                  minimizeContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(104, 116, 131), 1));
     painter.setBrush(minimizeHovered ? QColor(68, 78, 90, 230) :
@@ -894,6 +913,7 @@ void StationConnectToolbar::redraw()
                                 WindowButtonSize,
                                 WindowButtonSize);
     const bool disconnectHovered = m_LocalPointerInteraction &&
+                                   m_PopupPointerPositionValid &&
                                    disconnectContains(m_PointerX, m_PointerY);
     painter.setPen(QPen(QColor(239, 88, 88), 1));
     painter.setBrush(disconnectHovered ? QColor(151, 43, 49, 220) :
@@ -921,6 +941,29 @@ void StationConnectToolbar::redraw()
         painter.setPen(QColor(183, 151, 92));
         painter.drawText(QRect(229, 28, 187, 9), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
+    }
+
+    if (m_LocalPointerInteraction && m_PointerInside &&
+            m_PopupPointerPositionValid) {
+        // Render one receiver-side pointer whose hotspot is the exact native
+        // popup coordinate used above for control hit testing. This avoids a
+        // Wayland cursor ownership transition while preserving immediate,
+        // latency-free pointer feedback over the opaque toolbar.
+        const qreal cursorX = m_PointerX - toolbarLeft();
+        const qreal cursorY = m_PointerY;
+        QPainterPath cursor;
+        cursor.moveTo(cursorX, cursorY);
+        cursor.lineTo(cursorX + 1.0, cursorY + 18.0);
+        cursor.lineTo(cursorX + 5.2, cursorY + 13.7);
+        cursor.lineTo(cursorX + 9.1, cursorY + 22.0);
+        cursor.lineTo(cursorX + 12.0, cursorY + 20.6);
+        cursor.lineTo(cursorX + 8.1, cursorY + 12.3);
+        cursor.lineTo(cursorX + 14.0, cursorY + 12.0);
+        cursor.closeSubpath();
+        painter.setPen(QPen(QColor(20, 20, 20), 1.4,
+                            Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(QColor(248, 248, 248));
+        painter.drawPath(cursor);
     }
 
     painter.end();
