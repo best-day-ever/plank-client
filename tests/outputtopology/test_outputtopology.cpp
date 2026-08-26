@@ -23,7 +23,7 @@ void TestOutputTopology::parsesQualificationVector()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
     QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v4.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v5.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     QVERIFY(document.isObject());
@@ -33,13 +33,17 @@ void TestOutputTopology::parsesQualificationVector()
     QVERIFY2(NvOutputTopology::fromJson(document.object(), topology, &error), qPrintable(error));
     QCOMPARE(topology.outputs.size(), 2);
     QCOMPARE(topology.desktopWidth, 5120);
-    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 1023);
+    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 2047);
     QVERIFY((topology.featureFlags & NvOutputTopology::TopologyGenerationFeature) != 0);
     QVERIFY(!topology.generation.isEmpty());
     QCOMPARE(topology.layoutKind, QString("dual-horizontal"));
     QCOMPARE(topology.virtualModes,
              QStringList({QStringLiteral("3840x2160"), QStringLiteral("1280x2160")}));
     QVERIFY(topology.virtualLayout);
+    QCOMPARE(topology.startupLayoutKind, QStringLiteral("physical"));
+    QCOMPARE(topology.allowedLayoutKinds,
+             QStringList({QStringLiteral("physical"), QStringLiteral("single"),
+                          QStringLiteral("dual-horizontal")}));
     QCOMPARE(topology.outputs.at(0).configuredMode, QString("3840x2160"));
     QCOMPARE(topology.outputs.at(1).configuredMode, QString("1280x2160"));
     QCOMPARE(topology.outputs.at(1).sourceX, 3840);
@@ -49,7 +53,7 @@ void TestOutputTopology::roundTripsQualificationVector()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
     QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v4.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v5.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     NvOutputTopology topology;
@@ -71,10 +75,12 @@ void TestOutputTopology::rejectsDuplicateIdentity()
                                       {"width", 3840}, {"height", 2160}}},
     };
     QJsonObject document {
-        {"schema_version", 4}, {"feature_flags", 1023}, {"generation", "test"},
+        {"schema_version", 5}, {"feature_flags", 2047}, {"generation", "test"},
         {"layout", QJsonObject {{"kind", "dual-horizontal"}, {"virtual", true},
                                  {"virtual_modes", QJsonArray {"3840x2160", "3840x2160"}},
-                                 {"output_count", 2}}},
+                                 {"output_count", 2}, {"startup_kind", "physical"},
+                                 {"allowed_kinds", QJsonArray {
+                                      "physical", "single", "dual-horizontal"}}}},
         {"desktop", QJsonObject {{"x", 0}, {"y", 0}, {"width", 7680}, {"height", 2160}}},
         {"outputs", QJsonArray {output, output}},
     };
@@ -85,7 +91,7 @@ void TestOutputTopology::rejectsDuplicateIdentity()
 void TestOutputTopology::rejectsConfiguredModeMismatch()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v4.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v5.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
     QJsonArray outputs = document.value("outputs").toArray();
@@ -142,13 +148,24 @@ void TestOutputTopology::enforcesHostDisplayPolicy()
 
     topology.schemaVersion = NvOutputTopology::ProtocolVersion;
     topology.layoutKind = NvOutputTopology::PhysicalHostLayout;
+    topology.startupLayoutKind = NvOutputTopology::PhysicalHostLayout;
+    topology.allowedLayoutKinds = {
+        QString::fromLatin1(NvOutputTopology::PhysicalHostLayout),
+        QString::fromLatin1(NvOutputTopology::SingleHostLayout),
+        QString::fromLatin1(NvOutputTopology::DualHorizontalHostLayout)
+    };
     topology.virtualLayout = false;
     QVERIFY(topology.displayPolicyKnown());
     QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
-    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
-    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("single")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("single")));
 
     topology.layoutKind = NvOutputTopology::SingleHostLayout;
+    topology.startupLayoutKind = NvOutputTopology::SingleHostLayout;
+    topology.allowedLayoutKinds = {
+        QString::fromLatin1(NvOutputTopology::SingleHostLayout),
+        QString::fromLatin1(NvOutputTopology::DualHorizontalHostLayout)
+    };
     topology.virtualLayout = true;
     QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
     QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
@@ -159,7 +176,7 @@ void TestOutputTopology::enforcesHostDisplayPolicy()
 void TestOutputTopology::validatesRequestedLayoutGeometry()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v4.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v5.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
 

@@ -88,14 +88,16 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
                                     CompositeSourceRegionsFeature |
                                     HostLayoutBindingFeature |
                                     IndependentVirtualModesFeature |
-                                    DynamicHostLayoutFeature)) !=
+                                    DynamicHostLayoutFeature |
+                                    TemporaryPhysicalLayoutFeature)) !=
                 (OutputTopologyFeature | SelectedOutputFeature |
                  UnifiedAbsoluteInputFeature |
                  HostLayoutMetadataFeature |
                  CompositeSourceRegionsFeature |
                  HostLayoutBindingFeature |
                  IndependentVirtualModesFeature |
-                 DynamicHostLayoutFeature) ||
+                 DynamicHostLayoutFeature |
+                 TemporaryPhysicalLayoutFeature) ||
             !object.value("generation").isString() ||
             !object.value("layout").isObject() ||
             !object.value("desktop").isObject() ||
@@ -109,6 +111,23 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
     const QJsonObject layout = object.value("layout").toObject();
     int declaredOutputCount = 0;
     parsed.layoutKind = layout.value("kind").toString();
+    parsed.startupLayoutKind = layout.value("startup_kind").toString();
+    if (!layout.value("allowed_kinds").isArray()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Invalid host allowed-layout list");
+        }
+        return false;
+    }
+    for (const QJsonValue& kind : layout.value("allowed_kinds").toArray()) {
+        if (!kind.isString() || !validLayoutKind(kind.toString()) ||
+                parsed.allowedLayoutKinds.contains(kind.toString())) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Invalid host allowed layout");
+            }
+            return false;
+        }
+        parsed.allowedLayoutKinds.append(kind.toString());
+    }
     if (!layout.value("virtual_modes").isArray()) {
         if (error != nullptr) {
             *error = QStringLiteral("Invalid host virtual-mode list");
@@ -125,6 +144,18 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         parsed.virtualModes.append(mode.toString());
     }
     if (!validLayoutKind(parsed.layoutKind) ||
+            !validLayoutKind(parsed.startupLayoutKind) ||
+            parsed.allowedLayoutKinds.isEmpty() ||
+            !parsed.allowedLayoutKinds.contains(parsed.layoutKind) ||
+            (parsed.startupLayoutKind == PhysicalHostLayout &&
+             parsed.allowedLayoutKinds != QStringList {
+                 QString::fromLatin1(PhysicalHostLayout),
+                 QString::fromLatin1(SingleHostLayout),
+                 QString::fromLatin1(DualHorizontalHostLayout)}) ||
+            (parsed.startupLayoutKind != PhysicalHostLayout &&
+             parsed.allowedLayoutKinds != QStringList {
+                 QString::fromLatin1(SingleHostLayout),
+                 QString::fromLatin1(DualHorizontalHostLayout)}) ||
             !layout.value("virtual").isBool() ||
             !requireInteger(layout, "output_count", declaredOutputCount) ||
             declaredOutputCount <= 0) {
@@ -245,6 +276,8 @@ QJsonObject NvOutputTopology::toJson() const
             {"kind", layoutKind}, {"virtual", virtualLayout},
             {"virtual_modes", QJsonArray::fromStringList(virtualModes)},
             {"output_count", outputs.size()},
+            {"startup_kind", startupLayoutKind},
+            {"allowed_kinds", QJsonArray::fromStringList(allowedLayoutKinds)},
         }},
         {"desktop", QJsonObject {
             {"x", desktopX}, {"y", desktopY},
@@ -267,9 +300,8 @@ bool NvOutputTopology::contains(QString outputId) const
 bool NvOutputTopology::displayPolicyKnown() const
 {
     return schemaVersion == ProtocolVersion &&
-            (layoutKind == PhysicalHostLayout ||
-             layoutKind == SingleHostLayout ||
-             layoutKind == DualHorizontalHostLayout);
+            validLayoutKind(layoutKind) && validLayoutKind(startupLayoutKind) &&
+            !allowedLayoutKinds.isEmpty();
 }
 
 bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
@@ -277,8 +309,11 @@ bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
     if (!displayPolicyKnown()) {
         return true;
     }
-    return virtualLayout ? layout != PhysicalHostLayout :
-                           layout == PhysicalHostLayout;
+    if (layout == MatchClientHostLayout) {
+        return allowedLayoutKinds.contains(SingleHostLayout) &&
+                allowedLayoutKinds.contains(DualHorizontalHostLayout);
+    }
+    return allowedLayoutKinds.contains(layout);
 }
 
 bool NvOutputTopology::matchesRequestedHostLayout(const QString& layout,

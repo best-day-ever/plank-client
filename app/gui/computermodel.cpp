@@ -199,7 +199,8 @@ int ComputerModel::stationConnectHostDisplayPolicy(int computerIndex) const
             !computer->outputTopology.displayPolicyKnown()) {
         return -1;
     }
-    return computer->outputTopology.virtualLayout ? 1 : 0;
+    return computer->outputTopology.allowedLayoutKinds.contains(
+                NvOutputTopology::PhysicalHostLayout) ? 1 : 0;
 }
 
 int ComputerModel::stationConnectVirtualMode1Choice(int computerIndex) const

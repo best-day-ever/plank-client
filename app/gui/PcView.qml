@@ -378,7 +378,7 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
             hostDisplayPolicy = computerModel.stationConnectHostDisplayPolicy(pcIndex)
-            editHostLayout.currentIndex = hostDisplayPolicy === 0 ? 1 : hostLayoutIndex
+            editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
             for (var i = 0; i < editEncodingProfileModel.count; i++) {
@@ -472,7 +472,6 @@ CenteredGridView {
             ComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
-                enabled: editBookmarkDialog.hostDisplayPolicy !== 0
                 model: [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
@@ -484,7 +483,7 @@ CenteredGridView {
             Label {
                 Layout.fillWidth: true
                 visible: editBookmarkDialog.hostDisplayPolicy === 0
-                text: qsTr("This workstation is configured to use its physical displays.")
+                text: qsTr("This headless workstation does not provide physical displays.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

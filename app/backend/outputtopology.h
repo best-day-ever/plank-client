@@ -34,7 +34,7 @@ struct NvClientDisplay
 
 struct NvOutputTopology
 {
-    static const int ProtocolVersion = 4;
+    static const int ProtocolVersion = 5;
     static const int OutputTopologyFeature = 0x1;
     static const int SelectedOutputFeature = 0x2;
     static const int UnifiedAbsoluteInputFeature = 0x4;
@@ -45,6 +45,7 @@ struct NvOutputTopology
     static const int HostLayoutBindingFeature = 0x80;
     static const int IndependentVirtualModesFeature = 0x100;
     static const int DynamicHostLayoutFeature = 0x200;
+    static const int TemporaryPhysicalLayoutFeature = 0x400;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -55,7 +56,8 @@ struct NvOutputTopology
                                              CompositeSourceRegionsFeature |
                                              HostLayoutBindingFeature |
                                              IndependentVirtualModesFeature |
-                                             DynamicHostLayoutFeature;
+                                             DynamicHostLayoutFeature |
+                                             TemporaryPhysicalLayoutFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -89,6 +91,8 @@ struct NvOutputTopology
     int desktopWidth = 0;
     int desktopHeight = 0;
     QString layoutKind;
+    QString startupLayoutKind;
+    QStringList allowedLayoutKinds;
     bool virtualLayout = false;
     QStringList virtualModes;
     QVector<NvOutput> outputs;
