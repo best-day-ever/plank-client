@@ -488,9 +488,9 @@ void StationConnectToolbar::beginLocalPointerInteraction()
         return;
     }
 
-    // Keep the stream's absolute input mode untouched and expose the native
-    // compositor cursor over the local overlay. The same main-window event
-    // coordinate drives host motion, toolbar hit testing, and this cursor.
+    // Keep the stream's absolute input mode untouched. The same main-window
+    // coordinate drives host motion, toolbar hit testing, and the single
+    // receiver-side pointer painted into the toolbar overlay.
     m_InputHandler.setToolbarInteractionActive(true);
 
     m_LocalPointerInteraction = true;
@@ -538,8 +538,8 @@ void StationConnectToolbar::redraw()
     QImage image(static_cast<uchar*>(surface->pixels), surface->w, surface->h,
                  surface->pitch, QImage::Format_ARGB32_Premultiplied);
     // The host cursor is part of the decoded frame. Make every toolbar pixel
-    // opaque so the synchronized cursor beneath it cannot appear as a second
-    // pointer while the compositor cursor is shown above the overlay.
+    // opaque so it cannot appear through the receiver-side pointer drawn at
+    // the authoritative local hit-test coordinate below.
     image.fill(QColor(22, 27, 34));
 
     QPainter painter(&image);
@@ -745,6 +745,27 @@ void StationConnectToolbar::redraw()
         painter.setPen(QColor(183, 151, 92));
         painter.drawText(QRect(229, 28, 187, 9), Qt::AlignLeft | Qt::AlignVCenter,
                          "Host update required for live control");
+    }
+
+    if (m_LocalPointerInteraction && m_PointerInside) {
+        // Use one pointer whose hotspot is exactly the coordinate used by all
+        // toolbar controls. This avoids a Wayland cursor show/hide transition
+        // and makes pointer feedback independent of the delayed host cursor.
+        const qreal cursorX = m_PointerX - toolbarLeft();
+        const qreal cursorY = m_PointerY;
+        QPainterPath cursor;
+        cursor.moveTo(cursorX, cursorY);
+        cursor.lineTo(cursorX + 1.0, cursorY + 18.0);
+        cursor.lineTo(cursorX + 5.2, cursorY + 13.7);
+        cursor.lineTo(cursorX + 9.1, cursorY + 22.0);
+        cursor.lineTo(cursorX + 12.0, cursorY + 20.6);
+        cursor.lineTo(cursorX + 8.1, cursorY + 12.3);
+        cursor.lineTo(cursorX + 14.0, cursorY + 12.0);
+        cursor.closeSubpath();
+        painter.setPen(QPen(QColor(20, 20, 20), 1.4,
+                            Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(QColor(248, 248, 248));
+        painter.drawPath(cursor);
     }
 
     painter.end();
