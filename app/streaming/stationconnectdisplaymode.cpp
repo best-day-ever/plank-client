@@ -7,23 +7,20 @@ QSize StationConnectDisplayMode::qualifiedMaximum()
     return QSize(3840, 2160);
 }
 
-QSize StationConnectDisplayMode::resolve(bool autoResolution,
-                                         const QSize& detectedResolution,
-                                         const QSize& configuredResolution,
+QSize StationConnectDisplayMode::resolve(const QSize& detectedResolution,
                                          const QSize& exactNativeResolution,
                                          const QSize& maximumResolution)
 {
     const QSize maximum = maximumResolution.isValid() ?
                               maximumResolution : qualifiedMaximum();
-    QSize requested = autoResolution ? detectedResolution : configuredResolution;
+    QSize requested = detectedResolution;
     if (requested.width() < 2 || requested.height() < 2) {
         requested = maximum;
     }
 
     // Avoid a lossy downscale/upscale round trip when the selected host
     // canvas already matches the physical client display pixel-for-pixel.
-    if (autoResolution && exactNativeResolution.isValid() &&
-            detectedResolution == exactNativeResolution) {
+    if (exactNativeResolution.isValid() && detectedResolution == exactNativeResolution) {
         return fitWithin(requested, requested);
     }
 

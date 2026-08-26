@@ -10,14 +10,11 @@
 #include <QtDebug>
 
 #define SER_STREAMSETTINGS "streamsettings"
-#define SER_WIDTH "width"
-#define SER_HEIGHT "height"
 #define SER_FPS "fps"
 #define SER_BITRATE "bitrate"
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
-#define SER_STATIONCONNECT_AUTO_RESOLUTION "stationconnectautoresolution"
 #define SER_STATIONCONNECT_TOOLBAR_PINNED "stationconnecttoolbarpinned"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
@@ -83,14 +80,12 @@ void StreamingPreferences::reload()
 
     recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
 
-    width = settings.value(SER_WIDTH, 1280).toInt();
-    height = settings.value(SER_HEIGHT, 720).toInt();
     fps = settings.value(SER_FPS, 60).toInt();
     identityGbrBitDepth = 10;
-    stationConnectAutoResolution = settings.value(SER_STATIONCONNECT_AUTO_RESOLUTION, true).toBool();
     stationConnectToolbarPinned = settings.value(SER_STATIONCONNECT_TOOLBAR_PINNED, false).toBool();
     bitrateKbps = qBound(10000,
-                         settings.value(SER_BITRATE, getDefaultBitrate(width, height, fps)).toInt(),
+                         settings.value(SER_BITRATE,
+                                        getDefaultBitrate(3840, 2160, fps)).toInt(),
                          150000);
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
@@ -255,8 +250,6 @@ void StreamingPreferences::save()
 {
     QSettings settings;
 
-    settings.setValue(SER_WIDTH, width);
-    settings.setValue(SER_HEIGHT, height);
     settings.setValue(SER_FPS, fps);
     settings.setValue(SER_BITRATE, bitrateKbps);
     settings.setValue(SER_VSYNC, enableVsync);
@@ -270,7 +263,6 @@ void StreamingPreferences::save()
     settings.setValue(SER_DETECTNETBLOCKING, detectNetworkBlocking);
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
-    settings.setValue(SER_STATIONCONNECT_AUTO_RESOLUTION, stationConnectAutoResolution);
     settings.setValue(SER_STATIONCONNECT_TOOLBAR_PINNED, stationConnectToolbarPinned);
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));

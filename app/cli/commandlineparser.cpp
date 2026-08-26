@@ -162,16 +162,6 @@ public:
         return value(name);
     }
 
-    QPair<int,int> getResolutionOptionValue(QString name) const
-    {
-        static QRegularExpression re("^(\\d+)x(\\d+)$", QRegularExpression::CaseInsensitiveOption);
-        auto match = re.match(value(name));
-        if (!match.hasMatch()) {
-            showError(QString("Invalid %1 format: %2").arg(name, value(name)));
-        }
-        return qMakePair(match.captured(1).toInt(), match.captured(2).toInt());
-    }
-
     void addFlagOption(QString name, QString descriptiveName)
     {
         addOption(QCommandLineOption(name, QString("Use %1.").arg(descriptiveName)));
@@ -289,11 +279,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addPositionalArgument("host", "Host computer name, UUID, or IP address", "<host>");
     parser.addPositionalArgument("app", "App to stream", "\"<app>\"");
 
-    parser.addFlagOption("720",  "1280x720 resolution");
-    parser.addFlagOption("1080", "1920x1080 resolution");
-    parser.addFlagOption("1440", "2560x1440 resolution");
-    parser.addFlagOption("4K", "3840x2160 resolution");
-    parser.addValueOption("resolution", "custom <width>x<height> resolution");
     parser.addToggleOption("vsync", "V-Sync");
     parser.addValueOption("fps", "FPS");
     parser.addValueOption("bitrate", "bitrate in Kbps");
@@ -316,32 +301,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     parser.handleUnknownOptions();
 
-    // Resolve display's width and height
-    static QRegularExpression resolutionRexExp("^(720|1080|1440|4K|resolution)$");
-    QStringList resoOptions = parser.optionNames().filter(resolutionRexExp);
-    bool displaySet = !resoOptions.isEmpty();
-    if (displaySet) {
-        preferences->stationConnectAutoResolution = false;
-        QString name = resoOptions.last();
-        if (name == "720") {
-            preferences->width  = 1280;
-            preferences->height = 720;
-        } else if (name == "1080") {
-            preferences->width  = 1920;
-            preferences->height = 1080;
-        } else if (name == "1440") {
-            preferences->width  = 2560;
-            preferences->height = 1440;
-        } else if (name == "4K") {
-            preferences->width  = 3840;
-            preferences->height = 2160;
-        } else if (name == "resolution") {
-            auto resolution = parser.getResolutionOptionValue(name);
-            preferences->width  = resolution.first;
-            preferences->height = resolution.second;
-        }
-    }
-
     // Resolve --fps option
     if (parser.isSet("fps")) {
         preferences->fps = parser.getIntOption("fps");
@@ -357,9 +316,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
             fprintf(stderr, "Warning: Bitrate must be between 10000 and 150000 Kbps; clamping to the supported range.\n");
         }
         preferences->bitrateKbps = qBound(10000, requestedBitrateKbps, 150000);
-    } else if (displaySet || parser.isSet("fps")) {
-        preferences->bitrateKbps = preferences->getDefaultBitrate(
-            preferences->width, preferences->height, preferences->fps);
     }
 
     // Resolve --mtu option

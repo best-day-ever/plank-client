@@ -7,9 +7,7 @@ class StationConnectDisplayMode
 public:
     static QSize qualifiedMaximum();
 
-    static QSize resolve(bool autoResolution,
-                         const QSize& detectedResolution,
-                         const QSize& configuredResolution,
+    static QSize resolve(const QSize& detectedResolution,
                          const QSize& exactNativeResolution = QSize(),
                          const QSize& maximumResolution = qualifiedMaximum());
 

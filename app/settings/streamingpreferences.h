@@ -88,8 +88,6 @@ public:
     };
     Q_ENUM(CaptureSysKeysMode);
 
-    Q_PROPERTY(int width MEMBER width NOTIFY displayModeChanged)
-    Q_PROPERTY(int height MEMBER height NOTIFY displayModeChanged)
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
@@ -102,7 +100,6 @@ public:
     Q_PROPERTY(int networkMtu MEMBER networkMtu NOTIFY networkMtuChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
-    Q_PROPERTY(bool stationConnectAutoResolution MEMBER stationConnectAutoResolution NOTIFY stationConnectAutoResolutionChanged)
     Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
@@ -115,8 +112,6 @@ public:
     Q_INVOKABLE int videoPacketSizeForMtu(int mtu) const;
 
     // Directly accessible members for preferences
-    int width;
-    int height;
     int fps;
     int bitrateKbps;
     bool enableVsync;
@@ -132,7 +127,6 @@ public:
     int networkMtu;
     AudioConfig audioConfig;
     int identityGbrBitDepth;
-    bool stationConnectAutoResolution;
     bool stationConnectToolbarPinned;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
@@ -147,7 +141,6 @@ signals:
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void audioConfigChanged();
-    void stationConnectAutoResolutionChanged();
     void stationConnectToolbarPinnedChanged();
     void windowModeChanged();
     void framePacingChanged();

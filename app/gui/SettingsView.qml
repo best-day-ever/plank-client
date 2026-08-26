@@ -98,338 +98,17 @@ Flickable {
 
                 Label {
                     width: parent.width
-                    id: resFPStitle
-                    text: qsTr("Resolution and FPS")
+                    id: frameRateTitle
+                    text: qsTr("Frame rate")
                     font.pointSize: 12
                     wrapMode: Text.Wrap
                 }
 
-                Label {
-                    width: parent.width
-                    id: resFPSdesc
-                    text: qsTr("Setting values too high for your PC or network connection may cause lag, stuttering, or errors.")
-                    font.pointSize: 9
-                    wrapMode: Text.Wrap
-                }
-
-                CheckBox {
-                    id: stationConnectAutoResolutionCheckBox
-                    width: parent.width
-                    text: qsTr("Use the native client display resolution for StationConnect")
-                    checked: StreamingPreferences.stationConnectAutoResolution
-                    onClicked: StreamingPreferences.stationConnectAutoResolution = checked
-                }
 
                 Row {
                     spacing: 5
                     width: parent.width
 
-                    AutoResizingComboBox {
-                        property int lastIndexValue
-
-                        function addDetectedResolution(friendlyNamePrefix, rect) {
-                            var indexToAdd = 0
-                            for (var j = 0; j < resolutionComboBox.count; j++) {
-                                var existing_width = parseInt(resolutionListModel.get(j).video_width);
-                                var existing_height = parseInt(resolutionListModel.get(j).video_height);
-
-                                if (rect.width === existing_width && rect.height === existing_height) {
-                                    // Duplicate entry, skip
-                                    indexToAdd = -1
-                                    break
-                                }
-                                else if (rect.width * rect.height > existing_width * existing_height) {
-                                    // Candidate entrypoint after this entry
-                                    indexToAdd = j + 1
-                                }
-                            }
-
-                            // Insert this display's resolution if it's not a duplicate
-                            if (indexToAdd >= 0) {
-                                resolutionListModel.insert(indexToAdd,
-                                                           {
-                                                               "text": friendlyNamePrefix+" ("+rect.width+"x"+rect.height+")",
-                                                               "video_width": ""+rect.width,
-                                                               "video_height": ""+rect.height,
-                                                               "is_custom": false
-                                                           })
-                            }
-                        }
-
-                        // ignore setting the index at first, and actually set it when the component is loaded
-                        Component.onCompleted: {
-                            // Refresh display data before using it to build the list
-                            SystemProperties.refreshDisplays()
-
-                            // Add native and safe area resolutions for all attached displays
-                            var done = false
-                            for (var displayIndex = 0; !done; displayIndex++) {
-                                var screenRect = SystemProperties.getNativeResolution(displayIndex);
-                                var safeAreaRect = SystemProperties.getSafeAreaResolution(displayIndex);
-
-                                if (screenRect.width === 0) {
-                                    // Exceeded max count of displays
-                                    done = true
-                                    break
-                                }
-
-                                addDetectedResolution(qsTr("Native"), screenRect)
-                                addDetectedResolution(qsTr("Native (Excluding Notch)"), safeAreaRect)
-                            }
-
-                            // Prune resolutions that are over the decoder's maximum
-                            var max_pixels = SystemProperties.maximumResolution.width * SystemProperties.maximumResolution.height;
-                            if (max_pixels > 0) {
-                                for (var j = 0; j < resolutionComboBox.count; j++) {
-                                    var existing_width = parseInt(resolutionListModel.get(j).video_width);
-                                    var existing_height = parseInt(resolutionListModel.get(j).video_height);
-
-                                    if (existing_width * existing_height > max_pixels) {
-                                        resolutionListModel.remove(j)
-                                        j--
-                                    }
-                                }
-                            }
-
-                            // load the saved width/height, and iterate through the ComboBox until a match is found
-                            // and set it to that index.
-                            var saved_width = StreamingPreferences.width
-                            var saved_height = StreamingPreferences.height
-                            var index_set = false
-                            for (var i = 0; i < resolutionListModel.count; i++) {
-                                var el_width = parseInt(resolutionListModel.get(i).video_width);
-                                var el_height = parseInt(resolutionListModel.get(i).video_height);
-
-                                if (saved_width === el_width && saved_height === el_height) {
-                                    currentIndex = i
-                                    index_set = true
-                                    break
-                                }
-                            }
-
-                            if (!index_set) {
-                                // We did not find a match. This must be a custom resolution.
-                                resolutionListModel.append({
-                                                               "text": qsTr("Custom")+" ("+StreamingPreferences.width+"x"+StreamingPreferences.height+")",
-                                                               "video_width": ""+StreamingPreferences.width,
-                                                               "video_height": ""+StreamingPreferences.height,
-                                                               "is_custom": true
-                                                           })
-                                currentIndex = resolutionListModel.count - 1
-                            }
-                            else {
-                                resolutionListModel.append({
-                                                               "text": qsTr("Custom"),
-                                                               "video_width": "",
-                                                               "video_height": "",
-                                                               "is_custom": true
-                                                           })
-                            }
-
-                            // Since we don't call activate() here, we need to trigger
-                            // width calculation manually
-                            recalculateWidth()
-
-                            lastIndexValue = currentIndex
-                        }
-
-                        id: resolutionComboBox
-                        maximumWidth: parent.width / 2
-                        textRole: "text"
-                        model: ListModel {
-                            id: resolutionListModel
-                            // Other elements may be added at runtime
-                            // based on attached display resolution
-                            ListElement {
-                                text: qsTr("720p")
-                                video_width: "1280"
-                                video_height: "720"
-                                is_custom: false
-                            }
-                            ListElement {
-                                text: qsTr("1080p")
-                                video_width: "1920"
-                                video_height: "1080"
-                                is_custom: false
-                            }
-                            ListElement {
-                                text: qsTr("1440p")
-                                video_width: "2560"
-                                video_height: "1440"
-                                is_custom: false
-                            }
-                            ListElement {
-                                text: qsTr("4K")
-                                video_width: "3840"
-                                video_height: "2160"
-                                is_custom: false
-                            }
-                        }
-
-                        function updateBitrateForSelection() {
-                            var selectedWidth = parseInt(resolutionListModel.get(currentIndex).video_width)
-                            var selectedHeight = parseInt(resolutionListModel.get(currentIndex).video_height)
-
-                            // Only modify the bitrate if the values actually changed
-                            if (StreamingPreferences.width !== selectedWidth || StreamingPreferences.height !== selectedHeight) {
-                                StreamingPreferences.width = selectedWidth
-                                StreamingPreferences.height = selectedHeight
-
-                                StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
-                                                                                                          StreamingPreferences.height,
-                                                                                                          StreamingPreferences.fps);
-                                slider.value = StreamingPreferences.bitrateKbps
-                            }
-
-                            lastIndexValue = currentIndex
-                        }
-
-                        // ::onActivated must be used, as it only listens for when the index is changed by a human
-                        onActivated : {
-                            if (resolutionListModel.get(currentIndex).is_custom) {
-                                customResolutionDialog.open()
-                            }
-                            else {
-                                updateBitrateForSelection()
-                            }
-                        }
-
-                        NavigableDialog {
-                            id: customResolutionDialog
-                            standardButtons: Dialog.Ok | Dialog.Cancel
-                            onOpened: {
-                                // Force keyboard focus on the textbox so keyboard navigation works
-                                widthField.forceActiveFocus()
-
-                                // standardButton() was added in Qt 5.10, so we must check for it first
-                                if (customResolutionDialog.standardButton) {
-                                    customResolutionDialog.standardButton(Dialog.Ok).enabled = customResolutionDialog.isInputValid()
-                                }
-                            }
-
-                            onClosed: {
-                                widthField.clear()
-                                heightField.clear()
-                            }
-
-                            onRejected: {
-                                resolutionComboBox.currentIndex = resolutionComboBox.lastIndexValue
-                            }
-
-                            function isInputValid() {
-                                // If we have text in either textbox that isn't valid,
-                                // reject the input.
-                                if ((!widthField.acceptableInput && widthField.text) ||
-                                        (!heightField.acceptableInput && heightField.text)) {
-                                    return false
-                                }
-
-                                // The textboxes need to have text or placeholder text
-                                if ((!widthField.text && !widthField.placeholderText) ||
-                                        (!heightField.text && !heightField.placeholderText)) {
-                                    return false
-                                }
-
-                                return true
-                            }
-
-                            onAccepted: {
-                                // Reject if there's invalid input
-                                if (!isInputValid()) {
-                                    reject()
-                                    return
-                                }
-
-                                var width = widthField.text ? widthField.text : widthField.placeholderText
-                                var height = heightField.text ? heightField.text : heightField.placeholderText
-
-                                // Find and update the custom entry
-                                for (var i = 0; i < resolutionListModel.count; i++) {
-                                    if (resolutionListModel.get(i).is_custom) {
-                                        resolutionListModel.setProperty(i, "video_width", width)
-                                        resolutionListModel.setProperty(i, "video_height", height)
-                                        resolutionListModel.setProperty(i, "text", "Custom ("+width+"x"+height+")")
-
-                                        // Now update the bitrate using the custom resolution
-                                        resolutionComboBox.currentIndex = i
-                                        resolutionComboBox.updateBitrateForSelection()
-
-                                        // Update the combobox width too
-                                        resolutionComboBox.recalculateWidth()
-                                        break
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                Label {
-                                    text: qsTr("Custom resolutions are not officially supported by GeForce Experience, so it will not set your host display resolution. You will need to set it manually while in game.") + "\n\n" +
-                                          qsTr("Resolutions that are not supported by your client or host PC may cause streaming errors.") + "\n"
-                                    wrapMode: Label.WordWrap
-                                    Layout.maximumWidth: 300
-                                }
-
-                                Label {
-                                    text: qsTr("Enter a custom resolution:")
-                                    font.bold: true
-                                }
-
-                                RowLayout {
-                                    TextField {
-                                        id: widthField
-                                        maximumLength: 5
-                                        inputMethodHints: Qt.ImhDigitsOnly
-                                        placeholderText: resolutionListModel.get(resolutionComboBox.currentIndex).video_width
-                                        validator: IntValidator{bottom:256; top:8192}
-                                        focus: true
-
-                                        onTextChanged: {
-                                            // standardButton() was added in Qt 5.10, so we must check for it first
-                                            if (customResolutionDialog.standardButton) {
-                                                customResolutionDialog.standardButton(Dialog.Ok).enabled = customResolutionDialog.isInputValid()
-                                            }
-                                        }
-
-                                        Keys.onReturnPressed: {
-                                            customResolutionDialog.accept()
-                                        }
-
-                                        Keys.onEnterPressed: {
-                                            customResolutionDialog.accept()
-                                        }
-                                    }
-
-                                    Label {
-                                        text: "x"
-                                        font.bold: true
-                                    }
-
-                                    TextField {
-                                        id: heightField
-                                        maximumLength: 5
-                                        inputMethodHints: Qt.ImhDigitsOnly
-                                        placeholderText: resolutionListModel.get(resolutionComboBox.currentIndex).video_height
-                                        validator: IntValidator{bottom:256; top:8192}
-
-                                        onTextChanged: {
-                                            // standardButton() was added in Qt 5.10, so we must check for it first
-                                            if (customResolutionDialog.standardButton) {
-                                                customResolutionDialog.standardButton(Dialog.Ok).enabled = customResolutionDialog.isInputValid()
-                                            }
-                                        }
-
-                                        Keys.onReturnPressed: {
-                                            customResolutionDialog.accept()
-                                        }
-
-                                        Keys.onEnterPressed: {
-                                            customResolutionDialog.accept()
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     AutoResizingComboBox {
                         property int lastIndexValue
@@ -439,11 +118,6 @@ Flickable {
                             var selectedFps = parseInt(model.get(fpsComboBox.currentIndex).video_fps)
                             if (StreamingPreferences.fps !== selectedFps) {
                                 StreamingPreferences.fps = selectedFps
-
-                                StreamingPreferences.bitrateKbps = StreamingPreferences.getDefaultBitrate(StreamingPreferences.width,
-                                                                                                          StreamingPreferences.height,
-                                                                                                          StreamingPreferences.fps);
-                                slider.value = StreamingPreferences.bitrateKbps
                             }
 
                             lastIndexValue = currentIndex
@@ -499,7 +173,7 @@ Flickable {
                                         fpsListModel.setProperty(i, "video_fps", fps)
                                         fpsListModel.setProperty(i, "text", qsTr("Custom (%1 FPS)").arg(fps))
 
-                                        // Now update the bitrate using the custom resolution
+                                        // Apply the custom frame rate.
                                         fpsComboBox.currentIndex = i
                                         fpsComboBox.updateBitrateForSelection()
 
@@ -696,7 +370,7 @@ Flickable {
                 Label {
                     width: parent.width
                     id: windowModeTitle
-                    text: qsTr("Display mode")
+                    text: qsTr("Window Mode")
                     font.pointSize: 12
                     wrapMode: Text.Wrap
                     visible: SystemProperties.hasDesktopEnvironment
