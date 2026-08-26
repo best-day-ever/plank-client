@@ -19,8 +19,7 @@ private slots:
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
-    void confinesToVideoWithoutToolbar();
-    void reachesWindowEdgeWithToolbar();
+    void confinesPointerOnlyWithoutToolbar();
 };
 
 void TestStationConnectToolbarLogic::resolvesReportedAndDerivedDensity()
@@ -134,32 +133,10 @@ void TestStationConnectToolbarLogic::keepsMultiButtonSequenceWithFirstOwner()
     QCOMPARE(router.routeButton(3, false, true), ButtonRouter::Owner::Remote);
 }
 
-void TestStationConnectToolbarLogic::confinesToVideoWithoutToolbar()
+void TestStationConnectToolbarLogic::confinesPointerOnlyWithoutToolbar()
 {
-    const StationConnectPointerLogic::Rect window = {0, 0, 3840, 2160};
-    const StationConnectPointerLogic::Rect video = {0, 228, 3840, 1704};
-
-    const auto rect = StationConnectPointerLogic::pointerConfinementRect(
-                window, video, false);
-
-    QCOMPARE(rect.x, 0);
-    QCOMPARE(rect.y, 228);
-    QCOMPARE(rect.w, 3840);
-    QCOMPARE(rect.h, 1704);
-}
-
-void TestStationConnectToolbarLogic::reachesWindowEdgeWithToolbar()
-{
-    const StationConnectPointerLogic::Rect window = {0, 0, 3840, 2160};
-    const StationConnectPointerLogic::Rect video = {0, 228, 3840, 1704};
-
-    const auto rect = StationConnectPointerLogic::pointerConfinementRect(
-                window, video, true);
-
-    QCOMPARE(rect.x, 0);
-    QCOMPARE(rect.y, 0);
-    QCOMPARE(rect.w, 3840);
-    QCOMPARE(rect.h, 2160);
+    QVERIFY(StationConnectPointerLogic::shouldApplyPointerConfinement(false));
+    QVERIFY(!StationConnectPointerLogic::shouldApplyPointerConfinement(true));
 }
 
 QTEST_APPLESS_MAIN(TestStationConnectToolbarLogic)

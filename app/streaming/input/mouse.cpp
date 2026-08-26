@@ -224,7 +224,9 @@ void SdlInputHandler::updatePointerRegionLock()
     }
 
     // If region lock is enabled, grab the cursor so it can't accidentally leave our window.
-    if (isCaptureActive() && m_PointerRegionLockActive) {
+    if (isCaptureActive() && m_PointerRegionLockActive &&
+            StationConnectPointerLogic::shouldApplyPointerConfinement(
+                m_LocalToolbarAvailable)) {
         SDL_Rect src, videoRect;
 
         src.x = src.y = 0;
@@ -233,30 +235,9 @@ void SdlInputHandler::updatePointerRegionLock()
 
         videoRect.x = videoRect.y = 0;
         SDL_GetWindowSize(m_Window, &videoRect.w, &videoRect.h);
-        const StationConnectPointerLogic::Rect windowRect = {
-            0, 0, videoRect.w, videoRect.h
-        };
-
         // Use the stream and window sizes to determine the video region.
         StreamUtils::scaleSourceToDestinationSurface(&src, &videoRect);
-        // A StationConnect toolbar is anchored to the window's top edge, not
-        // the scaled video's top edge. Keep the pointer inside the window while
-        // allowing it to cross letterbox/pillarbox regions and reach the reveal
-        // strip. Mouse motion outside the video rectangle remains local and is
-        // not forwarded to the host by handleMouseMotionEvent().
-        const auto confinementRect =
-                StationConnectPointerLogic::pointerConfinementRect(
-                    windowRect,
-                    {videoRect.x, videoRect.y, videoRect.w, videoRect.h},
-                    m_LocalToolbarAvailable);
-        const SDL_Rect dst = {
-            confinementRect.x,
-            confinementRect.y,
-            confinementRect.w,
-            confinementRect.h,
-        };
-
-        SDL_SetWindowMouseRect(m_Window, &dst);
+        SDL_SetWindowMouseRect(m_Window, &videoRect);
     }
     else {
         // Allow the cursor to leave the bounds of our video region or window
