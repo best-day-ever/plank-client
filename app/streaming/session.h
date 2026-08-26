@@ -2,6 +2,7 @@
 
 #include <QSemaphore>
 #include <QSize>
+#include <QStringList>
 #include <QWindow>
 
 #include <atomic>
@@ -203,6 +204,8 @@ private:
 
     int getTargetDisplayIndex() const;
 
+    bool configureStationConnectHostLayout();
+
     QSize configureStationConnectDisplayMode();
 
     void toggleFullscreen();
@@ -303,6 +306,8 @@ private:
     std::atomic_bool m_WaitingForSessionCleanup;
     QString m_StationConnectUsername;
     QString m_StationConnectPassword;
+    QString m_ResolvedHostLayout;
+    QStringList m_ResolvedVirtualModes;
     SdlInputHandler* m_InputHandler;
     int m_FlushingWindowEventsRef;
 

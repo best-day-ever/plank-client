@@ -682,6 +682,12 @@ bool Session::initialize()
         return false;
     }
 
+    if (m_Computer->stationConnectAuthentication &&
+            !configureStationConnectHostLayout()) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
+    }
+
     const QSize stationConnectResolution = m_Computer->stationConnectAuthentication ?
                                                configureStationConnectDisplayMode() : QSize();
 
@@ -1012,6 +1018,82 @@ int Session::getTargetDisplayIndex() const
     return displayIndex;
 }
 
+bool Session::configureStationConnectHostLayout()
+{
+    QString layoutPolicy;
+    QString virtualMode1;
+    QString virtualMode2;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        layoutPolicy = m_Computer->stationConnectHostLayout;
+        virtualMode1 = m_Computer->stationConnectVirtualMode1;
+        virtualMode2 = m_Computer->stationConnectVirtualMode2;
+    }
+
+    m_ResolvedHostLayout.clear();
+    m_ResolvedVirtualModes.clear();
+    if (layoutPolicy == NvOutputTopology::MatchClientHostLayout) {
+        QVector<NvClientDisplay> displays;
+        const int displayCount = StreamUtils::getDisplayCount();
+        for (int displayIndex = 0; displayIndex < displayCount; ++displayIndex) {
+            const SDL_DisplayID displayId = StreamUtils::getDisplayId(displayIndex);
+            SDL_DisplayMode nativeMode;
+            SDL_Rect safeArea;
+            SDL_Rect bounds;
+            if (!StreamUtils::getNativeDesktopMode(displayIndex, &nativeMode, &safeArea) ||
+                    !SDL_GetDisplayBounds(displayId, &bounds)) {
+                const QString error = tr("Unable to detect the native layout of client monitor %1.")
+                        .arg(displayIndex + 1);
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s: %s",
+                             qPrintable(error), SDL_GetError());
+                emit displayLaunchError(error);
+                return false;
+            }
+            displays.append({QRect(bounds.x, bounds.y, bounds.w, bounds.h),
+                             QSize(nativeMode.w, nativeMode.h)});
+        }
+
+        QString error;
+        if (!NvOutputTopology::resolveClientDisplayLayout(
+                    displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+            emit displayLaunchError(error);
+            return false;
+        }
+    }
+    else if (layoutPolicy == NvOutputTopology::PhysicalHostLayout) {
+        m_ResolvedHostLayout = NvOutputTopology::PhysicalHostLayout;
+    }
+    else if (layoutPolicy == NvOutputTopology::SingleHostLayout ||
+             layoutPolicy == NvOutputTopology::DualHorizontalHostLayout) {
+        if (!NvOutputTopology::qualifiedVirtualModes().contains(virtualMode1) ||
+                (layoutPolicy == NvOutputTopology::DualHorizontalHostLayout &&
+                 !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode2))) {
+            const QString error = tr("The bookmark contains an unsupported virtual monitor resolution.");
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+            emit displayLaunchError(error);
+            return false;
+        }
+        m_ResolvedHostLayout = layoutPolicy;
+        m_ResolvedVirtualModes.append(virtualMode1);
+        if (layoutPolicy == NvOutputTopology::DualHorizontalHostLayout) {
+            m_ResolvedVirtualModes.append(virtualMode2);
+        }
+    }
+    else {
+        const QString error = tr("The bookmark contains an unsupported host display layout.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect host layout: policy=%s resolved=%s modes=%s",
+                qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
+                qPrintable(m_ResolvedVirtualModes.join(',')));
+    return true;
+}
+
 QSize Session::configureStationConnectDisplayMode()
 {
     const int displayIndex = getTargetDisplayIndex();
@@ -1265,17 +1347,8 @@ bool Session::startConnectionAsync(bool reconnecting)
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
-        QString hostLayout;
-        QStringList virtualModes;
-        {
-            QReadLocker lock(&m_Computer->lock);
-            hostLayout = m_Computer->outputTopology.resolveHostLayout(
-                        m_Computer->stationConnectHostLayout);
-            virtualModes = m_Computer->outputTopology.resolveVirtualModes(
-                        m_Computer->stationConnectHostLayout,
-                        m_Computer->stationConnectVirtualMode1,
-                        m_Computer->stationConnectVirtualMode2);
-        }
+        const QString hostLayout = m_ResolvedHostLayout;
+        const QStringList virtualModes = m_ResolvedVirtualModes;
         const auto startApp = [&]() {
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                           m_App.id, &m_StreamConfig,
@@ -1372,12 +1445,6 @@ bool Session::startConnectionAsync(bool reconnecting)
                             m_Computer->selectedDisplayMode =
                                     topology.selectDisplayMode(
                                         m_Computer->selectedDisplayMode);
-                            hostLayout = topology.resolveHostLayout(
-                                        m_Computer->stationConnectHostLayout);
-                            virtualModes = topology.resolveVirtualModes(
-                                        m_Computer->stationConnectHostLayout,
-                                        m_Computer->stationConnectVirtualMode1,
-                                        m_Computer->stationConnectVirtualMode2);
                         }
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);

@@ -1,11 +1,14 @@
 #include "outputtopology.h"
 
+#include <algorithm>
+#include <tuple>
+
 #include <QJsonArray>
 
 const char* NvOutputTopology::SingleOutputMode = "single-output";
 const char* NvOutputTopology::ScaledSpanMode = "scaled-span";
 const char* NvOutputTopology::SeparateDisplaysMode = "separate-displays";
-const char* NvOutputTopology::ConfiguredHostLayout = "configured";
+const char* NvOutputTopology::MatchClientHostLayout = "match-client";
 const char* NvOutputTopology::PhysicalHostLayout = "physical";
 const char* NvOutputTopology::SingleHostLayout = "single";
 const char* NvOutputTopology::DualHorizontalHostLayout = "dual-horizontal";
@@ -277,31 +280,53 @@ QString NvOutputTopology::selectDisplayMode(QString persistedMode) const
     return supportsScaledSpan() ? QString(ScaledSpanMode) : QString(SingleOutputMode);
 }
 
-QString NvOutputTopology::resolveHostLayout(QString persistedLayout) const
+bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
+                                                  QString& hostLayout,
+                                                  QStringList& virtualModes,
+                                                  QString* error)
 {
-    if (persistedLayout == ConfiguredHostLayout || !validLayoutKind(persistedLayout)) {
-        return layoutKind;
+    hostLayout.clear();
+    virtualModes.clear();
+    if (displays.size() < 1 || displays.size() > 2) {
+        if (error != nullptr) {
+            *error = QStringLiteral("Match client displays requires exactly one or two active client monitors.");
+        }
+        return false;
     }
-    return persistedLayout;
-}
 
-QStringList NvOutputTopology::resolveVirtualModes(QString persistedLayout,
-                                                  QString persistedMode1,
-                                                  QString persistedMode2) const
-{
-    const QString resolvedLayout = resolveHostLayout(persistedLayout);
-    if (resolvedLayout == PhysicalHostLayout) {
-        return {};
+    std::sort(displays.begin(), displays.end(), [](const auto& left, const auto& right) {
+        return std::make_tuple(left.bounds.x(), left.bounds.y()) <
+                std::make_tuple(right.bounds.x(), right.bounds.y());
+    });
+    if (displays.size() == 2) {
+        const QRect& left = displays.at(0).bounds;
+        const QRect& right = displays.at(1).bounds;
+        const bool horizontallySeparated = left.right() < right.left();
+        const bool verticallyOverlapping =
+                left.top() <= right.bottom() && right.top() <= left.bottom();
+        if (!horizontallySeparated || !verticallyOverlapping) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Match client displays currently requires two monitors arranged left to right.");
+            }
+            return false;
+        }
     }
-    if (persistedLayout == ConfiguredHostLayout) {
-        return virtualModes;
+
+    for (const NvClientDisplay& display : displays) {
+        const QString mode = QStringLiteral("%1x%2")
+                .arg(display.nativeSize.width()).arg(display.nativeSize.height());
+        if (!qualifiedVirtualModes().contains(mode)) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Client monitor resolution %1 is not a qualified StationConnect virtual mode.")
+                        .arg(mode);
+            }
+            hostLayout.clear();
+            virtualModes.clear();
+            return false;
+        }
+        virtualModes.append(mode);
     }
-    QStringList resolved;
-    resolved.append(qualifiedVirtualModes().contains(persistedMode1) ?
-                        persistedMode1 : virtualModes.value(0));
-    if (resolvedLayout == DualHorizontalHostLayout) {
-        resolved.append(qualifiedVirtualModes().contains(persistedMode2) ?
-                            persistedMode2 : virtualModes.value(1));
-    }
-    return resolved;
+    hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
+                                       QString::fromLatin1(DualHorizontalHostLayout);
+    return true;
 }

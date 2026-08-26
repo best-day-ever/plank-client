@@ -12,6 +12,9 @@ private slots:
     void rejectsDuplicateIdentity();
     void rejectsConfiguredModeMismatch();
     void acceptsTallCinemaModes();
+    void matchesOneClientDisplay();
+    void matchesTwoClientDisplaysLeftToRight();
+    void rejectsUnsupportedClientLayouts();
 };
 
 void TestOutputTopology::parsesQualificationVector()
@@ -43,13 +46,6 @@ void TestOutputTopology::parsesQualificationVector()
     QCOMPARE(topology.selectOutput(QString()), QString("x11:DP-0"));
     QCOMPARE(topology.selectOutput(QString("x11:DP-2")), QString("x11:DP-2"));
     QCOMPARE(topology.selectOutput(QString("x11:missing")), QString("x11:DP-0"));
-    QCOMPARE(topology.resolveHostLayout(QString("configured")), QString("dual-horizontal"));
-    QCOMPARE(topology.resolveVirtualModes(QString("configured"), QString(), QString()),
-             topology.virtualModes);
-    QCOMPARE(topology.resolveVirtualModes(QString("dual-horizontal"),
-                                          QString("4096x2160"),
-                                          QString("1024x2160")),
-             QStringList({QStringLiteral("4096x2160"), QStringLiteral("1024x2160")}));
     QCOMPARE(topology.outputs.at(0).configuredMode, QString("3840x2160"));
     QCOMPARE(topology.outputs.at(1).configuredMode, QString("1280x2160"));
     QCOMPARE(topology.outputs.at(1).sourceX, 3840);
@@ -120,6 +116,67 @@ void TestOutputTopology::acceptsTallCinemaModes()
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("4096x2160")),
              QSize(4096, 2160));
     QVERIFY(!NvOutputTopology::virtualModeSize(QStringLiteral("5120x2160")).isValid());
+}
+
+void TestOutputTopology::matchesOneClientDisplay()
+{
+    QString layout;
+    QStringList modes;
+    QString error;
+    const QVector<NvClientDisplay> displays {
+        {QRect(0, 0, 3840, 2160), QSize(3840, 2160)},
+    };
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 displays, layout, modes, &error),
+             qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(modes, QStringList({QStringLiteral("3840x2160")}));
+}
+
+void TestOutputTopology::matchesTwoClientDisplaysLeftToRight()
+{
+    QString layout;
+    QStringList modes;
+    QString error;
+    QVector<NvClientDisplay> displays {
+        {QRect(3840, 0, 1280, 2160), QSize(1280, 2160)},
+        {QRect(0, 0, 3840, 2160), QSize(3840, 2160)},
+    };
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 displays, layout, modes, &error), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("dual-horizontal"));
+    QCOMPARE(modes, QStringList({QStringLiteral("3840x2160"),
+                                 QStringLiteral("1280x2160")}));
+}
+
+void TestOutputTopology::rejectsUnsupportedClientLayouts()
+{
+    QString layout;
+    QStringList modes;
+    QString error;
+    const QVector<NvClientDisplay> threeDisplays {
+        {QRect(0, 0, 1920, 1080), QSize(1920, 1080)},
+        {QRect(1920, 0, 1920, 1080), QSize(1920, 1080)},
+        {QRect(3840, 0, 1920, 1080), QSize(1920, 1080)},
+    };
+    QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
+                threeDisplays, layout, modes, &error));
+    QVERIFY(error.contains(QStringLiteral("one or two")));
+
+    const QVector<NvClientDisplay> verticalDisplays {
+        {QRect(0, 0, 1920, 1080), QSize(1920, 1080)},
+        {QRect(0, 1080, 1920, 1080), QSize(1920, 1080)},
+    };
+    QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
+                verticalDisplays, layout, modes, &error));
+    QVERIFY(error.contains(QStringLiteral("left to right")));
+
+    const QVector<NvClientDisplay> unsupportedDisplay {
+        {QRect(0, 0, 5120, 2160), QSize(5120, 2160)},
+    };
+    QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
+                unsupportedDisplay, layout, modes, &error));
+    QVERIFY(error.contains(QStringLiteral("not a qualified")));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)

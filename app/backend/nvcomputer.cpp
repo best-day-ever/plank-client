@@ -50,7 +50,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile)
     this->manualAddress = address;
     this->manualBookmark = true;
     this->stationConnectVideoProfile = videoProfile;
-    this->stationConnectHostLayout = NvOutputTopology::ConfiguredHostLayout;
+    this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
     this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
     this->stationConnectVirtualMode2 = QStringLiteral("1280x2160");
     this->state = CS_UNKNOWN;
@@ -132,12 +132,12 @@ NvComputer::NvComputer(QSettings& settings)
     this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
     this->stationConnectHostLayout =
             settings.value(SER_HOSTLAYOUT,
-                           NvOutputTopology::ConfiguredHostLayout).toString();
-    if (this->stationConnectHostLayout != NvOutputTopology::ConfiguredHostLayout &&
+                           NvOutputTopology::MatchClientHostLayout).toString();
+    if (this->stationConnectHostLayout != NvOutputTopology::MatchClientHostLayout &&
             this->stationConnectHostLayout != NvOutputTopology::PhysicalHostLayout &&
             this->stationConnectHostLayout != NvOutputTopology::SingleHostLayout &&
             this->stationConnectHostLayout != NvOutputTopology::DualHorizontalHostLayout) {
-        this->stationConnectHostLayout = NvOutputTopology::ConfiguredHostLayout;
+        this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
     }
     this->stationConnectVirtualMode1 =
             settings.value(SER_VIRTUALMODE1, QStringLiteral("3840x2160")).toString();

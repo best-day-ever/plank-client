@@ -470,7 +470,7 @@ CenteredGridView {
                 id: editHostLayout
                 Layout.fillWidth: true
                 model: [
-                    qsTr("Use the host's configured layout"),
+                    qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
                     qsTr("Two virtual displays (horizontal)")

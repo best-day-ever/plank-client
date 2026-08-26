@@ -24,7 +24,7 @@ QVector<const NvOutput*> orderedOutputs(const NvOutputTopology& topology)
 QString hostLayoutFromChoice(int choice)
 {
     switch (choice) {
-    case 0: return QString::fromLatin1(NvOutputTopology::ConfiguredHostLayout);
+    case 0: return QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
     case 1: return QString::fromLatin1(NvOutputTopology::PhysicalHostLayout);
     case 2: return QString::fromLatin1(NvOutputTopology::SingleHostLayout);
     case 3: return QString::fromLatin1(NvOutputTopology::DualHorizontalHostLayout);

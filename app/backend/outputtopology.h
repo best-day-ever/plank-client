@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QRect>
 #include <QSize>
 #include <QString>
 #include <QStringList>
@@ -23,6 +24,12 @@ struct NvOutput
     int sourceY = 0;
     int sourceWidth = 0;
     int sourceHeight = 0;
+};
+
+struct NvClientDisplay
+{
+    QRect bounds;
+    QSize nativeSize;
 };
 
 struct NvOutputTopology
@@ -51,7 +58,7 @@ struct NvOutputTopology
     static const char* SingleOutputMode;
     static const char* ScaledSpanMode;
     static const char* SeparateDisplaysMode;
-    static const char* ConfiguredHostLayout;
+    static const char* MatchClientHostLayout;
     static const char* PhysicalHostLayout;
     static const char* SingleHostLayout;
     static const char* DualHorizontalHostLayout;
@@ -62,10 +69,10 @@ struct NvOutputTopology
 
     QString selectOutput(QString persistedId) const;
     QString selectDisplayMode(QString persistedMode) const;
-    QString resolveHostLayout(QString persistedLayout) const;
-    QStringList resolveVirtualModes(QString persistedLayout,
-                                    QString persistedMode1,
-                                    QString persistedMode2) const;
+    static bool resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
+                                           QString& hostLayout,
+                                           QStringList& virtualModes,
+                                           QString* error = nullptr);
     static QStringList qualifiedVirtualModes();
     static QSize virtualModeSize(const QString& mode);
     bool supportsScaledSpan() const;
