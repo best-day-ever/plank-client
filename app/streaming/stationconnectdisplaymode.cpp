@@ -8,23 +8,25 @@ QSize StationConnectDisplayMode::qualifiedMaximum()
 }
 
 QSize StationConnectDisplayMode::resolve(const QSize& detectedResolution,
-                                         const QSize& exactNativeResolution,
+                                         const QSize& hostCanvasResolution,
                                          const QSize& maximumResolution)
 {
     const QSize maximum = maximumResolution.isValid() ?
                               maximumResolution : qualifiedMaximum();
-    QSize requested = detectedResolution;
-    if (requested.width() < 2 || requested.height() < 2) {
-        requested = maximum;
+    QSize destination = detectedResolution;
+    if (destination.width() < 2 || destination.height() < 2) {
+        destination = maximum;
     }
 
-    // Avoid a lossy downscale/upscale round trip when the selected host
-    // canvas already matches the physical client display pixel-for-pixel.
-    if (exactNativeResolution.isValid() && detectedResolution == exactNativeResolution) {
-        return fitWithin(requested, requested);
-    }
-
-    return fitWithin(requested, maximum);
+    // Scale the host canvas directly to the largest stream that fits the
+    // physical client display. A fixed 3840-wide intermediate would make a
+    // 5120x2160 host canvas become 3840x1620 and then be enlarged again on a
+    // 4096x1728 client, adding a needless filtered downscale/upscale round
+    // trip. Never upscale the host canvas here either; presentation performs
+    // the one unavoidable enlargement when the client has more pixels.
+    const QSize source = hostCanvasResolution.isValid() ?
+                             hostCanvasResolution : destination;
+    return fitWithin(source, destination);
 }
 
 QSize StationConnectDisplayMode::fitWithin(const QSize& requestedResolution,

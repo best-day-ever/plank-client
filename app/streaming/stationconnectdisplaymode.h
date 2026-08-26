@@ -8,7 +8,7 @@ public:
     static QSize qualifiedMaximum();
 
     static QSize resolve(const QSize& detectedResolution,
-                         const QSize& exactNativeResolution = QSize(),
+                         const QSize& hostCanvasResolution = QSize(),
                          const QSize& maximumResolution = qualifiedMaximum());
 
 private:

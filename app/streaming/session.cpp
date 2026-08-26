@@ -1116,7 +1116,11 @@ QSize Session::configureStationConnectDisplayMode()
     QSize detectedResolution;
 
     if (StreamUtils::getNativeDesktopMode(displayIndex, &nativeMode, &safeArea)) {
-        detectedResolution = QSize(safeArea.w, safeArea.h);
+        // On Wayland, the usable bounds are expressed in compositor-scaled
+        // logical coordinates. Stream resolution must use the panel's real
+        // pixels so fractional desktop scaling cannot introduce a filtered
+        // downscale followed by an enlargement during presentation.
+        detectedResolution = QSize(nativeMode.w, nativeMode.h);
     }
     else if (const SDL_DisplayMode* desktopMode =
                  SDL_GetDesktopDisplayMode(StreamUtils::getDisplayId(displayIndex))) {
@@ -1158,7 +1162,7 @@ QSize Session::configureStationConnectDisplayMode()
             detectedResolution, nativeCanvasResolution);
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect client resolution: detected=%dx%d host-native=%dx%d selected=%dx%d scaling=%s resolution-policy=%s",
+                "StationConnect client physical resolution: detected=%dx%d host-native=%dx%d selected=%dx%d scaling=%s resolution-policy=%s",
                 detectedResolution.width(), detectedResolution.height(),
                 nativeCanvasResolution.width(), nativeCanvasResolution.height(),
                 selectedResolution.width(), selectedResolution.height(),

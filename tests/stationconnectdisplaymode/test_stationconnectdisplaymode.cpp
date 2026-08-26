@@ -8,10 +8,10 @@ class TestStationConnectDisplayMode : public QObject
 
 private slots:
     void usesDetectedClientResolution();
-    void clampsToQualifiedMaximum();
-    void preservesUltrawideAspectRatio();
-    void preservesExactNativeMatchAboveQualifiedMaximum();
-    void capsNonMatchingNativeResolution();
+    void preservesDetectedResolutionAboveFallback();
+    void scalesHostCanvasDirectlyToClient();
+    void preservesExactNativeMatch();
+    void avoidsHostUpscale();
     void fallsBackWhenDetectionFails();
 };
 
@@ -21,30 +21,31 @@ void TestStationConnectDisplayMode::usesDetectedClientResolution()
              QSize(2560, 1600));
 }
 
-void TestStationConnectDisplayMode::clampsToQualifiedMaximum()
+void TestStationConnectDisplayMode::preservesDetectedResolutionAboveFallback()
 {
     QCOMPARE(StationConnectDisplayMode::resolve(QSize(5120, 2880)),
-             QSize(3840, 2160));
+             QSize(5120, 2880));
 }
 
-void TestStationConnectDisplayMode::preservesUltrawideAspectRatio()
+void TestStationConnectDisplayMode::scalesHostCanvasDirectlyToClient()
 {
-    QCOMPARE(StationConnectDisplayMode::resolve(QSize(5120, 2160)),
-             QSize(3840, 1620));
+    QCOMPARE(StationConnectDisplayMode::resolve(QSize(4096, 1728),
+                                                QSize(5120, 2160)),
+             QSize(4096, 1728));
 }
 
-void TestStationConnectDisplayMode::preservesExactNativeMatchAboveQualifiedMaximum()
+void TestStationConnectDisplayMode::preservesExactNativeMatch()
 {
     QCOMPARE(StationConnectDisplayMode::resolve(QSize(5120, 2160),
                                                 QSize(5120, 2160)),
              QSize(5120, 2160));
 }
 
-void TestStationConnectDisplayMode::capsNonMatchingNativeResolution()
+void TestStationConnectDisplayMode::avoidsHostUpscale()
 {
-    QCOMPARE(StationConnectDisplayMode::resolve(QSize(5120, 2160),
-                                                QSize(5120, 2880)),
-             QSize(3840, 1620));
+    QCOMPARE(StationConnectDisplayMode::resolve(QSize(3840, 2160),
+                                                QSize(1920, 1080)),
+             QSize(1920, 1080));
 }
 
 void TestStationConnectDisplayMode::fallsBackWhenDetectionFails()
