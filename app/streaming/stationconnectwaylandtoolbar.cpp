@@ -12,6 +12,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include <wayland-version.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -341,6 +342,10 @@ private:
     static void pointerAxisStop(void*, wl_pointer*, uint32_t, uint32_t) {}
     static void pointerAxisDiscrete(void*, wl_pointer*, uint32_t, int32_t) {}
     static void pointerAxisValue120(void*, wl_pointer*, uint32_t, int32_t) {}
+#if WAYLAND_VERSION_MAJOR > 1 || WAYLAND_VERSION_MINOR >= 24
+    static void pointerAxisRelativeDirection(
+            void*, wl_pointer*, uint32_t, uint32_t) {}
+#endif
 
     static void bufferRelease(void* data, wl_buffer*)
     {
@@ -477,6 +482,9 @@ const wl_pointer_listener StationConnectWaylandToolbar::Impl::PointerListener = 
     pointerAxisStop,
     pointerAxisDiscrete,
     pointerAxisValue120,
+#if WAYLAND_VERSION_MAJOR > 1 || WAYLAND_VERSION_MINOR >= 24
+    pointerAxisRelativeDirection,
+#endif
 };
 
 const wl_buffer_listener StationConnectWaylandToolbar::Impl::BufferListener = {

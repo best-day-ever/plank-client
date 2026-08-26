@@ -63,8 +63,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
                     "Detected show mouse combo");
 
         m_MouseCursorCapturedVisibilityState = !m_MouseCursorCapturedVisibilityState;
-        setCursorVisible(m_ToolbarInteractionActive ? false :
-                         m_MouseCursorCapturedVisibilityState);
+        setCursorVisible(m_MouseCursorCapturedVisibilityState);
         break;
 
     case KeyComboToggleMinimize:
