@@ -225,6 +225,7 @@ HEADERS += \
     streaming/stationconnectpacketsize.h \
     streaming/stationconnectdisplaymode.h \
     streaming/stationconnecttoolbar.h \
+    streaming/stationconnecttoolbarlogic.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \

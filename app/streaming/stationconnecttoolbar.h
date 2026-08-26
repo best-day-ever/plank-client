@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "stationconnecttoolbarlogic.h"
+
 class StreamingPreferences;
 class SdlInputHandler;
 
@@ -30,6 +32,7 @@ public:
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
     void update(Uint64 now);
     void notifyWindowChanged();
+    void notifyFocusLost();
 
     bool handleMouseMotion(const SDL_MouseMotionEvent& event);
     Action handleMouseButton(const SDL_MouseButtonEvent& event);
@@ -38,6 +41,16 @@ public:
     int eventWaitTimeout() const;
 
 private:
+    enum class Control {
+        None,
+        Handle,
+        Slider,
+        Pin,
+        Fullscreen,
+        Minimize,
+        Disconnect,
+    };
+
     void show(Uint64 now);
     void hide();
     void beginLocalPointerInteraction();
@@ -52,6 +65,7 @@ private:
     bool fullscreenContains(int x, int y) const;
     bool minimizeContains(int x, int y) const;
     bool disconnectContains(int x, int y) const;
+    Control controlAt(int x, int y) const;
     int toolbarLeft() const;
     int sliderLeft() const;
     int sliderRight() const;
@@ -70,11 +84,16 @@ private:
     bool m_BitrateSupported;
     int m_WindowWidth;
     int m_WindowHeight;
+    int m_WindowPixelWidth;
+    int m_WindowPixelHeight;
+    float m_PixelDensity;
     int m_Width;
     int m_ToolbarLeft;
     int m_ToolbarDragOffsetX;
     int m_PointerX;
     int m_PointerY;
+    Control m_PressedControl;
+    StationConnectToolbarLogic::ButtonRouter m_ButtonRouter;
     int m_BitrateKbps;
     int m_LastSentBitrateKbps;
     int m_AppliedBitrateKbps;

@@ -2253,6 +2253,13 @@ void Session::execInternal()
             }
             break;
 
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            if (m_StationConnectToolbar) {
+                m_StationConnectToolbar->notifyWindowChanged();
+            }
+            break;
+
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         case SDL_EVENT_WINDOW_SHOWN:
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
@@ -2267,6 +2274,9 @@ void Session::execInternal()
             // Early handling of some events
             switch (event.type) {
             case SDL_EVENT_WINDOW_FOCUS_LOST:
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->notifyFocusLost();
+                }
                 if (m_Preferences->muteOnFocusLoss) {
                     m_AudioMuted = true;
                 }

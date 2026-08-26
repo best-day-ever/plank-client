@@ -724,7 +724,7 @@ void VAAPIRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
             // User-positionable along the top edge
             int windowWidth;
             int windowHeight;
-            SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+            SDL_GetWindowSizeInPixels(m_Window, &windowWidth, &windowHeight);
             (void)windowHeight;
             overlayRect.x = SDL_round(
                 Session::get()->getOverlayManager().getOverlayHorizontalPosition(type) *

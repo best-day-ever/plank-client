@@ -76,11 +76,15 @@ StationConnectToolbar::StationConnectToolbar(
               (LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK)),
       m_WindowWidth(0),
       m_WindowHeight(0),
+      m_WindowPixelWidth(0),
+      m_WindowPixelHeight(0),
+      m_PixelDensity(1.0f),
       m_Width(ToolbarPreferredWidth),
       m_ToolbarLeft(-1),
       m_ToolbarDragOffsetX(0),
       m_PointerX(0),
       m_PointerY(0),
+      m_PressedControl(Control::None),
       m_BitrateKbps(qBound(BitrateMinimumKbps,
                            preferences.bitrateKbps,
                            BitrateMaximumKbps)),
@@ -160,7 +164,8 @@ void StationConnectToolbar::update(Uint64 now)
         show(now);
     }
 
-    if (m_Visible && !m_DraggingSlider && !m_PointerInside &&
+    if (m_Visible && !m_ButtonRouter.hasLocalButtons() &&
+            !m_DraggingSlider && !m_PointerInside &&
             m_HideDeadline != 0 && now >= m_HideDeadline) {
         if (m_Pinned) {
             endLocalPointerInteraction();
@@ -183,13 +188,28 @@ void StationConnectToolbar::update(Uint64 now)
 
 void StationConnectToolbar::notifyWindowChanged()
 {
+    const int oldLogicalWidth = m_WindowWidth;
+    const int oldLogicalHeight = m_WindowHeight;
+    const int oldPixelWidth = m_WindowPixelWidth;
+    const int oldPixelHeight = m_WindowPixelHeight;
+    const float oldPixelDensity = m_PixelDensity;
+    const float oldHorizontalPosition = m_ToolbarLeft >= 0 ?
+                StationConnectToolbarLogic::horizontalPosition(
+                    m_ToolbarLeft, m_WindowWidth, m_Width) : 0.5f;
+
     SDL_GetWindowSize(m_Window, &m_WindowWidth, &m_WindowHeight);
+    SDL_GetWindowSizeInPixels(m_Window, &m_WindowPixelWidth,
+                              &m_WindowPixelHeight);
+    m_PixelDensity = StationConnectToolbarLogic::resolvePixelDensity(
+                SDL_GetWindowPixelDensity(m_Window),
+                m_WindowWidth, m_WindowHeight,
+                m_WindowPixelWidth, m_WindowPixelHeight);
     m_Width = std::min(ToolbarPreferredWidth, std::max(m_WindowWidth, 1));
     if (m_ToolbarLeft < 0) {
         m_ToolbarLeft = std::max(0, (m_WindowWidth - m_Width) / 2);
     } else {
-        m_ToolbarLeft = qBound(0, m_ToolbarLeft,
-                               std::max(0, m_WindowWidth - m_Width));
+        m_ToolbarLeft = StationConnectToolbarLogic::logicalLeftFromPosition(
+                    oldHorizontalPosition, m_WindowWidth, m_Width);
     }
     if (!m_PointerInitialized) {
         m_PointerX = m_WindowWidth / 2;
@@ -202,6 +222,31 @@ void StationConnectToolbar::notifyWindowChanged()
     if (m_Visible) {
         redraw();
     }
+
+    if (oldLogicalWidth != m_WindowWidth ||
+            oldLogicalHeight != m_WindowHeight ||
+            oldPixelWidth != m_WindowPixelWidth ||
+            oldPixelHeight != m_WindowPixelHeight ||
+            std::fabs(oldPixelDensity - m_PixelDensity) >= 0.001f) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect toolbar geometry: logical=%dx%d, pixels=%dx%d, density=%.3f, surface=%dx%d",
+                    m_WindowWidth, m_WindowHeight,
+                    m_WindowPixelWidth, m_WindowPixelHeight,
+                    m_PixelDensity,
+                    StationConnectToolbarLogic::physicalExtent(
+                        m_Width, m_PixelDensity),
+                    StationConnectToolbarLogic::physicalExtent(
+                        ToolbarHeight, m_PixelDensity));
+    }
+}
+
+void StationConnectToolbar::notifyFocusLost()
+{
+    m_ButtonRouter.reset();
+    m_PressedControl = Control::None;
+    m_DraggingToolbar = false;
+    m_DraggingSlider = false;
+    endLocalPointerInteraction();
 }
 
 bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
@@ -236,29 +281,29 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
     const bool pointerEnteredVisibleToolbar =
             m_Visible && m_PointerY > EdgeRevealHeight &&
             contains(m_PointerX, m_PointerY);
-    if (!m_LocalPointerInteraction && pointerEnteredVisibleToolbar) {
-        beginLocalPointerInteraction();
-        return true;
-    }
 
     if (!m_Visible) {
         return false;
     }
 
     m_PointerInside = contains(m_PointerX, m_PointerY);
-    if (m_PointerInside || m_DraggingSlider) {
+    if (m_PointerInside || m_ButtonRouter.hasLocalButtons()) {
         m_HideDeadline = 0;
     } else {
         m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
     }
 
-    // Match a native child toolbar's input routing: in absolute desktop mode,
-    // receiver UI owns events only inside its exact rectangle (or during a
-    // drag). Pinning changes visibility, never mouse capture or routing.
-    if (m_LocalPointerInteraction && !m_DraggingToolbar &&
-            !m_DraggingSlider && !m_PointerInside) {
-        endLocalPointerInteraction();
+    const auto owner = m_ButtonRouter.routeMotion(
+                pointerEnteredVisibleToolbar);
+    if (owner == StationConnectToolbarLogic::ButtonRouter::Owner::Remote) {
+        if (!m_ButtonRouter.hasLocalButtons()) {
+            endLocalPointerInteraction();
+        }
         return false;
+    }
+
+    if (!m_LocalPointerInteraction) {
+        beginLocalPointerInteraction();
     }
 
     if (m_DraggingToolbar) {
@@ -280,43 +325,23 @@ bool StationConnectToolbar::handleMouseMotion(const SDL_MouseMotionEvent& event)
         return true;
     }
 
-    if (m_LocalPointerInteraction) {
-        redraw();
-        return true;
-    }
-    return m_PointerInside;
+    redraw();
+    return true;
 }
 
 StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         const SDL_MouseButtonEvent& event)
 {
-    if (!m_Visible) {
-        return Action::None;
-    }
-
     m_PointerX = event.x;
     m_PointerY = event.y;
     const int pointerX = m_PointerX;
     const int pointerY = m_PointerY;
     const Uint64 now = SDL_GetTicks();
-    if (event.button == SDL_BUTTON_LEFT && !event.down &&
-            m_DraggingToolbar) {
-        m_DraggingToolbar = false;
-        redraw();
-        return Action::Consumed;
-    }
-    if (event.button == SDL_BUTTON_LEFT && !event.down &&
-            m_DraggingSlider) {
-        updateBitrateFromPointer(pointerX, now, true);
-        m_DraggingSlider = false;
-        m_Preferences.bitrateKbps = m_BitrateKbps;
-        m_Preferences.save();
-        return Action::Consumed;
-    }
-
-    if (!contains(pointerX, pointerY)) {
-        if (m_LocalPointerInteraction) {
-            m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+    const bool pointerInside = m_Visible && contains(pointerX, pointerY);
+    const auto owner = m_ButtonRouter.routeButton(
+                event.button, event.down, pointerInside);
+    if (owner == StationConnectToolbarLogic::ButtonRouter::Owner::Remote) {
+        if (!m_ButtonRouter.hasLocalButtons()) {
             endLocalPointerInteraction();
         }
         return Action::None;
@@ -326,46 +351,76 @@ StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         beginLocalPointerInteraction();
     }
 
+    m_PointerInside = pointerInside;
+    m_HideDeadline = 0;
+
     if (event.button != SDL_BUTTON_LEFT) {
         return Action::Consumed;
     }
 
     if (event.down) {
-        if (handleContains(pointerX, pointerY)) {
+        m_PressedControl = controlAt(pointerX, pointerY);
+        if (m_PressedControl == Control::Handle) {
             m_DraggingToolbar = true;
             m_ToolbarDragOffsetX = pointerX - toolbarLeft();
-            m_HideDeadline = 0;
             redraw();
-        } else if (pinContains(pointerX, pointerY)) {
-            m_Pinned = !m_Pinned;
-            m_Preferences.stationConnectToolbarPinned = m_Pinned;
-            m_Preferences.save();
-            m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
-            redraw();
-        } else if (fullscreenContains(pointerX, pointerY)) {
-            endLocalPointerInteraction();
-            return Action::ToggleFullscreen;
-        } else if (minimizeContains(pointerX, pointerY)) {
-            endLocalPointerInteraction();
-            return Action::Minimize;
-        } else if (disconnectContains(pointerX, pointerY)) {
-            return Action::Disconnect;
-        } else if (m_BitrateSupported && sliderContains(pointerX, pointerY)) {
+        } else if (m_PressedControl == Control::Slider &&
+                   m_BitrateSupported) {
             m_DraggingSlider = true;
             updateBitrateFromPointer(pointerX, now, false);
         }
+        return Action::Consumed;
     }
 
-    return Action::Consumed;
+    const Control releasedControl = controlAt(pointerX, pointerY);
+    const Control pressedControl = m_PressedControl;
+    m_PressedControl = Control::None;
+
+    if (m_DraggingToolbar) {
+        m_DraggingToolbar = false;
+        redraw();
+    }
+    if (m_DraggingSlider) {
+        updateBitrateFromPointer(pointerX, now, true);
+        m_DraggingSlider = false;
+        m_Preferences.bitrateKbps = m_BitrateKbps;
+        m_Preferences.save();
+    }
+
+    Action action = Action::Consumed;
+    if (pressedControl == releasedControl) {
+        switch (pressedControl) {
+        case Control::Pin:
+            m_Pinned = !m_Pinned;
+            m_Preferences.stationConnectToolbarPinned = m_Pinned;
+            m_Preferences.save();
+            redraw();
+            break;
+        case Control::Fullscreen:
+            action = Action::ToggleFullscreen;
+            break;
+        case Control::Minimize:
+            action = Action::Minimize;
+            break;
+        case Control::Disconnect:
+            action = Action::Disconnect;
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (!m_ButtonRouter.hasLocalButtons() && !pointerInside) {
+        m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+        endLocalPointerInteraction();
+    }
+    return action;
 }
 
 bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 {
-    float pointerX;
-    float pointerY;
-    SDL_GetMouseState(&pointerX, &pointerY);
-    const int mouseX = qRound(pointerX);
-    const int mouseY = qRound(pointerY);
+    const int mouseX = qRound(event.mouse_x);
+    const int mouseY = qRound(event.mouse_y);
     m_PointerX = mouseX;
     m_PointerY = mouseY;
     if (!m_Visible) {
@@ -458,8 +513,13 @@ void StationConnectToolbar::endLocalPointerInteraction()
 
 void StationConnectToolbar::redraw()
 {
+    const int surfaceWidth =
+            StationConnectToolbarLogic::physicalExtent(m_Width, m_PixelDensity);
+    const int surfaceHeight =
+            StationConnectToolbarLogic::physicalExtent(ToolbarHeight,
+                                                       m_PixelDensity);
     SDL_Surface* surface = SDL_CreateSurface(
-                m_Width, ToolbarHeight, SDL_PIXELFORMAT_ARGB8888);
+                surfaceWidth, surfaceHeight, SDL_PIXELFORMAT_ARGB8888);
     if (surface == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to allocate StationConnect toolbar surface: %s",
@@ -473,6 +533,7 @@ void StationConnectToolbar::redraw()
 
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.scale(m_PixelDensity, m_PixelDensity);
     // Paint the background through the first pixel row so the toolbar meets
     // the physical top edge without an antialiased one-pixel gap.
     painter.fillRect(QRect(0, 0, m_Width, ToolbarHeight - 4),
@@ -679,9 +740,9 @@ void StationConnectToolbar::redraw()
     m_LastDrawnVideoMbps = m_VideoMbps;
     m_LastDrawnPacketLossPercent = m_PacketLossPercent;
     m_LastRedrawTime = SDL_GetTicks();
-    const int availableWidth = std::max(0, m_WindowWidth - m_Width);
-    const float horizontalPosition = availableWidth > 0 ?
-                static_cast<float>(m_ToolbarLeft) / availableWidth : 0.5f;
+    const float horizontalPosition =
+            StationConnectToolbarLogic::horizontalPosition(
+                m_ToolbarLeft, m_WindowWidth, m_Width);
     m_OverlayManager.setOverlayHorizontalPosition(Overlay::OverlayToolbar,
                                                    horizontalPosition);
     m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
@@ -775,6 +836,32 @@ bool StationConnectToolbar::disconnectContains(int x, int y) const
 {
     return x >= toolbarLeft() + m_Width - 36 &&
            x <= toolbarLeft() + m_Width - 8 && y >= 5 && y <= 33;
+}
+
+StationConnectToolbar::Control StationConnectToolbar::controlAt(int x, int y) const
+{
+    if (!contains(x, y)) {
+        return Control::None;
+    }
+    if (handleContains(x, y)) {
+        return Control::Handle;
+    }
+    if (pinContains(x, y)) {
+        return Control::Pin;
+    }
+    if (fullscreenContains(x, y)) {
+        return Control::Fullscreen;
+    }
+    if (minimizeContains(x, y)) {
+        return Control::Minimize;
+    }
+    if (disconnectContains(x, y)) {
+        return Control::Disconnect;
+    }
+    if (sliderContains(x, y)) {
+        return Control::Slider;
+    }
+    return Control::None;
 }
 
 int StationConnectToolbar::toolbarLeft() const
