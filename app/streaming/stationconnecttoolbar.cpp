@@ -323,8 +323,8 @@ bool StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event
 
     // SDL also sees seat motion delivered for the toolbar's native child, but
     // that coordinate is child-local. Consume that duplicate here: the native
-    // listener forwards the authoritative parent-relative position to the host
-    // and remains the sole source of toolbar coordinates for this sequence.
+    // listener owns the exclusive local toolbar sequence and no corresponding
+    // motion is sent to the host.
     if (StationConnectToolbarLogic::nativeChildOwnsPointerSequence(
                 m_WaylandToolbar != nullptr,
                 m_PointerInside,
@@ -400,23 +400,17 @@ bool StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event
                 m_LastToolbarMoveDrawTime = now;
             }
         }
-        // Motion remains absolute remote-desktop motion even while the local
-        // toolbar owns the associated button sequence. Forwarding it keeps
-        // the captured host cursor synchronized beneath the opaque overlay.
-        return false;
+        return true;
     }
 
     if (m_DraggingSlider) {
         updateBitrateFromPointer(m_PointerX, now, false);
         redraw();
-        return false;
+        return true;
     }
 
     redraw();
-    // Hover is local state, but absolute motion is still forwarded to the
-    // host. Buttons and wheel events are the only events exclusively owned by
-    // toolbar controls.
-    return false;
+    return true;
 }
 
 StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
@@ -892,7 +886,6 @@ void StationConnectToolbar::nativePointerEnter(int parentX, int parentY)
     m_PointerInside = true;
     m_HideDeadline = 0;
     beginLocalPointerInteraction();
-    forwardNativePointerPosition();
     redraw();
 }
 
@@ -913,7 +906,6 @@ void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
     m_PointerY = parentY;
     m_PointerInside = true;
     m_HideDeadline = 0;
-    forwardNativePointerPosition();
 
     if (m_DraggingToolbar) {
         const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
@@ -932,19 +924,6 @@ void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
     } else {
         redraw();
     }
-}
-
-void StationConnectToolbar::forwardNativePointerPosition()
-{
-    // The native child receives pointer motion instead of SDL's parent
-    // surface while the pointer is over the toolbar. Forward the identical
-    // parent-relative position so the host cursor remains directly beneath
-    // the opaque toolbar rather than appearing as a second, stale cursor.
-    SDL_MouseMotionEvent event{};
-    event.timestamp = SDL_GetTicks();
-    event.x = static_cast<float>(m_PointerX);
-    event.y = static_cast<float>(m_PointerY);
-    m_InputHandler.handleMouseMotionEvent(&event, false);
 }
 
 void StationConnectToolbar::nativePointerButton(uint32_t button, bool down)

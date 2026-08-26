@@ -2578,10 +2578,8 @@ void Session::execInternal()
                         }
                     }
                 }
-                // The single-window toolbar observes the same authoritative
-                // coordinates, but motion always remains remote-desktop input.
-                // Only toolbar button and wheel events have exclusive local
-                // ownership.
+                // The toolbar takes exclusive ownership of pointer motion
+                // while the pointer is over it or dragging a local control.
                 toolbarConsumedMotion =
                         m_StationConnectToolbar->observeMouseMotion(event.motion);
             }

@@ -67,7 +67,6 @@ private:
     void nativePointerMotion(int parentX, int parentY);
     void nativePointerButton(uint32_t button, bool down);
     void nativePointerWheel(int verticalSteps);
-    void forwardNativePointerPosition();
     Action handlePointerButton(const SDL_MouseButtonEvent& event);
     bool handlePointerWheel(const SDL_MouseWheelEvent& event);
     bool contains(int x, int y) const;
