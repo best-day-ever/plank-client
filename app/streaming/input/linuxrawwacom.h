@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -17,7 +18,8 @@ public:
     LinuxRawWacomInput& operator=(const LinuxRawWacomInput&) = delete;
 
     void setActive(bool active);
-    void resetAfterReconnect();
+    void beginReconnect();
+    void finishReconnect();
     void handleControl(const unsigned char* data, unsigned int length);
 
 private:
@@ -44,6 +46,7 @@ private:
 
     std::atomic<bool> m_Active;
     std::atomic<bool> m_Stopping;
+    std::atomic<bool> m_Reconnecting;
     std::atomic<bool> m_AttachFailed;
     std::thread m_Thread;
     std::recursive_mutex m_Mutex;
@@ -53,4 +56,5 @@ private:
     std::uint32_t m_InputSequence;
     bool m_AttachPending;
     bool m_Attached;
+    std::chrono::steady_clock::time_point m_AttachDeadline;
 };

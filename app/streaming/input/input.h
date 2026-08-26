@@ -35,7 +35,8 @@ public:
 
     void handleRawHidControl(const unsigned char* data, unsigned int length);
 
-    void resetRawHidAfterReconnect();
+    void beginRawHidReconnect();
+    void finishRawHidReconnect();
 
     void raiseAllKeys();
 

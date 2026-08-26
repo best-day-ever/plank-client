@@ -211,11 +211,20 @@ void SdlInputHandler::handleRawHidControl(const unsigned char* data,
 #endif
 }
 
-void SdlInputHandler::resetRawHidAfterReconnect()
+void SdlInputHandler::beginRawHidReconnect()
 {
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxRawWacomInput) {
-        m_LinuxRawWacomInput->resetAfterReconnect();
+        m_LinuxRawWacomInput->beginReconnect();
+    }
+#endif
+}
+
+void SdlInputHandler::finishRawHidReconnect()
+{
+#ifdef HAVE_LIBINPUT_TABLET
+    if (m_LinuxRawWacomInput) {
+        m_LinuxRawWacomInput->finishReconnect();
     }
 #endif
 }

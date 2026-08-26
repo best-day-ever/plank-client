@@ -1765,6 +1765,7 @@ bool Session::reconnectStationConnect()
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
 
     m_InputHandler->raiseAllKeys();
+    m_InputHandler->beginRawHidReconnect();
     const int previousVideoFormat = m_ActiveVideoFormat;
     const int previousVideoWidth = m_ActiveVideoWidth;
     const int previousVideoHeight = m_ActiveVideoHeight;
@@ -1837,7 +1838,7 @@ bool Session::reconnectStationConnect()
                             m_VideoDecoder->resumeAfterReconnect();
                     SDL_UnlockSpinlock(&m_DecoderLock);
                 }
-                m_InputHandler->resetRawHidAfterReconnect();
+                m_InputHandler->finishRawHidReconnect();
                 m_Reconnecting.store(false);
                 m_ReconnectRequested = false;
                 m_UnexpectedTermination = false;

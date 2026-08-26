@@ -106,6 +106,7 @@ void writeLittle(T& destination, T value)
 LinuxRawWacomInput::LinuxRawWacomInput()
     : m_Active(false),
       m_Stopping(false),
+      m_Reconnecting(false),
       m_AttachFailed(false),
       m_Generation(0),
       m_InputSequence(0),
@@ -138,16 +139,28 @@ void LinuxRawWacomInput::setActive(bool active)
     }
 }
 
-void LinuxRawWacomInput::resetAfterReconnect()
+void LinuxRawWacomInput::beginReconnect()
+{
+    m_Reconnecting.store(true);
+    std::lock_guard<std::recursive_mutex> lock(m_Mutex);
+
+    // Stop the old transport before LiStopConnection() tears down its control
+    // channel. The host keeps the stable UHID endpoints for the resumed
+    // session, while the reconnect barrier prevents this worker from racing
+    // ahead and attaching to a partially initialized replacement channel.
+    suspendForFocusLoss();
+    m_AttachFailed.store(false);
+}
+
+void LinuxRawWacomInput::finishReconnect()
 {
     std::lock_guard<std::recursive_mutex> lock(m_Mutex);
 
-    // A StationConnect desktop handoff replaces the host media worker and its
-    // UHID devices. The physical tablet remains open on the client, so force a
-    // fresh discovery/attach transaction on the replacement control stream.
-    // Do not send DETACH: the new host generation has never seen this device.
+    // Discard any stale local transaction state, then allow the worker to
+    // perform exactly one fresh attachment on the ready replacement stream.
     release(false);
     m_AttachFailed.store(false);
+    m_Reconnecting.store(false);
 }
 
 void LinuxRawWacomInput::run()
@@ -155,7 +168,7 @@ void LinuxRawWacomInput::run()
     SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                 "StationConnect exact raw Wacom capture initialized");
     while (!m_Stopping.load()) {
-        if (!m_Active.load()) {
+        if (!m_Active.load() || m_Reconnecting.load()) {
             {
                 std::lock_guard<std::recursive_mutex> lock(m_Mutex);
                 if (!m_Interfaces.empty()) {
@@ -169,7 +182,14 @@ void LinuxRawWacomInput::run()
         bool delayRetry = false;
         {
             std::lock_guard<std::recursive_mutex> lock(m_Mutex);
-            if (m_Interfaces.empty()) {
+            if (m_AttachPending &&
+                    std::chrono::steady_clock::now() >= m_AttachDeadline) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                            "Timed out waiting for exact Wacom host attachment; retrying");
+                release(false);
+                delayRetry = true;
+            }
+            else if (m_Interfaces.empty()) {
                 if (m_AttachFailed.exchange(false)) {
                     delayRetry = true;
                 }
@@ -360,6 +380,8 @@ bool LinuxRawWacomInput::sendAttach()
         }
     }
     m_AttachPending = true;
+    m_AttachDeadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds(3);
     SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                 "Sent exact Wacom attach: %u interfaces, generation %u",
                 static_cast<unsigned int>(m_Interfaces.size()),
