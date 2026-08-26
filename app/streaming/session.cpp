@@ -690,6 +690,11 @@ bool Session::initialize()
 
     const QSize stationConnectResolution = m_Computer->stationConnectAuthentication ?
                                                configureStationConnectDisplayMode() : QSize();
+    if (m_Computer->stationConnectAuthentication &&
+            !stationConnectResolution.isValid()) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
+    }
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
     m_StreamConfig.width = stationConnectResolution.isValid() ?
@@ -1021,17 +1026,27 @@ int Session::getTargetDisplayIndex() const
 bool Session::configureStationConnectHostLayout()
 {
     QString layoutPolicy;
+    QString scalingMode;
     QString virtualMode1;
     QString virtualMode2;
     {
         QReadLocker lock(&m_Computer->lock);
         layoutPolicy = m_Computer->stationConnectHostLayout;
+        scalingMode = m_Computer->stationConnectScalingMode;
         virtualMode1 = m_Computer->stationConnectVirtualMode1;
         virtualMode2 = m_Computer->stationConnectVirtualMode2;
     }
 
     m_ResolvedHostLayout.clear();
     m_ResolvedVirtualModes.clear();
+    if (scalingMode != NvOutputTopology::NativeScalingMode &&
+            scalingMode != NvOutputTopology::ScaledSpanMode) {
+        const QString error = tr("The bookmark contains an unsupported client scaling mode.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
+    }
+    m_ResolvedScalingMode = scalingMode;
     if (layoutPolicy == NvOutputTopology::MatchClientHostLayout) {
         QVector<NvClientDisplay> displays;
         const int displayCount = StreamUtils::getDisplayCount();
@@ -1088,9 +1103,10 @@ bool Session::configureStationConnectHostLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect host layout: policy=%s resolved=%s modes=%s",
+                "StationConnect host layout: policy=%s resolved=%s modes=%s scaling=%s",
                 qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
-                qPrintable(m_ResolvedVirtualModes.join(',')));
+                qPrintable(m_ResolvedVirtualModes.join(',')),
+                qPrintable(m_ResolvedScalingMode));
     return true;
 }
 
@@ -1117,34 +1133,46 @@ QSize Session::configureStationConnectDisplayMode()
     }
 
     const QSize configuredResolution(m_Preferences->width, m_Preferences->height);
-    QSize exactNativeResolution;
+    QSize nativeCanvasResolution;
     {
         QReadLocker lock(&m_Computer->lock);
-        if (m_Computer->selectedDisplayMode == NvOutputTopology::ScaledSpanMode) {
-            exactNativeResolution = QSize(m_Computer->outputTopology.desktopWidth,
-                                          m_Computer->outputTopology.desktopHeight);
-        }
-        else if (m_Computer->selectedDisplayMode == NvOutputTopology::SingleOutputMode) {
-            for (const NvOutput& output : m_Computer->outputTopology.outputs) {
-                if (output.id == m_Computer->selectedOutputId) {
-                    exactNativeResolution = QSize(output.width, output.height);
-                    break;
-                }
-            }
+        if (m_ResolvedHostLayout == NvOutputTopology::PhysicalHostLayout) {
+            nativeCanvasResolution = QSize(m_Computer->outputTopology.desktopWidth,
+                                           m_Computer->outputTopology.desktopHeight);
         }
     }
-    const QSize selectedResolution = StationConnectDisplayMode::resolve(
-        m_Preferences->stationConnectAutoResolution,
-        detectedResolution,
-        configuredResolution,
-        exactNativeResolution);
+    if (m_ResolvedHostLayout != NvOutputTopology::PhysicalHostLayout) {
+        nativeCanvasResolution = NvOutputTopology::virtualCanvasSize(
+                    m_ResolvedHostLayout, m_ResolvedVirtualModes);
+    }
+
+    QSize selectedResolution;
+    if (m_ResolvedScalingMode == NvOutputTopology::NativeScalingMode) {
+        if (!nativeCanvasResolution.isValid()) {
+            const QString error = tr("Native scaling requires a valid host desktop pixel size.");
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+            emit displayLaunchError(error);
+            return QSize();
+        }
+        selectedResolution = nativeCanvasResolution;
+    }
+    else {
+        selectedResolution = StationConnectDisplayMode::resolve(
+            m_Preferences->stationConnectAutoResolution,
+            detectedResolution,
+            configuredResolution,
+            nativeCanvasResolution);
+    }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect client resolution: detected=%dx%d host-native=%dx%d configured=%dx%d selected=%dx%d mode=%s",
+                "StationConnect client resolution: detected=%dx%d host-native=%dx%d configured=%dx%d selected=%dx%d scaling=%s resolution-preference=%s",
                 detectedResolution.width(), detectedResolution.height(),
-                exactNativeResolution.width(), exactNativeResolution.height(),
+                nativeCanvasResolution.width(), nativeCanvasResolution.height(),
                 configuredResolution.width(), configuredResolution.height(),
                 selectedResolution.width(), selectedResolution.height(),
-                m_Preferences->stationConnectAutoResolution ? "auto" : "override");
+                qPrintable(m_ResolvedScalingMode),
+                m_ResolvedScalingMode == NvOutputTopology::NativeScalingMode ?
+                    "native" :
+                    (m_Preferences->stationConnectAutoResolution ? "auto" : "override"));
     return selectedResolution;
 }
 
@@ -1355,8 +1383,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                           m_Preferences->playAudioOnHost,
                           0,
                           false,
-                          m_Computer->selectedOutputId,
-                          m_Computer->selectedDisplayMode,
+                          NvOutputTopology::ScaledSpanMode,
                           m_Computer->outputTopology.generation,
                           m_Computer->stationConnectTopologyVersion,
                           m_Computer->stationConnectFeatureFlags &
@@ -1440,11 +1467,6 @@ bool Session::startConnectionAsync(bool reconnecting)
                         {
                             QWriteLocker lock(&m_Computer->lock);
                             m_Computer->outputTopology = topology;
-                            m_Computer->selectedOutputId =
-                                    topology.selectOutput(m_Computer->selectedOutputId);
-                            m_Computer->selectedDisplayMode =
-                                    topology.selectDisplayMode(
-                                        m_Computer->selectedDisplayMode);
                         }
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
@@ -1596,10 +1618,6 @@ bool Session::startConnectionAsync(bool reconnecting)
                 {
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->outputTopology = topology;
-                    m_Computer->selectedOutputId =
-                            topology.selectOutput(m_Computer->selectedOutputId);
-                    m_Computer->selectedDisplayMode =
-                            topology.selectDisplayMode(m_Computer->selectedDisplayMode);
                 }
                 if (m_ComputerManager != nullptr) {
                     m_ComputerManager->clientSideAttributeUpdated(m_Computer);
@@ -1806,11 +1824,6 @@ bool Session::reconnectStationConnect()
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
-                    m_Computer->selectedOutputId =
-                            topology.selectOutput(m_Computer->selectedOutputId);
-                    m_Computer->selectedDisplayMode =
-                            topology.selectDisplayMode(
-                                m_Computer->selectedDisplayMode);
                 }
                 m_Computer->updateAppList(apps);
             }

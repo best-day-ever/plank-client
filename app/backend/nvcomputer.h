@@ -48,7 +48,7 @@ public:
 
     bool
     updateManualBookmark(NvAddress manualAddress, QString nickname,
-                         QString displayMode, QString selectedOutputId,
+                         QString scalingMode,
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
                          int videoProfile);
@@ -125,8 +125,7 @@ public:
     QString uuid;
     QVector<NvApp> appList;
     bool isNvidiaServerSoftware;
-    QString selectedOutputId;
-    QString selectedDisplayMode;
+    QString stationConnectScalingMode;
     QString stationConnectHostLayout;
     QString stationConnectVirtualMode1;
     QString stationConnectVirtualMode2;

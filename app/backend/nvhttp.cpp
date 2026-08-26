@@ -218,8 +218,7 @@ NvHTTP::startApp(QString verb,
                  bool localAudio,
                  int gamepadMask,
                  bool persistGameControllersOnDisconnect,
-                 QString selectedOutputId,
-                 QString selectedDisplayMode,
+                 QString captureDisplayMode,
                  QString topologyGeneration,
                  int stationConnectProtocolVersion,
                  int stationConnectFeatureFlags,
@@ -234,11 +233,11 @@ NvHTTP::startApp(QString verb,
     riKeyId = qFromBigEndian(riKeyId);
 
     QString stationConnectOutputArguments;
-    if (m_StationConnectAuthentication && !selectedDisplayMode.isEmpty()) {
+    if (m_StationConnectAuthentication && !captureDisplayMode.isEmpty()) {
         stationConnectOutputArguments =
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
-                "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(selectedDisplayMode));
+                "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
         if ((stationConnectFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
             stationConnectOutputArguments +=
@@ -263,11 +262,6 @@ NvHTTP::startApp(QString verb,
             stationConnectOutputArguments +=
                     "&scTopologyGeneration=" +
                     QString::fromLatin1(QUrl::toPercentEncoding(topologyGeneration));
-        }
-        if (selectedDisplayMode == NvOutputTopology::SingleOutputMode &&
-                !selectedOutputId.isEmpty()) {
-            stationConnectOutputArguments +=
-                    "&scOutputId=" + QString::fromLatin1(QUrl::toPercentEncoding(selectedOutputId));
         }
     }
 

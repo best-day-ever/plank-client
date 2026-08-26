@@ -55,9 +55,8 @@ struct NvOutputTopology
                                              HostLayoutBindingFeature |
                                              IndependentVirtualModesFeature |
                                              DynamicHostLayoutFeature;
-    static const char* SingleOutputMode;
+    static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
-    static const char* SeparateDisplaysMode;
     static const char* MatchClientHostLayout;
     static const char* PhysicalHostLayout;
     static const char* SingleHostLayout;
@@ -67,16 +66,14 @@ struct NvOutputTopology
                          QString* error = nullptr);
     QJsonObject toJson() const;
 
-    QString selectOutput(QString persistedId) const;
-    QString selectDisplayMode(QString persistedMode) const;
     static bool resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                            QString& hostLayout,
                                            QStringList& virtualModes,
                                            QString* error = nullptr);
     static QStringList qualifiedVirtualModes();
     static QSize virtualModeSize(const QString& mode);
-    bool supportsScaledSpan() const;
-    bool supportsSeparateDisplays() const;
+    static QSize virtualCanvasSize(const QString& hostLayout,
+                                   const QStringList& virtualModes);
     bool contains(QString outputId) const;
 
     int schemaVersion = 0;

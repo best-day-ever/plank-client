@@ -231,10 +231,10 @@ public:
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
                                         int hostLayout = 0, int virtualMode1 = 11,
                                         int virtualMode2 = 3,
-                                        int presentation = 0, int videoProfile = 0);
+                                        int scaling = 1, int videoProfile = 0);
 
     bool editManualBookmark(NvComputer* computer, QString address, QString nickname,
-                            QString displayMode, QString selectedOutputId,
+                            QString scalingMode,
                             QString hostLayout, QString virtualMode1,
                             QString virtualMode2,
                             int videoProfile);

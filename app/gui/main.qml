@@ -427,7 +427,7 @@ ApplicationWindow {
             addHostLayout.currentIndex = 0
             addVirtualMode1.currentIndex = 11
             addVirtualMode2.currentIndex = 3
-            addDisplayChoice.currentIndex = 0
+            addScalingChoice.currentIndex = 1
             addEncodingProfile.currentIndex = 3
         }
 
@@ -438,7 +438,7 @@ ApplicationWindow {
                                                    addHostLayout.currentIndex,
                                                    addVirtualMode1.currentIndex,
                                                    addVirtualMode2.currentIndex,
-                                                   addDisplayChoice.currentIndex,
+                                                   addScalingChoice.currentIndex,
                                                    addEncodingProfileModel.get(
                                                        addEncodingProfile.currentIndex).val)
             }
@@ -569,19 +569,20 @@ ApplicationWindow {
             }
 
             Label {
-                text: qsTr("Client presentation")
+                text: qsTr("Scaling")
                 font.bold: true
             }
 
             ComboBox {
-                id: addDisplayChoice
+                id: addScalingChoice
                 Layout.fillWidth: true
-                model: [qsTr("Scaled desktop span"), qsTr("Primary display")]
+                currentIndex: 1
+                model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
             }
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("A specific host monitor can be selected later after StationConnect has retrieved its layout. Changing a host layout requires the workstation to be restarted before connecting.")
+                text: qsTr("Native preserves one host pixel per streamed pixel. Scaled-Span fits the complete host desktop into the client resolution.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

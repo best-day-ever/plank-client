@@ -22,8 +22,7 @@
 #define SER_APPLIST "apps"
 #define SER_CUSTOMNAME "customname"
 #define SER_NVIDIASOFTWARE "nvidiasw"
-#define SER_SELECTEDOUTPUT "stationconnect-selected-output"
-#define SER_DISPLAYMODE "stationconnect-display-mode"
+#define SER_SCALINGMODE "stationconnect-scaling-mode"
 #define SER_HOSTLAYOUT "stationconnect-host-layout"
 #define SER_VIRTUALMODE1 "stationconnect-virtual-mode-1"
 #define SER_VIRTUALMODE2 "stationconnect-virtual-mode-2"
@@ -50,6 +49,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile)
     this->manualAddress = address;
     this->manualBookmark = true;
     this->stationConnectVideoProfile = videoProfile;
+    this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
     this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
     this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
     this->stationConnectVirtualMode2 = QStringLiteral("1280x2160");
@@ -65,7 +65,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile)
 }
 
 bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
-                                      QString displayMode, QString outputId,
+                                      QString scalingMode,
                                       QString hostLayout, QString virtualMode1,
                                       QString virtualMode2,
                                       int videoProfile)
@@ -105,8 +105,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
 
     name = nickname;
     hasCustomName = true;
-    selectedDisplayMode = displayMode;
-    selectedOutputId = outputId;
+    stationConnectScalingMode = scalingMode;
     stationConnectHostLayout = hostLayout;
     stationConnectVirtualMode1 = virtualMode1;
     stationConnectVirtualMode2 = virtualMode2;
@@ -128,8 +127,12 @@ NvComputer::NvComputer(QSettings& settings)
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
-    this->selectedOutputId = settings.value(SER_SELECTEDOUTPUT).toString();
-    this->selectedDisplayMode = settings.value(SER_DISPLAYMODE).toString();
+    this->stationConnectScalingMode = settings.value(
+                SER_SCALINGMODE, NvOutputTopology::ScaledSpanMode).toString();
+    if (this->stationConnectScalingMode != NvOutputTopology::NativeScalingMode &&
+            this->stationConnectScalingMode != NvOutputTopology::ScaledSpanMode) {
+        this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
+    }
     this->stationConnectHostLayout =
             settings.value(SER_HOSTLAYOUT,
                            NvOutputTopology::MatchClientHostLayout).toString();
@@ -216,8 +219,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_MANUALPORT, manualAddress.port());
     settings.remove("srvcert");
     settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
-    settings.setValue(SER_SELECTEDOUTPUT, selectedOutputId);
-    settings.setValue(SER_DISPLAYMODE, selectedDisplayMode);
+    settings.setValue(SER_SCALINGMODE, stationConnectScalingMode);
     settings.setValue(SER_HOSTLAYOUT, stationConnectHostLayout);
     settings.setValue(SER_VIRTUALMODE1, stationConnectVirtualMode1);
     settings.setValue(SER_VIRTUALMODE2, stationConnectVirtualMode2);
@@ -253,8 +255,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->ipv6Address == that.ipv6Address &&
            this->manualAddress == that.manualAddress &&
            this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
-           this->selectedOutputId == that.selectedOutputId &&
-           this->selectedDisplayMode == that.selectedDisplayMode &&
+           this->stationConnectScalingMode == that.stationConnectScalingMode &&
            this->stationConnectHostLayout == that.stationConnectHostLayout &&
            this->stationConnectVirtualMode1 == that.stationConnectVirtualMode1 &&
            this->stationConnectVirtualMode2 == that.stationConnectVirtualMode2 &&
@@ -275,6 +276,7 @@ void NvComputer::sortAppList()
 NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 {
     this->manualBookmark = false;
+    this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
 
     this->hasCustomName = false;
     this->name = NvHTTP::getXmlString(serverInfo, "hostname");

@@ -44,9 +44,7 @@ public:
 
     Q_INVOKABLE Session* createSessionForStationConnectDesktop(int computerIndex);
 
-    Q_INVOKABLE QStringList stationConnectDisplayChoices(int computerIndex) const;
-
-    Q_INVOKABLE int stationConnectDisplayChoice(int computerIndex) const;
+    Q_INVOKABLE int stationConnectScalingChoice(int computerIndex) const;
 
     Q_INVOKABLE int stationConnectVideoProfile(int computerIndex) const;
 
@@ -57,7 +55,7 @@ public:
     Q_INVOKABLE int stationConnectVirtualMode2Choice(int computerIndex) const;
 
     Q_INVOKABLE bool editComputerBookmark(int computerIndex, QString address,
-                                          QString nickname, int displayChoice,
+                                          QString nickname, int scalingChoice,
                                           int hostLayoutChoice,
                                           int virtualMode1Choice,
                                           int virtualMode2Choice,

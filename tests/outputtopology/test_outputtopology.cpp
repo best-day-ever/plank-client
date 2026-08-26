@@ -34,18 +34,10 @@ void TestOutputTopology::parsesQualificationVector()
     QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 1023);
     QVERIFY((topology.featureFlags & NvOutputTopology::TopologyGenerationFeature) != 0);
     QVERIFY(!topology.generation.isEmpty());
-    QVERIFY(topology.supportsScaledSpan());
-    QVERIFY(topology.supportsSeparateDisplays());
     QCOMPARE(topology.layoutKind, QString("dual-horizontal"));
     QCOMPARE(topology.virtualModes,
              QStringList({QStringLiteral("3840x2160"), QStringLiteral("1280x2160")}));
     QVERIFY(topology.virtualLayout);
-    QCOMPARE(topology.selectDisplayMode(QString()), QString("scaled-span"));
-    QCOMPARE(topology.selectDisplayMode(QString("single-output")), QString("single-output"));
-    QCOMPARE(topology.selectDisplayMode(QString("separate-displays")), QString("separate-displays"));
-    QCOMPARE(topology.selectOutput(QString()), QString("x11:DP-0"));
-    QCOMPARE(topology.selectOutput(QString("x11:DP-2")), QString("x11:DP-2"));
-    QCOMPARE(topology.selectOutput(QString("x11:missing")), QString("x11:DP-0"));
     QCOMPARE(topology.outputs.at(0).configuredMode, QString("3840x2160"));
     QCOMPARE(topology.outputs.at(1).configuredMode, QString("1280x2160"));
     QCOMPARE(topology.outputs.at(1).sourceX, 3840);
@@ -64,7 +56,6 @@ void TestOutputTopology::roundTripsQualificationVector()
     NvOutputTopology restored;
     QVERIFY(NvOutputTopology::fromJson(topology.toJson(), restored));
     QCOMPARE(restored.toJson(), topology.toJson());
-    QCOMPARE(restored.selectDisplayMode(QString()), QString("scaled-span"));
 }
 
 void TestOutputTopology::rejectsDuplicateIdentity()
@@ -116,6 +107,16 @@ void TestOutputTopology::acceptsTallCinemaModes()
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("4096x2160")),
              QSize(4096, 2160));
     QVERIFY(!NvOutputTopology::virtualModeSize(QStringLiteral("5120x2160")).isValid());
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("single"), {QStringLiteral("2560x2160")}),
+             QSize(2560, 2160));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"),
+                 {QStringLiteral("3840x2160"), QStringLiteral("1280x2160")}),
+             QSize(5120, 2160));
+    QVERIFY(!NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"),
+                 {QStringLiteral("3840x2160"), QStringLiteral("5120x2160")}).isValid());
 }
 
 void TestOutputTopology::matchesOneClientDisplay()

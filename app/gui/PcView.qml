@@ -202,12 +202,11 @@ CenteredGridView {
                     text: qsTr("Edit bookmark…")
                     visible: model.manualBookmark
                     onTriggered: {
-                        var choices = computerModel.stationConnectDisplayChoices(index)
                         editBookmarkDialog.pcIndex = index
                         editBookmarkDialog.originalAddress = model.address
                         editBookmarkDialog.originalNickname = model.name
-                        editBookmarkDialog.choices = choices
-                        editBookmarkDialog.choiceIndex = computerModel.stationConnectDisplayChoice(index)
+                        editBookmarkDialog.scalingIndex =
+                                computerModel.stationConnectScalingChoice(index)
                         editBookmarkDialog.hostLayoutIndex =
                                 computerModel.stationConnectHostLayoutChoice(index)
                         editBookmarkDialog.virtualMode1Index =
@@ -357,8 +356,7 @@ CenteredGridView {
         property int pcIndex: -1
         property string originalAddress: ""
         property string originalNickname: ""
-        property var choices: []
-        property int choiceIndex: 0
+        property int scalingIndex: 1
         property int hostLayoutIndex: 0
         property int virtualMode1Index: 11
         property int virtualMode2Index: 3
@@ -374,8 +372,7 @@ CenteredGridView {
         onOpened: {
             editAddressText.text = originalAddress
             editNicknameText.text = originalNickname
-            editDisplayChoice.model = choices
-            editDisplayChoice.currentIndex = choiceIndex
+            editScalingChoice.currentIndex = scalingIndex
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
@@ -389,7 +386,7 @@ CenteredGridView {
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
                        editNicknameText.text.trim() !== "" &&
-                       editDisplayChoice.currentIndex >= 0
+                       editScalingChoice.currentIndex >= 0
             })
         }
         onClosed: {
@@ -400,7 +397,7 @@ CenteredGridView {
             if (!computerModel.editComputerBookmark(pcIndex,
                                                     editAddressText.text.trim(),
                                                     editNicknameText.text.trim(),
-                                                    editDisplayChoice.currentIndex,
+                                                    editScalingChoice.currentIndex,
                                                     editHostLayout.currentIndex,
                                                     editVirtualMode1.currentIndex,
                                                     editVirtualMode2.currentIndex,
@@ -502,17 +499,18 @@ CenteredGridView {
             }
 
             Label {
-                text: qsTr("Client presentation")
+                text: qsTr("Scaling")
                 font.bold: true
             }
             ComboBox {
-                id: editDisplayChoice
+                id: editScalingChoice
                 Layout.fillWidth: true
+                model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
             }
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Named host monitors become available after StationConnect has retrieved its layout. A requested host layout must already be active.")
+                text: qsTr("Native preserves one host pixel per streamed pixel. Scaled-Span fits the complete host desktop into the client resolution.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

@@ -5,9 +5,8 @@
 
 #include <QJsonArray>
 
-const char* NvOutputTopology::SingleOutputMode = "single-output";
+const char* NvOutputTopology::NativeScalingMode = "native";
 const char* NvOutputTopology::ScaledSpanMode = "scaled-span";
-const char* NvOutputTopology::SeparateDisplaysMode = "separate-displays";
 const char* NvOutputTopology::MatchClientHostLayout = "match-client";
 const char* NvOutputTopology::PhysicalHostLayout = "physical";
 const char* NvOutputTopology::SingleHostLayout = "single";
@@ -52,6 +51,25 @@ QSize NvOutputTopology::virtualModeSize(const QString& mode)
         return QSize();
     }
     return QSize(parts[0].toInt(), parts[1].toInt());
+}
+
+QSize NvOutputTopology::virtualCanvasSize(const QString& hostLayout,
+                                          const QStringList& virtualModes)
+{
+    const QSize first = virtualModeSize(virtualModes.value(0));
+    if (hostLayout == SingleHostLayout) {
+        return first;
+    }
+    if (hostLayout != DualHorizontalHostLayout || !first.isValid()) {
+        return QSize();
+    }
+
+    const QSize second = virtualModeSize(virtualModes.value(1));
+    if (!second.isValid()) {
+        return QSize();
+    }
+    return QSize(first.width() + second.width(),
+                 qMax(first.height(), second.height()));
 }
 
 bool NvOutputTopology::fromJson(const QJsonObject& object,
@@ -241,43 +259,6 @@ bool NvOutputTopology::contains(QString outputId) const
         }
     }
     return false;
-}
-
-QString NvOutputTopology::selectOutput(QString persistedId) const
-{
-    if (contains(persistedId)) {
-        return persistedId;
-    }
-    for (const NvOutput& output : outputs) {
-        if (output.primary) {
-            return output.id;
-        }
-    }
-    return outputs.isEmpty() ? QString() : outputs.first().id;
-}
-
-bool NvOutputTopology::supportsScaledSpan() const
-{
-    return (featureFlags & ScaledSpanFeature) != 0 && outputs.size() > 1;
-}
-
-bool NvOutputTopology::supportsSeparateDisplays() const
-{
-    return (featureFlags & CompositeSourceRegionsFeature) != 0 && outputs.size() > 1;
-}
-
-QString NvOutputTopology::selectDisplayMode(QString persistedMode) const
-{
-    if (persistedMode == SeparateDisplaysMode && supportsSeparateDisplays()) {
-        return persistedMode;
-    }
-    if (persistedMode == ScaledSpanMode && supportsScaledSpan()) {
-        return persistedMode;
-    }
-    if (persistedMode == SingleOutputMode) {
-        return persistedMode;
-    }
-    return supportsScaledSpan() ? QString(ScaledSpanMode) : QString(SingleOutputMode);
 }
 
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,

@@ -5,22 +5,6 @@
 #include <utility>
 
 namespace {
-QVector<const NvOutput*> orderedOutputs(const NvOutputTopology& topology)
-{
-    QVector<const NvOutput*> outputs;
-    for (const NvOutput& output : topology.outputs) {
-        if (output.primary) {
-            outputs.append(&output);
-        }
-    }
-    for (const NvOutput& output : topology.outputs) {
-        if (!output.primary) {
-            outputs.append(&output);
-        }
-    }
-    return outputs;
-}
-
 QString hostLayoutFromChoice(int choice)
 {
     switch (choice) {
@@ -168,54 +152,12 @@ Session* ComputerModel::createSessionForStationConnectDesktop(int computerIndex)
     return nullptr;
 }
 
-QStringList ComputerModel::stationConnectDisplayChoices(int computerIndex) const
+int ComputerModel::stationConnectScalingChoice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    const NvOutputTopology& topology = computer->outputTopology;
-    QStringList choices;
-    if (topology.outputs.isEmpty()) {
-        choices.append(tr("Scaled desktop span"));
-        choices.append(tr("Primary display"));
-        return choices;
-    }
-    if (topology.supportsScaledSpan()) {
-        choices.append(tr("Scaled desktop span (%1×%2)")
-                       .arg(topology.desktopWidth).arg(topology.desktopHeight));
-    }
-    for (const NvOutput* output : orderedOutputs(topology)) {
-        QString label = tr("%1 — %2×%3")
-                .arg(output->name).arg(output->width).arg(output->height);
-        if (output->primary) {
-            label += tr(" (Primary)");
-        }
-        choices.append(label);
-    }
-    return choices;
-}
-
-int ComputerModel::stationConnectDisplayChoice(int computerIndex) const
-{
-    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
-    NvComputer* computer = m_Computers[computerIndex];
-    QReadLocker lock(&computer->lock);
-    const NvOutputTopology& topology = computer->outputTopology;
-    if (topology.outputs.isEmpty()) {
-        return computer->selectedDisplayMode == NvOutputTopology::SingleOutputMode ? 1 : 0;
-    }
-    if (computer->selectedDisplayMode == NvOutputTopology::ScaledSpanMode &&
-            topology.supportsScaledSpan()) {
-        return 0;
-    }
-    int index = topology.supportsScaledSpan() ? 1 : 0;
-    for (const NvOutput* output : orderedOutputs(topology)) {
-        if (output->id == computer->selectedOutputId) {
-            return index;
-        }
-        ++index;
-    }
-    return 0;
+    return computer->stationConnectScalingMode == NvOutputTopology::NativeScalingMode ? 0 : 1;
 }
 
 int ComputerModel::stationConnectVideoProfile(int computerIndex) const
@@ -262,7 +204,7 @@ int ComputerModel::stationConnectVirtualMode2Choice(int computerIndex) const
 }
 
 bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
-                                         QString nickname, int displayChoice,
+                                         QString nickname, int scalingChoice,
                                          int hostLayoutChoice,
                                          int virtualMode1Choice,
                                          int virtualMode2Choice,
@@ -279,42 +221,16 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
     if (hostLayout.isEmpty() || virtualMode1.isEmpty() || virtualMode2.isEmpty()) {
         return false;
     }
-    QString displayMode;
-    QString selectedOutputId;
-    {
-        QReadLocker lock(&computer->lock);
-        const NvOutputTopology& topology = computer->outputTopology;
-        if (topology.outputs.isEmpty()) {
-            if (displayChoice < 0 || displayChoice > 1) {
-                return false;
-            }
-            displayMode = displayChoice == 0 ? NvOutputTopology::ScaledSpanMode :
-                                               NvOutputTopology::SingleOutputMode;
-        }
-        else {
-            int outputIndex = displayChoice;
-            if (topology.supportsScaledSpan()) {
-                if (displayChoice == 0) {
-                    displayMode = NvOutputTopology::ScaledSpanMode;
-                }
-                else {
-                    --outputIndex;
-                }
-            }
-            if (displayMode.isEmpty()) {
-                const QVector<const NvOutput*> outputs = orderedOutputs(topology);
-                if (outputIndex < 0 || outputIndex >= outputs.size()) {
-                    return false;
-                }
-                displayMode = NvOutputTopology::SingleOutputMode;
-                selectedOutputId = outputs[outputIndex]->id;
-            }
-        }
+    if (scalingChoice < 0 || scalingChoice > 1) {
+        return false;
     }
+    const QString scalingMode = scalingChoice == 0 ?
+                QString::fromLatin1(NvOutputTopology::NativeScalingMode) :
+                QString::fromLatin1(NvOutputTopology::ScaledSpanMode);
 
     return m_ComputerManager->editManualBookmark(computer, std::move(address),
-                                                  std::move(nickname), displayMode,
-                                                  selectedOutputId, hostLayout,
+                                                  std::move(nickname), scalingMode,
+                                                  hostLayout,
                                                   virtualMode1, virtualMode2,
                                                   videoProfile);
 }

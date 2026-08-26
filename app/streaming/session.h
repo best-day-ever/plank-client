@@ -306,6 +306,7 @@ private:
     std::atomic_bool m_WaitingForSessionCleanup;
     QString m_StationConnectUsername;
     QString m_StationConnectPassword;
+    QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
     SdlInputHandler* m_InputHandler;
