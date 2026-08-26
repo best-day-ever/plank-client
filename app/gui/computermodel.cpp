@@ -185,6 +185,19 @@ int ComputerModel::stationConnectHostLayoutChoice(int computerIndex) const
     return 0;
 }
 
+int ComputerModel::stationConnectHostDisplayPolicy(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    if (computer->state != NvComputer::CS_ONLINE ||
+            computer->authorizationState != NvComputer::AS_AUTHORIZED ||
+            !computer->outputTopology.displayPolicyKnown()) {
+        return -1;
+    }
+    return computer->outputTopology.virtualLayout ? 1 : 0;
+}
+
 int ComputerModel::stationConnectVirtualMode1Choice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());

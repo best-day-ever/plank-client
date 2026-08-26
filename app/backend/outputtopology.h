@@ -74,6 +74,8 @@ struct NvOutputTopology
     static QSize virtualModeSize(const QString& mode);
     static QSize virtualCanvasSize(const QString& hostLayout,
                                    const QStringList& virtualModes);
+    bool displayPolicyKnown() const;
+    bool allowsBookmarkHostLayout(const QString& layout) const;
     bool contains(QString outputId) const;
 
     int schemaVersion = 0;

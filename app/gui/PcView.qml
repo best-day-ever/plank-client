@@ -358,6 +358,7 @@ CenteredGridView {
         property string originalNickname: ""
         property int scalingIndex: 1
         property int hostLayoutIndex: 0
+        property int hostDisplayPolicy: -1
         property int virtualMode1Index: 11
         property int virtualMode2Index: 3
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
@@ -373,7 +374,8 @@ CenteredGridView {
             editAddressText.text = originalAddress
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
-            editHostLayout.currentIndex = hostLayoutIndex
+            hostDisplayPolicy = computerModel.stationConnectHostDisplayPolicy(pcIndex)
+            editHostLayout.currentIndex = hostDisplayPolicy === 0 ? 1 : hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
             for (var i = 0; i < editEncodingProfileModel.count; i++) {
@@ -392,6 +394,7 @@ CenteredGridView {
         onClosed: {
             editAddressText.clear()
             editNicknameText.clear()
+            hostDisplayPolicy = -1
         }
         onAccepted: {
             if (!computerModel.editComputerBookmark(pcIndex,
@@ -466,12 +469,21 @@ CenteredGridView {
             ComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
+                enabled: editBookmarkDialog.hostDisplayPolicy !== 0
                 model: [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
                     qsTr("Two virtual displays (horizontal)")
                 ]
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: editBookmarkDialog.hostDisplayPolicy === 0
+                text: qsTr("This workstation is configured to use its physical displays.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
 
             Label {

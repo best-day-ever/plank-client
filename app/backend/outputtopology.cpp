@@ -261,6 +261,23 @@ bool NvOutputTopology::contains(QString outputId) const
     return false;
 }
 
+bool NvOutputTopology::displayPolicyKnown() const
+{
+    return schemaVersion == ProtocolVersion &&
+            (layoutKind == PhysicalHostLayout ||
+             layoutKind == SingleHostLayout ||
+             layoutKind == DualHorizontalHostLayout);
+}
+
+bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
+{
+    if (!displayPolicyKnown()) {
+        return true;
+    }
+    return virtualLayout ? layout != PhysicalHostLayout :
+                           layout == PhysicalHostLayout;
+}
+
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,

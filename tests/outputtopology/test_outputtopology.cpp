@@ -12,6 +12,7 @@ private slots:
     void rejectsDuplicateIdentity();
     void rejectsConfiguredModeMismatch();
     void acceptsTallCinemaModes();
+    void enforcesHostDisplayPolicy();
     void matchesOneClientDisplay();
     void matchesTwoClientDisplaysLeftToRight();
     void rejectsUnsupportedClientLayouts();
@@ -117,6 +118,29 @@ void TestOutputTopology::acceptsTallCinemaModes()
     QVERIFY(!NvOutputTopology::virtualCanvasSize(
                  QStringLiteral("dual-horizontal"),
                  {QStringLiteral("3840x2160"), QStringLiteral("5120x2160")}).isValid());
+}
+
+void TestOutputTopology::enforcesHostDisplayPolicy()
+{
+    NvOutputTopology topology;
+    QVERIFY(!topology.displayPolicyKnown());
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("single")));
+
+    topology.schemaVersion = NvOutputTopology::ProtocolVersion;
+    topology.layoutKind = NvOutputTopology::PhysicalHostLayout;
+    topology.virtualLayout = false;
+    QVERIFY(topology.displayPolicyKnown());
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
+    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
+    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("single")));
+
+    topology.layoutKind = NvOutputTopology::SingleHostLayout;
+    topology.virtualLayout = true;
+    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("single")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("dual-horizontal")));
 }
 
 void TestOutputTopology::matchesOneClientDisplay()

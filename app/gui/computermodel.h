@@ -50,6 +50,9 @@ public:
 
     Q_INVOKABLE int stationConnectHostLayoutChoice(int computerIndex) const;
 
+    // -1 is unknown/offline, 0 is physical, and 1 is virtual.
+    Q_INVOKABLE int stationConnectHostDisplayPolicy(int computerIndex) const;
+
     Q_INVOKABLE int stationConnectVirtualMode1Choice(int computerIndex) const;
 
     Q_INVOKABLE int stationConnectVirtualMode2Choice(int computerIndex) const;

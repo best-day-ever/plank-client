@@ -1029,12 +1029,40 @@ bool Session::configureStationConnectHostLayout()
     QString scalingMode;
     QString virtualMode1;
     QString virtualMode2;
+    bool normalizeToPhysicalLayout = false;
+    bool virtualHostRejectsPhysicalLayout = false;
     {
         QReadLocker lock(&m_Computer->lock);
         layoutPolicy = m_Computer->stationConnectHostLayout;
         scalingMode = m_Computer->stationConnectScalingMode;
         virtualMode1 = m_Computer->stationConnectVirtualMode1;
         virtualMode2 = m_Computer->stationConnectVirtualMode2;
+        const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
+        if (hostPolicyKnown && !m_Computer->outputTopology.virtualLayout &&
+                layoutPolicy != NvOutputTopology::PhysicalHostLayout) {
+            layoutPolicy = NvOutputTopology::PhysicalHostLayout;
+            normalizeToPhysicalLayout = true;
+        }
+        virtualHostRejectsPhysicalLayout = hostPolicyKnown &&
+                m_Computer->outputTopology.virtualLayout &&
+                layoutPolicy == NvOutputTopology::PhysicalHostLayout;
+    }
+
+    if (normalizeToPhysicalLayout) {
+        {
+            QWriteLocker lock(&m_Computer->lock);
+            m_Computer->stationConnectHostLayout = NvOutputTopology::PhysicalHostLayout;
+        }
+        if (m_ComputerManager != nullptr) {
+            m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+        }
+        qInfo() << "StationConnect normalized the bookmark to the host's physical-display policy";
+    }
+    if (virtualHostRejectsPhysicalLayout) {
+        const QString error = tr("This workstation is configured for virtual displays. Edit the bookmark and select Match Client, one virtual display, or two virtual displays.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
     }
 
     m_ResolvedHostLayout.clear();
