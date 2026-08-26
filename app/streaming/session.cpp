@@ -1463,8 +1463,8 @@ bool Session::startConnectionAsync(bool reconnecting)
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                         }
-                        if (topology.layoutKind != hostLayout ||
-                                topology.virtualModes != virtualModes) {
+                        if (!topology.matchesRequestedHostLayout(hostLayout,
+                                                                 virtualModes)) {
                             qInfo() << "StationConnect display transition is still pending:"
                                     << topology.layoutKind << topology.virtualModes;
                             continue;

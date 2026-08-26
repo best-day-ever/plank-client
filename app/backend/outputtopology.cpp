@@ -278,6 +278,34 @@ bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
                            layout == PhysicalHostLayout;
 }
 
+bool NvOutputTopology::matchesRequestedHostLayout(const QString& layout,
+                                                  const QStringList& modes) const
+{
+    if (layoutKind != layout || virtualModes != modes) {
+        return false;
+    }
+    if (layout == PhysicalHostLayout) {
+        return !virtualLayout && !outputs.isEmpty();
+    }
+    if (layout == SingleHostLayout) {
+        return virtualLayout && outputs.size() == 1;
+    }
+    if (layout != DualHorizontalHostLayout || !virtualLayout || outputs.size() != 2) {
+        return false;
+    }
+
+    const NvOutput& left = outputs.at(0);
+    const NvOutput& right = outputs.at(1);
+    return left.y == right.y &&
+            right.x == left.x + left.width &&
+            desktopX == left.x &&
+            desktopY == left.y &&
+            desktopWidth == left.width + right.width &&
+            desktopHeight == qMax(left.height, right.height) &&
+            left.sourceX == 0 && left.sourceY == 0 &&
+            right.sourceX == left.width && right.sourceY == 0;
+}
+
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,

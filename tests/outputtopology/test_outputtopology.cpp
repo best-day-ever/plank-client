@@ -13,6 +13,7 @@ private slots:
     void rejectsConfiguredModeMismatch();
     void acceptsTallCinemaModes();
     void enforcesHostDisplayPolicy();
+    void validatesRequestedLayoutGeometry();
     void matchesOneClientDisplay();
     void matchesTwoClientDisplaysLeftToRight();
     void rejectsUnsupportedClientLayouts();
@@ -141,6 +142,37 @@ void TestOutputTopology::enforcesHostDisplayPolicy()
     QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
     QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("single")));
     QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("dual-horizontal")));
+}
+
+void TestOutputTopology::validatesRequestedLayoutGeometry()
+{
+    const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v4.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
+
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(document, topology));
+    QVERIFY(topology.matchesRequestedHostLayout(
+                QStringLiteral("dual-horizontal"),
+                {QStringLiteral("3840x2160"), QStringLiteral("1280x2160")}));
+
+    QJsonArray outputs = document.value("outputs").toArray();
+    QJsonObject second = outputs.at(1).toObject();
+    second["x"] = 2560;
+    second["source_rect"] = QJsonObject {
+        {"x", 2560}, {"y", 0}, {"width", 1280}, {"height", 2160}
+    };
+    outputs[1] = second;
+    document["outputs"] = outputs;
+    document["desktop"] = QJsonObject {
+        {"x", 0}, {"y", 0}, {"width", 3840}, {"height", 2160}
+    };
+
+    QVERIFY(NvOutputTopology::fromJson(document, topology));
+    QVERIFY(!topology.matchesRequestedHostLayout(
+                QStringLiteral("dual-horizontal"),
+                {QStringLiteral("3840x2160"), QStringLiteral("1280x2160")}));
 }
 
 void TestOutputTopology::matchesOneClientDisplay()

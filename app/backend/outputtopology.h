@@ -76,6 +76,8 @@ struct NvOutputTopology
                                    const QStringList& virtualModes);
     bool displayPolicyKnown() const;
     bool allowsBookmarkHostLayout(const QString& layout) const;
+    bool matchesRequestedHostLayout(const QString& layout,
+                                    const QStringList& modes) const;
     bool contains(QString outputId) const;
 
     int schemaVersion = 0;
