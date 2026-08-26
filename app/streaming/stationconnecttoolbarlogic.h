@@ -59,23 +59,6 @@ inline int logicalLeftFromPosition(float position,
                 std::clamp(position, 0.0f, 1.0f) * availableWidth));
 }
 
-inline int parentXFromPopup(int popupX, int popupLeft)
-{
-    return popupLeft + popupX;
-}
-
-inline int movedPopupLeft(int currentLeft,
-                          float relativeMotion,
-                          int logicalWindowWidth,
-                          int logicalToolbarWidth)
-{
-    const int maximumLeft = std::max(
-                0, logicalWindowWidth - logicalToolbarWidth);
-    return std::clamp(currentLeft +
-                      static_cast<int>(std::lround(relativeMotion)),
-                      0, maximumLeft);
-}
-
 class ButtonRouter
 {
 public:

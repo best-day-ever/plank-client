@@ -7,6 +7,10 @@
 class StreamingPreferences;
 class SdlInputHandler;
 
+namespace Overlay {
+class OverlayManager;
+}
+
 class StationConnectToolbar
 {
 public:
@@ -19,6 +23,7 @@ public:
     };
 
     StationConnectToolbar(SDL_Window* window,
+                          Overlay::OverlayManager& overlayManager,
                           SdlInputHandler& inputHandler,
                           StreamingPreferences& preferences);
     ~StationConnectToolbar();
@@ -28,11 +33,10 @@ public:
     void update(Uint64 now);
     void notifyWindowChanged();
     void notifyFocusLost();
-    bool handleWindowEvent(const SDL_Event& event);
 
-    bool handleMouseMotion(SDL_MouseMotionEvent& event);
-    Action handleMouseButton(SDL_MouseButtonEvent& event);
-    bool handleMouseWheel(SDL_MouseWheelEvent& event);
+    void observeMouseMotion(const SDL_MouseMotionEvent& event);
+    Action handleMouseButton(const SDL_MouseButtonEvent& event);
+    bool handleMouseWheel(const SDL_MouseWheelEvent& event);
 
     int eventWaitTimeout() const;
 
@@ -49,9 +53,6 @@ private:
 
     void show(Uint64 now);
     void hide();
-    bool createToolbarWindow();
-    void positionToolbarWindow();
-    void updateToolbarWindowMetrics();
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
     void redraw();
@@ -70,8 +71,7 @@ private:
     int sliderRight() const;
 
     SDL_Window* m_Window;
-    SDL_Window* m_ToolbarWindow;
-    SDL_WindowID m_ToolbarWindowId;
+    Overlay::OverlayManager& m_OverlayManager;
     SdlInputHandler& m_InputHandler;
     StreamingPreferences& m_Preferences;
     bool m_Visible;
@@ -80,7 +80,6 @@ private:
     bool m_DraggingSlider;
     bool m_PointerInside;
     bool m_PointerInitialized;
-    bool m_PopupPointerPositionValid;
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
     int m_WindowWidth;
@@ -90,6 +89,7 @@ private:
     float m_PixelDensity;
     int m_Width;
     int m_ToolbarLeft;
+    int m_ToolbarDragOffsetX;
     int m_PointerX;
     int m_PointerY;
     Control m_PressedControl;

@@ -2233,7 +2233,7 @@ void Session::execInternal()
 
     if (m_Computer->stationConnectAuthentication) {
         m_StationConnectToolbar.reset(new StationConnectToolbar(
-                    m_Window, *m_InputHandler, *m_Preferences));
+                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
@@ -2251,10 +2251,6 @@ void Session::execInternal()
         const int eventWaitTimeout = m_StationConnectToolbar ?
                     m_StationConnectToolbar->eventWaitTimeout() : 1000;
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
-            continue;
-        }
-        if (m_StationConnectToolbar &&
-                m_StationConnectToolbar->handleWindowEvent(event)) {
             continue;
         }
         switch (event.type) {
@@ -2552,16 +2548,9 @@ void Session::execInternal()
                 // the toolbar tracker and host receive the identical delta.
                 if (event.motion.which != SDL_TOUCH_MOUSEID) {
                     SDL_Event nextMotionEvent;
-                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_PEEKEVENT,
+                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
                                           SDL_EVENT_MOUSE_MOTION,
-                                          SDL_EVENT_MOUSE_MOTION) > 0 &&
-                           nextMotionEvent.motion.windowID ==
-                               event.motion.windowID) {
-                        if (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
-                                           SDL_EVENT_MOUSE_MOTION,
-                                           SDL_EVENT_MOUSE_MOTION) <= 0) {
-                            break;
-                        }
+                                          SDL_EVENT_MOUSE_MOTION) > 0) {
                         if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
                             event.motion.timestamp =
                                     nextMotionEvent.motion.timestamp;
@@ -2572,9 +2561,11 @@ void Session::execInternal()
                         }
                     }
                 }
-                if (m_StationConnectToolbar->handleMouseMotion(event.motion)) {
-                    break;
-                }
+                // The single-window toolbar observes the same authoritative
+                // coordinates, but motion always remains remote-desktop input.
+                // Only toolbar button and wheel events have exclusive local
+                // ownership.
+                m_StationConnectToolbar->observeMouseMotion(event.motion);
             }
             m_InputHandler->handleMouseMotionEvent(
                         &event.motion, !m_StationConnectToolbar);
