@@ -62,6 +62,9 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->isSupportedServerVersion;
     case StationConnectAuthenticationRole:
         return computer->stationConnectAuthentication;
+    case StationConnectHostVersionRole:
+        return computer->stationConnectHostMetadataVersion >= 1 ?
+                    computer->stationConnectHostVersion : QString();
     case ManualBookmarkRole:
         return computer->manualBookmark;
     case AddressRole:
@@ -111,6 +114,7 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[StatusUnknownRole] = "statusUnknown";
     names[ServerSupportedRole] = "serverSupported";
     names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
+    names[StationConnectHostVersionRole] = "stationConnectHostVersion";
     names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
 

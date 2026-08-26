@@ -170,7 +170,10 @@ CenteredGridView {
                 width: parent.width
                 text: (model.address ? model.address + "  ·  " : "") +
                       (model.statusUnknown ? qsTr("Checking") :
-                       (model.online ? qsTr("Online") : qsTr("Offline")))
+                       (model.online ? qsTr("Online") +
+                        (model.stationConnectHostVersion ?
+                         "  ·  " + model.stationConnectHostVersion : "") :
+                        qsTr("Offline")))
                 font.pointSize: 12
                 opacity: 0.72
                 elide: Text.ElideRight

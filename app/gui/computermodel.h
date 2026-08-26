@@ -16,6 +16,7 @@ class ComputerModel : public QAbstractListModel
         StatusUnknownRole,
         ServerSupportedRole,
         StationConnectAuthenticationRole,
+        StationConnectHostVersionRole,
         ManualBookmarkRole,
         AddressRole
     };

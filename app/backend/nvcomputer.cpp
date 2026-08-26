@@ -91,6 +91,8 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         state = CS_UNKNOWN;
         currentGameId = 0;
         stationConnectAuthentication = false;
+        stationConnectHostMetadataVersion = 0;
+        stationConnectHostVersion.clear();
         stationConnectTopologyVersion = 0;
         stationConnectFeatureFlags = 0;
         displayModes.clear();
@@ -188,6 +190,8 @@ NvComputer::NvComputer(QSettings& settings)
     this->externalPort = this->remoteAddress.port();
     this->activeHttpsPort = 0;
     this->stationConnectAuthentication = false;
+    this->stationConnectHostMetadataVersion = 0;
+    this->stationConnectHostVersion.clear();
     this->stationConnectTopologyVersion = 0;
     this->stationConnectFeatureFlags = 0;
     this->sessionToken.clear();
@@ -342,6 +346,10 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 
     this->stationConnectAuthentication =
             NvHTTP::getXmlString(serverInfo, "StationConnectAuth") == "1";
+    this->stationConnectHostMetadataVersion =
+            NvHTTP::getXmlString(serverInfo, "StationConnectHostMetadataVersion").toInt();
+    this->stationConnectHostVersion =
+            NvHTTP::getXmlString(serverInfo, "StationConnectHostVersion");
     this->stationConnectTopologyVersion =
             NvHTTP::getXmlString(serverInfo, "StationConnectTopologyVersion").toInt();
     this->stationConnectFeatureFlags =
@@ -579,6 +587,8 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
     ASSIGN_IF_CHANGED(activeHttpsPort);
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(stationConnectAuthentication);
+    ASSIGN_IF_CHANGED(stationConnectHostMetadataVersion);
+    ASSIGN_IF_CHANGED(stationConnectHostVersion);
     ASSIGN_IF_CHANGED(stationConnectTopologyVersion);
     ASSIGN_IF_CHANGED(stationConnectFeatureFlags);
     if (stationConnectAuthentication && sessionToken.isEmpty()) {

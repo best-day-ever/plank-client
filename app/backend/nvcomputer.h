@@ -110,6 +110,8 @@ public:
     QString gpuModel;
     bool isSupportedServerVersion;
     bool stationConnectAuthentication = false;
+    int stationConnectHostMetadataVersion = 0;
+    QString stationConnectHostVersion;
     QString sessionToken;
     int stationConnectTopologyVersion = 0;
     int stationConnectFeatureFlags = 0;
