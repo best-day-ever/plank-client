@@ -682,6 +682,12 @@ int main(int argc, char *argv[])
     // initializing the SDL video subsystem to have any effect.
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
 
+    // Wacom input is forwarded through StationConnect's raw-HID or normalized
+    // tablet path. SDL's virtual pen mouse would duplicate tip/button events
+    // and incorrectly transfer cursor ownership to the compositor on pen-down.
+    SDL_SetHintWithPriority(SDL_HINT_PEN_MOUSE_EVENTS,
+                            "0", SDL_HINT_OVERRIDE);
+
     // We use MMAL to render on Raspberry Pi, so we do not require DRM master.
     SDL_SetHint(SDL_HINT_KMSDRM_REQUIRE_DRM_MASTER, "0");
 

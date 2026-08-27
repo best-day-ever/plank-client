@@ -2,6 +2,7 @@
 #include "stationconnectwaylandtoolbar.h"
 
 #include "input/input.h"
+#include "input/stationconnectpointerlogic.h"
 #include "settings/streamingpreferences.h"
 #include "video/overlaymanager.h"
 
@@ -406,7 +407,7 @@ void StationConnectToolbar::notifyFocusLost()
 
 bool StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event)
 {
-    if (event.which == SDL_TOUCH_MOUSEID) {
+    if (StationConnectPointerLogic::isSyntheticMouseDevice(event.which)) {
         return false;
     }
 
@@ -511,6 +512,10 @@ bool StationConnectToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event
 StationConnectToolbar::Action StationConnectToolbar::handleMouseButton(
         const SDL_MouseButtonEvent& event)
 {
+    if (StationConnectPointerLogic::isSyntheticMouseDevice(event.which)) {
+        return Action::None;
+    }
+
     // SDL receives a duplicate seat event for the visible native child. The
     // native listener owns this sequence and will invoke handlePointerButton()
     // with the authoritative parent-relative coordinate.
@@ -613,6 +618,10 @@ StationConnectToolbar::Action StationConnectToolbar::handlePointerButton(
 
 bool StationConnectToolbar::handleMouseWheel(const SDL_MouseWheelEvent& event)
 {
+    if (StationConnectPointerLogic::isSyntheticMouseDevice(event.which)) {
+        return false;
+    }
+
     // Consume SDL's duplicate child-surface wheel event. The native callback
     // below owns scrolling while the compositor pointer is in the toolbar.
     if (m_WaylandToolbar && m_PointerInside) {
