@@ -113,6 +113,7 @@ class Session : public QObject
     friend class DeferredSessionCleanupTask;
     friend class AsyncConnectionStartThread;
     friend class ExecThread;
+    friend class StationConnectReconnectThread;
 
 public:
     explicit Session(NvComputer* computer, NvApp& app,
@@ -183,7 +184,20 @@ private:
 
     bool startConnectionAsync(bool reconnecting = false);
 
-    bool reconnectStationConnect();
+    struct StationConnectReconnectState {
+        bool retainedRenderer = false;
+        int videoFormat = 0;
+        int videoWidth = 0;
+        int videoHeight = 0;
+        int videoFrameRate = 0;
+    };
+
+    bool beginStationConnectReconnect(StationConnectReconnectState& state);
+
+    bool runStationConnectReconnect();
+
+    bool finishStationConnectReconnect(bool success,
+                                       const StationConnectReconnectState& state);
 
     void clearStationConnectReconnectCredentials();
 
@@ -309,6 +323,7 @@ private:
     bool m_UnexpectedTermination;
     std::atomic_bool m_ReconnectRequested;
     std::atomic_bool m_Reconnecting;
+    std::atomic_bool m_ReconnectCancelled;
     std::atomic_bool m_CanReconnect;
     std::atomic_bool m_ConnectionStartCancelled;
     std::atomic_bool m_WaitingForSessionCleanup;

@@ -45,6 +45,7 @@
 #define SDL_CODE_STATIONCONNECT_CURSOR 107
 #define SDL_CODE_STATIONCONNECT_TABLET_CURSOR 108
 #define SDL_CODE_STATIONCONNECT_CURSOR_POSITION 109
+#define SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE 110
 
 #include <openssl/rand.h>
 
@@ -611,6 +612,7 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_ReconnectRequested(false),
       m_Reconnecting(false),
+      m_ReconnectCancelled(false),
       m_CanReconnect(false),
       m_ConnectionStartCancelled(false),
       m_WaitingForSessionCleanup(false),
@@ -1802,7 +1804,8 @@ void Session::cancelConnectionStart()
     m_ConnectionStartCancelled.store(true);
 }
 
-bool Session::reconnectStationConnect()
+bool Session::beginStationConnectReconnect(
+        StationConnectReconnectState& state)
 {
     if (m_StationConnectUsername.isEmpty() ||
             m_StationConnectPassword.isEmpty()) {
@@ -1817,24 +1820,37 @@ bool Session::reconnectStationConnect()
 
     m_InputHandler->raiseAllKeys();
     m_InputHandler->beginRawHidReconnect();
-    const int previousVideoFormat = m_ActiveVideoFormat;
-    const int previousVideoWidth = m_ActiveVideoWidth;
-    const int previousVideoHeight = m_ActiveVideoHeight;
-    const int previousVideoFrameRate = m_ActiveVideoFrameRate;
-    bool retainedRenderer = false;
+    state = {};
+    state.videoFormat = m_ActiveVideoFormat;
+    state.videoWidth = m_ActiveVideoWidth;
+    state.videoHeight = m_ActiveVideoHeight;
+    state.videoFrameRate = m_ActiveVideoFrameRate;
     SDL_LockSpinlock(&m_DecoderLock);
     if (m_VideoDecoder != nullptr) {
-        retainedRenderer = m_VideoDecoder->suspendForReconnect();
-        if (!retainedRenderer) {
+        state.retainedRenderer = m_VideoDecoder->suspendForReconnect();
+        if (!state.retainedRenderer) {
             delete m_VideoDecoder;
             m_VideoDecoder = nullptr;
         }
     }
     SDL_UnlockSpinlock(&m_DecoderLock);
     LiStopConnection();
+    m_ReconnectCancelled.store(false);
+    m_ConnectionStartCancelled.store(false);
+    return true;
+}
+
+bool Session::runStationConnectReconnect()
+{
+    if (m_StationConnectUsername.isEmpty() ||
+            m_StationConnectPassword.isEmpty()) {
+        return false;
+    }
 
     constexpr int MaximumAttempts = 20;
-    for (int attempt = 1; attempt <= MaximumAttempts; ++attempt) {
+    for (int attempt = 1;
+         attempt <= MaximumAttempts && !m_ReconnectCancelled.load();
+         ++attempt) {
         try {
             {
                 QWriteLocker lock(&m_Computer->lock);
@@ -1876,37 +1892,11 @@ bool Session::reconnectStationConnect()
                 m_Computer->updateAppList(apps);
             }
 
-            if (startConnectionAsync(true)) {
-                const bool streamConfigurationUnchanged =
-                        previousVideoFormat == m_ActiveVideoFormat &&
-                        previousVideoWidth == m_ActiveVideoWidth &&
-                        previousVideoHeight == m_ActiveVideoHeight &&
-                        previousVideoFrameRate == m_ActiveVideoFrameRate;
-                bool resumedRenderer = false;
-                if (retainedRenderer && streamConfigurationUnchanged) {
-                    SDL_LockSpinlock(&m_DecoderLock);
-                    resumedRenderer = m_VideoDecoder != nullptr &&
-                            m_VideoDecoder->resumeAfterReconnect();
-                    SDL_UnlockSpinlock(&m_DecoderLock);
-                }
-                m_InputHandler->finishRawHidReconnect();
-                m_Reconnecting.store(false);
-                m_ReconnectRequested = false;
-                m_UnexpectedTermination = false;
-                m_OverlayManager.setOverlayState(
-                            Overlay::OverlayStatusUpdate, false);
-
-                if (!resumedRenderer) {
-                    SDL_Event resetEvent = {};
-                    resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
-                    SDL_PushEvent(&resetEvent);
-                } else {
-                    LiRequestIdrFrame();
-                }
+            if (startConnectionAsync(true) &&
+                    !m_ReconnectCancelled.load()) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect reconnect completed on attempt %d (%s renderer)",
-                            attempt,
-                            resumedRenderer ? "retained" : "recreated");
+                            "StationConnect reconnect transport completed on attempt %d",
+                            attempt);
                 return true;
             }
         } catch (const GfeHttpResponseException& error) {
@@ -1924,17 +1914,109 @@ bool Session::reconnectStationConnect()
             m_Computer->sessionToken.clear();
             m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
         }
-        if (attempt != MaximumAttempts) {
-            SDL_Delay(1000);
+        if (attempt != MaximumAttempts && !m_ReconnectCancelled.load()) {
+            constexpr int RetryDelayMs = 1000;
+            constexpr int CancellationPollMs = 50;
+            for (int elapsedMs = 0;
+                 elapsedMs < RetryDelayMs && !m_ReconnectCancelled.load();
+                 elapsedMs += CancellationPollMs) {
+                SDL_Delay(CancellationPollMs);
+            }
         }
+    }
+
+    return false;
+}
+
+bool Session::finishStationConnectReconnect(
+        bool success,
+        const StationConnectReconnectState& state)
+{
+    bool resumedRenderer = false;
+    if (success) {
+        const bool streamConfigurationUnchanged =
+                state.videoFormat == m_ActiveVideoFormat &&
+                state.videoWidth == m_ActiveVideoWidth &&
+                state.videoHeight == m_ActiveVideoHeight &&
+                state.videoFrameRate == m_ActiveVideoFrameRate;
+        if (state.retainedRenderer && streamConfigurationUnchanged) {
+            SDL_LockSpinlock(&m_DecoderLock);
+            resumedRenderer = m_VideoDecoder != nullptr &&
+                    m_VideoDecoder->resumeAfterReconnect();
+            SDL_UnlockSpinlock(&m_DecoderLock);
+        }
+        m_InputHandler->finishRawHidReconnect();
+        m_UnexpectedTermination = false;
+    } else {
+        m_UnexpectedTermination = true;
     }
 
     m_Reconnecting.store(false);
     m_ReconnectRequested = false;
-    m_UnexpectedTermination = true;
+    m_ReconnectCancelled.store(false);
+    m_ConnectionStartCancelled.store(false);
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
-    return false;
+
+    if (!success) {
+        return false;
+    }
+
+    if (!resumedRenderer) {
+        SDL_Event resetEvent = {};
+        resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+        SDL_PushEvent(&resetEvent);
+    } else {
+        LiRequestIdrFrame();
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect reconnect completed (%s renderer)",
+                resumedRenderer ? "retained" : "recreated");
+    return true;
 }
+
+class StationConnectReconnectThread : public QThread
+{
+public:
+    explicit StationConnectReconnectThread(Session* session) :
+        QThread(nullptr),
+        m_Session(session),
+        m_Success(false),
+        m_CompletionPosted(false)
+    {
+        setObjectName("StationConnect Reconnect");
+    }
+
+    bool succeeded() const
+    {
+        return m_Success;
+    }
+
+    bool completionPosted() const
+    {
+        return m_CompletionPosted.load();
+    }
+
+    void run() override
+    {
+        m_Success = m_Session->runStationConnectReconnect();
+
+        SDL_Event event = {};
+        event.type = SDL_EVENT_USER;
+        event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
+        const bool posted = SDL_PushEvent(&event);
+        m_CompletionPosted.store(posted);
+        if (!posted) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Failed to post StationConnect reconnect completion: %s",
+                         SDL_GetError());
+        }
+    }
+
+private:
+    Session* m_Session;
+    bool m_Success;
+    std::atomic_bool m_CompletionPosted;
+};
 
 void Session::flushWindowEvents()
 {
@@ -2286,9 +2368,11 @@ void Session::execInternal()
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
+    StationConnectReconnectThread* reconnectThread = nullptr;
+    StationConnectReconnectState reconnectState;
     SDL_Event event;
     for (;;) {
-        if (m_StationConnectToolbar) {
+        if (m_StationConnectToolbar && !m_Reconnecting.load()) {
             m_StationConnectToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
@@ -2311,9 +2395,30 @@ void Session::execInternal()
                 SDL_MinimizeWindow(m_Window);
             }
         }
-        const int eventWaitTimeout = m_StationConnectToolbar ?
-                    m_StationConnectToolbar->eventWaitTimeout() : 1000;
+        const int eventWaitTimeout = m_Reconnecting.load() ? 50 :
+                    (m_StationConnectToolbar ?
+                         m_StationConnectToolbar->eventWaitTimeout() : 1000);
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
+            if (reconnectThread != nullptr &&
+                    reconnectThread->isFinished() &&
+                    !reconnectThread->completionPosted()) {
+                event = {};
+                event.type = SDL_EVENT_USER;
+                event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
+            } else {
+                continue;
+            }
+        }
+
+        const bool reconnectCompletion =
+                event.type == SDL_EVENT_USER &&
+                event.user.code == SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
+        if (m_Reconnecting.load() &&
+                event.type != SDL_EVENT_QUIT &&
+                !reconnectCompletion) {
+            // SDL_WaitEventTimeout() continues dispatching the Wayland queue so
+            // Mutter receives prompt ping responses. Drop stream/window work
+            // until the reconnect worker has replaced the transport.
             continue;
         }
         switch (event.type) {
@@ -2325,12 +2430,34 @@ void Session::execInternal()
         case SDL_EVENT_USER:
             switch (event.user.code) {
             case SDL_CODE_STATIONCONNECT_RECONNECT:
-                if (!reconnectStationConnect()) {
+                if (reconnectThread != nullptr ||
+                        !beginStationConnectReconnect(reconnectState)) {
+                    emit displayLaunchError(
+                                tr("The workstation desktop changed, but the client could not reconnect within 20 seconds."));
+                    goto DispatchDeferredCleanup;
+                }
+                reconnectThread = new StationConnectReconnectThread(this);
+                reconnectThread->start();
+                break;
+            case SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE:
+            {
+                if (reconnectThread == nullptr) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Ignoring reconnect completion without an active worker");
+                    break;
+                }
+                reconnectThread->wait();
+                const bool reconnectSucceeded = reconnectThread->succeeded();
+                delete reconnectThread;
+                reconnectThread = nullptr;
+                if (!finishStationConnectReconnect(
+                            reconnectSucceeded, reconnectState)) {
                     emit displayLaunchError(
                                 tr("The workstation desktop changed, but the client could not reconnect within 20 seconds."));
                     goto DispatchDeferredCleanup;
                 }
                 break;
+            }
             case SDL_CODE_STATIONCONNECT_BITRATE_APPLIED:
                 if (m_StationConnectToolbar) {
                     m_StationConnectToolbar->setAppliedBitrate(
@@ -2667,6 +2794,16 @@ void Session::execInternal()
 DispatchDeferredCleanup:
     // Uncapture the mouse and hide the window immediately,
     // so we can return to the Qt GUI ASAP.
+    if (reconnectThread != nullptr) {
+        SDL_HideWindow(m_Window);
+        m_ReconnectCancelled.store(true);
+        m_ConnectionStartCancelled.store(true);
+        reconnectThread->wait();
+        delete reconnectThread;
+        reconnectThread = nullptr;
+        m_Reconnecting.store(false);
+        m_ReconnectRequested.store(false);
+    }
     m_InputHandler->setCaptureActive(false);
     SDL_EnableScreenSaver();
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "0");
