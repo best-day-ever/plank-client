@@ -123,7 +123,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
     m_LocalCursorSupported =
             (LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) != 0;
     if (m_LocalCursorSupported) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "StationConnect local cursor transport enabled");
         setCursorVisible(true);
     }
@@ -276,6 +276,7 @@ void SdlInputHandler::applyPendingRemoteCursor()
         return;
     }
 
+    const bool firstCursor = m_RemoteCursor == nullptr;
     SDL_SetCursor(replacement);
     if (m_RemoteCursor != nullptr) {
         SDL_DestroyCursor(m_RemoteCursor);
@@ -287,11 +288,19 @@ void SdlInputHandler::applyPendingRemoteCursor()
         setCursorVisible(!m_MouseWasInVideoRegion || m_RemoteCursorVisible);
     }
 
-    SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
-                 "Applied StationConnect local cursor generation %llu (%ux%u hotspot %u,%u visible=%d)",
-                 static_cast<unsigned long long>(cursor.generation),
-                 cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
-                 m_RemoteCursorVisible ? 1 : 0);
+    if (firstCursor) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Applied first StationConnect local cursor (%ux%u hotspot %u,%u visible=%d)",
+                    cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
+                    m_RemoteCursorVisible ? 1 : 0);
+    }
+    else {
+        SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
+                     "Applied StationConnect local cursor generation %llu (%ux%u hotspot %u,%u visible=%d)",
+                     static_cast<unsigned long long>(cursor.generation),
+                     cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
+                     m_RemoteCursorVisible ? 1 : 0);
+    }
 }
 
 void SdlInputHandler::raiseAllKeys()
