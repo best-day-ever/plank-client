@@ -395,7 +395,7 @@ ApplicationWindow {
         id: addPcDialog
         title: qsTr("Add workstation bookmark")
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
-        property bool bitrateManuallyEdited: false
+        property var profileBitratesKbps: []
 
         // Give both connection fields enough room for real hostnames while
         // keeping the dialog inside smaller launcher windows. The dialog still
@@ -411,13 +411,25 @@ ApplicationWindow {
             return value.split(":")[0].split(".")[0]
         }
 
-        function applyProfileBitrateDefault() {
-            if (!bitrateManuallyEdited && addEncodingProfile.currentIndex >= 0) {
-                addBitrateSlider.value =
-                        StreamingPreferences.stationConnectDefaultBitrateKbps(
-                            addEncodingProfile.model.get(
-                                addEncodingProfile.currentIndex).val)
+        function currentVideoProfile() {
+            if (addEncodingProfile.currentIndex >= 0) {
+                return addEncodingProfile.model.get(
+                            addEncodingProfile.currentIndex).val
             }
+            return StreamingPreferences.SCVP_H264_10BIT_444
+        }
+
+        function applyProfileBitrate() {
+            addBitrateSlider.value = profileBitratesKbps[currentVideoProfile()]
+        }
+
+        function rememberProfileBitrate() {
+            var values = []
+            for (var i = 0; i < profileBitratesKbps.length; ++i) {
+                values.push(profileBitratesKbps[i])
+            }
+            values[currentVideoProfile()] = Math.round(addBitrateSlider.value)
+            profileBitratesKbps = values
         }
 
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -425,8 +437,9 @@ ApplicationWindow {
         onOpened: {
             // Force keyboard focus on the textbox so keyboard navigation works
             addressText.forceActiveFocus()
-            bitrateManuallyEdited = false
-            applyProfileBitrateDefault()
+            profileBitratesKbps =
+                    StreamingPreferences.stationConnectDefaultProfileBitratesKbps()
+            applyProfileBitrate()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return addressText.text.trim() !== "" && nicknameText.text.trim() !== ""
             })
@@ -442,7 +455,7 @@ ApplicationWindow {
             addScalingChoice.currentIndex = 1
             addCaptureSource.currentIndex = 0
             addEncodingProfile.currentIndex = 3
-            bitrateManuallyEdited = false
+            profileBitratesKbps = []
         }
 
         onAccepted: {
@@ -457,7 +470,7 @@ ApplicationWindow {
                                                        addEncodingProfile.currentIndex).val,
                                                    addCaptureSourceModel.get(
                                                        addCaptureSource.currentIndex).val,
-                                                   Math.round(addBitrateSlider.value))
+                                                   profileBitratesKbps)
             }
         }
 
@@ -537,7 +550,7 @@ ApplicationWindow {
                     } else {
                         addEncodingProfile.currentIndex = 3
                     }
-                    Qt.callLater(addPcDialog.applyProfileBitrateDefault)
+                    Qt.callLater(addPcDialog.applyProfileBitrate)
                 }
             }
 
@@ -554,7 +567,7 @@ ApplicationWindow {
                 currentIndex: 3
                 model: addCaptureSource.currentIndex === 0 ?
                            addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
-                onActivated: addPcDialog.applyProfileBitrateDefault()
+                onActivated: addPcDialog.applyProfileBitrate()
             }
 
             ListModel {
@@ -576,11 +589,11 @@ ApplicationWindow {
                     val: StreamingPreferences.SCVP_H264_10BIT_444
                 }
                 ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_H264_8BIT_444
                 }
                 ListElement {
-                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
                 }
             }
@@ -592,7 +605,7 @@ ApplicationWindow {
                     val: StreamingPreferences.SCVP_H264_10BIT_444
                 }
                 ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
                 }
             }
@@ -610,12 +623,12 @@ ApplicationWindow {
                 to: StreamingPreferences.stationConnectBitrateMaximumKbps()
                 stepSize: StreamingPreferences.stationConnectBitrateStepKbps()
                 snapMode: Slider.SnapAlways
-                onMoved: addPcDialog.bitrateManuallyEdited = true
+                onMoved: addPcDialog.rememberProfileBitrate()
             }
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Used when this bookmark connects. Toolbar adjustments apply only to the active session.")
+                text: qsTr("Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

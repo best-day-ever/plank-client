@@ -219,8 +219,8 @@ CenteredGridView {
                         editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
                         editBookmarkDialog.originalCaptureSource =
                                 computerModel.stationConnectCaptureSource(index)
-                        editBookmarkDialog.originalBitrateKbps =
-                                computerModel.stationConnectBitrateKbps(index)
+                        editBookmarkDialog.originalProfileBitratesKbps =
+                                computerModel.stationConnectProfileBitratesKbps(index)
                         editBookmarkDialog.open()
                     }
                 }
@@ -371,15 +371,35 @@ CenteredGridView {
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         property int originalCaptureSource: StreamingPreferences.SCCS_NVFBC_8BIT
-        property int originalBitrateKbps:
-                StreamingPreferences.stationConnectDefaultBitrateKbps(
-                    StreamingPreferences.SCVP_H264_10BIT_444)
+        property var originalProfileBitratesKbps: []
+        property var profileBitratesKbps: []
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         dim: false
         modal: true
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
+
+        function currentVideoProfile() {
+            if (editEncodingProfile.currentIndex >= 0) {
+                return editEncodingProfile.model.get(
+                            editEncodingProfile.currentIndex).val
+            }
+            return StreamingPreferences.SCVP_H264_10BIT_444
+        }
+
+        function applyProfileBitrate() {
+            editBitrateSlider.value = profileBitratesKbps[currentVideoProfile()]
+        }
+
+        function rememberProfileBitrate() {
+            var values = []
+            for (var i = 0; i < profileBitratesKbps.length; ++i) {
+                values.push(profileBitratesKbps[i])
+            }
+            values[currentVideoProfile()] = Math.round(editBitrateSlider.value)
+            profileBitratesKbps = values
+        }
 
         onOpened: {
             editAddressText.text = originalAddress
@@ -396,7 +416,14 @@ CenteredGridView {
                     break
                 }
             }
-            editBitrateSlider.value = originalBitrateKbps
+            var loadedBitrates = []
+            for (var bitrateIndex = 0;
+                 bitrateIndex < originalProfileBitratesKbps.length;
+                 ++bitrateIndex) {
+                loadedBitrates.push(originalProfileBitratesKbps[bitrateIndex])
+            }
+            profileBitratesKbps = loadedBitrates
+            applyProfileBitrate()
             editAddressText.forceActiveFocus()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
@@ -408,6 +435,8 @@ CenteredGridView {
             editAddressText.clear()
             editNicknameText.clear()
             hostDisplayPolicy = -1
+            originalProfileBitratesKbps = []
+            profileBitratesKbps = []
         }
         onAccepted: {
             if (!computerModel.editComputerBookmark(pcIndex,
@@ -421,7 +450,7 @@ CenteredGridView {
                                                         editEncodingProfile.currentIndex).val,
                                                     editCaptureSourceModel.get(
                                                         editCaptureSource.currentIndex).val,
-                                                    Math.round(editBitrateSlider.value))) {
+                                                    profileBitratesKbps)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.helpText = ""
                 errorDialog.open()
@@ -474,6 +503,7 @@ CenteredGridView {
                     } else {
                         editEncodingProfile.currentIndex = 3
                     }
+                    Qt.callLater(editBookmarkDialog.applyProfileBitrate)
                 }
             }
 
@@ -488,6 +518,7 @@ CenteredGridView {
                 textRole: "text"
                 model: editCaptureSource.currentIndex === 0 ?
                            editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
+                onActivated: editBookmarkDialog.applyProfileBitrate()
             }
 
             ListModel {
@@ -509,11 +540,11 @@ CenteredGridView {
                     val: StreamingPreferences.SCVP_H264_10BIT_444
                 }
                 ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_H264_8BIT_444
                 }
                 ListElement {
-                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
                 }
             }
@@ -525,7 +556,7 @@ CenteredGridView {
                     val: StreamingPreferences.SCVP_H264_10BIT_444
                 }
                 ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
                 }
             }
@@ -543,11 +574,12 @@ CenteredGridView {
                 to: StreamingPreferences.stationConnectBitrateMaximumKbps()
                 stepSize: StreamingPreferences.stationConnectBitrateStepKbps()
                 snapMode: Slider.SnapAlways
+                onMoved: editBookmarkDialog.rememberProfileBitrate()
             }
 
             Label {
                 Layout.fillWidth: true
-                text: qsTr("Used when this bookmark connects. Toolbar adjustments apply only to the active session.")
+                text: qsTr("Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

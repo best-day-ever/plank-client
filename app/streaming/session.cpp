@@ -627,8 +627,9 @@ Session::Session(NvComputer* computer, NvApp& app,
                      computer->stationConnectCaptureSource,
                      static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10)))),
       m_StationConnectBitrateKbps(
-              StreamingPreferences::clampStationConnectBitrate(
-                  computer->stationConnectBitrateKbps)),
+              StreamingPreferences::stationConnectBitrateForProfile(
+                  computer->stationConnectProfileBitratesKbps,
+                  computer->stationConnectVideoProfile)),
       m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
@@ -672,8 +673,9 @@ Session::Session(NvComputer* computer, NvApp& app,
         // StationConnect is a qualified workstation protocol, not a generic
         // game-streaming profile. Its stream size is selected after SDL video
         // initialization from the target client display or explicit override.
-        // The bookmark owns the startup encoder target. The toolbar receives a
-        // session-local copy and never writes changes back to this value.
+        // The bookmark owns one startup encoder target for each exact encoding
+        // profile. The selected value is a session-local copy, and the toolbar
+        // never writes changes back to the bookmark.
         m_Preferences->fps = 60;
         m_Preferences->identityGbrBitDepth =
                 (m_StationConnectVideoProfile ==

@@ -46,14 +46,15 @@ public:
     explicit NvComputer(QSettings& settings);
 
     NvComputer(NvAddress manualAddress, QString nickname, int videoProfile,
-               int captureSource, int bitrateKbps);
+               int captureSource, const QVector<int>& profileBitratesKbps);
 
     bool
     updateManualBookmark(NvAddress manualAddress, QString nickname,
                          QString scalingMode,
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
-                         int videoProfile, int captureSource, int bitrateKbps);
+                         int videoProfile, int captureSource,
+                         const QVector<int>& profileBitratesKbps);
 
     void
     setRemoteAddress(QHostAddress);
@@ -135,8 +136,8 @@ public:
     QString stationConnectVirtualMode2;
     int stationConnectVideoProfile = 0;
     int stationConnectCaptureSource = 0;
-    int stationConnectBitrateKbps =
-            StreamingPreferences::StationConnectH264DefaultBitrateKbps;
+    QVector<int> stationConnectProfileBitratesKbps =
+            StreamingPreferences::stationConnectDefaultProfileBitrates();
     bool manualBookmark = false;
     QString serverUuid;
     // Remember to update isEqualSerialized() when adding fields here!

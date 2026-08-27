@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QRect>
 #include <QQmlEngine>
+#include <QVariantList>
+#include <QVector>
 
 class StreamingPreferences : public QObject
 {
@@ -32,6 +34,7 @@ public:
         SCVP_NVENC_H264_8BIT_444,
         SCVP_NVENC_HEVC_8BIT_444,
         SCVP_NVENC_HEVC_10BIT_444,
+        SCVP_COUNT,
     };
     Q_ENUM(StationConnectVideoProfile)
 
@@ -45,7 +48,7 @@ public:
     static bool isStationConnectVideoProfileValid(int profile)
     {
         return profile >= SCVP_H264_10BIT_444 &&
-               profile <= SCVP_NVENC_HEVC_10BIT_444;
+               profile < SCVP_COUNT;
     }
 
     static bool isStationConnectProfileValidForCaptureSource(
@@ -90,6 +93,62 @@ public:
         return qBound(StationConnectBitrateMinimumKbps,
                       bitrateKbps,
                       StationConnectBitrateMaximumKbps);
+    }
+
+    static QVector<int> stationConnectDefaultProfileBitrates()
+    {
+        QVector<int> bitrates;
+        bitrates.reserve(SCVP_COUNT);
+        for (int profile = SCVP_H264_10BIT_444;
+             profile < SCVP_COUNT;
+             ++profile) {
+            bitrates.append(stationConnectDefaultBitrateForProfile(profile));
+        }
+        return bitrates;
+    }
+
+    static QVariantList stationConnectProfileBitratesToVariantList(
+            const QVector<int>& bitrates)
+    {
+        QVariantList values;
+        values.reserve(SCVP_COUNT);
+        for (int profile = SCVP_H264_10BIT_444;
+             profile < SCVP_COUNT;
+             ++profile) {
+            values.append(stationConnectBitrateForProfile(bitrates, profile));
+        }
+        return values;
+    }
+
+    static bool stationConnectProfileBitratesFromVariantList(
+            const QVariantList& values, QVector<int>& bitrates)
+    {
+        if (values.size() != SCVP_COUNT) {
+            return false;
+        }
+
+        QVector<int> parsed;
+        parsed.reserve(SCVP_COUNT);
+        for (const QVariant& value : values) {
+            bool ok = false;
+            const int bitrateKbps = value.toInt(&ok);
+            if (!ok || bitrateKbps != clampStationConnectBitrate(bitrateKbps)) {
+                return false;
+            }
+            parsed.append(bitrateKbps);
+        }
+        bitrates = parsed;
+        return true;
+    }
+
+    static int stationConnectBitrateForProfile(
+            const QVector<int>& bitrates, int profile)
+    {
+        if (isStationConnectVideoProfileValid(profile) &&
+                bitrates.size() == SCVP_COUNT) {
+            return clampStationConnectBitrate(bitrates.at(profile));
+        }
+        return stationConnectDefaultBitrateForProfile(profile);
     }
 
     enum WindowMode
@@ -178,6 +237,11 @@ public:
     Q_INVOKABLE int stationConnectDefaultBitrateKbps(int profile) const
     {
         return stationConnectDefaultBitrateForProfile(profile);
+    }
+    Q_INVOKABLE QVariantList stationConnectDefaultProfileBitratesKbps() const
+    {
+        return stationConnectProfileBitratesToVariantList(
+                    stationConnectDefaultProfileBitrates());
     }
     Q_INVOKABLE int stationConnectBitrateMinimumKbps() const
     {

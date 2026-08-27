@@ -51,7 +51,8 @@ public:
 
     Q_INVOKABLE int stationConnectCaptureSource(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectBitrateKbps(int computerIndex) const;
+    Q_INVOKABLE QVariantList stationConnectProfileBitratesKbps(
+            int computerIndex) const;
 
     Q_INVOKABLE int stationConnectHostLayoutChoice(int computerIndex) const;
 
@@ -68,7 +69,7 @@ public:
                                           int virtualMode1Choice,
                                           int virtualMode2Choice,
                                           int videoProfile, int captureSource,
-                                          int bitrateKbps);
+                                          const QVariantList& profileBitratesKbps);
 
 signals:
     void authenticationCompleted(QVariant error);

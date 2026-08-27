@@ -8,6 +8,7 @@ class TestStationConnectBitrate : public QObject
 
 private slots:
     void selectsCodecFamilyDefaults();
+    void retainsIndependentProfileValues();
     void clampsProtocolRange();
 };
 
@@ -34,6 +35,36 @@ void TestStationConnectBitrate::selectsCodecFamilyDefaults()
         StreamingPreferences::stationConnectDefaultBitrateForProfile(
             StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444),
         StreamingPreferences::StationConnectHevcDefaultBitrateKbps);
+}
+
+void TestStationConnectBitrate::retainsIndependentProfileValues()
+{
+    QVector<int> bitrates =
+            StreamingPreferences::stationConnectDefaultProfileBitrates();
+    bitrates[StreamingPreferences::SCVP_H264_10BIT_444] = 76500;
+    bitrates[StreamingPreferences::SCVP_NVENC_H264_8BIT_444] = 68000;
+    bitrates[StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444] = 42500;
+    bitrates[StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444] = 51000;
+
+    QCOMPARE(StreamingPreferences::stationConnectBitrateForProfile(
+                 bitrates, StreamingPreferences::SCVP_H264_10BIT_444),
+             76500);
+    QCOMPARE(StreamingPreferences::stationConnectBitrateForProfile(
+                 bitrates, StreamingPreferences::SCVP_NVENC_H264_8BIT_444),
+             68000);
+    QCOMPARE(StreamingPreferences::stationConnectBitrateForProfile(
+                 bitrates, StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444),
+             42500);
+    QCOMPARE(StreamingPreferences::stationConnectBitrateForProfile(
+                 bitrates, StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444),
+             51000);
+
+    QVector<int> roundTripped;
+    QVERIFY(StreamingPreferences::stationConnectProfileBitratesFromVariantList(
+                StreamingPreferences::stationConnectProfileBitratesToVariantList(
+                    bitrates),
+                roundTripped));
+    QCOMPARE(roundTripped, bitrates);
 }
 
 void TestStationConnectBitrate::clampsProtocolRange()

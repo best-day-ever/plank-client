@@ -50,6 +50,19 @@ QString scalingFromChoice(int choice)
     default: return QString();
     }
 }
+
+bool parseProfileBitrates(const QVariantList& values,
+                          bool allowDefaultValues,
+                          QVector<int>& profileBitratesKbps)
+{
+    if (values.isEmpty() && allowDefaultValues) {
+        profileBitratesKbps =
+                StreamingPreferences::stationConnectDefaultProfileBitrates();
+        return true;
+    }
+    return StreamingPreferences::stationConnectProfileBitratesFromVariantList(
+                values, profileBitratesKbps);
+}
 }
 
 class PcMonitorThread : public QThread
@@ -816,21 +829,23 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          int hostLayoutChoice, int virtualMode1Choice,
                                          int virtualMode2Choice,
                                          int scalingChoice, int videoProfile,
-                                         int captureSource, int bitrateKbps)
+                                         int captureSource,
+                                         QVariantList profileBitrates)
 {
     NvAddress manualAddress;
     const QString hostLayout = hostLayoutFromChoice(hostLayoutChoice);
     const QString virtualMode1 = virtualModeFromChoice(virtualMode1Choice);
     const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
     const QString scalingMode = scalingFromChoice(scalingChoice);
+    QVector<int> profileBitratesKbps;
     if (parseManualAddress(address, manualAddress) &&
             !hostLayout.isEmpty() && !virtualMode1.isEmpty() &&
             !virtualMode2.isEmpty() &&
             !scalingMode.isEmpty() &&
             StreamingPreferences::isStationConnectProfileValidForCaptureSource(
                 videoProfile, captureSource) &&
-            bitrateKbps == StreamingPreferences::clampStationConnectBitrate(
-                bitrateKbps)) {
+            parseProfileBitrates(profileBitrates, true,
+                                 profileBitratesKbps)) {
         if (nickname.trimmed().isEmpty()) {
             nickname = manualAddress.address();
         }
@@ -848,7 +863,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
 
             if (bookmark == nullptr) {
                 bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile,
-                                          captureSource, bitrateKbps);
+                                          captureSource, profileBitratesKbps);
                 bookmark->stationConnectScalingMode = scalingMode;
                 bookmark->stationConnectHostLayout = hostLayout;
                 bookmark->stationConnectVirtualMode1 = virtualMode1;
@@ -866,7 +881,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             bookmark->stationConnectVirtualMode2 = virtualMode2;
             bookmark->stationConnectVideoProfile = videoProfile;
             bookmark->stationConnectCaptureSource = captureSource;
-            bookmark->stationConnectBitrateKbps = bitrateKbps;
+            bookmark->stationConnectProfileBitratesKbps = profileBitratesKbps;
         }
 
         bool nicknameChanged;
@@ -897,15 +912,16 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString hostLayout, QString virtualMode1,
                                          QString virtualMode2,
                                          int videoProfile, int captureSource,
-                                         int bitrateKbps)
+                                         const QVariantList& profileBitrates)
 {
     NvAddress manualAddress;
+    QVector<int> profileBitratesKbps;
     nickname = nickname.trimmed();
     if (computer == nullptr || nickname.isEmpty() ||
             !StreamingPreferences::isStationConnectProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
-            bitrateKbps != StreamingPreferences::clampStationConnectBitrate(
-                bitrateKbps) ||
+            !parseProfileBitrates(profileBitrates, false,
+                                  profileBitratesKbps) ||
             (scalingMode != NvOutputTopology::NativeScalingMode &&
              scalingMode != NvOutputTopology::ScaledSpanMode) ||
             (hostLayout != NvOutputTopology::MatchClientHostLayout &&
@@ -951,7 +967,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                            hostLayout,
                                            virtualMode1, virtualMode2,
                                            videoProfile, captureSource,
-                                           bitrateKbps);
+                                           profileBitratesKbps);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -971,7 +987,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
         computer->updateManualBookmark(manualAddress, nickname, scalingMode,
                                        hostLayout,
                                        virtualMode1, virtualMode2, videoProfile,
-                                       captureSource, bitrateKbps);
+                                       captureSource, profileBitratesKbps);
     }
 
     handleComputerStateChanged(computer);

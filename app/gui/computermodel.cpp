@@ -180,12 +180,14 @@ int ComputerModel::stationConnectCaptureSource(int computerIndex) const
     return computer->stationConnectCaptureSource;
 }
 
-int ComputerModel::stationConnectBitrateKbps(int computerIndex) const
+QVariantList ComputerModel::stationConnectProfileBitratesKbps(
+        int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    return computer->stationConnectBitrateKbps;
+    return StreamingPreferences::stationConnectProfileBitratesToVariantList(
+                computer->stationConnectProfileBitratesKbps);
 }
 
 int ComputerModel::stationConnectHostLayoutChoice(int computerIndex) const
@@ -243,7 +245,7 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                          int virtualMode1Choice,
                                          int virtualMode2Choice,
                                          int videoProfile, int captureSource,
-                                         int bitrateKbps)
+                                         const QVariantList& profileBitratesKbps)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         return false;
@@ -268,7 +270,7 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                                   hostLayout,
                                                   virtualMode1, virtualMode2,
                                                   videoProfile, captureSource,
-                                                  bitrateKbps);
+                                                  profileBitratesKbps);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)
