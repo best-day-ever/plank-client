@@ -945,7 +945,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         break;
 
     case VIDEO_FORMAT_H265_REXT8_444:
-        codecString = "HEVC 4:4:4";
+        codecString = "HEVC 8-bit SDR 4:4:4";
         break;
 
     case VIDEO_FORMAT_H265_MAIN10:
@@ -1028,19 +1028,17 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         offset += ret;
 
         if (m_IdentityGbrEnabled) {
-            if (m_VideoFormat == VIDEO_FORMAT_H264_HIGH8_444) {
-                ret = snprintf(&output[offset],
-                               length - offset,
-                               "Codec precision: 8-bit H.264 4:4:4\n"
-                               "Presentation precision: 8-bit RGB identity\n");
-            }
-            else {
-                ret = snprintf(&output[offset],
-                               length - offset,
-                               "Codec precision: 10-bit %s 4:4:4\n"
-                               "Presentation precision: 10-bit RGB identity\n",
-                               m_VideoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
-            }
+            const int identityBitDepth =
+                    (m_VideoFormat & VIDEO_FORMAT_MASK_10BIT) ? 10 : 8;
+            const char* identityCodec =
+                    (m_VideoFormat & VIDEO_FORMAT_MASK_H264) ? "H.264" : "HEVC";
+            ret = snprintf(&output[offset],
+                           length - offset,
+                           "Codec precision: %d-bit %s 4:4:4\n"
+                           "Presentation precision: %d-bit RGB identity\n",
+                           identityBitDepth,
+                           identityCodec,
+                           identityBitDepth);
             if (ret < 0 || ret >= length - offset) {
                 SDL_assert(false);
                 return;
