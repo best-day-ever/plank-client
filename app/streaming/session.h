@@ -310,6 +310,7 @@ private:
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
     StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
+    StreamingPreferences::StationConnectCaptureSource m_StationConnectCaptureSource;
     ComputerManager* m_ComputerManager;
     NvApp m_App;
     SDL_Window* m_Window;

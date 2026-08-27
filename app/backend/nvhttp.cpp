@@ -225,7 +225,9 @@ NvHTTP::startApp(QString verb,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
-                 QString& rtspSessionUrl)
+                 QString captureSource,
+                 QString& rtspSessionUrl,
+                 QString& acceptedCaptureSource)
 {
     int riKeyId;
 
@@ -238,6 +240,9 @@ NvHTTP::startApp(QString verb,
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
                 "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
+        stationConnectOutputArguments +=
+                "&scCaptureSource=" +
+                QString::fromLatin1(QUrl::toPercentEncoding(captureSource));
         if ((stationConnectFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
             stationConnectOutputArguments +=
@@ -293,6 +298,12 @@ NvHTTP::startApp(QString verb,
     verifyResponseStatus(response);
 
     rtspSessionUrl = getXmlString(response, "sessionUrl0");
+    acceptedCaptureSource = getXmlString(response, "StationConnectCaptureSource");
+    if (m_StationConnectAuthentication &&
+            (acceptedCaptureSource.isEmpty() || acceptedCaptureSource != captureSource)) {
+        throw GfeHttpResponseException(
+                    400, "Host did not accept the requested capture source");
+    }
 }
 
 QVector<NvDisplayMode>

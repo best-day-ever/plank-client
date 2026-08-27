@@ -428,6 +428,7 @@ ApplicationWindow {
             addVirtualMode1.currentIndex = 11
             addVirtualMode2.currentIndex = 3
             addScalingChoice.currentIndex = 1
+            addCaptureSource.currentIndex = 0
             addEncodingProfile.currentIndex = 3
         }
 
@@ -440,7 +441,9 @@ ApplicationWindow {
                                                    addVirtualMode2.currentIndex,
                                                    addScalingChoice.currentIndex,
                                                    addEncodingProfileModel.get(
-                                                       addEncodingProfile.currentIndex).val)
+                                                       addEncodingProfile.currentIndex).val,
+                                                   addCaptureSourceModel.get(
+                                                       addCaptureSource.currentIndex).val)
             }
         }
 
@@ -494,8 +497,37 @@ ApplicationWindow {
             }
 
             Label {
+                text: qsTr("Capture source")
+                font.bold: true
+            }
+
+            ComboBox {
+                id: addCaptureSource
+                Layout.fillWidth: true
+                textRole: "text"
+                currentIndex: 0
+                model: ListModel {
+                    id: addCaptureSourceModel
+                    ListElement {
+                        text: qsTr("NvFBC — 8-bit source")
+                        val: StreamingPreferences.SCCS_NVFBC_8BIT
+                    }
+                    ListElement {
+                        text: qsTr("Native X11/XShm — 10-bit (Experimental)")
+                        val: StreamingPreferences.SCCS_X11_NATIVE10
+                    }
+                }
+                onCurrentIndexChanged: {
+                    if (currentIndex === 1) {
+                        addEncodingProfile.currentIndex = 3
+                    }
+                }
+            }
+
+            Label {
                 text: qsTr("Encoding profile")
                 font.bold: true
+                opacity: addCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
 
             ComboBox {
@@ -503,6 +535,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 textRole: "text"
                 currentIndex: 3
+                enabled: addCaptureSource.currentIndex === 0
                 model: ListModel {
                     id: addEncodingProfileModel
                     ListElement {

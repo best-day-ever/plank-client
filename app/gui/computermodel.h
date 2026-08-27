@@ -49,6 +49,8 @@ public:
 
     Q_INVOKABLE int stationConnectVideoProfile(int computerIndex) const;
 
+    Q_INVOKABLE int stationConnectCaptureSource(int computerIndex) const;
+
     Q_INVOKABLE int stationConnectHostLayoutChoice(int computerIndex) const;
 
     // -1 is unknown/offline, 0 is physical, and 1 is virtual.
@@ -63,7 +65,7 @@ public:
                                           int hostLayoutChoice,
                                           int virtualMode1Choice,
                                           int virtualMode2Choice,
-                                          int videoProfile);
+                                          int videoProfile, int captureSource);
 
 signals:
     void authenticationCompleted(QVariant error);

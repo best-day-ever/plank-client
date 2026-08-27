@@ -344,6 +344,10 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
     params.enableIdentityGbr = enableIdentityGbr;
     params.testOnly = testOnly;
     params.selectionMode = selectionMode;
+    params.captureSource =
+            m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
+                DecoderCaptureSource::NativeX11_10Bit :
+                DecoderCaptureSource::Nvfbc8Bit;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -601,6 +605,10 @@ Session::Session(NvComputer* computer, NvApp& app,
               qBound(static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
                      computer->stationConnectVideoProfile,
                      static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_422)))),
+      m_StationConnectCaptureSource(static_cast<StreamingPreferences::StationConnectCaptureSource>(
+              qBound(static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
+                     computer->stationConnectCaptureSource,
+                     static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10)))),
       m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
@@ -689,6 +697,14 @@ bool Session::initialize()
         SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
     }
 #endif
+
+    if (m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 &&
+            m_StationConnectVideoProfile != StreamingPreferences::SCVP_H264_10BIT_444) {
+        const QString error = tr("Native X11/XShm capture requires the H.264 10-bit 4:4:4 encoding profile.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
+    }
 
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -1412,11 +1428,15 @@ bool Session::startConnectionAsync(bool reconnecting)
              m_Computer->currentGameId == m_App.id);
 
     QString rtspSessionUrl;
+    QString acceptedCaptureSource;
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
         const QString hostLayout = m_ResolvedHostLayout;
         const QStringList virtualModes = m_ResolvedVirtualModes;
+        const QString captureSource =
+                m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
+                    QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
         const auto startApp = [&]() {
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                           m_App.id, &m_StreamConfig,
@@ -1431,7 +1451,9 @@ bool Session::startConnectionAsync(bool reconnecting)
                           hostLayout,
                           virtualModes.value(0),
                           virtualModes.value(1),
-                          rtspSessionUrl);
+                          captureSource,
+                          rtspSessionUrl,
+                          acceptedCaptureSource);
         };
         try {
             startApp();

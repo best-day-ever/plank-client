@@ -217,6 +217,8 @@ CenteredGridView {
                         editBookmarkDialog.virtualMode2Index =
                                 computerModel.stationConnectVirtualMode2Choice(index)
                         editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
+                        editBookmarkDialog.originalCaptureSource =
+                                computerModel.stationConnectCaptureSource(index)
                         editBookmarkDialog.open()
                     }
                 }
@@ -366,6 +368,7 @@ CenteredGridView {
         property int virtualMode2Index: 3
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
+        property int originalCaptureSource: StreamingPreferences.SCCS_NVFBC_8BIT
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         dim: false
@@ -381,6 +384,7 @@ CenteredGridView {
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
+            editCaptureSource.currentIndex = originalCaptureSource
             for (var i = 0; i < editEncodingProfileModel.count; i++) {
                 if (editEncodingProfileModel.get(i).val === originalProfile) {
                     editEncodingProfile.currentIndex = i
@@ -408,7 +412,9 @@ CenteredGridView {
                                                     editVirtualMode1.currentIndex,
                                                     editVirtualMode2.currentIndex,
                                                     editEncodingProfileModel.get(
-                                                        editEncodingProfile.currentIndex).val)) {
+                                                        editEncodingProfile.currentIndex).val,
+                                                    editCaptureSourceModel.get(
+                                                        editCaptureSource.currentIndex).val)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.helpText = ""
                 errorDialog.open()
@@ -437,13 +443,41 @@ CenteredGridView {
             }
 
             Label {
+                text: qsTr("Capture source")
+                font.bold: true
+            }
+            ComboBox {
+                id: editCaptureSource
+                Layout.fillWidth: true
+                textRole: "text"
+                model: ListModel {
+                    id: editCaptureSourceModel
+                    ListElement {
+                        text: qsTr("NvFBC — 8-bit source")
+                        val: StreamingPreferences.SCCS_NVFBC_8BIT
+                    }
+                    ListElement {
+                        text: qsTr("Native X11/XShm — 10-bit (Experimental)")
+                        val: StreamingPreferences.SCCS_X11_NATIVE10
+                    }
+                }
+                onCurrentIndexChanged: {
+                    if (currentIndex === 1) {
+                        editEncodingProfile.currentIndex = 3
+                    }
+                }
+            }
+
+            Label {
                 text: qsTr("Encoding profile")
                 font.bold: true
+                opacity: editCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
             ComboBox {
                 id: editEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
+                enabled: editCaptureSource.currentIndex === 0
                 model: ListModel {
                     id: editEncodingProfileModel
                     ListElement {

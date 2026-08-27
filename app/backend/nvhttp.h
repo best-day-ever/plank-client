@@ -175,7 +175,9 @@ public:
              QString hostLayout,
              QString virtualMode1,
              QString virtualMode2,
-             QString& rtspSessionUrl);
+             QString captureSource,
+             QString& rtspSessionUrl,
+             QString& acceptedCaptureSource);
 
     QVector<NvApp>
     getAppList();

@@ -287,6 +287,7 @@ FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
       m_LastFrameNumber(0),
       m_StreamFps(0),
       m_VideoFormat(0),
+      m_CaptureSource(DecoderCaptureSource::Nvfbc8Bit),
       m_IdentityGbrEnabled(false),
       m_NeedsSpsFixup(false),
       m_TestOnly(testOnly),
@@ -1008,18 +1009,28 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
             offset += ret;
         }
 
+        ret = snprintf(&output[offset],
+                       length - offset,
+                       "Capture source: %s\n",
+                       m_CaptureSource == DecoderCaptureSource::NativeX11_10Bit ?
+                           "Native X11/XShm (10-bit)" :
+                           "NvFBC (8-bit)");
+        if (ret < 0 || ret >= length - offset) {
+            SDL_assert(false);
+            return;
+        }
+        offset += ret;
+
         if (m_IdentityGbrEnabled) {
             if (m_VideoFormat == VIDEO_FORMAT_H264_HIGH8_444) {
                 ret = snprintf(&output[offset],
                                length - offset,
-                               "Source precision: native 8-bit RGB\n"
                                "Codec precision: 8-bit H.264 4:4:4\n"
                                "Presentation precision: 8-bit RGB identity\n");
             }
             else {
                 ret = snprintf(&output[offset],
                                length - offset,
-                               "Source precision: 8-bit-source/up-converted\n"
                                "Codec precision: 10-bit %s 4:4:4\n"
                                "Presentation precision: 10-bit RGB identity\n",
                                m_VideoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
@@ -1726,6 +1737,8 @@ bool FFmpegVideoDecoder::tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS para
 
 bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
 {
+    m_CaptureSource = params->captureSource;
+
     // Increase log level until the first frame is decoded
     av_log_set_level(AV_LOG_DEBUG);
 

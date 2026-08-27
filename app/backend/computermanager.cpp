@@ -815,7 +815,8 @@ QStringList ComputerManager::stationConnectVirtualModeChoices() const
 void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          int hostLayoutChoice, int virtualMode1Choice,
                                          int virtualMode2Choice,
-                                         int scalingChoice, int videoProfile)
+                                         int scalingChoice, int videoProfile,
+                                         int captureSource)
 {
     NvAddress manualAddress;
     const QString hostLayout = hostLayoutFromChoice(hostLayoutChoice);
@@ -827,7 +828,11 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             !virtualMode2.isEmpty() &&
             !scalingMode.isEmpty() &&
             videoProfile >= StreamingPreferences::SCVP_H264_10BIT_444 &&
-            videoProfile <= StreamingPreferences::SCVP_H264_10BIT_422) {
+            videoProfile <= StreamingPreferences::SCVP_H264_10BIT_422 &&
+            captureSource >= StreamingPreferences::SCCS_NVFBC_8BIT &&
+            captureSource <= StreamingPreferences::SCCS_X11_NATIVE10 &&
+            (captureSource != StreamingPreferences::SCCS_X11_NATIVE10 ||
+             videoProfile == StreamingPreferences::SCVP_H264_10BIT_444)) {
         if (nickname.trimmed().isEmpty()) {
             nickname = manualAddress.address();
         }
@@ -844,7 +849,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             }
 
             if (bookmark == nullptr) {
-                bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile);
+                bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile,
+                                          captureSource);
                 bookmark->stationConnectScalingMode = scalingMode;
                 bookmark->stationConnectHostLayout = hostLayout;
                 bookmark->stationConnectVirtualMode1 = virtualMode1;
@@ -861,6 +867,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             bookmark->stationConnectVirtualMode1 = virtualMode1;
             bookmark->stationConnectVirtualMode2 = virtualMode2;
             bookmark->stationConnectVideoProfile = videoProfile;
+            bookmark->stationConnectCaptureSource = captureSource;
         }
 
         bool nicknameChanged;
@@ -890,13 +897,17 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString nickname, QString scalingMode,
                                          QString hostLayout, QString virtualMode1,
                                          QString virtualMode2,
-                                         int videoProfile)
+                                         int videoProfile, int captureSource)
 {
     NvAddress manualAddress;
     nickname = nickname.trimmed();
     if (computer == nullptr || nickname.isEmpty() ||
             videoProfile < StreamingPreferences::SCVP_H264_10BIT_444 ||
             videoProfile > StreamingPreferences::SCVP_H264_10BIT_422 ||
+            captureSource < StreamingPreferences::SCCS_NVFBC_8BIT ||
+            captureSource > StreamingPreferences::SCCS_X11_NATIVE10 ||
+            (captureSource == StreamingPreferences::SCCS_X11_NATIVE10 &&
+             videoProfile != StreamingPreferences::SCVP_H264_10BIT_444) ||
             (scalingMode != NvOutputTopology::NativeScalingMode &&
              scalingMode != NvOutputTopology::ScaledSpanMode) ||
             (hostLayout != NvOutputTopology::MatchClientHostLayout &&
@@ -941,7 +952,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
             computer->updateManualBookmark(manualAddress, nickname, scalingMode,
                                            hostLayout,
                                            virtualMode1, virtualMode2,
-                                           videoProfile);
+                                           videoProfile, captureSource);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -960,7 +971,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     else {
         computer->updateManualBookmark(manualAddress, nickname, scalingMode,
                                        hostLayout,
-                                       virtualMode1, virtualMode2, videoProfile);
+                                       virtualMode1, virtualMode2, videoProfile,
+                                       captureSource);
     }
 
     handleComputerStateChanged(computer);

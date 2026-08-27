@@ -35,6 +35,13 @@ public:
     };
     Q_ENUM(StationConnectVideoProfile)
 
+    enum StationConnectCaptureSource
+    {
+        SCCS_NVFBC_8BIT,
+        SCCS_X11_NATIVE10,
+    };
+    Q_ENUM(StationConnectCaptureSource)
+
     enum WindowMode
     {
         // Preserve the historical numeric values stored in QSettings.

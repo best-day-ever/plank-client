@@ -44,14 +44,15 @@ public:
 
     explicit NvComputer(QSettings& settings);
 
-    NvComputer(NvAddress manualAddress, QString nickname, int videoProfile = 0);
+    NvComputer(NvAddress manualAddress, QString nickname, int videoProfile = 0,
+               int captureSource = 0);
 
     bool
     updateManualBookmark(NvAddress manualAddress, QString nickname,
                          QString scalingMode,
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
-                         int videoProfile);
+                         int videoProfile, int captureSource);
 
     void
     setRemoteAddress(QHostAddress);
@@ -132,6 +133,7 @@ public:
     QString stationConnectVirtualMode1;
     QString stationConnectVirtualMode2;
     int stationConnectVideoProfile = 0;
+    int stationConnectCaptureSource = 0;
     bool manualBookmark = false;
     QString serverUuid;
     // Remember to update isEqualSerialized() when adding fields here!

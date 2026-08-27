@@ -16,6 +16,12 @@ enum class DecoderSelectionMode
     ExactHardwareOnly,
 };
 
+enum class DecoderCaptureSource
+{
+    Nvfbc8Bit,
+    NativeX11_10Bit,
+};
+
 typedef struct _VIDEO_STATS {
     uint64_t receivedVideoBytes;
     uint32_t receivedFrames;
@@ -48,6 +54,7 @@ typedef struct _VIDEO_STATS {
 typedef struct _DECODER_PARAMETERS {
     SDL_Window* window;
     DecoderSelectionMode selectionMode;
+    DecoderCaptureSource captureSource;
 
     int videoFormat;
     int width;
