@@ -226,8 +226,12 @@ NvHTTP::startApp(QString verb,
                  QString virtualMode1,
                  QString virtualMode2,
                  QString captureSource,
+                 QString encoderBackend,
+                 QString encodingMode,
                  QString& rtspSessionUrl,
-                 QString& acceptedCaptureSource)
+                 QString& acceptedCaptureSource,
+                 QString& acceptedEncoderBackend,
+                 QString& acceptedEncodingMode)
 {
     int riKeyId;
 
@@ -243,6 +247,12 @@ NvHTTP::startApp(QString verb,
         stationConnectOutputArguments +=
                 "&scCaptureSource=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(captureSource));
+        stationConnectOutputArguments +=
+                "&scEncoderBackend=" +
+                QString::fromLatin1(QUrl::toPercentEncoding(encoderBackend));
+        stationConnectOutputArguments +=
+                "&scEncodingMode=" +
+                QString::fromLatin1(QUrl::toPercentEncoding(encodingMode));
         if ((stationConnectFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
             stationConnectOutputArguments +=
@@ -299,10 +309,22 @@ NvHTTP::startApp(QString verb,
 
     rtspSessionUrl = getXmlString(response, "sessionUrl0");
     acceptedCaptureSource = getXmlString(response, "StationConnectCaptureSource");
+    acceptedEncoderBackend = getXmlString(response, "StationConnectEncoderBackend");
+    acceptedEncodingMode = getXmlString(response, "StationConnectEncodingMode");
     if (m_StationConnectAuthentication &&
             (acceptedCaptureSource.isEmpty() || acceptedCaptureSource != captureSource)) {
         throw GfeHttpResponseException(
                     400, "Host did not accept the requested capture source");
+    }
+    if (m_StationConnectAuthentication &&
+            (acceptedEncoderBackend.isEmpty() || acceptedEncoderBackend != encoderBackend)) {
+        throw GfeHttpResponseException(
+                    400, "Host did not accept the requested encoder backend");
+    }
+    if (m_StationConnectAuthentication &&
+            (acceptedEncodingMode.isEmpty() || acceptedEncodingMode != encodingMode)) {
+        throw GfeHttpResponseException(
+                    400, "Host did not accept the requested encoding mode");
     }
 }
 

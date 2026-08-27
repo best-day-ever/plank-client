@@ -32,6 +32,9 @@ public:
         SCVP_H264_8BIT_422,
         SCVP_H264_8BIT_444,
         SCVP_H264_10BIT_422,
+        SCVP_NVENC_H264_8BIT_444,
+        SCVP_NVENC_HEVC_8BIT_444,
+        SCVP_NVENC_HEVC_10BIT_444,
     };
     Q_ENUM(StationConnectVideoProfile)
 
@@ -41,6 +44,35 @@ public:
         SCCS_X11_NATIVE10,
     };
     Q_ENUM(StationConnectCaptureSource)
+
+    static bool isStationConnectVideoProfileValid(int profile)
+    {
+        return profile >= SCVP_H264_10BIT_444 &&
+               profile <= SCVP_NVENC_HEVC_10BIT_444;
+    }
+
+    static bool isStationConnectProfileValidForCaptureSource(
+            int profile, int captureSource)
+    {
+        if (!isStationConnectVideoProfileValid(profile) ||
+                captureSource < SCCS_NVFBC_8BIT ||
+                captureSource > SCCS_X11_NATIVE10) {
+            return false;
+        }
+
+        if (captureSource == SCCS_X11_NATIVE10) {
+            return profile == SCVP_H264_10BIT_444 ||
+                   profile == SCVP_NVENC_HEVC_10BIT_444;
+        }
+
+        return profile != SCVP_NVENC_HEVC_10BIT_444;
+    }
+
+    static bool isStationConnectNvencProfile(int profile)
+    {
+        return profile >= SCVP_NVENC_H264_8BIT_444 &&
+               profile <= SCVP_NVENC_HEVC_10BIT_444;
+    }
 
     enum WindowMode
     {

@@ -440,7 +440,7 @@ ApplicationWindow {
                                                    addVirtualMode1.currentIndex,
                                                    addVirtualMode2.currentIndex,
                                                    addScalingChoice.currentIndex,
-                                                   addEncodingProfileModel.get(
+                                                   addEncodingProfile.model.get(
                                                        addEncodingProfile.currentIndex).val,
                                                    addCaptureSourceModel.get(
                                                        addCaptureSource.currentIndex).val)
@@ -519,6 +519,8 @@ ApplicationWindow {
                 }
                 onCurrentIndexChanged: {
                     if (currentIndex === 1) {
+                        addEncodingProfile.currentIndex = 0
+                    } else {
                         addEncodingProfile.currentIndex = 3
                     }
                 }
@@ -535,25 +537,47 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 textRole: "text"
                 currentIndex: 3
-                enabled: addCaptureSource.currentIndex === 0
-                model: ListModel {
-                    id: addEncodingProfileModel
-                    ListElement {
-                        text: qsTr("H.264 8-bit 4:2:2")
-                        val: StreamingPreferences.SCVP_H264_8BIT_422
-                    }
-                    ListElement {
-                        text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                        val: StreamingPreferences.SCVP_H264_8BIT_444
-                    }
-                    ListElement {
-                        text: qsTr("H.264 10-bit 4:2:2")
-                        val: StreamingPreferences.SCVP_H264_10BIT_422
-                    }
-                    ListElement {
-                        text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                        val: StreamingPreferences.SCVP_H264_10BIT_444
-                    }
+                model: addCaptureSource.currentIndex === 0 ?
+                           addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
+            }
+
+            ListModel {
+                id: addNvfbcEncodingProfileModel
+                ListElement {
+                    text: qsTr("H.264 8-bit 4:2:2")
+                    val: StreamingPreferences.SCVP_H264_8BIT_422
+                }
+                ListElement {
+                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
+                    val: StreamingPreferences.SCVP_H264_8BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.264 10-bit 4:2:2")
+                    val: StreamingPreferences.SCVP_H264_10BIT_422
+                }
+                ListElement {
+                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    val: StreamingPreferences.SCVP_NVENC_H264_8BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
+                }
+            }
+
+            ListModel {
+                id: addNativeEncodingProfileModel
+                ListElement {
+                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
                 }
             }
 

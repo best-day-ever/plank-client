@@ -60,12 +60,14 @@ private:
     int m_GlesMajorVersion;
     int m_GlesMinorVersion;
     bool m_HasExtUnpackSubimage;
+    bool m_IdentityGbr8Bit;
 
 #define NV12_PARAM_YUVMAT 0
 #define NV12_PARAM_OFFSET 1
 #define NV12_PARAM_PLANE1 2
 #define NV12_PARAM_PLANE2 3
 #define OPAQUE_PARAM_TEXTURE 0
+#define OPAQUE_PARAM_IDENTITY_GBR_8 1
     int m_ShaderProgramParams[4];
 
 #define OVERLAY_PARAM_TEXTURE 0

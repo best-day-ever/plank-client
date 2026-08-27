@@ -1050,6 +1050,19 @@ uint32_t VAAPIRenderer::getEGLImportFormat(uint32_t drmFormat) {
 #ifndef DRM_FORMAT_XRGB2101010
 #define DRM_FORMAT_XRGB2101010 VA_FOURCC('X', 'R', '3', '0')
 #endif
+#ifndef DRM_FORMAT_AYUV
+#define DRM_FORMAT_AYUV VA_FOURCC('A', 'Y', 'U', 'V')
+#endif
+#ifndef DRM_FORMAT_XRGB8888
+#define DRM_FORMAT_XRGB8888 VA_FOURCC('X', 'R', '2', '4')
+#endif
+
+    // AYUV stores Y, U, and V in the same bit positions that XR24 uses for
+    // R, G, and B. The opaque shader reorders R=V, G=Y, B=U to recover the
+    // 8-bit identity transport without applying a YCbCr matrix.
+    if (m_IdentityGbr && drmFormat == DRM_FORMAT_AYUV) {
+        return DRM_FORMAT_XRGB8888;
+    }
 
     // Y410 stores U, Y, and V in the same bit positions that XR30 uses for
     // B, G, and R. The identity transport defines U=B, Y=G, V=R, so importing
@@ -1095,13 +1108,13 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
         const uint32_t importFormat = getEGLImportFormat(descriptor.layers[0].drm_format);
         if (m_IdentityGbr && importFormat == descriptor.layers[0].drm_format) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Identity GBR requires a Y410 VAAPI surface");
+                         "Identity GBR requires an AYUV or Y410 VAAPI surface");
             return false;
         }
         else if (!m_EglImageFactory.supportsImportingFormat(dpy, importFormat)) {
             if (m_IdentityGbr) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "EGL cannot import the XR30 identity surface");
+                             "EGL cannot import the packed identity surface");
                 return false;
             }
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -1111,7 +1124,7 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
         else if (!m_EglImageFactory.supportsImportingModifier(dpy, importFormat, descriptor.objects[0].drm_format_modifier)) {
             if (m_IdentityGbr) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "EGL cannot import the XR30 identity surface modifier");
+                             "EGL cannot import the packed identity surface modifier");
                 return false;
             }
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

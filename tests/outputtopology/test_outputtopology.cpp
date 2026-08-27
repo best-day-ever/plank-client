@@ -23,7 +23,7 @@ void TestOutputTopology::parsesQualificationVector()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
     QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v6.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v7.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     QVERIFY(document.isObject());
@@ -33,8 +33,9 @@ void TestOutputTopology::parsesQualificationVector()
     QVERIFY2(NvOutputTopology::fromJson(document.object(), topology, &error), qPrintable(error));
     QCOMPARE(topology.outputs.size(), 2);
     QCOMPARE(topology.desktopWidth, 5120);
-    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 4095);
+    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 8191);
     QVERIFY((topology.featureFlags & NvOutputTopology::CaptureSourceSelectionFeature) != 0);
+    QVERIFY((topology.featureFlags & NvOutputTopology::EncoderBackendSelectionFeature) != 0);
     QVERIFY((topology.featureFlags & NvOutputTopology::TopologyGenerationFeature) != 0);
     QVERIFY(!topology.generation.isEmpty());
     QCOMPARE(topology.layoutKind, QString("dual-horizontal"));
@@ -54,7 +55,7 @@ void TestOutputTopology::roundTripsQualificationVector()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
     QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v6.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v7.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     NvOutputTopology topology;
@@ -76,7 +77,7 @@ void TestOutputTopology::rejectsDuplicateIdentity()
                                       {"width", 3840}, {"height", 2160}}},
     };
     QJsonObject document {
-        {"schema_version", 6}, {"feature_flags", 4095}, {"generation", "test"},
+        {"schema_version", 7}, {"feature_flags", 8191}, {"generation", "test"},
         {"layout", QJsonObject {{"kind", "dual-horizontal"}, {"virtual", true},
                                  {"virtual_modes", QJsonArray {"3840x2160", "3840x2160"}},
                                  {"output_count", 2}, {"startup_kind", "physical"},
@@ -92,7 +93,7 @@ void TestOutputTopology::rejectsDuplicateIdentity()
 void TestOutputTopology::rejectsConfiguredModeMismatch()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v6.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v7.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
     QJsonArray outputs = document.value("outputs").toArray();
@@ -177,7 +178,7 @@ void TestOutputTopology::enforcesHostDisplayPolicy()
 void TestOutputTopology::validatesRequestedLayoutGeometry()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v6.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v7.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
 

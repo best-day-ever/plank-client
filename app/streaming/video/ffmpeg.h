@@ -142,6 +142,7 @@ private:
     static const uint8_t k_h264High_444TestFrame[];
     static const uint8_t k_h264High10_444TestFrame[];
     static const uint8_t k_HEVCRExt8_444TestFrame[];
+    static const uint8_t k_HEVCRExt8_444IdentityGbrTestFrame[];
     static const uint8_t k_HEVCRExt10_444TestFrame[];
     static const uint8_t k_HEVCRExt10_444IdentityGbrTestFrame[];
     static const uint8_t k_AV1High8_444TestFrame[];

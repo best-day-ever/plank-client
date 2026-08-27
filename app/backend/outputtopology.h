@@ -34,7 +34,7 @@ struct NvClientDisplay
 
 struct NvOutputTopology
 {
-    static const int ProtocolVersion = 6;
+    static const int ProtocolVersion = 7;
     static const int OutputTopologyFeature = 0x1;
     static const int SelectedOutputFeature = 0x2;
     static const int UnifiedAbsoluteInputFeature = 0x4;
@@ -47,6 +47,7 @@ struct NvOutputTopology
     static const int DynamicHostLayoutFeature = 0x200;
     static const int TemporaryPhysicalLayoutFeature = 0x400;
     static const int CaptureSourceSelectionFeature = 0x800;
+    static const int EncoderBackendSelectionFeature = 0x1000;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -59,7 +60,8 @@ struct NvOutputTopology
                                              IndependentVirtualModesFeature |
                                              DynamicHostLayoutFeature |
                                              TemporaryPhysicalLayoutFeature |
-                                             CaptureSourceSelectionFeature;
+                                             CaptureSourceSelectionFeature |
+                                             EncoderBackendSelectionFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;

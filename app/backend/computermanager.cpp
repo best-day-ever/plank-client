@@ -827,12 +827,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             !hostLayout.isEmpty() && !virtualMode1.isEmpty() &&
             !virtualMode2.isEmpty() &&
             !scalingMode.isEmpty() &&
-            videoProfile >= StreamingPreferences::SCVP_H264_10BIT_444 &&
-            videoProfile <= StreamingPreferences::SCVP_H264_10BIT_422 &&
-            captureSource >= StreamingPreferences::SCCS_NVFBC_8BIT &&
-            captureSource <= StreamingPreferences::SCCS_X11_NATIVE10 &&
-            (captureSource != StreamingPreferences::SCCS_X11_NATIVE10 ||
-             videoProfile == StreamingPreferences::SCVP_H264_10BIT_444)) {
+            StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                videoProfile, captureSource)) {
         if (nickname.trimmed().isEmpty()) {
             nickname = manualAddress.address();
         }
@@ -902,12 +898,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     NvAddress manualAddress;
     nickname = nickname.trimmed();
     if (computer == nullptr || nickname.isEmpty() ||
-            videoProfile < StreamingPreferences::SCVP_H264_10BIT_444 ||
-            videoProfile > StreamingPreferences::SCVP_H264_10BIT_422 ||
-            captureSource < StreamingPreferences::SCCS_NVFBC_8BIT ||
-            captureSource > StreamingPreferences::SCCS_X11_NATIVE10 ||
-            (captureSource == StreamingPreferences::SCCS_X11_NATIVE10 &&
-             videoProfile != StreamingPreferences::SCVP_H264_10BIT_444) ||
+            !StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                videoProfile, captureSource) ||
             (scalingMode != NvOutputTopology::NativeScalingMode &&
              scalingMode != NvOutputTopology::ScaledSpanMode) ||
             (hostLayout != NvOutputTopology::MatchClientHostLayout &&

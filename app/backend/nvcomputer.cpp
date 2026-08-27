@@ -162,13 +162,15 @@ NvComputer::NvComputer(QSettings& settings)
             static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
             settings.value(SER_VIDEOPROFILE,
                            static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444)).toInt(),
-            static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_422));
+            static_cast<int>(StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444));
     this->stationConnectCaptureSource = qBound(
             static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
             settings.value(SER_CAPTURESOURCE,
                            static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT)).toInt(),
             static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10));
-    if (this->stationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10) {
+    if (!StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                this->stationConnectVideoProfile,
+                this->stationConnectCaptureSource)) {
         this->stationConnectVideoProfile = StreamingPreferences::SCVP_H264_10BIT_444;
     }
     this->manualBookmark = settings.value(SER_MANUALBOOKMARK, false).toBool();

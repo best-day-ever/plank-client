@@ -176,8 +176,12 @@ public:
              QString virtualMode1,
              QString virtualMode2,
              QString captureSource,
+             QString encoderBackend,
+             QString encodingMode,
              QString& rtspSessionUrl,
-             QString& acceptedCaptureSource);
+             QString& acceptedCaptureSource,
+             QString& acceptedEncoderBackend,
+             QString& acceptedEncodingMode);
 
     QVector<NvApp>
     getAppList();

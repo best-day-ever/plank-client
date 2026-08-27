@@ -87,6 +87,7 @@ EGLRenderer::EGLRenderer(IFFmpegRenderer *backendRenderer)
         m_GlesMajorVersion(0),
         m_GlesMinorVersion(0),
         m_HasExtUnpackSubimage(false),
+        m_IdentityGbr8Bit(false),
         m_DummyRenderer(nullptr)
 {
     SDL_assert(backendRenderer);
@@ -400,6 +401,7 @@ bool EGLRenderer::compileShaders() {
         }
 
         m_ShaderProgramParams[OPAQUE_PARAM_TEXTURE] = glGetUniformLocation(m_ShaderProgram, "uTexture");
+        m_ShaderProgramParams[OPAQUE_PARAM_IDENTITY_GBR_8] = glGetUniformLocation(m_ShaderProgram, "uIdentityGbr8");
     }
     else {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -422,6 +424,8 @@ bool EGLRenderer::compileShaders() {
 bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
 {
     m_Window = params->window;
+    m_IdentityGbr8Bit = params->enableIdentityGbr &&
+                        !(params->videoFormat & VIDEO_FORMAT_MASK_10BIT);
 
     // This renderer doesn't support HDR, so pick a different one.
     // HACK: This avoids a deadlock in SDL_CreateRenderer() if
@@ -432,7 +436,9 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     }
 
     if (params->enableIdentityGbr) {
-        EGL_LOG(Info, "Enabling 10-bit identity GBR presentation");
+        EGL_LOG(Info,
+                "Enabling %s identity GBR presentation",
+                m_IdentityGbr8Bit ? "8-bit" : "10-bit");
     }
 
     // HACK: Work around bug where renderer will repeatedly fail with:
@@ -892,6 +898,8 @@ void EGLRenderer::renderFrame(AVFrame* frame)
     }
     else if (m_EGLImagePixelFormat == AV_PIX_FMT_DRM_PRIME) {
         glUniform1i(m_ShaderProgramParams[OPAQUE_PARAM_TEXTURE], 0);
+        glUniform1i(m_ShaderProgramParams[OPAQUE_PARAM_IDENTITY_GBR_8],
+                    m_IdentityGbr8Bit ? 1 : 0);
     }
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);

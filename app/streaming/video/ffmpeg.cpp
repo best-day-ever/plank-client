@@ -640,8 +640,14 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             m_Pkt->size = sizeof(k_h264High10_444TestFrame);
             break;
         case VIDEO_FORMAT_H265_REXT8_444:
-            m_Pkt->data = (uint8_t*)k_HEVCRExt8_444TestFrame;
-            m_Pkt->size = sizeof(k_HEVCRExt8_444TestFrame);
+            if (params->enableIdentityGbr) {
+                m_Pkt->data = (uint8_t*)k_HEVCRExt8_444IdentityGbrTestFrame;
+                m_Pkt->size = sizeof(k_HEVCRExt8_444IdentityGbrTestFrame);
+            }
+            else {
+                m_Pkt->data = (uint8_t*)k_HEVCRExt8_444TestFrame;
+                m_Pkt->size = sizeof(k_HEVCRExt8_444TestFrame);
+            }
             break;
         case VIDEO_FORMAT_H265_REXT10_444:
             if (params->enableIdentityGbr) {

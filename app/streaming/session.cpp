@@ -393,6 +393,7 @@ bool Session::isIdentityGbrEnabledForFormat(int videoFormat) const
 {
     return (videoFormat == VIDEO_FORMAT_H264_HIGH8_444 ||
             videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ||
+            videoFormat == VIDEO_FORMAT_H265_REXT8_444 ||
             videoFormat == VIDEO_FORMAT_H265_REXT10_444) &&
            (m_Computer->serverCodecModeSupport & SCM_IDENTITY_GBR_444);
 }
@@ -415,6 +416,11 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Video precision: native 8-bit RGB -> "
                         "8-bit H.264 4:4:4 -> 8-bit RGB identity presentation");
+        }
+        else if (videoFormat == VIDEO_FORMAT_H265_REXT8_444) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Video precision: native 8-bit NvFBC source -> "
+                        "8-bit HEVC 4:4:4 -> 8-bit RGB identity presentation");
         }
         else {
             const bool native10 = s_ActiveSession->m_StationConnectCaptureSource ==
@@ -609,7 +615,7 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_StationConnectVideoProfile(static_cast<StreamingPreferences::StationConnectVideoProfile>(
               qBound(static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
                      computer->stationConnectVideoProfile,
-                     static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_422)))),
+                     static_cast<int>(StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444)))),
       m_StationConnectCaptureSource(static_cast<StreamingPreferences::StationConnectCaptureSource>(
               qBound(static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
                      computer->stationConnectCaptureSource,
@@ -664,7 +670,11 @@ Session::Session(NvComputer* computer, NvApp& app,
                 (m_StationConnectVideoProfile ==
                      StreamingPreferences::SCVP_H264_8BIT_422 ||
                  m_StationConnectVideoProfile ==
-                     StreamingPreferences::SCVP_H264_8BIT_444) ? 8 : 10;
+                     StreamingPreferences::SCVP_H264_8BIT_444 ||
+                 m_StationConnectVideoProfile ==
+                     StreamingPreferences::SCVP_NVENC_H264_8BIT_444 ||
+                 m_StationConnectVideoProfile ==
+                     StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444) ? 8 : 10;
         // Decoder selection is internal and exact-profile constrained. Hardware
         // is accepted only after a test frame proves the requested bit depth,
         // chroma sampling, and identity mapping; otherwise the same profile
@@ -703,9 +713,10 @@ bool Session::initialize()
     }
 #endif
 
-    if (m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 &&
-            m_StationConnectVideoProfile != StreamingPreferences::SCVP_H264_10BIT_444) {
-        const QString error = tr("Native X11/XShm capture requires the H.264 10-bit 4:4:4 encoding profile.");
+    if (!StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                m_StationConnectVideoProfile,
+                m_StationConnectCaptureSource)) {
+        const QString error = tr("The selected capture source and encoding profile are not compatible.");
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
         emit displayLaunchError(error);
         return false;
@@ -828,13 +839,22 @@ bool Session::initialize()
         break;
     case StreamingPreferences::SCVP_H264_10BIT_444:
         break;
+    case StreamingPreferences::SCVP_NVENC_H264_8BIT_444:
+        selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_444;
+        break;
+    case StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444:
+        selectedVideoFormat = VIDEO_FORMAT_H265_REXT8_444;
+        break;
+    case StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444:
+        selectedVideoFormat = VIDEO_FORMAT_H265_REXT10_444;
+        break;
     }
     if (!(selectedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ||
             isIdentityGbrEnabledForFormat(selectedVideoFormat)) {
         m_SupportedVideoFormats.append(selectedVideoFormat);
     }
 
-    SDL_assert((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) == 0);
+    SDL_assert(m_SupportedVideoFormats.size() == 1);
 
     // Check for validation errors/warnings and emit
     // signals for them, if appropriate
@@ -1434,6 +1454,8 @@ bool Session::startConnectionAsync(bool reconnecting)
 
     QString rtspSessionUrl;
     QString acceptedCaptureSource;
+    QString acceptedEncoderBackend;
+    QString acceptedEncodingMode;
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
@@ -1442,6 +1464,34 @@ bool Session::startConnectionAsync(bool reconnecting)
         const QString captureSource =
                 m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
+        const QString encoderBackend =
+                StreamingPreferences::isStationConnectNvencProfile(
+                    m_StationConnectVideoProfile) ?
+                    QStringLiteral("nvenc-direct") : QStringLiteral("software-cuda");
+        QString encodingMode;
+        switch (m_StationConnectVideoProfile) {
+        case StreamingPreferences::SCVP_H264_8BIT_422:
+            encodingMode = QStringLiteral("h264-8-422-software");
+            break;
+        case StreamingPreferences::SCVP_H264_8BIT_444:
+            encodingMode = QStringLiteral("h264-8-444-software");
+            break;
+        case StreamingPreferences::SCVP_H264_10BIT_422:
+            encodingMode = QStringLiteral("h264-10-422-software");
+            break;
+        case StreamingPreferences::SCVP_NVENC_H264_8BIT_444:
+            encodingMode = QStringLiteral("h264-8-444-nvenc");
+            break;
+        case StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444:
+            encodingMode = QStringLiteral("hevc-8-444-nvenc");
+            break;
+        case StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444:
+            encodingMode = QStringLiteral("hevc-10-444-nvenc");
+            break;
+        case StreamingPreferences::SCVP_H264_10BIT_444:
+            encodingMode = QStringLiteral("h264-10-444-software");
+            break;
+        }
         const auto startApp = [&]() {
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                           m_App.id, &m_StreamConfig,
@@ -1457,8 +1507,12 @@ bool Session::startConnectionAsync(bool reconnecting)
                           virtualModes.value(0),
                           virtualModes.value(1),
                           captureSource,
+                          encoderBackend,
+                          encodingMode,
                           rtspSessionUrl,
-                          acceptedCaptureSource);
+                          acceptedCaptureSource,
+                          acceptedEncoderBackend,
+                          acceptedEncodingMode);
         };
         try {
             startApp();

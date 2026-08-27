@@ -385,8 +385,8 @@ CenteredGridView {
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
             editCaptureSource.currentIndex = originalCaptureSource
-            for (var i = 0; i < editEncodingProfileModel.count; i++) {
-                if (editEncodingProfileModel.get(i).val === originalProfile) {
+            for (var i = 0; i < editEncodingProfile.model.count; i++) {
+                if (editEncodingProfile.model.get(i).val === originalProfile) {
                     editEncodingProfile.currentIndex = i
                     break
                 }
@@ -411,7 +411,7 @@ CenteredGridView {
                                                     editHostLayout.currentIndex,
                                                     editVirtualMode1.currentIndex,
                                                     editVirtualMode2.currentIndex,
-                                                    editEncodingProfileModel.get(
+                                                    editEncodingProfile.model.get(
                                                         editEncodingProfile.currentIndex).val,
                                                     editCaptureSourceModel.get(
                                                         editCaptureSource.currentIndex).val)) {
@@ -463,6 +463,8 @@ CenteredGridView {
                 }
                 onCurrentIndexChanged: {
                     if (currentIndex === 1) {
+                        editEncodingProfile.currentIndex = 0
+                    } else {
                         editEncodingProfile.currentIndex = 3
                     }
                 }
@@ -477,25 +479,47 @@ CenteredGridView {
                 id: editEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
-                enabled: editCaptureSource.currentIndex === 0
-                model: ListModel {
-                    id: editEncodingProfileModel
-                    ListElement {
-                        text: qsTr("H.264 8-bit 4:2:2")
-                        val: StreamingPreferences.SCVP_H264_8BIT_422
-                    }
-                    ListElement {
-                        text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                        val: StreamingPreferences.SCVP_H264_8BIT_444
-                    }
-                    ListElement {
-                        text: qsTr("H.264 10-bit 4:2:2")
-                        val: StreamingPreferences.SCVP_H264_10BIT_422
-                    }
-                    ListElement {
-                        text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                        val: StreamingPreferences.SCVP_H264_10BIT_444
-                    }
+                model: editCaptureSource.currentIndex === 0 ?
+                           editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
+            }
+
+            ListModel {
+                id: editNvfbcEncodingProfileModel
+                ListElement {
+                    text: qsTr("H.264 8-bit 4:2:2")
+                    val: StreamingPreferences.SCVP_H264_8BIT_422
+                }
+                ListElement {
+                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
+                    val: StreamingPreferences.SCVP_H264_8BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.264 10-bit 4:2:2")
+                    val: StreamingPreferences.SCVP_H264_10BIT_422
+                }
+                ListElement {
+                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    val: StreamingPreferences.SCVP_NVENC_H264_8BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
+                }
+            }
+
+            ListModel {
+                id: editNativeEncodingProfileModel
+                ListElement {
+                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                }
+                ListElement {
+                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
+                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
                 }
             }
 
