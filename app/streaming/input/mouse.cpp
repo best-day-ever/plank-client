@@ -57,6 +57,14 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
             return;
     }
 
+    // Button packets carry no coordinates. Reassert the SDL button event's
+    // absolute position immediately before the button so a stale tablet or
+    // coalesced motion sample cannot make the remote click land elsewhere.
+    if (event->down && !sendAbsoluteMousePosition(
+                qRound(event->x), qRound(event->y), false)) {
+        return;
+    }
+
     LiSendMouseButtonEvent(event->down ?
                                BUTTON_ACTION_PRESS :
                                BUTTON_ACTION_RELEASE,
@@ -131,7 +139,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         }
     }
     if (mouseInVideoRegion || m_MouseWasInVideoRegion || m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
-        LiSendMousePositionEvent((short)x, (short)y, dst.w, dst.h);
+        sendAbsoluteMousePosition(x + dst.x, y + dst.y, true);
     }
 
     // Adjust the cursor visibility if applicable
@@ -147,6 +155,35 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
 
     m_MouseWasInVideoRegion = mouseInVideoRegion;
+}
+
+bool SdlInputHandler::sendAbsoluteMousePosition(
+        int windowX, int windowY, bool allowClampedPosition)
+{
+    int windowWidth = 0;
+    int windowHeight = 0;
+    SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+    if (windowWidth <= 0 || windowHeight <= 0) {
+        return false;
+    }
+
+    SDL_Rect source{0, 0, m_StreamWidth, m_StreamHeight};
+    SDL_Rect destination{0, 0, windowWidth, windowHeight};
+    StreamUtils::scaleSourceToDestinationSurface(&source, &destination);
+    const bool inside = windowX >= destination.x &&
+            windowX <= destination.x + destination.w &&
+            windowY >= destination.y &&
+            windowY <= destination.y + destination.h;
+    if (!inside && !allowClampedPosition) {
+        return false;
+    }
+
+    const int x = qMin(qMax(windowX - destination.x, 0), destination.w);
+    const int y = qMin(qMax(windowY - destination.y, 0), destination.h);
+    return LiSendMousePositionEvent(
+                static_cast<short>(x), static_cast<short>(y),
+                static_cast<short>(destination.w),
+                static_cast<short>(destination.h)) == 0;
 }
 
 void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)

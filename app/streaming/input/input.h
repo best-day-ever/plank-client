@@ -125,8 +125,10 @@ private:
     std::mutex m_RemoteCursorMutex;
     RemoteCursorState m_RemoteCursorAssembly;
     RemoteCursorState m_ReadyRemoteCursor;
+    RemoteCursorState m_AppliedRemoteCursor;
     bool m_RemoteCursorAssemblyActive = false;
     bool m_ReadyRemoteCursorValid = false;
+    bool m_AppliedRemoteCursorValid = false;
     std::atomic_bool m_RemoteCursorUpdatePending {false};
     SDL_Cursor* m_RemoteCursor = nullptr;
 
@@ -140,17 +142,24 @@ private:
 
     std::mutex m_RemoteCursorPositionMutex;
     RemoteCursorPosition m_ReadyRemoteCursorPosition;
+    RemoteCursorPosition m_AppliedRemoteCursorPosition;
     std::uint64_t m_HighestRemoteCursorPositionSequence = 0;
     std::uint64_t m_AppliedRemoteCursorPositionSequence = 0;
     std::uint64_t m_TabletCursorActivationSequence = 0;
     bool m_ReadyRemoteCursorPositionValid = false;
+    bool m_AppliedRemoteCursorPositionValid = false;
     std::atomic_bool m_RemoteCursorPositionUpdatePending {false};
     std::atomic_bool m_TabletCursorActivationPending {false};
     std::unique_ptr<StationConnectWaylandCursor> m_WaylandTabletCursor;
 
     void setCursorVisible(bool visible);
     void activateCompositorCursor();
+    bool ensureWaylandTabletCursorAttached();
+    bool mapRemoteCursorPositionToWindow(const RemoteCursorPosition& position,
+                                         int& x, int& y) const;
     void updateTabletCursorVisibility();
+    bool sendAbsoluteMousePosition(int windowX, int windowY,
+                                   bool allowClampedPosition);
 
     struct {
         KeyCombo keyCombo;
