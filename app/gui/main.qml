@@ -395,6 +395,7 @@ ApplicationWindow {
         id: addPcDialog
         title: qsTr("Add workstation bookmark")
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
+        property bool bitrateManuallyEdited: false
 
         // Give both connection fields enough room for real hostnames while
         // keeping the dialog inside smaller launcher windows. The dialog still
@@ -410,11 +411,22 @@ ApplicationWindow {
             return value.split(":")[0].split(".")[0]
         }
 
+        function applyProfileBitrateDefault() {
+            if (!bitrateManuallyEdited && addEncodingProfile.currentIndex >= 0) {
+                addBitrateSlider.value =
+                        StreamingPreferences.stationConnectDefaultBitrateKbps(
+                            addEncodingProfile.model.get(
+                                addEncodingProfile.currentIndex).val)
+            }
+        }
+
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         onOpened: {
             // Force keyboard focus on the textbox so keyboard navigation works
             addressText.forceActiveFocus()
+            bitrateManuallyEdited = false
+            applyProfileBitrateDefault()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return addressText.text.trim() !== "" && nicknameText.text.trim() !== ""
             })
@@ -430,6 +442,7 @@ ApplicationWindow {
             addScalingChoice.currentIndex = 1
             addCaptureSource.currentIndex = 0
             addEncodingProfile.currentIndex = 3
+            bitrateManuallyEdited = false
         }
 
         onAccepted: {
@@ -443,7 +456,8 @@ ApplicationWindow {
                                                    addEncodingProfile.model.get(
                                                        addEncodingProfile.currentIndex).val,
                                                    addCaptureSourceModel.get(
-                                                       addCaptureSource.currentIndex).val)
+                                                       addCaptureSource.currentIndex).val,
+                                                   Math.round(addBitrateSlider.value))
             }
         }
 
@@ -523,6 +537,7 @@ ApplicationWindow {
                     } else {
                         addEncodingProfile.currentIndex = 3
                     }
+                    Qt.callLater(addPcDialog.applyProfileBitrateDefault)
                 }
             }
 
@@ -539,6 +554,7 @@ ApplicationWindow {
                 currentIndex: 3
                 model: addCaptureSource.currentIndex === 0 ?
                            addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
+                onActivated: addPcDialog.applyProfileBitrateDefault()
             }
 
             ListModel {
@@ -579,6 +595,29 @@ ApplicationWindow {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
                 }
+            }
+
+            Label {
+                text: qsTr("Startup encoder target: %1 Mbps").arg(
+                          (addBitrateSlider.value / 1000.0).toFixed(1))
+                font.bold: true
+            }
+
+            Slider {
+                id: addBitrateSlider
+                Layout.fillWidth: true
+                from: StreamingPreferences.stationConnectBitrateMinimumKbps()
+                to: StreamingPreferences.stationConnectBitrateMaximumKbps()
+                stepSize: StreamingPreferences.stationConnectBitrateStepKbps()
+                snapMode: Slider.SnapAlways
+                onMoved: addPcDialog.bitrateManuallyEdited = true
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Used when this bookmark connects. Toolbar adjustments apply only to the active session.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
 
             Label {

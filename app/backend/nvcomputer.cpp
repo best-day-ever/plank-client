@@ -28,6 +28,7 @@
 #define SER_VIRTUALMODE2 "stationconnect-virtual-mode-2"
 #define SER_VIDEOPROFILE "stationconnect-video-profile"
 #define SER_CAPTURESOURCE "stationconnect-capture-source"
+#define SER_STATIONCONNECT_BITRATE "stationconnect-bitrate-kbps"
 #define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
 #define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
 #define SER_SERVERUUID "stationconnect-server-uuid"
@@ -43,7 +44,7 @@ QString manualBookmarkUuid(const NvAddress& address)
 }
 
 NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
-                       int captureSource)
+                       int captureSource, int bitrateKbps)
 {
     this->uuid = manualBookmarkUuid(address);
     this->name = nickname;
@@ -52,6 +53,8 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->manualBookmark = true;
     this->stationConnectVideoProfile = videoProfile;
     this->stationConnectCaptureSource = captureSource;
+    this->stationConnectBitrateKbps =
+            StreamingPreferences::clampStationConnectBitrate(bitrateKbps);
     this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
     this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
     this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
@@ -71,7 +74,8 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
                                       QString scalingMode,
                                       QString hostLayout, QString virtualMode1,
                                       QString virtualMode2,
-                                      int videoProfile, int captureSource)
+                                      int videoProfile, int captureSource,
+                                      int bitrateKbps)
 {
     QWriteLocker writeLocker(&lock);
     Q_ASSERT(manualBookmark);
@@ -116,6 +120,8 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     stationConnectVirtualMode2 = virtualMode2;
     stationConnectVideoProfile = videoProfile;
     stationConnectCaptureSource = captureSource;
+    stationConnectBitrateKbps =
+            StreamingPreferences::clampStationConnectBitrate(bitrateKbps);
     return addressChanged;
 }
 
@@ -173,6 +179,12 @@ NvComputer::NvComputer(QSettings& settings)
                 this->stationConnectCaptureSource)) {
         this->stationConnectVideoProfile = StreamingPreferences::SCVP_H264_10BIT_444;
     }
+    this->stationConnectBitrateKbps =
+            StreamingPreferences::clampStationConnectBitrate(
+                settings.value(
+                    SER_STATIONCONNECT_BITRATE,
+                    StreamingPreferences::stationConnectDefaultBitrateForProfile(
+                        this->stationConnectVideoProfile)).toInt());
     this->manualBookmark = settings.value(SER_MANUALBOOKMARK, false).toBool();
     this->serverUuid = settings.value(SER_SERVERUUID).toString();
     const QJsonDocument serializedTopology = QJsonDocument::fromJson(
@@ -243,6 +255,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_VIRTUALMODE2, stationConnectVirtualMode2);
     settings.setValue(SER_VIDEOPROFILE, stationConnectVideoProfile);
     settings.setValue(SER_CAPTURESOURCE, stationConnectCaptureSource);
+    settings.setValue(SER_STATIONCONNECT_BITRATE, stationConnectBitrateKbps);
     settings.setValue(SER_MANUALBOOKMARK, manualBookmark);
     settings.setValue(SER_SERVERUUID, serverUuid);
     if (!outputTopology.outputs.isEmpty()) {
@@ -280,6 +293,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->stationConnectVirtualMode2 == that.stationConnectVirtualMode2 &&
            this->stationConnectVideoProfile == that.stationConnectVideoProfile &&
            this->stationConnectCaptureSource == that.stationConnectCaptureSource &&
+           this->stationConnectBitrateKbps == that.stationConnectBitrateKbps &&
            this->manualBookmark == that.manualBookmark &&
            this->serverUuid == that.serverUuid &&
            this->outputTopology.toJson() == that.outputTopology.toJson() &&

@@ -29,7 +29,8 @@ public:
     StationConnectToolbar(SDL_Window* window,
                           Overlay::OverlayManager& overlayManager,
                           SdlInputHandler& inputHandler,
-                          StreamingPreferences& preferences);
+                          StreamingPreferences& preferences,
+                          int initialBitrateKbps);
     ~StationConnectToolbar();
 
     void setRenderedStats(float fps, float videoMbps, float packetLossPercent);

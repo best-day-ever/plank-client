@@ -11,9 +11,6 @@ class StreamingPreferences : public QObject
 public:
     static StreamingPreferences* get(QQmlEngine *qmlEngine = nullptr);
 
-    Q_INVOKABLE static int
-    getDefaultBitrate(int width, int height, int fps);
-
     Q_INVOKABLE void save();
 
     void reload();
@@ -72,6 +69,27 @@ public:
     {
         return profile >= SCVP_NVENC_H264_8BIT_444 &&
                profile <= SCVP_NVENC_HEVC_10BIT_444;
+    }
+
+    static constexpr int StationConnectBitrateMinimumKbps = 10000;
+    static constexpr int StationConnectBitrateMaximumKbps = 150000;
+    static constexpr int StationConnectBitrateStepKbps = 500;
+    static constexpr int StationConnectH264DefaultBitrateKbps = 80000;
+    static constexpr int StationConnectHevcDefaultBitrateKbps = 50000;
+
+    static int stationConnectDefaultBitrateForProfile(int profile)
+    {
+        return profile == SCVP_NVENC_HEVC_8BIT_444 ||
+               profile == SCVP_NVENC_HEVC_10BIT_444 ?
+                   StationConnectHevcDefaultBitrateKbps :
+                   StationConnectH264DefaultBitrateKbps;
+    }
+
+    static int clampStationConnectBitrate(int bitrateKbps)
+    {
+        return qBound(StationConnectBitrateMinimumKbps,
+                      bitrateKbps,
+                      StationConnectBitrateMaximumKbps);
     }
 
     enum WindowMode
@@ -135,7 +153,6 @@ public:
     Q_ENUM(StationConnectUnreachableAction);
 
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
-    Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
@@ -158,10 +175,25 @@ public:
 
     Q_INVOKABLE bool retranslate();
     Q_INVOKABLE int videoPacketSizeForMtu(int mtu) const;
+    Q_INVOKABLE int stationConnectDefaultBitrateKbps(int profile) const
+    {
+        return stationConnectDefaultBitrateForProfile(profile);
+    }
+    Q_INVOKABLE int stationConnectBitrateMinimumKbps() const
+    {
+        return StationConnectBitrateMinimumKbps;
+    }
+    Q_INVOKABLE int stationConnectBitrateMaximumKbps() const
+    {
+        return StationConnectBitrateMaximumKbps;
+    }
+    Q_INVOKABLE int stationConnectBitrateStepKbps() const
+    {
+        return StationConnectBitrateStepKbps;
+    }
 
     // Directly accessible members for preferences
     int fps;
-    int bitrateKbps;
     bool enableVsync;
     bool playAudioOnHost;
     bool enableMdns;
@@ -185,7 +217,6 @@ public:
 
 signals:
     void displayModeChanged();
-    void bitrateChanged();
     void enableVsyncChanged();
     void playAudioOnHostChanged();
     void unsupportedFpsChanged();

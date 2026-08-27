@@ -315,6 +315,7 @@ private:
     NvComputer* m_Computer;
     StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
     StreamingPreferences::StationConnectCaptureSource m_StationConnectCaptureSource;
+    int m_StationConnectBitrateKbps;
     ComputerManager* m_ComputerManager;
     NvApp m_App;
     SDL_Window* m_Window;

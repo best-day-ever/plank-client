@@ -281,7 +281,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     parser.addToggleOption("vsync", "V-Sync");
     parser.addValueOption("fps", "FPS");
-    parser.addValueOption("bitrate", "bitrate in Kbps");
     parser.addValueOption("mtu", "physical network path MTU");
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
@@ -307,15 +306,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         if (!inRange(preferences->fps, 10, 480)) {
             fprintf(stderr, "Warning: FPS is out of the supported range (10 - 480 FPS). Performance may suffer!\n");
         }
-    }
-
-    // Resolve --bitrate option
-    if (parser.isSet("bitrate")) {
-        const int requestedBitrateKbps = parser.getIntOption("bitrate");
-        if (!inRange(requestedBitrateKbps, 10000, 150000)) {
-            fprintf(stderr, "Warning: Bitrate must be between 10000 and 150000 Kbps; clamping to the supported range.\n");
-        }
-        preferences->bitrateKbps = qBound(10000, requestedBitrateKbps, 150000);
     }
 
     // Resolve --mtu option

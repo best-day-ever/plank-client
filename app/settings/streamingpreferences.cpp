@@ -5,13 +5,10 @@
 #include <QCoreApplication>
 #include <QLocale>
 #include <QReadWriteLock>
-#include <QtMath>
-
 #include <QtDebug>
 
 #define SER_STREAMSETTINGS "streamsettings"
 #define SER_FPS "fps"
-#define SER_BITRATE "bitrate"
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
@@ -85,10 +82,6 @@ void StreamingPreferences::reload()
     fps = settings.value(SER_FPS, 60).toInt();
     identityGbrBitDepth = 10;
     stationConnectToolbarPinned = settings.value(SER_STATIONCONNECT_TOOLBAR_PINNED, false).toBool();
-    bitrateKbps = qBound(10000,
-                         settings.value(SER_BITRATE,
-                                        getDefaultBitrate(3840, 2160, fps)).toInt(),
-                         150000);
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
     enableMdns = settings.value(SER_MDNS, false).toBool();
@@ -264,7 +257,6 @@ void StreamingPreferences::save()
     QSettings settings;
 
     settings.setValue(SER_FPS, fps);
-    settings.setValue(SER_BITRATE, bitrateKbps);
     settings.setValue(SER_VSYNC, enableVsync);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
     if (!mdnsDiscoveryManaged) {
@@ -291,59 +283,4 @@ void StreamingPreferences::save()
 int StreamingPreferences::videoPacketSizeForMtu(int mtu) const
 {
     return StationConnectPacketSize::videoPacketSizeForPhysicalMtu(mtu);
-}
-
-int StreamingPreferences::getDefaultBitrate(int width, int height, int fps)
-{
-    // Don't scale bitrate linearly beyond 60 FPS. It's definitely not a linear
-    // bitrate increase for frame rate once we get to values that high.
-    float frameRateFactor = (fps <= 60 ? fps : (qSqrt(fps / 60.f) * 60.f)) / 30.f;
-
-    // TODO: Collect some empirical data to see if these defaults make sense.
-    // We're just using the values that the Shield used, as we have for years.
-    static const struct resTable {
-        int pixels;
-        int factor;
-    } resTable[] {
-        { 640 * 360, 1 },
-        { 854 * 480, 2 },
-        { 1280 * 720, 5 },
-        { 1920 * 1080, 10 },
-        { 2560 * 1440, 20 },
-        { 3840 * 2160, 40 },
-        { -1, -1 },
-    };
-
-    // Calculate the resolution factor by linear interpolation of the resolution table
-    float resolutionFactor;
-    int pixels = width * height;
-    for (int i = 0;; i++) {
-        if (pixels == resTable[i].pixels) {
-            // We can bail immediately for exact matches
-            resolutionFactor = resTable[i].factor;
-            break;
-        }
-        else if (pixels < resTable[i].pixels) {
-            if (i == 0) {
-                // Never go below the lowest resolution entry
-                resolutionFactor = resTable[i].factor;
-            }
-            else {
-                // Interpolate between the entry greater than the chosen resolution (i) and the entry less than the chosen resolution (i-1)
-                resolutionFactor = ((float)(pixels - resTable[i-1].pixels) / (resTable[i].pixels - resTable[i-1].pixels)) * (resTable[i].factor - resTable[i-1].factor) + resTable[i-1].factor;
-            }
-            break;
-        }
-        else if (resTable[i].pixels == -1) {
-            // Never go above the highest resolution entry
-            resolutionFactor = resTable[i-1].factor;
-            break;
-        }
-    }
-
-    // StationConnect always uses 4:4:4. This rough estimate accounts for its
-    // doubled raw sample count relative to 4:2:0.
-    resolutionFactor *= 2;
-
-    return qRound(resolutionFactor * frameRateFactor) * 1000;
 }

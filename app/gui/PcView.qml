@@ -219,6 +219,8 @@ CenteredGridView {
                         editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
                         editBookmarkDialog.originalCaptureSource =
                                 computerModel.stationConnectCaptureSource(index)
+                        editBookmarkDialog.originalBitrateKbps =
+                                computerModel.stationConnectBitrateKbps(index)
                         editBookmarkDialog.open()
                     }
                 }
@@ -369,6 +371,9 @@ CenteredGridView {
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         property int originalCaptureSource: StreamingPreferences.SCCS_NVFBC_8BIT
+        property int originalBitrateKbps:
+                StreamingPreferences.stationConnectDefaultBitrateKbps(
+                    StreamingPreferences.SCVP_H264_10BIT_444)
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         dim: false
@@ -391,6 +396,7 @@ CenteredGridView {
                     break
                 }
             }
+            editBitrateSlider.value = originalBitrateKbps
             editAddressText.forceActiveFocus()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
@@ -414,7 +420,8 @@ CenteredGridView {
                                                     editEncodingProfile.model.get(
                                                         editEncodingProfile.currentIndex).val,
                                                     editCaptureSourceModel.get(
-                                                        editCaptureSource.currentIndex).val)) {
+                                                        editCaptureSource.currentIndex).val,
+                                                    Math.round(editBitrateSlider.value))) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.helpText = ""
                 errorDialog.open()
@@ -521,6 +528,28 @@ CenteredGridView {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC (Experimental)")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
                 }
+            }
+
+            Label {
+                text: qsTr("Startup encoder target: %1 Mbps").arg(
+                          (editBitrateSlider.value / 1000.0).toFixed(1))
+                font.bold: true
+            }
+
+            Slider {
+                id: editBitrateSlider
+                Layout.fillWidth: true
+                from: StreamingPreferences.stationConnectBitrateMinimumKbps()
+                to: StreamingPreferences.stationConnectBitrateMaximumKbps()
+                stepSize: StreamingPreferences.stationConnectBitrateStepKbps()
+                snapMode: Slider.SnapAlways
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Used when this bookmark connects. Toolbar adjustments apply only to the active session.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
 
             Label {

@@ -31,9 +31,12 @@ constexpr Uint32 BitrateSettleDelayMs = 250;
 constexpr Uint32 BitrateAcknowledgementRetryMs = 1000;
 constexpr Uint32 RedrawIntervalMs = 200;
 constexpr Uint32 ToolbarMoveRedrawIntervalMs = 16;
-constexpr int BitrateMinimumKbps = 10000;
-constexpr int BitrateMaximumKbps = 150000;
-constexpr int BitrateStepKbps = 500;
+constexpr int BitrateMinimumKbps =
+        StreamingPreferences::StationConnectBitrateMinimumKbps;
+constexpr int BitrateMaximumKbps =
+        StreamingPreferences::StationConnectBitrateMaximumKbps;
+constexpr int BitrateStepKbps =
+        StreamingPreferences::StationConnectBitrateStepKbps;
 constexpr qreal WindowGlyphScale = 0.85;
 constexpr qreal WindowButtonSize = 28.0 * WindowGlyphScale;
 constexpr qreal WindowButtonRadius = 5.0 * WindowGlyphScale;
@@ -69,7 +72,8 @@ StationConnectToolbar::StationConnectToolbar(
         SDL_Window* window,
         Overlay::OverlayManager& overlayManager,
         SdlInputHandler& inputHandler,
-        StreamingPreferences& preferences)
+        StreamingPreferences& preferences,
+        int initialBitrateKbps)
     : m_Window(window),
       m_OverlayManager(overlayManager),
       m_InputHandler(inputHandler),
@@ -105,7 +109,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_PointerY(0),
       m_PressedControl(Control::None),
       m_BitrateKbps(qBound(BitrateMinimumKbps,
-                           preferences.bitrateKbps,
+                           initialBitrateKbps,
                            BitrateMaximumKbps)),
       m_LastSentBitrateKbps(-1),
       m_AppliedBitrateKbps(-1),
@@ -126,10 +130,6 @@ StationConnectToolbar::StationConnectToolbar(
     createWaylandToolbar();
     createWaylandReconnectPrompt();
 
-    if (m_Preferences.bitrateKbps != m_BitrateKbps) {
-        m_Preferences.bitrateKbps = m_BitrateKbps;
-        m_Preferences.save();
-    }
     m_InputHandler.setLocalToolbarAvailable(true);
     notifyWindowChanged();
     redraw();
@@ -223,8 +223,6 @@ void StationConnectToolbar::setAppliedBitrate(
     m_AppliedPeakKbps = peakKbps;
     if (appliedKbps != m_BitrateKbps) {
         m_BitrateKbps = appliedKbps;
-        m_Preferences.bitrateKbps = appliedKbps;
-        m_Preferences.save();
     }
     redraw();
 }
@@ -577,8 +575,6 @@ StationConnectToolbar::Action StationConnectToolbar::handlePointerButton(
     if (m_DraggingSlider) {
         updateBitrateFromPointer(pointerX, now, true);
         m_DraggingSlider = false;
-        m_Preferences.bitrateKbps = m_BitrateKbps;
-        m_Preferences.save();
     }
 
     Action action = Action::Consumed;
@@ -646,8 +642,6 @@ bool StationConnectToolbar::handlePointerWheel(const SDL_MouseWheelEvent& event)
     if (delta != 0) {
         m_BitrateKbps = qBound(BitrateMinimumKbps,
                                m_BitrateKbps + delta, BitrateMaximumKbps);
-        m_Preferences.bitrateKbps = m_BitrateKbps;
-        m_Preferences.save();
         redraw();
         queueBitrateRequest(SDL_GetTicks(), true);
     }
@@ -1236,7 +1230,6 @@ void StationConnectToolbar::updateBitrateFromPointer(int x, Uint64 now, bool for
     bitrate = qBound(BitrateMinimumKbps, bitrate, BitrateMaximumKbps);
     if (bitrate != m_BitrateKbps) {
         m_BitrateKbps = bitrate;
-        m_Preferences.bitrateKbps = bitrate;
         m_LastBitrateChangeTime = now;
         redraw();
     }

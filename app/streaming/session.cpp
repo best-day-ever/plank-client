@@ -626,6 +626,9 @@ Session::Session(NvComputer* computer, NvApp& app,
               qBound(static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
                      computer->stationConnectCaptureSource,
                      static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10)))),
+      m_StationConnectBitrateKbps(
+              StreamingPreferences::clampStationConnectBitrate(
+                  computer->stationConnectBitrateKbps)),
       m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
@@ -669,8 +672,8 @@ Session::Session(NvComputer* computer, NvApp& app,
         // StationConnect is a qualified workstation protocol, not a generic
         // game-streaming profile. Its stream size is selected after SDL video
         // initialization from the target client display or explicit override.
-        // Keep bitrateKbps user-controlled: SettingsView persists the bitrate
-        // slider value and initialize() copies it into the stream configuration.
+        // The bookmark owns the startup encoder target. The toolbar receives a
+        // session-local copy and never writes changes back to this value.
         m_Preferences->fps = 60;
         m_Preferences->identityGbrBitDepth =
                 (m_StationConnectVideoProfile ==
@@ -779,7 +782,7 @@ bool Session::initialize()
     m_VideoCallbacks.setup = drSetup;
 
     m_StreamConfig.fps = m_Preferences->fps;
-    m_StreamConfig.bitrate = m_Preferences->bitrateKbps;
+    m_StreamConfig.bitrate = m_StationConnectBitrateKbps;
 
 #ifndef STEAM_LINK
     // Opt-in to all encryption features if we detect that the platform
@@ -2447,7 +2450,8 @@ void Session::execInternal()
 
     if (m_Computer->stationConnectAuthentication) {
         m_StationConnectToolbar.reset(new StationConnectToolbar(
-                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences));
+                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences,
+                    m_StationConnectBitrateKbps));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this

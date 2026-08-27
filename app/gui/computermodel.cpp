@@ -180,6 +180,14 @@ int ComputerModel::stationConnectCaptureSource(int computerIndex) const
     return computer->stationConnectCaptureSource;
 }
 
+int ComputerModel::stationConnectBitrateKbps(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return computer->stationConnectBitrateKbps;
+}
+
 int ComputerModel::stationConnectHostLayoutChoice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
@@ -234,7 +242,8 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                          int hostLayoutChoice,
                                          int virtualMode1Choice,
                                          int virtualMode2Choice,
-                                         int videoProfile, int captureSource)
+                                         int videoProfile, int captureSource,
+                                         int bitrateKbps)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         return false;
@@ -258,7 +267,8 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                                   std::move(nickname), scalingMode,
                                                   hostLayout,
                                                   virtualMode1, virtualMode2,
-                                                  videoProfile, captureSource);
+                                                  videoProfile, captureSource,
+                                                  bitrateKbps);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

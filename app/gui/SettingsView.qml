@@ -113,8 +113,7 @@ Flickable {
                     AutoResizingComboBox {
                         property int lastIndexValue
 
-                        function updateBitrateForSelection() {
-                            // Only modify the bitrate if the values actually changed
+                        function updateFrameRateForSelection() {
                             var selectedFps = parseInt(model.get(fpsComboBox.currentIndex).video_fps)
                             if (StreamingPreferences.fps !== selectedFps) {
                                 StreamingPreferences.fps = selectedFps
@@ -175,7 +174,7 @@ Flickable {
 
                                         // Apply the custom frame rate.
                                         fpsComboBox.currentIndex = i
-                                        fpsComboBox.updateBitrateForSelection()
+                                        fpsComboBox.updateFrameRateForSelection()
 
                                         // Update the combobox width too
                                         fpsComboBox.recalculateWidth()
@@ -322,48 +321,9 @@ Flickable {
                                 customFpsDialog.open()
                             }
                             else {
-                                updateBitrateForSelection()
+                                updateFrameRateForSelection()
                             }
                         }
-                    }
-                }
-
-                Label {
-                    width: parent.width
-                    id: bitrateTitle
-                    text: qsTr("Video bitrate:")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
-                }
-
-                Label {
-                    width: parent.width
-                    id: bitrateDesc
-                    text: qsTr("Lower the bitrate on slower connections. Raise the bitrate to increase image quality.")
-                    font.pointSize: 9
-                    wrapMode: Text.Wrap
-                }
-
-                Slider {
-                    id: slider
-
-                    value: StreamingPreferences.bitrateKbps
-
-                    stepSize: 500
-                    from: 10000
-                    to: 150000
-
-                    snapMode: "SnapOnRelease"
-                    width: Math.min(bitrateDesc.implicitWidth, parent.width)
-
-                    onValueChanged: {
-                        bitrateTitle.text = qsTr("Video bitrate: %1 Mbps").arg(value / 1000.0)
-                        StreamingPreferences.bitrateKbps = value
-                    }
-
-                    Component.onCompleted: {
-                        // Refresh the text after translations change
-                        languageChanged.connect(valueChanged)
                     }
                 }
 
