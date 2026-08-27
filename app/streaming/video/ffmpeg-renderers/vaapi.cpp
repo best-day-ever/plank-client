@@ -957,10 +957,22 @@ VAAPIRenderer::canExportSurfaceHandle(int layerTypeFlag, VADRMPRIMESurfaceDescri
         attributeCount++;
     }
 
+    // The render-target format alone does not guarantee which concrete packed
+    // YUV444 layout the driver selects for this export probe. Match the exact
+    // identity surface that FFmpeg requests for real decoded frames so the EGL
+    // capability check tests the same zero-copy path used during playback.
+    if (m_IdentityGbr) {
+        attrs[attributeCount].type = VASurfaceAttribPixelFormat;
+        attrs[attributeCount].flags = VA_SURFACE_ATTRIB_SETTABLE;
+        attrs[attributeCount].value.type = VAGenericValueTypeInteger;
+        attrs[attributeCount].value.value.i =
+            (m_VideoFormat & VIDEO_FORMAT_MASK_10BIT) ? VA_FOURCC_Y410 : VA_FOURCC_XYUV;
+        attributeCount++;
+    }
     // These attributes are required for i965 to create a surface that can
     // be successfully exported via vaExportSurfaceHandle(). YUV444 is not
     // handled here but i965 supports no hardware with YUV444 decoding.
-    if (m_RequiresExplicitPixelFormat && !(m_VideoFormat & VIDEO_FORMAT_MASK_YUV444)) {
+    else if (m_RequiresExplicitPixelFormat && !(m_VideoFormat & VIDEO_FORMAT_MASK_YUV444)) {
         attrs[attributeCount].type = VASurfaceAttribPixelFormat;
         attrs[attributeCount].flags = VA_SURFACE_ATTRIB_SETTABLE;
         attrs[attributeCount].value.type = VAGenericValueTypeInteger;
