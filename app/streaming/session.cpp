@@ -325,7 +325,8 @@ void Session::clVideoPacketLossUpdate(float packetLossPercent)
 bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
                             SDL_Window* window, int videoFormat, int width, int height,
                             int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly,
-                            IVideoDecoder*& chosenDecoder, bool enableIdentityGbr)
+                            IVideoDecoder*& chosenDecoder, bool enableIdentityGbr,
+                            DecoderCaptureSource captureSource)
 {
     DECODER_PARAMETERS params;
 
@@ -344,10 +345,7 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
     params.enableIdentityGbr = enableIdentityGbr;
     params.testOnly = testOnly;
     params.selectionMode = selectionMode;
-    params.captureSource =
-            m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
-                DecoderCaptureSource::NativeX11_10Bit :
-                DecoderCaptureSource::Nvfbc8Bit;
+    params.captureSource = captureSource;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -419,9 +417,13 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
                         "8-bit H.264 4:4:4 -> 8-bit RGB identity presentation");
         }
         else {
+            const bool native10 = s_ActiveSession->m_StationConnectCaptureSource ==
+                    StreamingPreferences::SCCS_X11_NATIVE10;
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Video precision: 8-bit-source/up-converted -> "
-                        "10-bit %s 4:4:4 -> 10-bit RGB identity presentation",
+                        "Video precision: %s -> 10-bit %s 4:4:4 -> "
+                        "10-bit RGB identity presentation",
+                        native10 ? "native 10-bit X11/XShm" :
+                                   "8-bit NvFBC source/up-converted",
                         videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ? "H.264" : "HEVC");
         }
     }
@@ -549,7 +551,10 @@ bool Session::populateDecoderProperties(SDL_Window* window)
                        m_StreamConfig.height,
                        m_StreamConfig.fps,
                        false, false, true, decoder,
-                       isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()))) {
+                       isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()),
+                       m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
+                           DecoderCaptureSource::NativeX11_10Bit :
+                           DecoderCaptureSource::Nvfbc8Bit)) {
         return false;
     }
 
@@ -2782,7 +2787,11 @@ void Session::execInternal()
                                    enableVsync && m_Preferences->framePacing,
                                    false,
                                    s_ActiveSession->m_VideoDecoder,
-                                   isIdentityGbrEnabledForFormat(m_ActiveVideoFormat))) {
+                                   isIdentityGbrEnabledForFormat(m_ActiveVideoFormat),
+                                   m_StationConnectCaptureSource ==
+                                           StreamingPreferences::SCCS_X11_NATIVE10 ?
+                                       DecoderCaptureSource::NativeX11_10Bit :
+                                       DecoderCaptureSource::Nvfbc8Bit)) {
                     SDL_UnlockSpinlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");

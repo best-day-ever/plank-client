@@ -245,7 +245,9 @@ private:
                        int frameRate, bool enableVsync, bool enableFramePacing,
                        bool testOnly,
                        IVideoDecoder*& chosenDecoder,
-                       bool enableIdentityGbr = false);
+                       bool enableIdentityGbr = false,
+                       DecoderCaptureSource captureSource =
+                           DecoderCaptureSource::Nvfbc8Bit);
 
     bool isIdentityGbrEnabledForFormat(int videoFormat) const;
 
