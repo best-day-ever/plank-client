@@ -540,7 +540,6 @@ Flickable {
 
         GroupBox {
             id: uiSettingsGroupBox
-            parent: settingsColumn2
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             padding: 12
             title: "<font color=\"skyblue\">" + qsTr("UI Settings") + "</font>"
@@ -940,6 +939,7 @@ Flickable {
 
                 AutoResizingComboBox {
                     id: unreachableActionComboBox
+                    width: parent.width
                     textRole: "text"
                     model: ListModel {
                         id: unreachableActionListModel
