@@ -1784,11 +1784,9 @@ bool Session::startConnectionAsync(bool reconnecting)
         return false;
     }
 
-    if ((LiGetHostFeatureFlags() &
-         (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION)) !=
-            (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION)) {
+    if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Host does not advertise required StationConnect local cursor and position transport");
+                     "Host does not advertise required StationConnect local cursor transport");
         LiStopConnection();
         emit displayLaunchError(
                     tr("This workstation does not support the required StationConnect local cursor protocol."));

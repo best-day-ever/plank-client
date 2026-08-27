@@ -130,9 +130,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 {
     m_Window = window;
     m_LocalCursorSupported =
-            (LiGetHostFeatureFlags() &
-             (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION)) ==
-            (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION);
+            (LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) != 0;
     if (m_LocalCursorSupported) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "StationConnect local cursor transport enabled");
