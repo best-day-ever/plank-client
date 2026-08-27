@@ -123,6 +123,7 @@ private:
     int m_StreamFps;
     int m_VideoFormat;
     DecoderCaptureSource m_CaptureSource;
+    DecoderEncoderBackend m_EncoderBackend;
     bool m_IdentityGbrEnabled;
     bool m_NeedsSpsFixup;
     bool m_TestOnly;

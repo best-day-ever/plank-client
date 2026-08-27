@@ -1034,10 +1034,12 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
                     (m_VideoFormat & VIDEO_FORMAT_MASK_H264) ? "H.264" : "HEVC";
             ret = snprintf(&output[offset],
                            length - offset,
-                           "Codec precision: %d-bit %s 4:4:4\n"
+                           "Codec precision: %d-bit %s 4:4:4%s\n"
                            "Presentation precision: %d-bit RGB identity\n",
                            identityBitDepth,
                            identityCodec,
+                           m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
+                               " (NVENC)" : "",
                            identityBitDepth);
             if (ret < 0 || ret >= length - offset) {
                 SDL_assert(false);
@@ -1742,6 +1744,7 @@ bool FFmpegVideoDecoder::tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS para
 bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
 {
     m_CaptureSource = params->captureSource;
+    m_EncoderBackend = params->encoderBackend;
 
     // Increase log level until the first frame is decoded
     av_log_set_level(AV_LOG_DEBUG);

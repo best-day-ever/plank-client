@@ -247,7 +247,9 @@ private:
                        IVideoDecoder*& chosenDecoder,
                        bool enableIdentityGbr = false,
                        DecoderCaptureSource captureSource =
-                           DecoderCaptureSource::Nvfbc8Bit);
+                           DecoderCaptureSource::Nvfbc8Bit,
+                       DecoderEncoderBackend encoderBackend =
+                           DecoderEncoderBackend::SoftwareCuda);
 
     bool isIdentityGbrEnabledForFormat(int videoFormat) const;
 

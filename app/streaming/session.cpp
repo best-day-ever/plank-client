@@ -326,7 +326,8 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
                             SDL_Window* window, int videoFormat, int width, int height,
                             int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly,
                             IVideoDecoder*& chosenDecoder, bool enableIdentityGbr,
-                            DecoderCaptureSource captureSource)
+                            DecoderCaptureSource captureSource,
+                            DecoderEncoderBackend encoderBackend)
 {
     DECODER_PARAMETERS params;
 
@@ -346,6 +347,7 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
     params.testOnly = testOnly;
     params.selectionMode = selectionMode;
     params.captureSource = captureSource;
+    params.encoderBackend = encoderBackend;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -560,7 +562,11 @@ bool Session::populateDecoderProperties(SDL_Window* window)
                        isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()),
                        m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
                            DecoderCaptureSource::NativeX11_10Bit :
-                           DecoderCaptureSource::Nvfbc8Bit)) {
+                           DecoderCaptureSource::Nvfbc8Bit,
+                       StreamingPreferences::isStationConnectNvencProfile(
+                           m_StationConnectVideoProfile) ?
+                           DecoderEncoderBackend::NvencDirect :
+                           DecoderEncoderBackend::SoftwareCuda)) {
         return false;
     }
 
@@ -2845,7 +2851,11 @@ void Session::execInternal()
                                    m_StationConnectCaptureSource ==
                                            StreamingPreferences::SCCS_X11_NATIVE10 ?
                                        DecoderCaptureSource::NativeX11_10Bit :
-                                       DecoderCaptureSource::Nvfbc8Bit)) {
+                                       DecoderCaptureSource::Nvfbc8Bit,
+                                   StreamingPreferences::isStationConnectNvencProfile(
+                                       m_StationConnectVideoProfile) ?
+                                       DecoderEncoderBackend::NvencDirect :
+                                       DecoderEncoderBackend::SoftwareCuda)) {
                     SDL_UnlockSpinlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");

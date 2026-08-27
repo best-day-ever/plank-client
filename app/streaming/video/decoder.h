@@ -22,6 +22,12 @@ enum class DecoderCaptureSource
     NativeX11_10Bit,
 };
 
+enum class DecoderEncoderBackend
+{
+    SoftwareCuda,
+    NvencDirect,
+};
+
 typedef struct _VIDEO_STATS {
     uint64_t receivedVideoBytes;
     uint32_t receivedFrames;
@@ -55,6 +61,7 @@ typedef struct _DECODER_PARAMETERS {
     SDL_Window* window;
     DecoderSelectionMode selectionMode;
     DecoderCaptureSource captureSource;
+    DecoderEncoderBackend encoderBackend;
 
     int videoFormat;
     int width;
