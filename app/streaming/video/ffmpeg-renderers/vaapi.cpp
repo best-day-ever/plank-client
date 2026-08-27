@@ -1053,14 +1053,20 @@ uint32_t VAAPIRenderer::getEGLImportFormat(uint32_t drmFormat) {
 #ifndef DRM_FORMAT_AYUV
 #define DRM_FORMAT_AYUV VA_FOURCC('A', 'Y', 'U', 'V')
 #endif
+#ifndef DRM_FORMAT_XYUV8888
+#define DRM_FORMAT_XYUV8888 VA_FOURCC('X', 'Y', 'U', 'V')
+#endif
 #ifndef DRM_FORMAT_XRGB8888
 #define DRM_FORMAT_XRGB8888 VA_FOURCC('X', 'R', '2', '4')
 #endif
 
-    // AYUV stores Y, U, and V in the same bit positions that XR24 uses for
-    // R, G, and B. The opaque shader reorders R=V, G=Y, B=U to recover the
-    // 8-bit identity transport without applying a YCbCr matrix.
-    if (m_IdentityGbr && drmFormat == DRM_FORMAT_AYUV) {
+    // AYUV and XYUV8888 store Y, U, and V in the same bit positions that XR24
+    // uses for R, G, and B. Intel's VA-API driver exports the 8-bit HEVC 4:4:4
+    // surface as XYUV8888 (FFmpeg VUYX). Import it as XR24 and let the opaque
+    // shader reorder R=V, G=Y, B=U without applying a YCbCr matrix or copy.
+    if (m_IdentityGbr &&
+            (drmFormat == DRM_FORMAT_AYUV ||
+             drmFormat == DRM_FORMAT_XYUV8888)) {
         return DRM_FORMAT_XRGB8888;
     }
 
@@ -1108,7 +1114,7 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
         const uint32_t importFormat = getEGLImportFormat(descriptor.layers[0].drm_format);
         if (m_IdentityGbr && importFormat == descriptor.layers[0].drm_format) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Identity GBR requires an AYUV or Y410 VAAPI surface");
+                         "Identity GBR requires an AYUV, XYUV8888, or Y410 VAAPI surface");
             return false;
         }
         else if (!m_EglImageFactory.supportsImportingFormat(dpy, importFormat)) {
