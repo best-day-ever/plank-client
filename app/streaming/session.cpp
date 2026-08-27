@@ -43,6 +43,8 @@
 #define SDL_CODE_STATIONCONNECT_RECONNECT 105
 #define SDL_CODE_STATIONCONNECT_BITRATE_APPLIED 106
 #define SDL_CODE_STATIONCONNECT_CURSOR 107
+#define SDL_CODE_STATIONCONNECT_TABLET_CURSOR 108
+#define SDL_CODE_STATIONCONNECT_CURSOR_POSITION 109
 
 #include <openssl/rand.h>
 
@@ -73,6 +75,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clRawHidControl,
     Session::clVideoBitrateApplied,
     Session::clCursorChunk,
+    Session::clCursorPosition,
     Session::clVideoPacketLossUpdate,
 };
 
@@ -272,6 +275,27 @@ void Session::clCursorChunk(const unsigned char* data, unsigned int length)
         event.user.code = SDL_CODE_STATIONCONNECT_CURSOR;
         SDL_PushEvent(&event);
     }
+}
+
+void Session::clCursorPosition(const unsigned char* data, unsigned int length)
+{
+    if (s_ActiveSession == nullptr || s_ActiveSession->m_InputHandler == nullptr) {
+        return;
+    }
+    if (s_ActiveSession->m_InputHandler->handleRemoteCursorPosition(data, length)) {
+        SDL_Event event = {};
+        event.type = SDL_EVENT_USER;
+        event.user.code = SDL_CODE_STATIONCONNECT_CURSOR_POSITION;
+        SDL_PushEvent(&event);
+    }
+}
+
+void Session::postTabletCursorActivationEvent()
+{
+    SDL_Event event = {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_STATIONCONNECT_TABLET_CURSOR;
+    SDL_PushEvent(&event);
 }
 
 void Session::clVideoPacketLossUpdate(float packetLossPercent)
@@ -1760,9 +1784,11 @@ bool Session::startConnectionAsync(bool reconnecting)
         return false;
     }
 
-    if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
+    if ((LiGetHostFeatureFlags() &
+         (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION)) !=
+            (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Host does not advertise required StationConnect local cursor transport");
+                     "Host does not advertise required StationConnect local cursor and position transport");
         LiStopConnection();
         emit displayLaunchError(
                     tr("This workstation does not support the required StationConnect local cursor protocol."));
@@ -2318,6 +2344,16 @@ void Session::execInternal()
             case SDL_CODE_STATIONCONNECT_CURSOR:
                 if (m_InputHandler != nullptr) {
                     m_InputHandler->applyPendingRemoteCursor();
+                }
+                break;
+            case SDL_CODE_STATIONCONNECT_TABLET_CURSOR:
+                if (m_InputHandler != nullptr) {
+                    m_InputHandler->applyPendingTabletCursorActivation();
+                }
+                break;
+            case SDL_CODE_STATIONCONNECT_CURSOR_POSITION:
+                if (m_InputHandler != nullptr) {
+                    m_InputHandler->applyPendingRemoteCursorPosition();
                 }
                 break;
             case SDL_CODE_FRAME_READY:

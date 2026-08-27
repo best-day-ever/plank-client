@@ -144,6 +144,8 @@ public:
 
     void flushWindowEvents();
 
+    static void postTabletCursorActivationEvent();
+
     void updateRenderedStats(float fps, float videoMbps)
     {
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
@@ -259,6 +261,9 @@ private:
 
     static
     void clCursorChunk(const unsigned char* data, unsigned int length);
+
+    static
+    void clCursorPosition(const unsigned char* data, unsigned int length);
 
     static
     void clVideoPacketLossUpdate(float packetLossPercent);

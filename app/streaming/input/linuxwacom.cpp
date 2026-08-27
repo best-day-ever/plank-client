@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
 
 namespace {
 
@@ -58,7 +59,7 @@ unsigned char toolType(libinput_tablet_tool* tool)
 
 } // namespace
 
-LinuxWacomInput::LinuxWacomInput()
+LinuxWacomInput::LinuxWacomInput(std::function<void()> tabletActivity)
     : m_Active(false),
       m_Stopping(false),
       m_TipDown(false),
@@ -69,7 +70,8 @@ LinuxWacomInput::LinuxWacomInput()
       m_Pressure(0.0f),
       m_Distance(0.0f),
       m_Rotation(kUnknownRotation),
-      m_Tilt(kUnknownTilt)
+      m_Tilt(kUnknownTilt),
+      m_TabletActivity(std::move(tabletActivity))
 {
     m_Thread = std::thread(&LinuxWacomInput::run, this);
 }
@@ -319,6 +321,9 @@ void LinuxWacomInput::handleTabletEvent(libinput_event_tablet_tool* event,
                        std::max(0.0f, std::min(1.0f, m_Y)),
                        std::max(0.0f, std::min(1.0f, pressureOrDistance)),
                        0.0f, 0.0f, m_Rotation, m_Tilt);
+        if (m_TabletActivity) {
+            m_TabletActivity();
+        }
     }
 
     if (eventType == LI_TOUCH_EVENT_HOVER_LEAVE) {

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -11,7 +12,7 @@
 class LinuxRawWacomInput
 {
 public:
-    LinuxRawWacomInput();
+    explicit LinuxRawWacomInput(std::function<void()> tabletActivity);
     ~LinuxRawWacomInput();
 
     LinuxRawWacomInput(const LinuxRawWacomInput&) = delete;
@@ -56,5 +57,6 @@ private:
     std::uint32_t m_InputSequence;
     bool m_AttachPending;
     bool m_Attached;
+    std::function<void()> m_TabletActivity;
     std::chrono::steady_clock::time_point m_AttachDeadline;
 };

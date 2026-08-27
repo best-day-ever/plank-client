@@ -18,6 +18,7 @@
 #include <linux/uhid.h>
 #include <poll.h>
 #include <set>
+#include <utility>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -103,7 +104,7 @@ void writeLittle(T& destination, T value)
 
 } // namespace
 
-LinuxRawWacomInput::LinuxRawWacomInput()
+LinuxRawWacomInput::LinuxRawWacomInput(std::function<void()> tabletActivity)
     : m_Active(false),
       m_Stopping(false),
       m_Reconnecting(false),
@@ -111,7 +112,8 @@ LinuxRawWacomInput::LinuxRawWacomInput()
       m_Generation(0),
       m_InputSequence(0),
       m_AttachPending(false),
-      m_Attached(false)
+      m_Attached(false),
+      m_TabletActivity(std::move(tabletActivity))
 {
     m_Thread = std::thread(&LinuxRawWacomInput::run, this);
 }
@@ -446,9 +448,11 @@ void LinuxRawWacomInput::handlePhysicalReports()
         }
         const ssize_t bytes = read(pollFds[index].fd, report.data(), report.size());
         if (bytes > 0) {
-            sendFrame(SC_RAW_HID_INPUT, static_cast<std::uint16_t>(index),
-                      ++m_InputSequence, report.data(),
-                      static_cast<std::size_t>(bytes));
+            if (sendFrame(SC_RAW_HID_INPUT, static_cast<std::uint16_t>(index),
+                          ++m_InputSequence, report.data(),
+                          static_cast<std::size_t>(bytes)) && m_TabletActivity) {
+                m_TabletActivity();
+            }
         }
     }
 }

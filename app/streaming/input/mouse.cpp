@@ -13,7 +13,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore synthetic mouse events
         return;
     }
-    else if (!isCaptureActive()) {
+    activateCompositorCursor();
+    if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
                 isMouseInVideoRegion(event->x, event->y)) {
             // Capture the mouse again if clicked when unbound.
@@ -73,6 +74,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         // Ignore synthetic mouse events
         return;
     }
+    activateCompositorCursor();
 
     // Batch all pending mouse motion events to save CPU time
     Sint32 x = event->x, y = event->y;
@@ -157,6 +159,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
         // Ignore synthetic mouse events
         return;
     }
+    activateCompositorCursor();
 
     const int mouseX = qRound(event->mouse_x);
     const int mouseY = qRound(event->mouse_y);

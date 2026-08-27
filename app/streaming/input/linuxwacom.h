@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -10,7 +11,7 @@ struct libinput_event_tablet_tool;
 class LinuxWacomInput
 {
 public:
-    LinuxWacomInput();
+    explicit LinuxWacomInput(std::function<void()> tabletActivity);
     ~LinuxWacomInput();
 
     LinuxWacomInput(const LinuxWacomInput&) = delete;
@@ -44,4 +45,5 @@ private:
     float m_Distance;
     unsigned short m_Rotation;
     unsigned char m_Tilt;
+    std::function<void()> m_TabletActivity;
 };

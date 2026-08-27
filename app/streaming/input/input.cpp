@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 #include "streaming/input/input.h"
 #include "streaming/session.h"
+#include "streaming/stationconnectwaylandcursor.h"
+#include "streaming/streamutils.h"
 #include "utils.h"
 
 #ifdef HAVE_LIBINPUT_TABLET
@@ -29,6 +31,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
       m_LocalToolbarAvailable(false),
       m_LocalCursorSupported(false),
       m_RemoteCursorVisible(true),
+      m_CompositorCursorRequestedVisible(true),
+      m_TabletCursorActive(false),
       m_FakeMouseCaptureActive(false),
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
@@ -103,6 +107,11 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxRawWacomInput.reset();
 #endif
 
+    if (m_WaylandTabletCursor) {
+        m_WaylandTabletCursor->setVisible(false);
+        m_WaylandTabletCursor.reset();
+    }
+
     if (m_RemoteCursor != nullptr) {
         SDL_DestroyCursor(m_RemoteCursor);
         m_RemoteCursor = nullptr;
@@ -121,17 +130,29 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 {
     m_Window = window;
     m_LocalCursorSupported =
-            (LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) != 0;
+            (LiGetHostFeatureFlags() &
+             (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION)) ==
+            (LI_FF_LOCAL_CURSOR | LI_FF_CURSOR_POSITION);
     if (m_LocalCursorSupported) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "StationConnect local cursor transport enabled");
         setCursorVisible(true);
+        m_WaylandTabletCursor = StationConnectWaylandCursor::create(window);
+        if (m_WaylandTabletCursor) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "StationConnect Wayland Wacom cursor surface enabled");
+        }
     }
     else {
         SDL_LogError(SDL_LOG_CATEGORY_INPUT,
                      "Host does not support required StationConnect local cursor transport");
     }
 #ifdef HAVE_LIBINPUT_TABLET
+    const auto requestTabletCursor = [this]() {
+        if (!m_TabletCursorActivationPending.exchange(true)) {
+            Session::postTabletCursorActivationEvent();
+        }
+    };
     if (qEnvironmentVariableIntValue("STATIONCONNECT_EXTERNAL_WACOM_BRIDGE") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                     "Normalized Wacom capture disabled for external raw-HID qualification");
@@ -139,12 +160,12 @@ void SdlInputHandler::setWindow(SDL_Window *window)
     else if ((LiGetHostFeatureFlags() &
               (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
              (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
-        m_LinuxRawWacomInput.reset(new LinuxRawWacomInput());
+        m_LinuxRawWacomInput.reset(new LinuxRawWacomInput(requestTabletCursor));
         m_LinuxRawWacomInput->setActive(
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     }
     else if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
-        m_LinuxWacomInput.reset(new LinuxWacomInput());
+        m_LinuxWacomInput.reset(new LinuxWacomInput(requestTabletCursor));
         m_LinuxWacomInput->setActive(
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     }
@@ -284,6 +305,20 @@ void SdlInputHandler::applyPendingRemoteCursor()
     m_RemoteCursor = replacement;
     m_RemoteCursorVisible =
             (cursor.flags & SC_CURSOR_FLAG_VISIBLE) != 0;
+    if (m_WaylandTabletCursor) {
+        const QImage cursorImage(
+                    cursor.pixels.data(),
+                    static_cast<int>(cursor.width),
+                    static_cast<int>(cursor.height),
+                    static_cast<int>(cursor.width * 4U),
+                    QImage::Format_ARGB32_Premultiplied);
+        m_WaylandTabletCursor->setImage(
+                    cursorImage,
+                    static_cast<int>(cursor.hotspotX),
+                    static_cast<int>(cursor.hotspotY));
+        m_WaylandTabletCursor->dispatchPending();
+        updateTabletCursorVisibility();
+    }
     if (isCaptureActive()) {
         setCursorVisible(!m_MouseWasInVideoRegion || m_RemoteCursorVisible);
     }
@@ -300,6 +335,103 @@ void SdlInputHandler::applyPendingRemoteCursor()
                      static_cast<unsigned long long>(cursor.generation),
                      cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
                      m_RemoteCursorVisible ? 1 : 0);
+    }
+}
+
+bool SdlInputHandler::handleRemoteCursorPosition(
+        const unsigned char* data, unsigned int length)
+{
+    if (data == nullptr || length != sizeof(SC_CURSOR_POSITION_WIRE_MESSAGE)) {
+        return false;
+    }
+
+    SC_CURSOR_POSITION_WIRE_MESSAGE wire;
+    std::memcpy(&wire, data, sizeof(wire));
+    RemoteCursorPosition position;
+    const std::uint32_t magic = qFromLittleEndian(wire.magic);
+    const std::uint16_t version = qFromLittleEndian(wire.version);
+    const std::uint16_t reserved = qFromLittleEndian(wire.reserved);
+    position.sequence = qFromLittleEndian(wire.sequence);
+    position.x = qFromLittleEndian(wire.x);
+    position.y = qFromLittleEndian(wire.y);
+    position.frameWidth = qFromLittleEndian(wire.frameWidth);
+    position.frameHeight = qFromLittleEndian(wire.frameHeight);
+
+    if (magic != SC_CURSOR_POSITION_WIRE_MAGIC ||
+            version != SC_CURSOR_POSITION_WIRE_VERSION || reserved != 0 ||
+            position.sequence == 0 || position.frameWidth == 0 ||
+            position.frameHeight == 0 || position.x >= position.frameWidth ||
+            position.y >= position.frameHeight ||
+            position.frameWidth != static_cast<std::uint32_t>(m_StreamWidth) ||
+            position.frameHeight != static_cast<std::uint32_t>(m_StreamHeight)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Rejected malformed StationConnect cursor position");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(m_RemoteCursorPositionMutex);
+    if (position.sequence <= m_HighestRemoteCursorPositionSequence) {
+        return false;
+    }
+    m_HighestRemoteCursorPositionSequence = position.sequence;
+    m_ReadyRemoteCursorPosition = position;
+    m_ReadyRemoteCursorPositionValid = true;
+    return !m_RemoteCursorPositionUpdatePending.exchange(true);
+}
+
+void SdlInputHandler::applyPendingRemoteCursorPosition()
+{
+    RemoteCursorPosition position;
+    {
+        std::lock_guard<std::mutex> lock(m_RemoteCursorPositionMutex);
+        if (!m_ReadyRemoteCursorPositionValid) {
+            m_RemoteCursorPositionUpdatePending.store(false);
+            return;
+        }
+        position = m_ReadyRemoteCursorPosition;
+        m_ReadyRemoteCursorPositionValid = false;
+        m_RemoteCursorPositionUpdatePending.store(false);
+    }
+
+    m_AppliedRemoteCursorPositionSequence = position.sequence;
+    if (!m_WaylandTabletCursor || m_Window == nullptr) {
+        return;
+    }
+
+    int windowWidth = 0;
+    int windowHeight = 0;
+    SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+    SDL_Rect source{0, 0, m_StreamWidth, m_StreamHeight};
+    SDL_Rect destination{0, 0, windowWidth, windowHeight};
+    StreamUtils::scaleSourceToDestinationSurface(&source, &destination);
+
+    const int x = destination.x + static_cast<int>(
+            (static_cast<std::uint64_t>(position.x) * destination.w) /
+            position.frameWidth);
+    const int y = destination.y + static_cast<int>(
+            (static_cast<std::uint64_t>(position.y) * destination.h) /
+            position.frameHeight);
+    m_WaylandTabletCursor->setPosition(x, y);
+    m_WaylandTabletCursor->dispatchPending();
+    updateTabletCursorVisibility();
+}
+
+void SdlInputHandler::applyPendingTabletCursorActivation()
+{
+    if (!m_WaylandTabletCursor || !m_LocalCursorSupported ||
+            !isCaptureActive()) {
+        m_TabletCursorActivationPending.store(false);
+        return;
+    }
+
+    if (!m_TabletCursorActive) {
+        m_TabletCursorActive = true;
+        m_TabletCursorActivationSequence =
+                m_AppliedRemoteCursorPositionSequence;
+        SDL_HideCursor();
+        updateTabletCursorVisibility();
+        SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
+                     "Switched to host-authoritative Wacom cursor position");
     }
 }
 
@@ -342,6 +474,7 @@ void SdlInputHandler::notifyMouseLeave()
 
 void SdlInputHandler::notifyFocusLost()
 {
+    activateCompositorCursor();
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(false);
@@ -406,6 +539,9 @@ bool SdlInputHandler::isCaptureActive()
 
 void SdlInputHandler::setToolbarInteractionActive(bool active)
 {
+    if (active) {
+        activateCompositorCursor();
+    }
     setCursorVisible(active ? true :
                      (!m_MouseWasInVideoRegion ||
                       (m_LocalCursorSupported ? m_RemoteCursorVisible :
@@ -502,6 +638,7 @@ void SdlInputHandler::setCaptureActive(bool active)
         }
     }
     else {
+        activateCompositorCursor();
         setCursorVisible(true);
         m_FakeMouseCaptureActive = false;
     }
@@ -515,10 +652,45 @@ void SdlInputHandler::setCaptureActive(bool active)
 
 void SdlInputHandler::setCursorVisible(bool visible)
 {
-    if (visible) {
+    m_CompositorCursorRequestedVisible = visible;
+    if (visible && !m_TabletCursorActive) {
         SDL_ShowCursor();
     }
     else {
         SDL_HideCursor();
     }
+    updateTabletCursorVisibility();
+}
+
+void SdlInputHandler::activateCompositorCursor()
+{
+    m_TabletCursorActivationPending.store(false);
+    if (!m_TabletCursorActive) {
+        return;
+    }
+
+    m_TabletCursorActive = false;
+    if (m_WaylandTabletCursor) {
+        m_WaylandTabletCursor->setVisible(false);
+        m_WaylandTabletCursor->dispatchPending();
+    }
+    if (m_CompositorCursorRequestedVisible) {
+        SDL_ShowCursor();
+    } else {
+        SDL_HideCursor();
+    }
+    SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
+                 "Restored Wayland compositor cursor for mouse input");
+}
+
+void SdlInputHandler::updateTabletCursorVisibility()
+{
+    if (!m_WaylandTabletCursor) {
+        return;
+    }
+    const bool visible = m_TabletCursorActive && isCaptureActive() &&
+            m_RemoteCursorVisible &&
+            m_AppliedRemoteCursorPositionSequence >
+                m_TabletCursorActivationSequence;
+    m_WaylandTabletCursor->setVisible(visible);
 }
