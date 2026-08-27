@@ -9,8 +9,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 {
     int button;
 
-    if (StationConnectPointerLogic::isSyntheticMouseDevice(event->which)) {
-        // Raw tablet and touch paths own their synthetic mouse events.
+    if (event->which == SDL_TOUCH_MOUSEID) {
+        // Ignore synthetic mouse events
         return;
     }
     activateCompositorCursor();
@@ -78,8 +78,8 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         // Not capturing
         return;
     }
-    else if (StationConnectPointerLogic::isSyntheticMouseDevice(event->which)) {
-        // Raw tablet and touch paths own their synthetic mouse events.
+    else if (event->which == SDL_TOUCH_MOUSEID) {
+        // Ignore synthetic mouse events
         return;
     }
     activateCompositorCursor();
@@ -92,8 +92,8 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
                           SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
         event = &nextEvent.motion;
 
-        // Ignore synthetic mouse events.
-        if (!StationConnectPointerLogic::isSyntheticMouseDevice(event->which)) {
+        // Ignore synthetic mouse events
+        if (event->which != SDL_TOUCH_MOUSEID) {
             x = event->x;
             y = event->y;
         }
@@ -192,8 +192,8 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
         // Not capturing
         return;
     }
-    else if (StationConnectPointerLogic::isSyntheticMouseDevice(event->which)) {
-        // Raw tablet and touch paths own their synthetic mouse events.
+    else if (event->which == SDL_TOUCH_MOUSEID) {
+        // Ignore synthetic mouse events
         return;
     }
     activateCompositorCursor();

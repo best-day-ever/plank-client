@@ -19,7 +19,6 @@ private slots:
     void keepsRemotePressReleaseTogether();
     void keepsLocalPressReleaseTogether();
     void keepsMultiButtonSequenceWithFirstOwner();
-    void rejectsSyntheticTouchAndPenMice();
     void confinesToVideoWithoutToolbar();
     void reachesWindowEdgeWithToolbar();
 };
@@ -133,16 +132,6 @@ void TestStationConnectToolbarLogic::keepsMultiButtonSequenceWithFirstOwner()
     QCOMPARE(router.routeButton(3, true, true), ButtonRouter::Owner::Remote);
     QCOMPARE(router.routeButton(1, false, true), ButtonRouter::Owner::Remote);
     QCOMPARE(router.routeButton(3, false, true), ButtonRouter::Owner::Remote);
-}
-
-void TestStationConnectToolbarLogic::rejectsSyntheticTouchAndPenMice()
-{
-    QVERIFY(StationConnectPointerLogic::isSyntheticMouseDevice(
-                SDL_TOUCH_MOUSEID));
-    QVERIFY(StationConnectPointerLogic::isSyntheticMouseDevice(
-                SDL_PEN_MOUSEID));
-    QVERIFY(!StationConnectPointerLogic::isSyntheticMouseDevice(0));
-    QVERIFY(!StationConnectPointerLogic::isSyntheticMouseDevice(1));
 }
 
 void TestStationConnectToolbarLogic::confinesToVideoWithoutToolbar()

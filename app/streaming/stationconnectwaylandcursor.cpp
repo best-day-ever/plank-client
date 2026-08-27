@@ -153,13 +153,6 @@ public:
         m_PositionY = hotspotY;
         m_HasPosition = true;
         updatePosition();
-        if (m_Visible) {
-            // wl_subsurface.set_position state is applied only when the
-            // parent's state is applied, regardless of desynchronized child
-            // mode. Do not make Wacom motion depend on an unrelated video
-            // presentation commit, which may be deferred while drawing.
-            wl_surface_commit(m_ParentSurface);
-        }
         wl_display_flush(m_Display);
     }
 
@@ -174,8 +167,6 @@ public:
             wl_surface_commit(m_Surface);
         } else if (!m_Image.isNull() && m_HasPosition) {
             publishImage();
-            // Apply the position that may have been queued while hidden.
-            wl_surface_commit(m_ParentSurface);
         }
         wl_display_flush(m_Display);
     }

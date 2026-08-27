@@ -5,7 +5,6 @@
 #include "streaming/stationconnectdisplaymode.h"
 #include "streaming/stationconnecttoolbar.h"
 #include "streaming/streamutils.h"
-#include "streaming/input/stationconnectpointerlogic.h"
 #include "backend/computermanager.h"
 
 #include <Limelight.h>
@@ -2803,10 +2802,6 @@ void Session::execInternal()
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (StationConnectPointerLogic::isSyntheticMouseDevice(
-                        event.button.which)) {
-                break;
-            }
             if (m_StationConnectToolbar) {
                 const auto action = m_StationConnectToolbar->handleMouseButton(event.button);
                 if (action == StationConnectToolbar::Action::Disconnect) {
@@ -2835,23 +2830,17 @@ void Session::execInternal()
             break;
         case SDL_EVENT_MOUSE_MOTION:
         {
-            if (StationConnectPointerLogic::isSyntheticMouseDevice(
-                        event.motion.which)) {
-                break;
-            }
             bool toolbarConsumedMotion = false;
             if (m_StationConnectToolbar) {
                 // The ordinary input path batches queued motion for efficient
                 // transport. Aggregate it here when the toolbar is present so
                 // the toolbar tracker and host receive the identical delta.
-                if (!StationConnectPointerLogic::isSyntheticMouseDevice(
-                            event.motion.which)) {
+                if (event.motion.which != SDL_TOUCH_MOUSEID) {
                     SDL_Event nextMotionEvent;
                     while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
                                           SDL_EVENT_MOUSE_MOTION,
                                           SDL_EVENT_MOUSE_MOTION) > 0) {
-                        if (!StationConnectPointerLogic::isSyntheticMouseDevice(
-                                    nextMotionEvent.motion.which)) {
+                        if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
                             event.motion.timestamp =
                                     nextMotionEvent.motion.timestamp;
                             event.motion.x = nextMotionEvent.motion.x;
@@ -2875,10 +2864,6 @@ void Session::execInternal()
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL:
-            if (StationConnectPointerLogic::isSyntheticMouseDevice(
-                        event.wheel.which)) {
-                break;
-            }
             if (m_StationConnectToolbar &&
                     m_StationConnectToolbar->handleMouseWheel(event.wheel)) {
                 break;
