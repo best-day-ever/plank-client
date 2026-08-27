@@ -37,6 +37,11 @@ constexpr int BitrateStepKbps = 500;
 constexpr qreal WindowGlyphScale = 0.85;
 constexpr qreal WindowButtonSize = 28.0 * WindowGlyphScale;
 constexpr qreal WindowButtonRadius = 5.0 * WindowGlyphScale;
+constexpr int ReconnectPromptWidth = 460;
+constexpr int ReconnectPromptHeight = 156;
+constexpr int ReconnectPromptNoButton = 0;
+constexpr int ReconnectPromptDisconnectButton = 1;
+constexpr int ReconnectPromptWaitButton = 2;
 
 QColor interpolateColor(const QColor& start, const QColor& end, qreal fraction)
 {
@@ -81,6 +86,13 @@ StationConnectToolbar::StationConnectToolbar(
               (LiGetHostFeatureFlags() &
                (LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK)) ==
               (LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK)),
+      m_ReconnectPromptVisible(false),
+      m_ReconnectPromptPointerInside(false),
+      m_ReconnectPromptButtonDown(false),
+      m_ReconnectPromptPointerX(0),
+      m_ReconnectPromptPointerY(0),
+      m_ReconnectPromptPressedButton(ReconnectPromptNoButton),
+      m_ReconnectPromptSeconds(0),
       m_WindowWidth(0),
       m_WindowHeight(0),
       m_WindowPixelWidth(0),
@@ -112,6 +124,7 @@ StationConnectToolbar::StationConnectToolbar(
       m_EdgeHoverStartTime(0)
 {
     createWaylandToolbar();
+    createWaylandReconnectPrompt();
 
     if (m_Preferences.bitrateKbps != m_BitrateKbps) {
         m_Preferences.bitrateKbps = m_BitrateKbps;
@@ -129,6 +142,31 @@ StationConnectToolbar::StationConnectToolbar(
     // control stream too, then retry until the host confirms its applied
     // target.
     queueBitrateRequest(SDL_GetTicks(), true);
+}
+
+void StationConnectToolbar::createWaylandReconnectPrompt()
+{
+    if (!m_WaylandToolbar) {
+        return;
+    }
+
+    StationConnectWaylandToolbar::Callbacks callbacks;
+    callbacks.enter = [this](int x, int y) {
+        reconnectPromptPointerEnter(x, y);
+    };
+    callbacks.leave = [this]() { reconnectPromptPointerLeave(); };
+    callbacks.motion = [this](int x, int y) {
+        reconnectPromptPointerMotion(x, y);
+    };
+    callbacks.button = [this](uint32_t button, bool down) {
+        reconnectPromptPointerButton(button, down);
+    };
+    m_WaylandReconnectPrompt = StationConnectWaylandToolbar::create(
+                m_Window, std::move(callbacks));
+    if (!m_WaylandReconnectPrompt) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Unable to create native Wayland reconnect prompt; the toolbar disconnect control remains available");
+    }
 }
 
 void StationConnectToolbar::createWaylandToolbar()
@@ -191,10 +229,14 @@ void StationConnectToolbar::setAppliedBitrate(
     redraw();
 }
 
-StationConnectToolbar::Action StationConnectToolbar::update(Uint64 now)
+StationConnectToolbar::Action StationConnectToolbar::update(
+        Uint64 now, bool transportAvailable)
 {
     if (m_WaylandToolbar) {
         m_WaylandToolbar->dispatchPending();
+    }
+    if (m_WaylandReconnectPrompt) {
+        m_WaylandReconnectPrompt->dispatchPending();
     }
 
     if (!m_Visible && !m_LocalPointerInteraction &&
@@ -223,11 +265,46 @@ StationConnectToolbar::Action StationConnectToolbar::update(Uint64 now)
         redraw();
     }
 
-    queueBitrateRequest(now, false);
+    if (transportAvailable) {
+        queueBitrateRequest(now, false);
+    }
 
     const Action action = m_PendingAction;
     m_PendingAction = Action::None;
     return action;
+}
+
+void StationConnectToolbar::showReconnectPrompt(int unreachableSeconds)
+{
+    m_ReconnectPromptSeconds = std::max(1, unreachableSeconds);
+    m_ReconnectPromptVisible = true;
+    m_ReconnectPromptPointerInside = false;
+    m_ReconnectPromptButtonDown = false;
+    m_ReconnectPromptPressedButton = ReconnectPromptNoButton;
+
+    if (m_WaylandReconnectPrompt) {
+        redrawReconnectPrompt();
+        m_WaylandReconnectPrompt->setVisible(true);
+    } else {
+        m_OverlayManager.updateOverlayText(
+                    Overlay::OverlayStatusUpdate,
+                    "Workstation unreachable. Use the toolbar X to disconnect, or wait while StationConnect retries.");
+        m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
+    }
+}
+
+void StationConnectToolbar::hideReconnectPrompt()
+{
+    if (!m_ReconnectPromptVisible) {
+        return;
+    }
+    m_ReconnectPromptVisible = false;
+    m_ReconnectPromptPointerInside = false;
+    m_ReconnectPromptButtonDown = false;
+    m_ReconnectPromptPressedButton = ReconnectPromptNoButton;
+    if (m_WaylandReconnectPrompt) {
+        m_WaylandReconnectPrompt->setVisible(false);
+    }
 }
 
 void StationConnectToolbar::notifyWindowChanged()
@@ -236,7 +313,9 @@ void StationConnectToolbar::notifyWindowChanged()
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Recreating StationConnect toolbar for a replacement Wayland parent surface");
         m_WaylandToolbar.reset();
+        m_WaylandReconnectPrompt.reset();
         createWaylandToolbar();
+        createWaylandReconnectPrompt();
         if (!m_WaylandToolbar) {
             m_OverlayManager.setOverlayState(Overlay::OverlayToolbar,
                                              m_Visible);
@@ -277,6 +356,16 @@ void StationConnectToolbar::notifyWindowChanged()
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
                                     m_Width, ToolbarHeight);
+    }
+    if (m_WaylandReconnectPrompt) {
+        m_WaylandReconnectPrompt->setLayoutAt(
+                    m_WindowWidth, reconnectPromptTop(), reconnectPromptLeft(),
+                    std::min(ReconnectPromptWidth, m_WindowWidth),
+                    ReconnectPromptHeight);
+        if (m_ReconnectPromptVisible) {
+            redrawReconnectPrompt();
+            m_WaylandReconnectPrompt->setVisible(true);
+        }
     }
     if (m_Visible) {
         redraw();
@@ -881,6 +970,172 @@ void StationConnectToolbar::redraw()
                                                        horizontalPosition);
         m_OverlayManager.updateOverlaySurface(Overlay::OverlayToolbar, surface);
     }
+}
+
+int StationConnectToolbar::reconnectPromptLeft() const
+{
+    return std::max(0, (m_WindowWidth -
+                        std::min(ReconnectPromptWidth, m_WindowWidth)) / 2);
+}
+
+int StationConnectToolbar::reconnectPromptTop() const
+{
+    return std::max(0, (m_WindowHeight - ReconnectPromptHeight) / 2);
+}
+
+void StationConnectToolbar::redrawReconnectPrompt()
+{
+    if (!m_WaylandReconnectPrompt) {
+        return;
+    }
+
+    const int width = std::min(ReconnectPromptWidth,
+                               std::max(1, m_WindowWidth));
+    QImage image(width, ReconnectPromptHeight,
+                 QImage::Format_ARGB32_Premultiplied);
+    image.fill(QColor(22, 27, 34));
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(QColor(106, 117, 132), 1));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1.0,
+                                   ReconnectPromptHeight - 1.0), 8, 8);
+
+    QFont titleFont;
+    titleFont.setPixelSize(18);
+    titleFont.setWeight(QFont::DemiBold);
+    painter.setFont(titleFont);
+    painter.setPen(QColor(246, 248, 250));
+    painter.drawText(QRect(22, 18, width - 44, 26),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     "Workstation unreachable");
+
+    QFont bodyFont;
+    bodyFont.setPixelSize(12);
+    painter.setFont(bodyFont);
+    painter.setPen(QColor(190, 199, 210));
+    painter.drawText(QRect(22, 50, width - 44, 42),
+                     Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+                     QString("No response for %1 seconds. Disconnect now, or keep trying while the host restarts.")
+                         .arg(m_ReconnectPromptSeconds));
+
+    const QRect disconnectRect(width - 252, 108, 108, 32);
+    const QRect waitRect(width - 132, 108, 110, 32);
+    const auto buttonAt = [&](int parentX, int surfaceY) {
+        const QPoint local(parentX - reconnectPromptLeft(), surfaceY);
+        if (disconnectRect.contains(local)) {
+            return ReconnectPromptDisconnectButton;
+        }
+        if (waitRect.contains(local)) {
+            return ReconnectPromptWaitButton;
+        }
+        return ReconnectPromptNoButton;
+    };
+    const int hoveredButton = m_ReconnectPromptPointerInside ?
+                buttonAt(m_ReconnectPromptPointerX,
+                         m_ReconnectPromptPointerY) :
+                ReconnectPromptNoButton;
+
+    const auto drawButton = [&](const QRect& rect, int id,
+                                const QString& label, bool destructive) {
+        const bool active = hoveredButton == id;
+        const bool pressed = m_ReconnectPromptButtonDown &&
+                             m_ReconnectPromptPressedButton == id;
+        painter.setPen(QPen(destructive ? QColor(239, 88, 88) :
+                                         QColor(104, 116, 131), 1));
+        painter.setBrush(destructive ?
+                    (active ? QColor(151, 43, 49) : QColor(126, 35, 40)) :
+                    (active ? QColor(68, 78, 90) : QColor(48, 57, 68)));
+        QRectF paintedRect(rect);
+        if (pressed) {
+            paintedRect.translate(0, 1);
+        }
+        painter.drawRoundedRect(paintedRect, 5, 5);
+        painter.setPen(QColor(246, 248, 250));
+        painter.setFont(bodyFont);
+        painter.drawText(paintedRect, Qt::AlignCenter, label);
+    };
+    drawButton(disconnectRect, ReconnectPromptDisconnectButton,
+               "Disconnect", true);
+    drawButton(waitRect, ReconnectPromptWaitButton,
+               "Keep Waiting", false);
+    painter.end();
+
+    m_WaylandReconnectPrompt->setLayoutAt(
+                m_WindowWidth, reconnectPromptTop(), reconnectPromptLeft(),
+                width, ReconnectPromptHeight);
+    m_WaylandReconnectPrompt->present(image);
+}
+
+void StationConnectToolbar::reconnectPromptPointerEnter(
+        int parentX, int surfaceY)
+{
+    m_ReconnectPromptPointerInside = true;
+    m_ReconnectPromptPointerX = parentX;
+    m_ReconnectPromptPointerY = surfaceY;
+    redrawReconnectPrompt();
+}
+
+void StationConnectToolbar::reconnectPromptPointerLeave()
+{
+    m_ReconnectPromptPointerInside = false;
+    if (!m_ReconnectPromptButtonDown) {
+        m_ReconnectPromptPressedButton = ReconnectPromptNoButton;
+    }
+    redrawReconnectPrompt();
+}
+
+void StationConnectToolbar::reconnectPromptPointerMotion(
+        int parentX, int surfaceY)
+{
+    m_ReconnectPromptPointerInside = true;
+    m_ReconnectPromptPointerX = parentX;
+    m_ReconnectPromptPointerY = surfaceY;
+    redrawReconnectPrompt();
+}
+
+void StationConnectToolbar::reconnectPromptPointerButton(
+        uint32_t button, bool down)
+{
+#ifdef HAS_WAYLAND
+    if (button != BTN_LEFT || !m_ReconnectPromptVisible) {
+        return;
+    }
+
+    const int width = std::min(ReconnectPromptWidth,
+                               std::max(1, m_WindowWidth));
+    const QPoint local(m_ReconnectPromptPointerX - reconnectPromptLeft(),
+                       m_ReconnectPromptPointerY);
+    int buttonAtPointer = ReconnectPromptNoButton;
+    if (QRect(width - 252, 108, 108, 32).contains(local)) {
+        buttonAtPointer = ReconnectPromptDisconnectButton;
+    } else if (QRect(width - 132, 108, 110, 32).contains(local)) {
+        buttonAtPointer = ReconnectPromptWaitButton;
+    }
+
+    if (down) {
+        m_ReconnectPromptButtonDown = true;
+        m_ReconnectPromptPressedButton = buttonAtPointer;
+        redrawReconnectPrompt();
+        return;
+    }
+
+    const int pressedButton = m_ReconnectPromptPressedButton;
+    m_ReconnectPromptButtonDown = false;
+    m_ReconnectPromptPressedButton = ReconnectPromptNoButton;
+    if (pressedButton == buttonAtPointer) {
+        if (pressedButton == ReconnectPromptDisconnectButton) {
+            m_PendingAction = Action::Disconnect;
+        } else if (pressedButton == ReconnectPromptWaitButton) {
+            m_PendingAction = Action::KeepWaiting;
+        }
+    }
+    redrawReconnectPrompt();
+#else
+    (void) button;
+    (void) down;
+#endif
 }
 
 void StationConnectToolbar::nativePointerEnter(int parentX, int parentY)

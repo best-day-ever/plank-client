@@ -23,6 +23,7 @@ public:
         ToggleFullscreen,
         Minimize,
         Disconnect,
+        KeepWaiting,
     };
 
     StationConnectToolbar(SDL_Window* window,
@@ -33,7 +34,9 @@ public:
 
     void setRenderedStats(float fps, float videoMbps, float packetLossPercent);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
-    Action update(Uint64 now);
+    Action update(Uint64 now, bool transportAvailable = true);
+    void showReconnectPrompt(int unreachableSeconds);
+    void hideReconnectPrompt();
     void notifyWindowChanged();
     void notifyFocusLost();
 
@@ -59,7 +62,15 @@ private:
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
     void createWaylandToolbar();
+    void createWaylandReconnectPrompt();
     void redraw();
+    void redrawReconnectPrompt();
+    void reconnectPromptPointerEnter(int parentX, int surfaceY);
+    void reconnectPromptPointerLeave();
+    void reconnectPromptPointerMotion(int parentX, int surfaceY);
+    void reconnectPromptPointerButton(uint32_t button, bool down);
+    int reconnectPromptLeft() const;
+    int reconnectPromptTop() const;
     void updateBitrateFromPointer(int x, Uint64 now, bool forceSend);
     void queueBitrateRequest(Uint64 now, bool forceSend);
     void nativePointerEnter(int parentX, int parentY);
@@ -86,6 +97,7 @@ private:
     SdlInputHandler& m_InputHandler;
     StreamingPreferences& m_Preferences;
     std::unique_ptr<StationConnectWaylandToolbar> m_WaylandToolbar;
+    std::unique_ptr<StationConnectWaylandToolbar> m_WaylandReconnectPrompt;
     Action m_PendingAction;
     bool m_Visible;
     bool m_Pinned;
@@ -95,6 +107,13 @@ private:
     bool m_PointerInitialized;
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
+    bool m_ReconnectPromptVisible;
+    bool m_ReconnectPromptPointerInside;
+    bool m_ReconnectPromptButtonDown;
+    int m_ReconnectPromptPointerX;
+    int m_ReconnectPromptPointerY;
+    int m_ReconnectPromptPressedButton;
+    int m_ReconnectPromptSeconds;
     int m_WindowWidth;
     int m_WindowHeight;
     int m_WindowPixelWidth;

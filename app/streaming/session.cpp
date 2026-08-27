@@ -116,7 +116,7 @@ void Session::clConnectionTerminated(int errorCode)
             !s_ActiveSession->m_Reconnecting.load() &&
             !s_ActiveSession->m_ReconnectRequested.exchange(true)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect transport ended (%d); requesting bounded reconnect",
+                    "StationConnect transport ended (%d); starting responsive reconnect",
                     errorCode);
         SDL_Event event = {};
         event.type = SDL_EVENT_USER;
@@ -1847,10 +1847,7 @@ bool Session::runStationConnectReconnect()
         return false;
     }
 
-    constexpr int MaximumAttempts = 20;
-    for (int attempt = 1;
-         attempt <= MaximumAttempts && !m_ReconnectCancelled.load();
-         ++attempt) {
+    for (int attempt = 1; !m_ReconnectCancelled.load(); ++attempt) {
         try {
             {
                 QWriteLocker lock(&m_Computer->lock);
@@ -1914,7 +1911,7 @@ bool Session::runStationConnectReconnect()
             m_Computer->sessionToken.clear();
             m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
         }
-        if (attempt != MaximumAttempts && !m_ReconnectCancelled.load()) {
+        if (!m_ReconnectCancelled.load()) {
             constexpr int RetryDelayMs = 1000;
             constexpr int CancellationPollMs = 50;
             for (int elapsedMs = 0;
@@ -2370,19 +2367,28 @@ void Session::execInternal()
     // because we want to suspend all Qt processing until the stream is over.
     StationConnectReconnectThread* reconnectThread = nullptr;
     StationConnectReconnectState reconnectState;
+    Uint64 reconnectDecisionDeadline = 0;
     SDL_Event event;
     for (;;) {
-        if (m_StationConnectToolbar && !m_Reconnecting.load()) {
+        if (m_StationConnectToolbar) {
             m_StationConnectToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
                         m_CurrentVideoPacketLossPercent.load(
                             std::memory_order_relaxed));
-            const auto action = m_StationConnectToolbar->update(SDL_GetTicks());
+            const auto action = m_StationConnectToolbar->update(
+                        SDL_GetTicks(), !m_Reconnecting.load());
             if (action == StationConnectToolbar::Action::Disconnect) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "StationConnect toolbar disconnect requested");
                 goto DispatchDeferredCleanup;
+            }
+            if (action == StationConnectToolbar::Action::KeepWaiting) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect unreachable-host prompt requested continued retries");
+                m_StationConnectToolbar->hideReconnectPrompt();
+                reconnectDecisionDeadline = SDL_GetTicks() +
+                        static_cast<Uint64>(m_Preferences->stationConnectUnreachableTimeoutSeconds) * 1000;
             }
             if (action == StationConnectToolbar::Action::ToggleFullscreen) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -2394,6 +2400,22 @@ void Session::execInternal()
                             "StationConnect toolbar minimize requested");
                 SDL_MinimizeWindow(m_Window);
             }
+        }
+
+        if (m_Reconnecting.load() && reconnectDecisionDeadline != 0 &&
+                (reconnectThread == nullptr || !reconnectThread->isFinished()) &&
+                SDL_GetTicks() >= reconnectDecisionDeadline) {
+            if (m_Preferences->stationConnectUnreachableAction ==
+                    StreamingPreferences::SCUA_DISCONNECT) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "StationConnect host remained unreachable for %d seconds; disconnecting automatically",
+                            m_Preferences->stationConnectUnreachableTimeoutSeconds);
+                goto DispatchDeferredCleanup;
+            }
+
+            m_StationConnectToolbar->showReconnectPrompt(
+                        m_Preferences->stationConnectUnreachableTimeoutSeconds);
+            reconnectDecisionDeadline = 0;
         }
         const int eventWaitTimeout = m_Reconnecting.load() ? 50 :
                     (m_StationConnectToolbar ?
@@ -2414,11 +2436,65 @@ void Session::execInternal()
                 event.type == SDL_EVENT_USER &&
                 event.user.code == SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
         if (m_Reconnecting.load() &&
-                event.type != SDL_EVENT_QUIT &&
-                !reconnectCompletion) {
-            // SDL_WaitEventTimeout() continues dispatching the Wayland queue so
-            // Mutter receives prompt ping responses. Drop stream/window work
-            // until the reconnect worker has replaced the transport.
+                event.type != SDL_EVENT_QUIT && !reconnectCompletion) {
+            // Keep the local window, hotkeys, and toolbar alive while the
+            // transport worker retries. Never forward these events to a host
+            // whose input connection has already stopped.
+            switch (event.type) {
+            case SDL_EVENT_MOUSE_MOTION:
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->observeMouseMotion(event.motion);
+                }
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                if (m_StationConnectToolbar) {
+                    const auto action =
+                            m_StationConnectToolbar->handleMouseButton(event.button);
+                    if (action == StationConnectToolbar::Action::Disconnect) {
+                        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                                    "StationConnect toolbar disconnect requested during reconnect");
+                        goto DispatchDeferredCleanup;
+                    }
+                    if (action == StationConnectToolbar::Action::ToggleFullscreen) {
+                        toggleFullscreen();
+                        m_StationConnectToolbar->notifyWindowChanged();
+                    } else if (action == StationConnectToolbar::Action::Minimize) {
+                        SDL_MinimizeWindow(m_Window);
+                    }
+                }
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->handleMouseWheel(event.wheel);
+                }
+                break;
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_UP:
+                // Retain StationConnect's local Ctrl+Alt+Shift hotkeys. Any
+                // ordinary key events are harmless because LiStopConnection()
+                // has already closed the remote input channel.
+                m_InputHandler->handleKeyEvent(&event.key);
+                break;
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->notifyWindowChanged();
+                }
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->notifyFocusLost();
+                }
+                m_InputHandler->notifyFocusLost();
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                m_InputHandler->notifyFocusGained();
+                break;
+            default:
+                break;
+            }
             continue;
         }
         switch (event.type) {
@@ -2433,11 +2509,13 @@ void Session::execInternal()
                 if (reconnectThread != nullptr ||
                         !beginStationConnectReconnect(reconnectState)) {
                     emit displayLaunchError(
-                                tr("The workstation desktop changed, but the client could not reconnect within 20 seconds."));
+                                tr("The workstation desktop changed, but the client could not start reconnecting."));
                     goto DispatchDeferredCleanup;
                 }
                 reconnectThread = new StationConnectReconnectThread(this);
                 reconnectThread->start();
+                reconnectDecisionDeadline = SDL_GetTicks() +
+                        static_cast<Uint64>(m_Preferences->stationConnectUnreachableTimeoutSeconds) * 1000;
                 break;
             case SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE:
             {
@@ -2450,10 +2528,14 @@ void Session::execInternal()
                 const bool reconnectSucceeded = reconnectThread->succeeded();
                 delete reconnectThread;
                 reconnectThread = nullptr;
+                reconnectDecisionDeadline = 0;
+                if (m_StationConnectToolbar) {
+                    m_StationConnectToolbar->hideReconnectPrompt();
+                }
                 if (!finishStationConnectReconnect(
                             reconnectSucceeded, reconnectState)) {
                     emit displayLaunchError(
-                                tr("The workstation desktop changed, but the client could not reconnect within 20 seconds."));
+                                tr("The workstation desktop changed, but the client could not reconnect."));
                     goto DispatchDeferredCleanup;
                 }
                 break;

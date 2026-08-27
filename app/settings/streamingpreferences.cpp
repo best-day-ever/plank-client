@@ -21,6 +21,8 @@
 #define SER_FRAMEPACING "framepacing"
 #define SER_CONNWARNINGS "connwarnings"
 #define SER_NETWORKMTU "stationconnect-network-mtu"
+#define SER_STATIONCONNECT_UNREACHABLE_TIMEOUT "stationconnect-unreachable-timeout-seconds"
+#define SER_STATIONCONNECT_UNREACHABLE_ACTION "stationconnect-unreachable-action"
 #define SER_DETECTNETBLOCKING "detectnetblocking"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
@@ -115,6 +117,17 @@ void StreamingPreferences::reload()
                             networkMtu,
                             StationConnectPacketSize::MaximumPhysicalPathMtu);
     }
+    stationConnectUnreachableTimeoutSeconds = qBound(
+                5,
+                settings.value(SER_STATIONCONNECT_UNREACHABLE_TIMEOUT, 15).toInt(),
+                300);
+    const int unreachableAction = settings.value(
+                SER_STATIONCONNECT_UNREACHABLE_ACTION,
+                static_cast<int>(StationConnectUnreachableAction::SCUA_ASK)).toInt();
+    stationConnectUnreachableAction =
+            unreachableAction == StationConnectUnreachableAction::SCUA_DISCONNECT ?
+                StationConnectUnreachableAction::SCUA_DISCONNECT :
+                StationConnectUnreachableAction::SCUA_ASK;
     muteOnFocusLoss = settings.value(SER_MUTEONFOCUSLOSS, false).toBool();
     keepAwake = settings.value(SER_KEEPAWAKE, true).toBool();
     captureSysKeysMode = static_cast<CaptureSysKeysMode>(settings.value(SER_CAPTURESYSKEYS,
@@ -260,6 +273,10 @@ void StreamingPreferences::save()
     settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
     settings.setValue(SER_NETWORKMTU, networkMtu);
+    settings.setValue(SER_STATIONCONNECT_UNREACHABLE_TIMEOUT,
+                      stationConnectUnreachableTimeoutSeconds);
+    settings.setValue(SER_STATIONCONNECT_UNREACHABLE_ACTION,
+                      static_cast<int>(stationConnectUnreachableAction));
     settings.setValue(SER_DETECTNETBLOCKING, detectNetworkBlocking);
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));

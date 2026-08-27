@@ -185,11 +185,19 @@ public:
     void setLayout(int parentWidth, int toolbarX,
                    int toolbarWidth, int toolbarHeight)
     {
+        setLayoutAt(parentWidth, 0, toolbarX, toolbarWidth, toolbarHeight);
+    }
+
+    void setLayoutAt(int parentWidth, int surfaceY, int contentX,
+                     int contentWidth, int contentHeight)
+    {
         m_ParentWidth = std::max(1, parentWidth);
-        m_ToolbarWidth = std::clamp(toolbarWidth, 1, m_ParentWidth);
-        m_ToolbarX = std::clamp(toolbarX, 0,
+        m_ToolbarWidth = std::clamp(contentWidth, 1, m_ParentWidth);
+        m_ToolbarX = std::clamp(contentX, 0,
                                 m_ParentWidth - m_ToolbarWidth);
-        m_Height = std::max(1, toolbarHeight);
+        m_SurfaceY = std::max(0, surfaceY);
+        m_Height = std::max(1, contentHeight);
+        wl_subsurface_set_position(m_Subsurface, 0, m_SurfaceY);
         updateInputRegion();
         wl_display_flush(m_Display);
     }
@@ -483,6 +491,7 @@ private:
     int m_ParentWidth = 0;
     int m_ToolbarX = 0;
     int m_ToolbarWidth = 0;
+    int m_SurfaceY = 0;
     int m_Height = 0;
 };
 
@@ -577,6 +586,22 @@ void StationConnectWaylandToolbar::setLayout(
     (void) toolbarX;
     (void) toolbarWidth;
     (void) toolbarHeight;
+#endif
+}
+
+void StationConnectWaylandToolbar::setLayoutAt(
+        int parentWidth, int surfaceY, int contentX,
+        int contentWidth, int contentHeight)
+{
+#ifdef HAS_WAYLAND
+    m_Impl->setLayoutAt(parentWidth, surfaceY, contentX,
+                        contentWidth, contentHeight);
+#else
+    (void) parentWidth;
+    (void) surfaceY;
+    (void) contentX;
+    (void) contentWidth;
+    (void) contentHeight;
 #endif
 }
 

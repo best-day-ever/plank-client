@@ -947,6 +947,66 @@ Flickable {
                     wrapMode: Text.Wrap
                     opacity: 0.72
                 }
+
+                Label {
+                    width: parent.width
+                    topPadding: 5
+                    text: qsTr("Unreachable host timeout")
+                    font.pointSize: 12
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 8
+
+                    SpinBox {
+                        id: unreachableTimeoutSpinBox
+                        from: 5
+                        to: 300
+                        stepSize: 5
+                        editable: true
+                        value: StreamingPreferences.stationConnectUnreachableTimeoutSeconds
+                        onValueModified: {
+                            StreamingPreferences.stationConnectUnreachableTimeoutSeconds = value
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("seconds")
+                        font.pointSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                AutoResizingComboBox {
+                    id: unreachableActionComboBox
+                    textRole: "text"
+                    model: ListModel {
+                        id: unreachableActionListModel
+                        ListElement {
+                            text: qsTr("Ask whether to disconnect or keep waiting")
+                            val: StreamingPreferences.SCUA_ASK
+                        }
+                        ListElement {
+                            text: qsTr("Disconnect automatically")
+                            val: StreamingPreferences.SCUA_DISCONNECT
+                        }
+                    }
+                    Component.onCompleted: {
+                        currentIndex = StreamingPreferences.stationConnectUnreachableAction === StreamingPreferences.SCUA_DISCONNECT ? 1 : 0
+                    }
+                    onActivated: {
+                        StreamingPreferences.stationConnectUnreachableAction = model.get(currentIndex).val
+                    }
+                }
+
+                Label {
+                    width: parent.width
+                    text: qsTr("The stream window and toolbar remain responsive while StationConnect retries the host.")
+                    font.pointSize: 9
+                    wrapMode: Text.Wrap
+                    opacity: 0.72
+                }
             }
         }
 

@@ -88,6 +88,13 @@ public:
     };
     Q_ENUM(CaptureSysKeysMode);
 
+    enum StationConnectUnreachableAction
+    {
+        SCUA_ASK,
+        SCUA_DISCONNECT,
+    };
+    Q_ENUM(StationConnectUnreachableAction);
+
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
     Q_PROPERTY(int bitrateKbps MEMBER bitrateKbps NOTIFY bitrateChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
@@ -98,6 +105,8 @@ public:
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(int networkMtu MEMBER networkMtu NOTIFY networkMtuChanged)
+    Q_PROPERTY(int stationConnectUnreachableTimeoutSeconds MEMBER stationConnectUnreachableTimeoutSeconds NOTIFY stationConnectUnreachableTimeoutChanged)
+    Q_PROPERTY(StationConnectUnreachableAction stationConnectUnreachableAction MEMBER stationConnectUnreachableAction NOTIFY stationConnectUnreachableActionChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
     Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
@@ -125,6 +134,8 @@ public:
     bool muteOnFocusLoss;
     bool keepAwake;
     int networkMtu;
+    int stationConnectUnreachableTimeoutSeconds;
+    StationConnectUnreachableAction stationConnectUnreachableAction;
     AudioConfig audioConfig;
     int identityGbrBitDepth;
     bool stationConnectToolbarPinned;
@@ -147,6 +158,8 @@ signals:
     void connectionWarningsChanged();
     void detectNetworkBlockingChanged();
     void networkMtuChanged();
+    void stationConnectUnreachableTimeoutChanged();
+    void stationConnectUnreachableActionChanged();
     void showPerformanceOverlayChanged();
     void muteOnFocusLossChanged();
     void captureSysKeysModeChanged();

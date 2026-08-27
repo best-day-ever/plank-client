@@ -26,6 +26,8 @@ public:
     bool isAttachedTo(SDL_Window* parentWindow) const;
     void setLayout(int parentWidth, int toolbarX,
                    int toolbarWidth, int toolbarHeight);
+    void setLayoutAt(int parentWidth, int surfaceY, int contentX,
+                     int contentWidth, int contentHeight);
     void setVisible(bool visible);
     void present(const QImage& image);
 
