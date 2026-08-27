@@ -5,6 +5,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
+#include <cstdint>
+#include <mutex>
+#include <vector>
+
 #ifdef HAVE_LIBINPUT_TABLET
 #include <memory>
 class LinuxWacomInput;
@@ -34,6 +39,10 @@ public:
     void sendText(QString& string);
 
     void handleRawHidControl(const unsigned char* data, unsigned int length);
+
+    bool handleRemoteCursorChunk(const unsigned char* data, unsigned int length);
+
+    void applyPendingRemoteCursor();
 
     void beginRawHidReconnect();
     void finishRawHidReconnect();
@@ -68,7 +77,6 @@ private:
         KeyComboUngrabInput,
         KeyComboToggleFullScreen,
         KeyComboToggleStatsOverlay,
-        KeyComboToggleCursorHide,
         KeyComboToggleMinimize,
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
@@ -85,12 +93,33 @@ private:
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
     bool m_LocalToolbarAvailable;
+    bool m_LocalCursorSupported;
+    bool m_RemoteCursorVisible;
 
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;
     bool m_KeyboardCaptureActive;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
     bool m_MouseCursorCapturedVisibilityState;
+
+    struct RemoteCursorState {
+        std::uint64_t generation = 0;
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+        std::uint32_t hotspotX = 0;
+        std::uint32_t hotspotY = 0;
+        std::uint32_t flags = 0;
+        std::uint32_t nextOffset = 0;
+        std::vector<unsigned char> pixels;
+    };
+
+    std::mutex m_RemoteCursorMutex;
+    RemoteCursorState m_RemoteCursorAssembly;
+    RemoteCursorState m_ReadyRemoteCursor;
+    bool m_RemoteCursorAssemblyActive = false;
+    bool m_ReadyRemoteCursorValid = false;
+    std::atomic_bool m_RemoteCursorUpdatePending {false};
+    SDL_Cursor* m_RemoteCursor = nullptr;
 
     void setCursorVisible(bool visible);
 

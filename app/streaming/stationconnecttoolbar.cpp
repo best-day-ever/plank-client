@@ -653,9 +653,7 @@ void StationConnectToolbar::redraw()
 
     QImage image(static_cast<uchar*>(surface->pixels), surface->w, surface->h,
                  surface->pitch, QImage::Format_ARGB32_Premultiplied);
-    // The host cursor is part of the decoded frame. Make every toolbar pixel
-    // opaque so it cannot appear through the receiver-side pointer drawn at
-    // the authoritative local hit-test coordinate below.
+    // Keep the toolbar fully opaque over the video surface.
     image.fill(QColor(22, 27, 34));
 
     QPainter painter(&image);
@@ -892,7 +890,6 @@ void StationConnectToolbar::nativePointerEnter(int parentX, int parentY)
     m_PointerInside = true;
     m_HideDeadline = 0;
     beginLocalPointerInteraction();
-    forwardNativePointerPosition();
     redraw();
 }
 
@@ -913,7 +910,6 @@ void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
     m_PointerY = parentY;
     m_PointerInside = true;
     m_HideDeadline = 0;
-    forwardNativePointerPosition();
 
     if (m_DraggingToolbar) {
         const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
@@ -932,19 +928,6 @@ void StationConnectToolbar::nativePointerMotion(int parentX, int parentY)
     } else {
         redraw();
     }
-}
-
-void StationConnectToolbar::forwardNativePointerPosition()
-{
-    // The native child receives pointer motion instead of SDL's parent
-    // surface while the pointer is over the toolbar. Forward the identical
-    // parent-relative position so the host cursor remains directly beneath
-    // the opaque toolbar rather than appearing as a second, stale cursor.
-    SDL_MouseMotionEvent event{};
-    event.timestamp = SDL_GetTicks();
-    event.x = static_cast<float>(m_PointerX);
-    event.y = static_cast<float>(m_PointerY);
-    m_InputHandler.handleMouseMotionEvent(&event, false);
 }
 
 void StationConnectToolbar::nativePointerButton(uint32_t button, bool down)

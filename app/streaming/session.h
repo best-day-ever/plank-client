@@ -258,6 +258,9 @@ private:
     void clVideoBitrateApplied(uint32_t requestedKbps, uint32_t appliedKbps, uint32_t peakKbps);
 
     static
+    void clCursorChunk(const unsigned char* data, unsigned int length);
+
+    static
     void clVideoPacketLossUpdate(float packetLossPercent);
 
     static

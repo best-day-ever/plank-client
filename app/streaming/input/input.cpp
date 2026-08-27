@@ -1,4 +1,5 @@
 #include <Limelight.h>
+#include <StationConnect.h>
 #include <SDL3/SDL.h>
 #include "streaming/input/input.h"
 #include "streaming/session.h"
@@ -12,6 +13,9 @@
 #include <QtGlobal>
 #include <QDir>
 #include <QGuiApplication>
+#include <QtEndian>
+
+#include <cstring>
 
 SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
                                  int streamWidth,
@@ -23,6 +27,8 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
       m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false),
       m_LocalToolbarAvailable(false),
+      m_LocalCursorSupported(false),
+      m_RemoteCursorVisible(true),
       m_FakeMouseCaptureActive(false),
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
@@ -68,11 +74,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].scanCode = SDL_SCANCODE_S;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].enabled = true;
 
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCombo = KeyComboToggleCursorHide;
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].keyCode = SDLK_C;
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].scanCode = SDL_SCANCODE_C;
-    m_SpecialKeyCombos[KeyComboToggleCursorHide].enabled = true;
-
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCombo = KeyComboToggleMinimize;
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCode = SDLK_D;
     m_SpecialKeyCombos[KeyComboToggleMinimize].scanCode = SDL_SCANCODE_D;
@@ -102,6 +103,11 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxRawWacomInput.reset();
 #endif
 
+    if (m_RemoteCursor != nullptr) {
+        SDL_DestroyCursor(m_RemoteCursor);
+        m_RemoteCursor = nullptr;
+    }
+
 #ifdef STEAM_LINK
     // Hide SDL's cursor on Steam Link after quitting the stream.
     // FIXME: We should also do this for other situations where SDL
@@ -114,6 +120,17 @@ SdlInputHandler::~SdlInputHandler()
 void SdlInputHandler::setWindow(SDL_Window *window)
 {
     m_Window = window;
+    m_LocalCursorSupported =
+            (LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) != 0;
+    if (m_LocalCursorSupported) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                    "StationConnect local cursor transport enabled");
+        setCursorVisible(true);
+    }
+    else {
+        SDL_LogError(SDL_LOG_CATEGORY_INPUT,
+                     "Host does not support required StationConnect local cursor transport");
+    }
 #ifdef HAVE_LIBINPUT_TABLET
     if (qEnvironmentVariableIntValue("STATIONCONNECT_EXTERNAL_WACOM_BRIDGE") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
@@ -132,6 +149,149 @@ void SdlInputHandler::setWindow(SDL_Window *window)
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     }
 #endif
+}
+
+bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
+                                              unsigned int length)
+{
+    if (data == nullptr || length < sizeof(SC_CURSOR_WIRE_HEADER) ||
+            length > sizeof(SC_CURSOR_WIRE_HEADER) + SC_CURSOR_MAX_CHUNK_SIZE) {
+        return false;
+    }
+
+    SC_CURSOR_WIRE_HEADER wire;
+    std::memcpy(&wire, data, sizeof(wire));
+    const std::uint32_t magic = qFromLittleEndian(wire.magic);
+    const std::uint16_t version = qFromLittleEndian(wire.version);
+    const std::uint16_t pixelFormat = qFromLittleEndian(wire.pixelFormat);
+    const std::uint32_t flags = qFromLittleEndian(wire.flags);
+    const std::uint64_t generation = qFromLittleEndian(wire.generation);
+    const std::uint32_t width = qFromLittleEndian(wire.width);
+    const std::uint32_t height = qFromLittleEndian(wire.height);
+    const std::uint32_t hotspotX = qFromLittleEndian(wire.hotspotX);
+    const std::uint32_t hotspotY = qFromLittleEndian(wire.hotspotY);
+    const std::uint32_t imageSize = qFromLittleEndian(wire.imageSize);
+    const std::uint32_t chunkOffset = qFromLittleEndian(wire.chunkOffset);
+    const std::uint32_t chunkSize = qFromLittleEndian(wire.chunkSize);
+    constexpr std::uint32_t knownFlags = SC_CURSOR_FLAG_VISIBLE |
+                                          SC_CURSOR_FLAG_FIRST_CHUNK |
+                                          SC_CURSOR_FLAG_LAST_CHUNK;
+
+    if (magic != SC_CURSOR_WIRE_MAGIC || version != SC_CURSOR_WIRE_VERSION ||
+            pixelFormat != SC_CURSOR_PIXEL_FORMAT_ARGB8888 ||
+            (flags & ~knownFlags) != 0 || width == 0 || height == 0 ||
+            width > SC_CURSOR_MAX_DIMENSION || height > SC_CURSOR_MAX_DIMENSION ||
+            imageSize != width * height * 4U || imageSize > SC_CURSOR_MAX_IMAGE_SIZE ||
+            hotspotX >= width || hotspotY >= height ||
+            chunkSize > SC_CURSOR_MAX_CHUNK_SIZE ||
+            sizeof(wire) + chunkSize != length ||
+            chunkOffset > imageSize || chunkSize > imageSize - chunkOffset) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Rejected malformed StationConnect local cursor chunk");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(m_RemoteCursorMutex);
+    if ((flags & SC_CURSOR_FLAG_FIRST_CHUNK) != 0) {
+        if (chunkOffset != 0) {
+            return false;
+        }
+        m_RemoteCursorAssembly = {};
+        m_RemoteCursorAssembly.generation = generation;
+        m_RemoteCursorAssembly.width = width;
+        m_RemoteCursorAssembly.height = height;
+        m_RemoteCursorAssembly.hotspotX = hotspotX;
+        m_RemoteCursorAssembly.hotspotY = hotspotY;
+        m_RemoteCursorAssembly.flags = flags & SC_CURSOR_FLAG_VISIBLE;
+        m_RemoteCursorAssembly.pixels.resize(imageSize);
+        m_RemoteCursorAssemblyActive = true;
+    }
+
+    if (!m_RemoteCursorAssemblyActive ||
+            generation != m_RemoteCursorAssembly.generation ||
+            width != m_RemoteCursorAssembly.width ||
+            height != m_RemoteCursorAssembly.height ||
+            hotspotX != m_RemoteCursorAssembly.hotspotX ||
+            hotspotY != m_RemoteCursorAssembly.hotspotY ||
+            (flags & SC_CURSOR_FLAG_VISIBLE) != m_RemoteCursorAssembly.flags ||
+            chunkOffset != m_RemoteCursorAssembly.nextOffset) {
+        m_RemoteCursorAssemblyActive = false;
+        return false;
+    }
+
+    std::memcpy(m_RemoteCursorAssembly.pixels.data() + chunkOffset,
+                data + sizeof(wire), chunkSize);
+    m_RemoteCursorAssembly.nextOffset += chunkSize;
+
+    if ((flags & SC_CURSOR_FLAG_LAST_CHUNK) == 0) {
+        return false;
+    }
+    if (m_RemoteCursorAssembly.nextOffset != imageSize) {
+        m_RemoteCursorAssemblyActive = false;
+        return false;
+    }
+
+    m_ReadyRemoteCursor = std::move(m_RemoteCursorAssembly);
+    m_ReadyRemoteCursorValid = true;
+    m_RemoteCursorAssemblyActive = false;
+    return !m_RemoteCursorUpdatePending.exchange(true);
+}
+
+void SdlInputHandler::applyPendingRemoteCursor()
+{
+    RemoteCursorState cursor;
+    {
+        std::lock_guard<std::mutex> lock(m_RemoteCursorMutex);
+        if (!m_ReadyRemoteCursorValid) {
+            m_RemoteCursorUpdatePending.store(false);
+            return;
+        }
+        cursor = std::move(m_ReadyRemoteCursor);
+        m_ReadyRemoteCursorValid = false;
+        m_RemoteCursorUpdatePending.store(false);
+    }
+
+    SDL_Surface* surface = SDL_CreateSurfaceFrom(
+                static_cast<int>(cursor.width),
+                static_cast<int>(cursor.height),
+                SDL_PIXELFORMAT_ARGB8888,
+                cursor.pixels.data(),
+                static_cast<int>(cursor.width * 4U));
+    if (surface == nullptr) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Failed to create StationConnect cursor surface: %s",
+                    SDL_GetError());
+        return;
+    }
+
+    SDL_Cursor* replacement = SDL_CreateColorCursor(
+                surface,
+                static_cast<int>(cursor.hotspotX),
+                static_cast<int>(cursor.hotspotY));
+    SDL_DestroySurface(surface);
+    if (replacement == nullptr) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Failed to create StationConnect compositor cursor: %s",
+                    SDL_GetError());
+        return;
+    }
+
+    SDL_SetCursor(replacement);
+    if (m_RemoteCursor != nullptr) {
+        SDL_DestroyCursor(m_RemoteCursor);
+    }
+    m_RemoteCursor = replacement;
+    m_RemoteCursorVisible =
+            (cursor.flags & SC_CURSOR_FLAG_VISIBLE) != 0;
+    if (isCaptureActive()) {
+        setCursorVisible(!m_MouseWasInVideoRegion || m_RemoteCursorVisible);
+    }
+
+    SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
+                 "Applied StationConnect local cursor generation %llu (%ux%u hotspot %u,%u visible=%d)",
+                 static_cast<unsigned long long>(cursor.generation),
+                 cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
+                 m_RemoteCursorVisible ? 1 : 0);
 }
 
 void SdlInputHandler::raiseAllKeys()
@@ -237,11 +397,10 @@ bool SdlInputHandler::isCaptureActive()
 
 void SdlInputHandler::setToolbarInteractionActive(bool active)
 {
-    // The fallback toolbar is drawn inside the streaming window. Its local
-    // interaction exposes the compositor cursor without changing capture.
     setCursorVisible(active ? true :
                      (!m_MouseWasInVideoRegion ||
-                      m_MouseCursorCapturedVisibilityState));
+                      (m_LocalCursorSupported ? m_RemoteCursorVisible :
+                                                m_MouseCursorCapturedVisibilityState)));
 }
 
 void SdlInputHandler::setLocalToolbarAvailable(bool available)
@@ -304,7 +463,9 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 void SdlInputHandler::setCaptureActive(bool active)
 {
     if (active) {
-        setCursorVisible(m_MouseCursorCapturedVisibilityState);
+        setCursorVisible(m_LocalCursorSupported ?
+                             (!m_MouseWasInVideoRegion || m_RemoteCursorVisible) :
+                             m_MouseCursorCapturedVisibilityState);
         m_FakeMouseCaptureActive = true;
 
         // Synchronize the client and host cursor when activating absolute capture

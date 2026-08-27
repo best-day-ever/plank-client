@@ -42,6 +42,7 @@
 #define SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER 100
 #define SDL_CODE_STATIONCONNECT_RECONNECT 105
 #define SDL_CODE_STATIONCONNECT_BITRATE_APPLIED 106
+#define SDL_CODE_STATIONCONNECT_CURSOR 107
 
 #include <openssl/rand.h>
 
@@ -71,6 +72,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     nullptr,
     Session::clRawHidControl,
     Session::clVideoBitrateApplied,
+    Session::clCursorChunk,
     Session::clVideoPacketLossUpdate,
 };
 
@@ -257,6 +259,19 @@ void Session::clVideoBitrateApplied(
     event.type = SDL_EVENT_USER;
     event.user.code = SDL_CODE_STATIONCONNECT_BITRATE_APPLIED;
     SDL_PushEvent(&event);
+}
+
+void Session::clCursorChunk(const unsigned char* data, unsigned int length)
+{
+    if (s_ActiveSession == nullptr || s_ActiveSession->m_InputHandler == nullptr) {
+        return;
+    }
+    if (s_ActiveSession->m_InputHandler->handleRemoteCursorChunk(data, length)) {
+        SDL_Event event = {};
+        event.type = SDL_EVENT_USER;
+        event.user.code = SDL_CODE_STATIONCONNECT_CURSOR;
+        SDL_PushEvent(&event);
+    }
 }
 
 void Session::clVideoPacketLossUpdate(float packetLossPercent)
@@ -1745,6 +1760,15 @@ bool Session::startConnectionAsync(bool reconnecting)
         return false;
     }
 
+    if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Host does not advertise required StationConnect local cursor transport");
+        LiStopConnection();
+        emit displayLaunchError(
+                    tr("This workstation does not support the required StationConnect local cursor protocol."));
+        return false;
+    }
+
     emit connectionStarted();
     return true;
 }
@@ -2289,6 +2313,11 @@ void Session::execInternal()
                                 m_ConfirmedBitrateRequestKbps.load(std::memory_order_relaxed),
                                 m_ConfirmedBitrateAppliedKbps.load(std::memory_order_relaxed),
                                 m_ConfirmedBitratePeakKbps.load(std::memory_order_relaxed));
+                }
+                break;
+            case SDL_CODE_STATIONCONNECT_CURSOR:
+                if (m_InputHandler != nullptr) {
+                    m_InputHandler->applyPendingRemoteCursor();
                 }
                 break;
             case SDL_CODE_FRAME_READY:

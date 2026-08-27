@@ -58,14 +58,6 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
                                                             !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
         break;
 
-    case KeyComboToggleCursorHide:
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Detected show mouse combo");
-
-        m_MouseCursorCapturedVisibilityState = !m_MouseCursorCapturedVisibilityState;
-        setCursorVisible(m_MouseCursorCapturedVisibilityState);
-        break;
-
     case KeyComboToggleMinimize:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected minimize combo");
