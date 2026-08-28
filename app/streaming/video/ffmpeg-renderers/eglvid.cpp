@@ -10,6 +10,8 @@
 #include <Limelight.h>
 #include <unistd.h>
 
+#include <algorithm>
+
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_system.h>
 
@@ -73,6 +75,7 @@ EGLRenderer::EGLRenderer(IFFmpegRenderer *backendRenderer)
         m_Window(nullptr),
         m_Backend(backendRenderer),
         m_VAO(0),
+        m_VideoVbo(0),
         m_BlockingSwapBuffers(false),
         m_LastRenderSync(EGL_NO_SYNC),
         m_LastFrame(av_frame_alloc()),
@@ -87,8 +90,7 @@ EGLRenderer::EGLRenderer(IFFmpegRenderer *backendRenderer)
         m_GlesMajorVersion(0),
         m_GlesMinorVersion(0),
         m_HasExtUnpackSubimage(false),
-        m_IdentityGbr8Bit(false),
-        m_DummyRenderer(nullptr)
+        m_IdentityGbr8Bit(false)
 {
     SDL_assert(backendRenderer);
     SDL_assert(backendRenderer->canExportEGL());
@@ -118,6 +120,9 @@ EGLRenderer::~EGLRenderer()
             SDL_assert(m_glDeleteVertexArraysOES != nullptr);
             m_glDeleteVertexArraysOES(1, &m_VAO);
         }
+        if (m_VideoVbo) {
+            glDeleteBuffers(1, &m_VideoVbo);
+        }
         for (int i = 0; i < EGL_MAX_PLANES; i++) {
             if (m_Textures[i] != 0) {
                 glDeleteTextures(1, &m_Textures[i]);
@@ -134,8 +139,8 @@ EGLRenderer::~EGLRenderer()
         SDL_GL_DestroyContext(m_Context);
     }
 
-    if (m_DummyRenderer) {
-        SDL_DestroyRenderer(m_DummyRenderer);
+    for (SDL_Renderer* renderer : m_DummyRenderers) {
+        SDL_DestroyRenderer(renderer);
     }
 
     av_frame_free(&m_LastFrame);
@@ -424,6 +429,29 @@ bool EGLRenderer::compileShaders() {
 bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
 {
     m_Window = params->window;
+    if (params->presentationLayout != nullptr &&
+            params->presentationLayout->canvasSize.isValid() &&
+            !params->presentationLayout->outputs.isEmpty()) {
+        m_PresentationCanvasSize = params->presentationLayout->canvasSize;
+        for (const auto& output : params->presentationLayout->outputs) {
+            m_PresentationTargets.push_back(output);
+        }
+        std::stable_sort(m_PresentationTargets.begin(),
+                         m_PresentationTargets.end(),
+                         [](const auto& left, const auto& right) {
+            return left.primary && !right.primary;
+        });
+    }
+    else {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(m_Window, &width, &height);
+        m_PresentationCanvasSize = QSize(qMax(1, width), qMax(1, height));
+        m_PresentationTargets.push_back(
+            {m_Window,
+             QRect(QPoint(0, 0), m_PresentationCanvasSize),
+             true});
+    }
     m_IdentityGbr8Bit = params->enableIdentityGbr &&
                         !(params->videoFormat & VIDEO_FORMAT_MASK_10BIT);
 
@@ -475,11 +503,20 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    m_DummyRenderer = SDL_CreateRenderer(m_Window, renderDriver);
-    if (!m_DummyRenderer) {
-        // Print the error here (before it gets clobbered), but ensure that we flush window
-        // events just in case SDL re-created the window before eventually failing.
-        EGL_LOG(Error, "SDL_CreateRenderer() failed: %s", SDL_GetError());
+    for (const auto& target : m_PresentationTargets) {
+        SDL_Renderer* renderer = SDL_CreateRenderer(target.window,
+                                                    renderDriver);
+        if (!renderer) {
+            // Print the error here (before it gets clobbered), but ensure that
+            // we flush window events just in case SDL re-created a window
+            // before eventually failing.
+            EGL_LOG(Error,
+                    "SDL_CreateRenderer() failed for StationConnect output: %s",
+                    SDL_GetError());
+            s_LastFailedWindow = target.window;
+            break;
+        }
+        m_DummyRenderers.push_back(renderer);
     }
 
     // SDL_CreateRenderer() can end up having to recreate our window (SDL_RecreateWindow())
@@ -500,8 +537,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     }
 
     // Now we finally bail if we failed during SDL_CreateRenderer() above.
-    if (!m_DummyRenderer) {
-        s_LastFailedWindow = m_Window;
+    if (m_DummyRenderers.size() != m_PresentationTargets.size()) {
         s_LastFailedVideoFormat = params->videoFormat;
         return false;
     }
@@ -518,6 +554,15 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
         EGL_LOG(Error, "Cannot use created EGL context: %s", SDL_GetError());
         return false;
     }
+    for (const auto& target : m_PresentationTargets) {
+        if (!SDL_GL_MakeCurrent(target.window, m_Context)) {
+            EGL_LOG(Error,
+                    "Cannot bind EGL context to StationConnect output: %s",
+                    SDL_GetError());
+            return false;
+        }
+    }
+    SDL_GL_MakeCurrent(m_Window, m_Context);
 
     {
         int r, g, b, a;
@@ -674,6 +719,13 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     }
 #endif
 
+    EGL_LOG(Info,
+            "StationConnect presentation initialized with %zu output surface%s on a %dx%d canvas",
+            m_PresentationTargets.size(),
+            m_PresentationTargets.size() == 1 ? "" : "s",
+            m_PresentationCanvasSize.width(),
+            m_PresentationCanvasSize.height());
+
     return err == GL_NO_ERROR;
 }
 
@@ -756,15 +808,15 @@ bool EGLRenderer::specialize() {
 
     glUseProgram(m_ShaderProgram);
 
-    unsigned int VBO, EBO;
+    unsigned int EBO;
     m_glGenVertexArraysOES(1, &m_VAO);
-    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &m_VideoVbo);
     glGenBuffers(1, &EBO);
 
     m_glBindVertexArrayOES(m_VAO);
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof (vertices), vertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, m_VideoVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof (vertices), vertices, GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof (indices), indices, GL_STATIC_DRAW);
@@ -777,7 +829,6 @@ bool EGLRenderer::specialize() {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     m_glBindVertexArrayOES(0);
 
-    glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 
     GLenum err = glGetError();
@@ -817,12 +868,14 @@ void EGLRenderer::waitToRender()
 
 void EGLRenderer::prepareToRender()
 {
-    SDL_GL_MakeCurrent(m_Window, m_Context);
-    {
+    for (const auto& target : m_PresentationTargets) {
+        if (!SDL_GL_MakeCurrent(target.window, m_Context)) {
+            continue;
+        }
         // Draw a black frame until the video stream starts rendering
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-        SDL_GL_SwapWindow(m_Window);
+        SDL_GL_SwapWindow(target.window);
     }
     SDL_GL_MakeCurrent(m_Window, nullptr);
 }
@@ -871,48 +924,97 @@ void EGLRenderer::renderFrame(AVFrame* frame)
         m_glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, imgs[i]);
     }
 
-    glClear(GL_COLOR_BUFFER_BIT);
+    const QSize streamSize(frame->width, frame->height);
+    bool rendererResetRequired = false;
+    for (const auto& target : m_PresentationTargets) {
+        if (!SDL_GL_MakeCurrent(target.window, m_Context)) {
+            EGL_LOG(Error,
+                    "Cannot bind EGL context to StationConnect output while rendering: %s",
+                    SDL_GetError());
+            rendererResetRequired = true;
+            continue;
+        }
 
-    int drawableWidth, drawableHeight;
-    SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight);
+        int drawableWidth = 0;
+        int drawableHeight = 0;
+        SDL_GetWindowSizeInPixels(target.window,
+                                  &drawableWidth, &drawableHeight);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
 
-    // Set the viewport to the size of the aspect-ratio-scaled video
-    SDL_Rect src, dst;
-    src.x = src.y = dst.x = dst.y = 0;
-    src.w = frame->width;
-    src.h = frame->height;
-    dst.w = drawableWidth;
-    dst.h = drawableHeight;
-    StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
-    glViewport(dst.x, dst.y, dst.w, dst.h);
+        const auto slice = StationConnectPresentation::sliceForOutput(
+                    streamSize, m_PresentationCanvasSize,
+                    target.canvasRect);
+        if (slice.visible) {
+            const float u0 = slice.sourceRect.left() / frame->width;
+            const float v0 = slice.sourceRect.top() / frame->height;
+            const float u1 = slice.sourceRect.right() / frame->width;
+            const float v1 = slice.sourceRect.bottom() / frame->height;
+            const float vertices[] = {
+                1.0f, 1.0f, u1, v0,
+                1.0f, -1.0f, u1, v1,
+                -1.0f, -1.0f, u0, v1,
+                -1.0f, 1.0f, u0, v0,
+            };
 
-    glUseProgram(m_ShaderProgram);
-    m_glBindVertexArrayOES(m_VAO);
+            glBindBuffer(GL_ARRAY_BUFFER, m_VideoVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0,
+                            sizeof(vertices), vertices);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    // Bind parameters for the shaders
-    if (m_EGLImagePixelFormat == AV_PIX_FMT_NV12 || m_EGLImagePixelFormat == AV_PIX_FMT_P010) {
-        glUniformMatrix3fv(m_ShaderProgramParams[NV12_PARAM_YUVMAT], 1, GL_FALSE, getColorMatrix(frame));
-        glUniform3fv(m_ShaderProgramParams[NV12_PARAM_OFFSET], 1, getColorOffsets(frame));
-        glUniform1i(m_ShaderProgramParams[NV12_PARAM_PLANE1], 0);
-        glUniform1i(m_ShaderProgramParams[NV12_PARAM_PLANE2], 1);
-    }
-    else if (m_EGLImagePixelFormat == AV_PIX_FMT_DRM_PRIME) {
-        glUniform1i(m_ShaderProgramParams[OPAQUE_PARAM_TEXTURE], 0);
-        glUniform1i(m_ShaderProgramParams[OPAQUE_PARAM_IDENTITY_GBR_8],
+            const float targetScaleX = drawableWidth /
+                    static_cast<float>(target.canvasRect.width());
+            const float targetScaleY = drawableHeight /
+                    static_cast<float>(target.canvasRect.height());
+            const QRect destination = slice.destinationRect;
+            glViewport(qRound(destination.x() * targetScaleX),
+                       qRound(drawableHeight -
+                              (destination.y() + destination.height()) *
+                              targetScaleY),
+                       qRound(destination.width() * targetScaleX),
+                       qRound(destination.height() * targetScaleY));
+
+            glUseProgram(m_ShaderProgram);
+            m_glBindVertexArrayOES(m_VAO);
+
+            // Bind parameters for the shaders
+            if (m_EGLImagePixelFormat == AV_PIX_FMT_NV12 ||
+                    m_EGLImagePixelFormat == AV_PIX_FMT_P010) {
+                glUniformMatrix3fv(
+                    m_ShaderProgramParams[NV12_PARAM_YUVMAT],
+                    1, GL_FALSE, getColorMatrix(frame));
+                glUniform3fv(m_ShaderProgramParams[NV12_PARAM_OFFSET],
+                             1, getColorOffsets(frame));
+                glUniform1i(m_ShaderProgramParams[NV12_PARAM_PLANE1], 0);
+                glUniform1i(m_ShaderProgramParams[NV12_PARAM_PLANE2], 1);
+            }
+            else if (m_EGLImagePixelFormat == AV_PIX_FMT_DRM_PRIME) {
+                glUniform1i(m_ShaderProgramParams[OPAQUE_PARAM_TEXTURE], 0);
+                glUniform1i(
+                    m_ShaderProgramParams[OPAQUE_PARAM_IDENTITY_GBR_8],
                     m_IdentityGbr8Bit ? 1 : 0);
+            }
+
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+            m_glBindVertexArrayOES(0);
+        }
+
+        // The toolbar and on-screen statistics belong to the primary output.
+        if (target.primary) {
+            glViewport(0, 0, drawableWidth, drawableHeight);
+            for (int i = 0; i < Overlay::OverlayMax; i++) {
+                renderOverlay((Overlay::OverlayType)i,
+                              drawableWidth, drawableHeight);
+            }
+        }
+
+        if (!SDL_GL_SwapWindow(target.window)) {
+            EGL_LOG(Error,
+                    "Failed to swap StationConnect output: %s",
+                    SDL_GetError());
+            rendererResetRequired = true;
+        }
     }
-
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-
-    m_glBindVertexArrayOES(0);
-
-    // Adjust the viewport to the whole window before rendering the overlays
-    glViewport(0, 0, drawableWidth, drawableHeight);
-    for (int i = 0; i < Overlay::OverlayMax; i++) {
-        renderOverlay((Overlay::OverlayType)i, drawableWidth, drawableHeight);
-    }
-
-    SDL_GL_SwapWindow(m_Window);
 
     if (m_BlockingSwapBuffers) {
         // This glClear() requires the new back buffer to complete. This ensures
@@ -949,6 +1051,12 @@ void EGLRenderer::renderFrame(AVFrame* frame)
     // RK3288-based TinkerBoard when V-Sync is disabled.
     av_frame_unref(m_LastFrame);
     av_frame_move_ref(m_LastFrame, frame);
+
+    if (rendererResetRequired) {
+        SDL_Event event = {};
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
+        SDL_PushEvent(&event);
+    }
 }
 
 bool EGLRenderer::testRenderFrame(AVFrame* frame)

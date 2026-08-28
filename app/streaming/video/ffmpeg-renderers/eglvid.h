@@ -1,10 +1,13 @@
 #pragma once
 
 #include "renderer.h"
+#include "streaming/stationconnectpresentation.h"
 
 #define SDL_USE_BUILTIN_OPENGL_DEFINITIONS 1
 #include <SDL3/SDL_egl.h>
 #include <SDL3/SDL_opengles2.h>
+
+#include <vector>
 
 class EGLRenderer : public IFFmpegRenderer {
 public:
@@ -44,8 +47,11 @@ private:
     unsigned m_OverlayShaderProgram;
     SDL_GLContext m_Context;
     SDL_Window *m_Window;
+    QSize m_PresentationCanvasSize;
+    std::vector<StationConnectPresentationOutput> m_PresentationTargets;
     IFFmpegRenderer *m_Backend;
     unsigned int m_VAO;
+    unsigned int m_VideoVbo;
     bool m_BlockingSwapBuffers;
     EGLSync m_LastRenderSync;
     AVFrame* m_LastFrame;
@@ -77,7 +83,7 @@ private:
     int m_OldContextMajorVersion;
     int m_OldContextMinorVersion;
 
-    SDL_Renderer *m_DummyRenderer;
+    std::vector<SDL_Renderer*> m_DummyRenderers;
 
     // HACK: Work around bug where renderer will repeatedly fail with:
     // SDL_CreateRenderer() failed: Could not create GLES window surface
