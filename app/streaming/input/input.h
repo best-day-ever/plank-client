@@ -31,6 +31,8 @@ public:
 
     void setPresentationLayout(const StationConnectPresentationLayout& layout);
 
+    void refreshWaylandTabletCursorParents();
+
     void handleKeyEvent(SDL_KeyboardEvent* event);
 
     void handleMouseButtonEvent(SDL_MouseButtonEvent* event);

@@ -206,6 +206,30 @@ void SdlInputHandler::setPresentationLayout(
     updatePointerRegionLock();
 }
 
+void SdlInputHandler::refreshWaylandTabletCursorParents()
+{
+    if (!m_LocalCursorSupported) {
+        return;
+    }
+
+    for (auto& output : m_WaylandTabletCursorOutputs) {
+        output.cursor->setVisible(false);
+        output.cursor->dispatchPending();
+    }
+    m_WaylandTabletCursorOutputs.clear();
+
+    // SDL_CreateRenderer() may replace a Wayland window's native wl_surface.
+    // A replacement proxy can reuse the same client address, so raw pointer
+    // identity cannot reliably prove that an existing subsurface still has a
+    // live parent. Rebuild from the final SDL windows after renderer setup.
+    reconcileWaylandTabletCursorOutputs();
+    updateTabletCursorVisibility();
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Refreshed StationConnect Wacom cursor parents for %zu presentation output%s",
+                m_WaylandTabletCursorOutputs.size(),
+                m_WaylandTabletCursorOutputs.size() == 1 ? "" : "s");
+}
+
 bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
                                               unsigned int length)
 {

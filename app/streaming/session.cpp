@@ -2372,6 +2372,14 @@ void Session::flushWindowEvents()
     // Pump events to ensure all pending OS events are posted
     SDL_PumpEvents();
 
+    // SDL_CreateRenderer() callers use this barrier after renderer setup
+    // because SDL may have recreated one or more native windows. Refresh every
+    // Wayland Wacom subsurface explicitly; native wl_surface proxy addresses
+    // alone cannot identify a replacement reliably.
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->refreshWaylandTabletCursorParents();
+    }
+
     // Insert a barrier to discard any additional window events.
     // We don't use SDL_FlushEvent() here because it could cause
     // important events to be lost.
