@@ -597,6 +597,10 @@ ApplicationWindow {
                     text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
                 }
+                ListElement {
+                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
+                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
+                }
             }
 
             ListModel {

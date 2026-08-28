@@ -65,7 +65,7 @@ public:
                    profile == SCVP_NVENC_HEVC_10BIT_444;
         }
 
-        return profile != SCVP_NVENC_HEVC_10BIT_444;
+        return true;
     }
 
     static bool isStationConnectNvencProfile(int profile)

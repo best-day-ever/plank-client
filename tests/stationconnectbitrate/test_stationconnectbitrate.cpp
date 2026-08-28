@@ -8,6 +8,7 @@ class TestStationConnectBitrate : public QObject
 
 private slots:
     void selectsCodecFamilyDefaults();
+    void validatesCaptureProfileTuples();
     void retainsIndependentProfileValues();
     void clampsProtocolRange();
 };
@@ -35,6 +36,19 @@ void TestStationConnectBitrate::selectsCodecFamilyDefaults()
         StreamingPreferences::stationConnectDefaultBitrateForProfile(
             StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444),
         StreamingPreferences::StationConnectHevcDefaultBitrateKbps);
+}
+
+void TestStationConnectBitrate::validatesCaptureProfileTuples()
+{
+    QVERIFY(StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444,
+                StreamingPreferences::SCCS_NVFBC_8BIT));
+    QVERIFY(StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444,
+                StreamingPreferences::SCCS_X11_NATIVE10));
+    QVERIFY(!StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+                StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444,
+                StreamingPreferences::SCCS_X11_NATIVE10));
 }
 
 void TestStationConnectBitrate::retainsIndependentProfileValues()

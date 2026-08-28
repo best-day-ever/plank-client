@@ -738,6 +738,16 @@ bool Session::initialize()
         emit displayLaunchError(error);
         return false;
     }
+    if (m_StationConnectCaptureSource == StreamingPreferences::SCCS_NVFBC_8BIT &&
+            m_StationConnectVideoProfile ==
+                StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444 &&
+            (m_Computer->stationConnectFeatureFlags &
+             NvOutputTopology::NvfbcHevc10NvencFeature) == 0) {
+        const QString error = tr("The host does not support NvFBC with the HEVC 10-bit NVENC profile.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
+    }
 
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
