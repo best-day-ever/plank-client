@@ -17,6 +17,7 @@
 #include <QGuiApplication>
 #include <QtEndian>
 
+#include <algorithm>
 #include <cstring>
 
 SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
@@ -107,10 +108,11 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxRawWacomInput.reset();
 #endif
 
-    if (m_WaylandTabletCursor) {
-        m_WaylandTabletCursor->setVisible(false);
-        m_WaylandTabletCursor.reset();
+    for (auto& output : m_WaylandTabletCursorOutputs) {
+        output.cursor->setVisible(false);
+        output.cursor->dispatchPending();
     }
+    m_WaylandTabletCursorOutputs.clear();
 
     if (m_RemoteCursor != nullptr) {
         SDL_DestroyCursor(m_RemoteCursor);
@@ -135,7 +137,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "StationConnect local cursor transport enabled");
         setCursorVisible(true);
-        ensureWaylandTabletCursorAttached();
+        ensureWaylandTabletCursorAttached(m_Window);
     }
     else {
         SDL_LogError(SDL_LOG_CATEGORY_INPUT,
@@ -199,6 +201,8 @@ void SdlInputHandler::setPresentationLayout(
         m_PresentationLayout.outputs.append(
             {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true});
     }
+    reconcileWaylandTabletCursorOutputs();
+    updateTabletCursorVisibility();
     updatePointerRegionLock();
 }
 
@@ -337,20 +341,21 @@ void SdlInputHandler::applyPendingRemoteCursor()
             (cursor.flags & SC_CURSOR_FLAG_VISIBLE) != 0;
     m_AppliedRemoteCursor = cursor;
     m_AppliedRemoteCursorValid = true;
-    if (ensureWaylandTabletCursorAttached()) {
-        const QImage cursorImage(
-                    m_AppliedRemoteCursor.pixels.data(),
-                    static_cast<int>(m_AppliedRemoteCursor.width),
-                    static_cast<int>(m_AppliedRemoteCursor.height),
-                    static_cast<int>(m_AppliedRemoteCursor.width * 4U),
-                    QImage::Format_ARGB32_Premultiplied);
-        m_WaylandTabletCursor->setImage(
-                    cursorImage,
-                    static_cast<int>(m_AppliedRemoteCursor.hotspotX),
-                    static_cast<int>(m_AppliedRemoteCursor.hotspotY));
-        m_WaylandTabletCursor->dispatchPending();
-        updateTabletCursorVisibility();
+    reconcileWaylandTabletCursorOutputs();
+    const QImage cursorImage(
+                m_AppliedRemoteCursor.pixels.data(),
+                static_cast<int>(m_AppliedRemoteCursor.width),
+                static_cast<int>(m_AppliedRemoteCursor.height),
+                static_cast<int>(m_AppliedRemoteCursor.width * 4U),
+                QImage::Format_ARGB32_Premultiplied);
+    for (auto& output : m_WaylandTabletCursorOutputs) {
+        output.cursor->setImage(
+                cursorImage,
+                static_cast<int>(m_AppliedRemoteCursor.hotspotX),
+                static_cast<int>(m_AppliedRemoteCursor.hotspotY));
+        output.cursor->dispatchPending();
     }
+    updateTabletCursorVisibility();
     if (isCaptureActive()) {
         setCursorVisible(!m_MouseWasInVideoRegion || m_RemoteCursorVisible);
     }
@@ -431,12 +436,16 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     SDL_Window* targetWindow = nullptr;
     int x = 0;
     int y = 0;
-    if (!mapRemoteCursorPositionToWindow(position, targetWindow, x, y) ||
-            !ensureWaylandTabletCursorAttached(targetWindow)) {
+    if (!mapRemoteCursorPositionToWindow(position, targetWindow, x, y)) {
         return;
     }
-    m_WaylandTabletCursor->setPosition(x, y);
-    m_WaylandTabletCursor->dispatchPending();
+    StationConnectWaylandCursor* cursor =
+            ensureWaylandTabletCursorAttached(targetWindow);
+    if (cursor == nullptr) {
+        return;
+    }
+    cursor->setPosition(x, y);
+    cursor->dispatchPending();
     updateTabletCursorVisibility();
 }
 
@@ -447,8 +456,9 @@ void SdlInputHandler::applyPendingTabletCursorActivation()
     if (!m_TabletCursorActivationPending.load()) {
         return;
     }
+    reconcileWaylandTabletCursorOutputs();
     if (!m_LocalCursorSupported || !isCaptureActive() ||
-            !ensureWaylandTabletCursorAttached()) {
+            m_WaylandTabletCursorOutputs.empty()) {
         m_TabletCursorActivationPending.store(false);
         return;
     }
@@ -708,9 +718,9 @@ void SdlInputHandler::activateCompositorCursor()
     }
 
     m_TabletCursorActive = false;
-    if (m_WaylandTabletCursor) {
-        m_WaylandTabletCursor->setVisible(false);
-        m_WaylandTabletCursor->dispatchPending();
+    for (auto& output : m_WaylandTabletCursorOutputs) {
+        output.cursor->setVisible(false);
+        output.cursor->dispatchPending();
     }
     if (m_CompositorCursorRequestedVisible) {
         SDL_ShowCursor();
@@ -752,30 +762,40 @@ bool SdlInputHandler::mapRemoteCursorPositionToWindow(
     return false;
 }
 
-bool SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
+StationConnectWaylandCursor*
+SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
 {
-    if (targetWindow == nullptr) {
-        targetWindow = m_Window;
-    }
     if (!m_LocalCursorSupported || targetWindow == nullptr) {
-        return false;
-    }
-    if (m_WaylandTabletCursor &&
-            m_WaylandTabletCursor->isAttachedTo(targetWindow)) {
-        return true;
+        return nullptr;
     }
 
-    const bool replacing = m_WaylandTabletCursor != nullptr;
-    if (m_WaylandTabletCursor) {
-        m_WaylandTabletCursor->setVisible(false);
-        m_WaylandTabletCursor.reset();
+    auto existing = std::find_if(
+            m_WaylandTabletCursorOutputs.begin(),
+            m_WaylandTabletCursorOutputs.end(),
+            [targetWindow](const WaylandTabletCursorOutput& output) {
+                return output.window == targetWindow;
+            });
+    if (existing != m_WaylandTabletCursorOutputs.end() &&
+            existing->cursor->isAttachedTo(targetWindow)) {
+        return existing->cursor.get();
     }
 
-    m_WaylandTabletCursor = StationConnectWaylandCursor::create(targetWindow);
-    if (!m_WaylandTabletCursor) {
+    const bool replacing = existing != m_WaylandTabletCursorOutputs.end();
+    if (replacing) {
+        existing->cursor->setVisible(false);
+        existing->cursor->dispatchPending();
+        existing->cursor.reset();
+    }
+
+    std::unique_ptr<StationConnectWaylandCursor> cursor =
+            StationConnectWaylandCursor::create(targetWindow);
+    if (!cursor) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Unable to attach StationConnect Wayland Wacom cursor surface");
-        return false;
+        if (replacing) {
+            m_WaylandTabletCursorOutputs.erase(existing);
+        }
+        return nullptr;
     }
 
     if (m_AppliedRemoteCursorValid) {
@@ -785,42 +805,100 @@ bool SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow
                     static_cast<int>(m_AppliedRemoteCursor.height),
                     static_cast<int>(m_AppliedRemoteCursor.width * 4U),
                     QImage::Format_ARGB32_Premultiplied);
-        m_WaylandTabletCursor->setImage(
+        cursor->setImage(
                     cursorImage,
                     static_cast<int>(m_AppliedRemoteCursor.hotspotX),
                     static_cast<int>(m_AppliedRemoteCursor.hotspotY));
     }
+    SDL_Window* positionWindow = nullptr;
+    int positionX = 0;
+    int positionY = 0;
     if (m_AppliedRemoteCursorPositionValid) {
-        SDL_Window* positionWindow = nullptr;
-        int x = 0;
-        int y = 0;
         if (mapRemoteCursorPositionToWindow(
                     m_AppliedRemoteCursorPosition,
-                    positionWindow, x, y) &&
+                    positionWindow, positionX, positionY) &&
                 positionWindow == targetWindow) {
-            m_WaylandTabletCursor->setPosition(x, y);
+            cursor->setPosition(positionX, positionY);
         }
     }
     const bool visible = m_TabletCursorActive && isCaptureActive() &&
             m_RemoteCursorVisible && m_AppliedRemoteCursorPositionSequence >
-                m_TabletCursorActivationSequence;
-    m_WaylandTabletCursor->setVisible(visible);
-    m_WaylandTabletCursor->dispatchPending();
+                m_TabletCursorActivationSequence &&
+            positionWindow == targetWindow;
+    cursor->setVisible(visible);
+    cursor->dispatchPending();
+
+    StationConnectWaylandCursor* result = cursor.get();
+    if (replacing) {
+        existing->cursor = std::move(cursor);
+    }
+    else {
+        m_WaylandTabletCursorOutputs.push_back(
+                {targetWindow, std::move(cursor)});
+    }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 replacing ?
-                    "Reattached StationConnect Wacom cursor to replacement Wayland parent surface" :
-                    "StationConnect Wayland Wacom cursor surface enabled");
-    return true;
+                    "Reattached StationConnect Wacom cursor to replacement Wayland parent surface for window %u" :
+                    "StationConnect Wayland Wacom cursor surface enabled for window %u",
+                SDL_GetWindowID(targetWindow));
+    return result;
+}
+
+void SdlInputHandler::reconcileWaylandTabletCursorOutputs()
+{
+    if (!m_LocalCursorSupported) {
+        return;
+    }
+
+    const auto containsWindow = [this](SDL_Window* window) {
+        if (m_PresentationLayout.outputs.isEmpty()) {
+            return window == m_Window;
+        }
+        return std::any_of(
+                m_PresentationLayout.outputs.cbegin(),
+                m_PresentationLayout.outputs.cend(),
+                [window](const StationConnectPresentationOutput& output) {
+                    return output.window == window;
+                });
+    };
+    auto output = m_WaylandTabletCursorOutputs.begin();
+    while (output != m_WaylandTabletCursorOutputs.end()) {
+        if (containsWindow(output->window)) {
+            ++output;
+            continue;
+        }
+        output->cursor->setVisible(false);
+        output->cursor->dispatchPending();
+        output = m_WaylandTabletCursorOutputs.erase(output);
+    }
+
+    if (m_PresentationLayout.outputs.isEmpty()) {
+        ensureWaylandTabletCursorAttached(m_Window);
+        return;
+    }
+    for (const auto& presentationOutput : m_PresentationLayout.outputs) {
+        ensureWaylandTabletCursorAttached(presentationOutput.window);
+    }
 }
 
 void SdlInputHandler::updateTabletCursorVisibility()
 {
-    if (!ensureWaylandTabletCursorAttached()) {
-        return;
+    reconcileWaylandTabletCursorOutputs();
+
+    SDL_Window* positionWindow = nullptr;
+    int x = 0;
+    int y = 0;
+    if (m_AppliedRemoteCursorPositionValid) {
+        mapRemoteCursorPositionToWindow(
+                m_AppliedRemoteCursorPosition,
+                positionWindow, x, y);
     }
     const bool visible = m_TabletCursorActive && isCaptureActive() &&
             m_RemoteCursorVisible &&
             m_AppliedRemoteCursorPositionSequence >
                 m_TabletCursorActivationSequence;
-    m_WaylandTabletCursor->setVisible(visible);
+    for (auto& output : m_WaylandTabletCursorOutputs) {
+        output.cursor->setVisible(visible && output.window == positionWindow);
+        output.cursor->dispatchPending();
+    }
 }

@@ -8,11 +8,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
 #ifdef HAVE_LIBINPUT_TABLET
-#include <memory>
 class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
@@ -157,11 +157,17 @@ private:
     bool m_AppliedRemoteCursorPositionValid = false;
     std::atomic_bool m_RemoteCursorPositionUpdatePending {false};
     std::atomic_bool m_TabletCursorActivationPending {false};
-    std::unique_ptr<StationConnectWaylandCursor> m_WaylandTabletCursor;
+    struct WaylandTabletCursorOutput {
+        SDL_Window* window = nullptr;
+        std::unique_ptr<StationConnectWaylandCursor> cursor;
+    };
+    std::vector<WaylandTabletCursorOutput> m_WaylandTabletCursorOutputs;
 
     void setCursorVisible(bool visible);
     void activateCompositorCursor();
-    bool ensureWaylandTabletCursorAttached(SDL_Window* targetWindow = nullptr);
+    StationConnectWaylandCursor* ensureWaylandTabletCursorAttached(
+        SDL_Window* targetWindow);
+    void reconcileWaylandTabletCursorOutputs();
     bool mapRemoteCursorPositionToWindow(const RemoteCursorPosition& position,
                                          SDL_Window*& window,
                                          int& x, int& y) const;

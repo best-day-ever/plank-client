@@ -11,6 +11,8 @@ private slots:
     void letterboxedDualOutputSlices();
     void mapsEachWindowIntoOneStreamCanvas();
     void preservesMappingWithScaledLogicalWindows();
+    void mapsCursorIntoSingleOutput();
+    void mapsCursorAcrossDualOutputSeam();
 };
 
 void TestStationConnectPresentation::exactDualOutputSlices()
@@ -77,6 +79,34 @@ void TestStationConnectPresentation::preservesMappingWithScaledLogicalWindows()
                 QRect(2560, 0, 2560, 2160), QSize(2048, 1728),
                 windowPoint));
     QCOMPARE(windowPoint, QPointF(1024, 864));
+}
+
+void TestStationConnectPresentation::mapsCursorIntoSingleOutput()
+{
+    QPointF windowPoint;
+    QVERIFY(StationConnectPresentation::mapStreamPointToWindow(
+                QPointF(960, 540), QSize(1920, 1080), QSize(1920, 1080),
+                QRect(0, 0, 1920, 1080), QSize(1920, 1080), windowPoint));
+    QCOMPARE(windowPoint, QPointF(960, 540));
+}
+
+void TestStationConnectPresentation::mapsCursorAcrossDualOutputSeam()
+{
+    const QSize canvas(5120, 2160);
+    QPointF windowPoint;
+
+    QVERIFY(StationConnectPresentation::mapStreamPointToWindow(
+                QPointF(2559, 1080), canvas, canvas,
+                QRect(0, 0, 2560, 2160), QSize(2560, 2160), windowPoint));
+    QCOMPARE(windowPoint, QPointF(2559, 1080));
+    QVERIFY(!StationConnectPresentation::mapStreamPointToWindow(
+                QPointF(2560, 1080), canvas, canvas,
+                QRect(0, 0, 2560, 2160), QSize(2560, 2160), windowPoint));
+
+    QVERIFY(StationConnectPresentation::mapStreamPointToWindow(
+                QPointF(2560, 1080), canvas, canvas,
+                QRect(2560, 0, 2560, 2160), QSize(2560, 2160), windowPoint));
+    QCOMPARE(windowPoint, QPointF(0, 1080));
 }
 
 QTEST_APPLESS_MAIN(TestStationConnectPresentation)
