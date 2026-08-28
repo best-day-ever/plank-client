@@ -375,7 +375,7 @@ CenteredGridView {
         property var profileBitratesKbps: []
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
-        height: Math.min(900, parent.height - 20)
+        height: Math.min(1100, parent.height - 20)
         dim: false
         modal: true
         closePolicy: Popup.CloseOnEscape

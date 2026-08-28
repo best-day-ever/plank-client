@@ -18,8 +18,8 @@ ApplicationWindow {
 
     id: window
     width: 1280
-    height: 820
-    minimumHeight: 720
+    height: 1200
+    minimumHeight: 900
 
     Component.onCompleted: {
         // Override the background color to Material 2 colors for Qt 6.5+
@@ -401,7 +401,7 @@ ApplicationWindow {
         // keeping the dialog inside smaller launcher windows. The dialog still
         // blocks the launcher, but it must not wash out the UI behind it.
         width: Math.min(640, parent.width - 40)
-        height: Math.min(900, parent.height - 20)
+        height: Math.min(1100, parent.height - 20)
         dim: false
 
         function suggestedNickname(address) {
