@@ -522,7 +522,7 @@ Flickable {
                 CheckBox {
                     id: muteOnFocusLossCheck
                     width: parent.width
-                    text: qsTr("Mute audio stream when Moonlight is not the active window")
+                    text: qsTr("Mute audio stream when the client is not the active window")
                     font.pointSize: 12
                     visible: SystemProperties.hasDesktopEnvironment
                     checked: StreamingPreferences.muteOnFocusLoss
@@ -533,7 +533,7 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 5000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Mutes Moonlight's audio when you Alt+Tab out of the stream or click on a different window.")
+                    ToolTip.text: qsTr("Mutes streamed audio when you Alt+Tab out of the stream or click on a different window.")
                 }
             }
         }
