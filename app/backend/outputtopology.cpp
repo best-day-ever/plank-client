@@ -35,13 +35,13 @@ bool validLayoutKind(const QString& kind)
 
 QStringList NvOutputTopology::qualifiedVirtualModes()
 {
-    return {QStringLiteral("1024x2160"), QStringLiteral("1280x720"),
-            QStringLiteral("1280x1024"), QStringLiteral("1280x2160"),
+    return {QStringLiteral("1024x2160"), QStringLiteral("1280x2160"),
             QStringLiteral("1920x1080"), QStringLiteral("1920x1200"),
             QStringLiteral("2560x1440"), QStringLiteral("2560x1600"),
             QStringLiteral("2560x2160"),
             QStringLiteral("3440x1440"), QStringLiteral("3840x1600"),
-            QStringLiteral("3840x2160"), QStringLiteral("4096x2160")};
+            QStringLiteral("3840x2160"), QStringLiteral("4096x2160"),
+            QStringLiteral("5120x2160")};
 }
 
 QSize NvOutputTopology::virtualModeSize(const QString& mode)

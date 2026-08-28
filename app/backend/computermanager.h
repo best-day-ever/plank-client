@@ -229,8 +229,8 @@ public:
     Q_INVOKABLE QStringList stationConnectVirtualModeChoices() const;
 
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
-                                        int hostLayout = 0, int virtualMode1 = 11,
-                                        int virtualMode2 = 3,
+                                        int hostLayout = 0, int virtualMode1 = 9,
+                                        int virtualMode2 = 1,
                                         int scaling = 1, int videoProfile = 0,
                                         int captureSource = 0,
                                         QVariantList profileBitratesKbps = QVariantList());

@@ -451,8 +451,8 @@ ApplicationWindow {
             nicknameText.clear()
             nicknameText.manuallyEdited = false
             addHostLayout.currentIndex = 0
-            addVirtualMode1.currentIndex = 11
-            addVirtualMode2.currentIndex = 3
+            addVirtualMode1.currentIndex = 9
+            addVirtualMode2.currentIndex = 1
             addScalingChoice.currentIndex = 1
             addCaptureSource.currentIndex = 0
             addEncodingProfile.currentIndex = 3
@@ -660,7 +660,7 @@ ApplicationWindow {
                 id: addVirtualMode1
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex >= 2
-                currentIndex: 11
+                currentIndex: 9
                 model: addPcDialog.virtualModeChoices
             }
 
@@ -674,7 +674,7 @@ ApplicationWindow {
                 id: addVirtualMode2
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex === 3
-                currentIndex: 3
+                currentIndex: 1
                 model: addPcDialog.virtualModeChoices
             }
 

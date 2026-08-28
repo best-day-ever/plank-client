@@ -366,8 +366,8 @@ CenteredGridView {
         property int scalingIndex: 1
         property int hostLayoutIndex: 0
         property int hostDisplayPolicy: -1
-        property int virtualMode1Index: 11
-        property int virtualMode2Index: 3
+        property int virtualMode1Index: 9
+        property int virtualMode2Index: 1
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         property int originalCaptureSource: StreamingPreferences.SCCS_NVFBC_8BIT
