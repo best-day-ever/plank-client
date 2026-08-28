@@ -263,7 +263,7 @@ void TestOutputTopology::rejectsUnsupportedClientLayouts()
     QVERIFY(error.contains(QStringLiteral("left to right")));
 
     const QVector<NvClientDisplay> unsupportedDisplay {
-        {QRect(0, 0, 5120, 2160), QSize(5120, 2160)},
+        {QRect(0, 0, 1280, 1024), QSize(1280, 1024)},
     };
     QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
                 unsupportedDisplay, layout, modes, &error));
