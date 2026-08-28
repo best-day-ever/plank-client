@@ -191,6 +191,7 @@ SOURCES += \
     streaming/session.cpp \
     streaming/avsynccontroller.cpp \
     streaming/stationconnectdisplaymode.cpp \
+    streaming/stationconnectpresentation.cpp \
     streaming/stationconnecttoolbar.cpp \
     streaming/stationconnectwaylandcursor.cpp \
     streaming/stationconnectwaylandtoolbar.cpp \
@@ -227,6 +228,7 @@ HEADERS += \
     streaming/session.h \
     streaming/stationconnectpacketsize.h \
     streaming/stationconnectdisplaymode.h \
+    streaming/stationconnectpresentation.h \
     streaming/stationconnecttoolbar.h \
     streaming/stationconnecttoolbarlogic.h \
     streaming/audio/renderers/renderer.h \

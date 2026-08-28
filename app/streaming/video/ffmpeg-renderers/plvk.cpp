@@ -319,7 +319,9 @@ PlVkRenderer::PlVkRenderer(bool hwaccel, IFFmpegRenderer *backendRenderer) :
 PlVkRenderer::~PlVkRenderer()
 {
     // The render context must have been cleaned up by now
-    SDL_assert(!m_HasPendingSwapchainFrame);
+    for (const auto& target : m_PresentationTargets) {
+        SDL_assert(!target.hasPendingSwapchainFrame);
+    }
 
     {
         std::lock_guard<std::mutex> lock(m_ImportedHostPoolMutex);
@@ -341,12 +343,21 @@ PlVkRenderer::~PlVkRenderer()
     }
 
     pl_renderer_destroy(&m_Renderer);
-    pl_swapchain_destroy(&m_Swapchain);
+    for (auto& target : m_PresentationTargets) {
+        pl_swapchain_destroy(&target.swapchain);
+    }
     pl_vulkan_destroy(&m_Vulkan);
 
-    // This surface was created by SDL, so there's no libplacebo API to destroy it
-    if (fn_vkDestroySurfaceKHR && m_VkSurface) {
-        fn_vkDestroySurfaceKHR(m_PlVkInstance->instance, m_VkSurface, nullptr);
+    // These surfaces were created by SDL, so there is no libplacebo API to
+    // destroy them.
+    if (fn_vkDestroySurfaceKHR) {
+        for (auto& target : m_PresentationTargets) {
+            if (target.surface) {
+                fn_vkDestroySurfaceKHR(m_PlVkInstance->instance,
+                                       target.surface, nullptr);
+                target.surface = VK_NULL_HANDLE;
+            }
+        }
     }
 
     if (m_HwDeviceCtx != nullptr) {
@@ -495,18 +506,23 @@ bool PlVkRenderer::tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDevice
         }
     }
 
-    if (!isSurfacePresentationSupportedByPhysicalDevice(device)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Vulkan device '%s' does not support presenting on window surface",
-                    deviceProps->deviceName);
-        return false;
-    }
-
-    if (hdrOutputRequired && !isColorSpaceSupportedByPhysicalDevice(device, VK_COLOR_SPACE_HDR10_ST2084_EXT)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Vulkan device '%s' does not support HDR10 (ST.2084 PQ)",
-                    deviceProps->deviceName);
-        return false;
+    for (const auto& target : m_PresentationTargets) {
+        if (!isSurfacePresentationSupportedByPhysicalDevice(device,
+                                                             target.surface)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Vulkan device '%s' does not support presenting on a StationConnect output surface",
+                        deviceProps->deviceName);
+            return false;
+        }
+        if (hdrOutputRequired &&
+                !isColorSpaceSupportedByPhysicalDevice(
+                    device, target.surface,
+                    VK_COLOR_SPACE_HDR10_ST2084_EXT)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Vulkan device '%s' does not support HDR10 (ST.2084 PQ) on every StationConnect output",
+                        deviceProps->deviceName);
+            return false;
+        }
     }
 
     // Avoid software GPUs
@@ -520,7 +536,7 @@ bool PlVkRenderer::tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDevice
     pl_vulkan_params vkParams = pl_vulkan_default_params;
     vkParams.instance = m_PlVkInstance->instance;
     vkParams.get_proc_addr = m_PlVkInstance->get_proc_addr;
-    vkParams.surface = m_VkSurface;
+    vkParams.surface = m_PresentationTargets.front().surface;
     vkParams.device = device;
     vkParams.opt_extensions = k_OptionalDeviceExtensions;
     vkParams.num_opt_extensions = SDL_arraysize(k_OptionalDeviceExtensions);
@@ -566,6 +582,28 @@ bool PlVkRenderer::isExtensionSupportedByPhysicalDevice(VkPhysicalDevice device,
 bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
 {
     m_Window = params->window;
+    if (params->presentationLayout != nullptr &&
+            params->presentationLayout->canvasSize.isValid() &&
+            !params->presentationLayout->outputs.isEmpty()) {
+        m_PresentationCanvasSize = params->presentationLayout->canvasSize;
+        for (const auto& output : params->presentationLayout->outputs) {
+            m_PresentationTargets.push_back(
+                {output.window, output.canvasRect, output.primary});
+        }
+        std::stable_sort(m_PresentationTargets.begin(),
+                         m_PresentationTargets.end(),
+                         [](const auto& left, const auto& right) {
+            return left.primary && !right.primary;
+        });
+    }
+    else {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(m_Window, &width, &height);
+        m_PresentationCanvasSize = QSize(qMax(1, width), qMax(1, height));
+        m_PresentationTargets.push_back(
+            {m_Window, QRect(QPoint(0, 0), m_PresentationCanvasSize), true});
+    }
 
     Uint32 instanceExtensionCount = 0;
     const char* const* instanceExtensions = SDL_Vulkan_GetInstanceExtensions(&instanceExtensionCount);
@@ -607,11 +645,15 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
     POPULATE_FUNCTION(vkGetPhysicalDeviceSurfaceSupportKHR);
     POPULATE_FUNCTION(vkEnumerateDeviceExtensionProperties);
 
-    if (!SDL_Vulkan_CreateSurface(params->window, m_PlVkInstance->instance, nullptr, &m_VkSurface)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "SDL_Vulkan_CreateSurface() failed: %s",
-                     SDL_GetError());
-        return false;
+    for (auto& target : m_PresentationTargets) {
+        if (!SDL_Vulkan_CreateSurface(target.window,
+                                     m_PlVkInstance->instance, nullptr,
+                                     &target.surface)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "SDL_Vulkan_CreateSurface() failed for StationConnect output: %s",
+                         SDL_GetError());
+            return false;
+        }
     }
 
     // Enumerate physical devices and choose one that is suitable for our needs.
@@ -623,57 +665,48 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
         return false;
     }
 
-    VkPresentModeKHR presentMode;
-    if (params->enableVsync) {
-        // FIFO mode improves frame pacing compared with Mailbox, especially for
-        // platforms like X11 that lack a VSyncSource implementation for Pacer.
-        presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    }
-    else {
-        // We want immediate mode for V-Sync disabled if possible
-        if (isPresentModeSupportedByPhysicalDevice(m_Vulkan->phys_device, VK_PRESENT_MODE_IMMEDIATE_KHR)) {
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Using Immediate present mode with V-Sync disabled");
-            presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-        }
-        else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Immediate present mode is not supported by the Vulkan driver. Latency may be higher than normal with V-Sync disabled.");
-
-            // FIFO Relaxed can tear if the frame is running late
-            if (isPresentModeSupportedByPhysicalDevice(m_Vulkan->phys_device, VK_PRESENT_MODE_FIFO_RELAXED_KHR)) {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using FIFO Relaxed present mode with V-Sync disabled");
+    for (auto& target : m_PresentationTargets) {
+        VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        if (!params->enableVsync) {
+            if (isPresentModeSupportedByPhysicalDevice(
+                        m_Vulkan->phys_device, target.surface,
+                        VK_PRESENT_MODE_IMMEDIATE_KHR)) {
+                presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            }
+            else if (isPresentModeSupportedByPhysicalDevice(
+                         m_Vulkan->phys_device, target.surface,
+                         VK_PRESENT_MODE_FIFO_RELAXED_KHR)) {
                 presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
             }
-            // Mailbox at least provides non-blocking behavior
-            else if (isPresentModeSupportedByPhysicalDevice(m_Vulkan->phys_device, VK_PRESENT_MODE_MAILBOX_KHR)) {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using Mailbox present mode with V-Sync disabled");
+            else if (isPresentModeSupportedByPhysicalDevice(
+                         m_Vulkan->phys_device, target.surface,
+                         VK_PRESENT_MODE_MAILBOX_KHR)) {
                 presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
             }
-            // FIFO is always supported
-            else {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "Using FIFO present mode with V-Sync disabled");
-                presentMode = VK_PRESENT_MODE_FIFO_KHR;
-            }
+        }
+
+        pl_vulkan_swapchain_params vkSwapchainParams = {};
+        vkSwapchainParams.surface = target.surface;
+        vkSwapchainParams.present_mode = presentMode;
+        vkSwapchainParams.swapchain_depth = 1; // No queued frames
+#if PL_API_VER >= 338
+        vkSwapchainParams.disable_10bit_sdr = true;
+#endif
+        target.swapchain = pl_vulkan_create_swapchain(
+                    m_Vulkan, &vkSwapchainParams);
+        if (target.swapchain == nullptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "pl_vulkan_create_swapchain() failed for StationConnect output");
+            return false;
         }
     }
 
-    pl_vulkan_swapchain_params vkSwapchainParams = {};
-    vkSwapchainParams.surface = m_VkSurface;
-    vkSwapchainParams.present_mode = presentMode;
-    vkSwapchainParams.swapchain_depth = 1; // No queued frames
-#if PL_API_VER >= 338
-    vkSwapchainParams.disable_10bit_sdr = true; // Some drivers don't dither 10-bit SDR output correctly
-#endif
-    m_Swapchain = pl_vulkan_create_swapchain(m_Vulkan, &vkSwapchainParams);
-    if (m_Swapchain == nullptr) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "pl_vulkan_create_swapchain() failed");
-        return false;
-    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect Vulkan presentation initialized with %zu output surface%s on a %dx%d canvas",
+                m_PresentationTargets.size(),
+                m_PresentationTargets.size() == 1 ? "" : "s",
+                m_PresentationCanvasSize.width(),
+                m_PresentationCanvasSize.height());
 
     m_Renderer = pl_renderer_create(m_Log, m_Vulkan->gpu);
     if (m_Renderer == nullptr) {
@@ -990,13 +1023,17 @@ bool PlVkRenderer::getQueue(VkQueueFlags requiredFlags, uint32_t *queueIndex, ui
     return false;
 }
 
-bool PlVkRenderer::isPresentModeSupportedByPhysicalDevice(VkPhysicalDevice device, VkPresentModeKHR presentMode)
+bool PlVkRenderer::isPresentModeSupportedByPhysicalDevice(
+        VkPhysicalDevice device, VkSurfaceKHR surface,
+        VkPresentModeKHR presentMode)
 {
     uint32_t presentModeCount = 0;
-    fn_vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_VkSurface, &presentModeCount, nullptr);
+    fn_vkGetPhysicalDeviceSurfacePresentModesKHR(
+                device, surface, &presentModeCount, nullptr);
 
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
-    fn_vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_VkSurface, &presentModeCount, presentModes.data());
+    fn_vkGetPhysicalDeviceSurfacePresentModesKHR(
+                device, surface, &presentModeCount, presentModes.data());
 
     for (uint32_t i = 0; i < presentModeCount; i++) {
         if (presentModes[i] == presentMode) {
@@ -1007,13 +1044,17 @@ bool PlVkRenderer::isPresentModeSupportedByPhysicalDevice(VkPhysicalDevice devic
     return false;
 }
 
-bool PlVkRenderer::isColorSpaceSupportedByPhysicalDevice(VkPhysicalDevice device, VkColorSpaceKHR colorSpace)
+bool PlVkRenderer::isColorSpaceSupportedByPhysicalDevice(
+        VkPhysicalDevice device, VkSurfaceKHR surface,
+        VkColorSpaceKHR colorSpace)
 {
     uint32_t formatCount = 0;
-    fn_vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_VkSurface, &formatCount, nullptr);
+    fn_vkGetPhysicalDeviceSurfaceFormatsKHR(
+                device, surface, &formatCount, nullptr);
 
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
-    fn_vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_VkSurface, &formatCount, formats.data());
+    fn_vkGetPhysicalDeviceSurfaceFormatsKHR(
+                device, surface, &formatCount, formats.data());
 
     for (uint32_t i = 0; i < formatCount; i++) {
         if (formats[i].colorSpace == colorSpace) {
@@ -1024,14 +1065,17 @@ bool PlVkRenderer::isColorSpaceSupportedByPhysicalDevice(VkPhysicalDevice device
     return false;
 }
 
-bool PlVkRenderer::isSurfacePresentationSupportedByPhysicalDevice(VkPhysicalDevice device)
+bool PlVkRenderer::isSurfacePresentationSupportedByPhysicalDevice(
+        VkPhysicalDevice device, VkSurfaceKHR surface)
 {
     uint32_t queueFamilyCount = 0;
     fn_vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
 
     for (uint32_t i = 0; i < queueFamilyCount; i++) {
         VkBool32 supported = VK_FALSE;
-        if (fn_vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_VkSurface, &supported) == VK_SUCCESS && supported == VK_TRUE) {
+        if (fn_vkGetPhysicalDeviceSurfaceSupportKHR(
+                    device, i, surface, &supported) == VK_SUCCESS &&
+                supported == VK_TRUE) {
             return true;
         }
     }
@@ -1059,25 +1103,24 @@ void PlVkRenderer::waitToRender()
     //
     // NB: This seems to cause performance problems with the Windows display stack
     // (particularly on Nvidia) so we will only do this for non-Windows platforms.
-    pl_swapchain_swap_buffers(m_Swapchain);
+    for (auto& target : m_PresentationTargets) {
+        pl_swapchain_swap_buffers(target.swapchain);
+    }
 #endif
 
-    // Handle the swapchain being resized
-    int vkDrawableW, vkDrawableH;
-    SDL_GetWindowSizeInPixels(m_Window, &vkDrawableW, &vkDrawableH);
-    if (!pl_swapchain_resize(m_Swapchain, &vkDrawableW, &vkDrawableH)) {
-        // Swapchain (re)creation can fail if the window is occluded
-        return;
-    }
-
-    // Get the next swapchain buffer for rendering. If this fails, renderFrame()
-    // will try again.
-    //
-    // NB: After calling this successfully, we *MUST* call pl_swapchain_submit_frame(),
-    // hence the implementation of cleanupRenderContext() which does just this in case
-    // renderFrame() wasn't called after waitToRender().
-    if (pl_swapchain_start_frame(m_Swapchain, &m_SwapchainFrame)) {
-        m_HasPendingSwapchainFrame = true;
+    for (auto& target : m_PresentationTargets) {
+        int drawableWidth = 0;
+        int drawableHeight = 0;
+        SDL_GetWindowSizeInPixels(target.window,
+                                  &drawableWidth, &drawableHeight);
+        if (!pl_swapchain_resize(target.swapchain,
+                                 &drawableWidth, &drawableHeight)) {
+            continue;
+        }
+        if (pl_swapchain_start_frame(target.swapchain,
+                                     &target.swapchainFrame)) {
+            target.hasPendingSwapchainFrame = true;
+        }
     }
 }
 
@@ -1085,20 +1128,25 @@ void PlVkRenderer::cleanupRenderContext()
 {
     // We have to submit a pending swapchain frame before shutting down
     // in order to release a mutex that pl_swapchain_start_frame() acquires.
-    if (m_HasPendingSwapchainFrame) {
-        pl_swapchain_submit_frame(m_Swapchain);
-        m_HasPendingSwapchainFrame = false;
+    for (auto& target : m_PresentationTargets) {
+        if (target.hasPendingSwapchainFrame) {
+            pl_swapchain_submit_frame(target.swapchain);
+            target.hasPendingSwapchainFrame = false;
+        }
     }
 }
 
 void PlVkRenderer::renderFrame(AVFrame *frame)
 {
-    pl_frame mappedFrame, targetFrame;
+    pl_frame mappedFrame;
     bool importedHostFrame = false;
 
-    // If waitToRender() failed to get the next swapchain frame, skip
-    // rendering this frame. It probably means the window is occluded.
-    if (!m_HasPendingSwapchainFrame) {
+    const bool hasPendingTarget = std::any_of(
+                m_PresentationTargets.begin(), m_PresentationTargets.end(),
+                [](const auto& target) {
+        return target.hasPendingSwapchainFrame;
+    });
+    if (!hasPendingTarget) {
         return;
     }
 
@@ -1111,7 +1159,10 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
     if (!pl_color_space_equal(&mappedFrame.color, &m_LastColorspace)) {
         m_LastColorspace = mappedFrame.color;
         SDL_assert(pl_color_space_equal(&mappedFrame.color, &m_LastColorspace));
-        pl_swapchain_colorspace_hint(m_Swapchain, &mappedFrame.color);
+        for (auto& target : m_PresentationTargets) {
+            pl_swapchain_colorspace_hint(target.swapchain,
+                                         &mappedFrame.color);
+        }
     }
 
     // Reserve enough space to avoid allocating under the overlay lock
@@ -1121,7 +1172,16 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
     texturesToDestroy.reserve(Overlay::OverlayMax);
     overlays.reserve(Overlay::OverlayMax);
 
-    pl_frame_from_swapchain(&targetFrame, &m_SwapchainFrame);
+    pl_frame primaryTargetFrame = {};
+    bool hasPrimaryTargetFrame = false;
+    for (auto& target : m_PresentationTargets) {
+        if (target.primary && target.hasPendingSwapchainFrame) {
+            pl_frame_from_swapchain(&primaryTargetFrame,
+                                    &target.swapchainFrame);
+            hasPrimaryTargetFrame = true;
+            break;
+        }
+    }
 
     // We perform minimal processing under the overlay lock to avoid blocking threads updating the overlay
     SDL_LockSpinlock(&m_OverlayLock);
@@ -1149,13 +1209,14 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
         }
 
         // We have an overlay to draw
-        if (m_Overlays[i].hasOverlay) {
+        if (m_Overlays[i].hasOverlay && hasPrimaryTargetFrame) {
             // Position the overlay
             overlayParts[i].src = { 0, 0, (float)m_Overlays[i].overlay.tex->params.w, (float)m_Overlays[i].overlay.tex->params.h };
             if (i == Overlay::OverlayStatusUpdate) {
                 // Bottom Left
                 overlayParts[i].dst.x0 = 0;
-                overlayParts[i].dst.y0 = SDL_max(0, targetFrame.crop.y1 - overlayParts[i].src.y1);
+                overlayParts[i].dst.y0 = SDL_max(
+                    0, primaryTargetFrame.crop.y1 - overlayParts[i].src.y1);
             }
             else if (i == Overlay::OverlayDebug) {
                 // Top left
@@ -1164,10 +1225,11 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
             }
             else if (i == Overlay::OverlayToolbar) {
                 // User-positionable along the top edge
-                overlayParts[i].dst.x0 = targetFrame.crop.x0 +
+                overlayParts[i].dst.x0 = primaryTargetFrame.crop.x0 +
                     Session::get()->getOverlayManager().getOverlayHorizontalPosition(
                         (Overlay::OverlayType)i) *
-                    SDL_max(0.0f, targetFrame.crop.x1 - targetFrame.crop.x0 -
+                    SDL_max(0.0f, primaryTargetFrame.crop.x1 -
+                                      primaryTargetFrame.crop.x0 -
                                       overlayParts[i].src.x1);
                 overlayParts[i].dst.y0 = 0;
             }
@@ -1182,61 +1244,80 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
     }
     SDL_UnlockSpinlock(&m_OverlayLock);
 
-    SDL_Rect src;
-    src.x = mappedFrame.crop.x0;
-    src.y = mappedFrame.crop.y0;
-    src.w = mappedFrame.crop.x1 - mappedFrame.crop.x0;
-    src.h = mappedFrame.crop.y1 - mappedFrame.crop.y0;
+    const QSize streamSize(mappedFrame.crop.x1 - mappedFrame.crop.x0,
+                           mappedFrame.crop.y1 - mappedFrame.crop.y0);
+    bool rendererResetRequired = false;
+    for (auto& target : m_PresentationTargets) {
+        if (!target.hasPendingSwapchainFrame) {
+            continue;
+        }
 
-    SDL_Rect dst;
-    dst.x = targetFrame.crop.x0;
-    dst.y = targetFrame.crop.y0;
-    dst.w = targetFrame.crop.x1 - targetFrame.crop.x0;
-    dst.h = targetFrame.crop.y1 - targetFrame.crop.y0;
+        pl_frame targetFrame;
+        pl_frame_from_swapchain(&targetFrame, &target.swapchainFrame);
+        const auto slice = StationConnectPresentation::sliceForOutput(
+                    streamSize, m_PresentationCanvasSize,
+                    target.canvasRect);
+        if (slice.visible) {
+            pl_frame sourceFrame = mappedFrame;
+            sourceFrame.crop.x0 = mappedFrame.crop.x0 + slice.sourceRect.x();
+            sourceFrame.crop.y0 = mappedFrame.crop.y0 + slice.sourceRect.y();
+            sourceFrame.crop.x1 = sourceFrame.crop.x0 +
+                    slice.sourceRect.width();
+            sourceFrame.crop.y1 = sourceFrame.crop.y0 +
+                    slice.sourceRect.height();
 
-    // Scale the video to the surface size while preserving the aspect ratio
-    StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
+            const float targetScaleX =
+                    (targetFrame.crop.x1 - targetFrame.crop.x0) /
+                    static_cast<float>(target.canvasRect.width());
+            const float targetScaleY =
+                    (targetFrame.crop.y1 - targetFrame.crop.y0) /
+                    static_cast<float>(target.canvasRect.height());
+            const auto destination = slice.destinationRect;
+            const float targetOriginX = targetFrame.crop.x0;
+            const float targetOriginY = targetFrame.crop.y0;
+            targetFrame.crop.x0 = targetOriginX +
+                    destination.x() * targetScaleX;
+            targetFrame.crop.y0 = targetOriginY +
+                    destination.y() * targetScaleY;
+            targetFrame.crop.x1 = targetFrame.crop.x0 +
+                    destination.width() * targetScaleX;
+            targetFrame.crop.y1 = targetFrame.crop.y0 +
+                    destination.height() * targetScaleY;
 
-    targetFrame.crop.x0 = dst.x;
-    targetFrame.crop.y0 = dst.y;
-    targetFrame.crop.x1 = dst.x + dst.w;
-    targetFrame.crop.y1 = dst.y + dst.h;
+            targetFrame.num_overlays = target.primary ?
+                        static_cast<int>(overlays.size()) : 0;
+            targetFrame.overlays = target.primary ? overlays.data() : nullptr;
+            if (!pl_render_image(m_Renderer, &sourceFrame, &targetFrame,
+                                 &pl_render_fast_params)) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                             "pl_render_image() failed for StationConnect output");
+            }
+        }
 
-    // Render the video image and overlays into the swapchain buffer
-    targetFrame.num_overlays = (int)overlays.size();
-    targetFrame.overlays = overlays.data();
-    if (!pl_render_image(m_Renderer, &mappedFrame, &targetFrame, &pl_render_fast_params)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "pl_render_image() failed");
-        // NB: We must fallthrough to call pl_swapchain_submit_frame()
-    }
-
-    // Submit the frame for display and swap buffers
-    m_HasPendingSwapchainFrame = false;
-    if (!pl_swapchain_submit_frame(m_Swapchain)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "pl_swapchain_submit_frame() failed");
-
-        // Recreate the renderer
-        SDL_Event event;
-        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
-        SDL_PushEvent(&event);
-        goto UnmapExit;
-    }
+        target.hasPendingSwapchainFrame = false;
+        if (!pl_swapchain_submit_frame(target.swapchain)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "pl_swapchain_submit_frame() failed for StationConnect output");
+            rendererResetRequired = true;
+        }
 
 #ifdef Q_OS_WIN32
-    // On Windows, we swap buffers here instead of waitToRender()
-    // to avoid some performance problems on Nvidia GPUs.
-    pl_swapchain_swap_buffers(m_Swapchain);
+        pl_swapchain_swap_buffers(target.swapchain);
 #endif
+    }
 
-UnmapExit:
     // Delete any textures that need to be destroyed
     for (pl_tex& texture : texturesToDestroy) {
         pl_tex_destroy(m_Vulkan->gpu, &texture);
     }
 
     unmapAvFrameFromPlacebo(&mappedFrame, importedHostFrame);
+
+    if (rendererResetRequired) {
+        SDL_Event event = {};
+        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
+        SDL_PushEvent(&event);
+    }
 }
 
 bool PlVkRenderer::testRenderFrame(AVFrame *frame)

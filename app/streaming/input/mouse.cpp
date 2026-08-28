@@ -8,6 +8,10 @@
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 {
     int button;
+    SDL_Window* window = presentationWindow(event->windowID);
+    if (window == nullptr) {
+        return;
+    }
 
     if (event->which == SDL_TOUCH_MOUSEID) {
         // Ignore synthetic mouse events
@@ -16,7 +20,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     activateCompositorCursor();
     if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
-                isMouseInVideoRegion(event->x, event->y)) {
+                isMouseInVideoRegion(event->x, event->y,
+                                     event->windowID)) {
             // Capture the mouse again if clicked when unbound.
             // We start capture on left button released instead of
             // pressed to avoid sending an errant mouse button released
@@ -28,7 +33,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Not capturing
         return;
     }
-    else if (!isMouseInVideoRegion(event->x, event->y) && event->down) {
+    else if (!isMouseInVideoRegion(event->x, event->y,
+                                   event->windowID) && event->down) {
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
@@ -61,7 +67,7 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     // absolute position immediately before the button so a stale tablet or
     // coalesced motion sample cannot make the remote click land elsewhere.
     if (event->down && !sendAbsoluteMousePosition(
-                qRound(event->x), qRound(event->y), false)) {
+                window, qRound(event->x), qRound(event->y), false)) {
         return;
     }
 
@@ -84,6 +90,11 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
     activateCompositorCursor();
 
+    SDL_Window* window = presentationWindow(event->windowID);
+    if (window == nullptr) {
+        return;
+    }
+
     // Batch all pending mouse motion events to save CPU time
     Sint32 x = event->x, y = event->y;
     SDL_Event nextEvent;
@@ -93,9 +104,13 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         event = &nextEvent.motion;
 
         // Ignore synthetic mouse events
-        if (event->which != SDL_TOUCH_MOUSEID) {
+        if (event->which != SDL_TOUCH_MOUSEID &&
+                event->windowID == SDL_GetWindowID(window)) {
             x = event->x;
             y = event->y;
+        } else if (event->windowID != SDL_GetWindowID(window)) {
+            SDL_PushEvent(&nextEvent);
+            break;
         }
     }
 
@@ -103,27 +118,12 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     event = nullptr;
 
     int windowWidth, windowHeight;
-    SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
 
-    SDL_Rect src, dst;
     bool mouseInVideoRegion;
 
-    src.x = src.y = 0;
-    src.w = m_StreamWidth;
-    src.h = m_StreamHeight;
-
-    dst.x = dst.y = 0;
-    dst.w = windowWidth;
-    dst.h = windowHeight;
-
-    // Use the stream and window sizes to determine the video region
-    StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
-
-    mouseInVideoRegion = isMouseInVideoRegion(x, y, windowWidth, windowHeight);
-
-    // Clamp motion to the video region
-    x = qMin(qMax(x - dst.x, 0), dst.w);
-    y = qMin(qMax(y - dst.y, 0), dst.h);
+    mouseInVideoRegion = isMouseInVideoRegion(
+                x, y, SDL_GetWindowID(window), windowWidth, windowHeight);
 
     // Send the mouse position update if one of the following is true:
     // a) it is in the video region now
@@ -139,7 +139,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         }
     }
     if (mouseInVideoRegion || m_MouseWasInVideoRegion || m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
-        sendAbsoluteMousePosition(x + dst.x, y + dst.y, true);
+        sendAbsoluteMousePosition(window, x, y, true);
     }
 
     // Adjust the cursor visibility if applicable
@@ -158,32 +158,35 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
 }
 
 bool SdlInputHandler::sendAbsoluteMousePosition(
-        int windowX, int windowY, bool allowClampedPosition)
+        SDL_Window* window, int windowX, int windowY,
+        bool allowClampedPosition)
 {
+    const auto* output = presentationOutput(window);
+    if (output == nullptr) {
+        return false;
+    }
     int windowWidth = 0;
     int windowHeight = 0;
-    SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
     if (windowWidth <= 0 || windowHeight <= 0) {
         return false;
     }
 
-    SDL_Rect source{0, 0, m_StreamWidth, m_StreamHeight};
-    SDL_Rect destination{0, 0, windowWidth, windowHeight};
-    StreamUtils::scaleSourceToDestinationSurface(&source, &destination);
-    const bool inside = windowX >= destination.x &&
-            windowX <= destination.x + destination.w &&
-            windowY >= destination.y &&
-            windowY <= destination.y + destination.h;
-    if (!inside && !allowClampedPosition) {
+    QPointF streamPoint;
+    if (!StationConnectPresentation::mapWindowPointToStream(
+                QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
+                QSize(m_StreamWidth, m_StreamHeight),
+                m_PresentationLayout.canvasSize, output->canvasRect,
+                streamPoint, allowClampedPosition)) {
         return false;
     }
-
-    const int x = qMin(qMax(windowX - destination.x, 0), destination.w);
-    const int y = qMin(qMax(windowY - destination.y, 0), destination.h);
     return LiSendMousePositionEvent(
-                static_cast<short>(x), static_cast<short>(y),
-                static_cast<short>(destination.w),
-                static_cast<short>(destination.h)) == 0;
+                static_cast<short>(qBound(0, qRound(streamPoint.x()),
+                                          m_StreamWidth)),
+                static_cast<short>(qBound(0, qRound(streamPoint.y()),
+                                          m_StreamHeight)),
+                static_cast<short>(m_StreamWidth),
+                static_cast<short>(m_StreamHeight)) == 0;
 }
 
 void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
@@ -198,9 +201,14 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     }
     activateCompositorCursor();
 
+    SDL_Window* window = presentationWindow(event->windowID);
+    if (window == nullptr) {
+        return;
+    }
+
     const int mouseX = qRound(event->mouse_x);
     const int mouseY = qRound(event->mouse_y);
-    if (!isMouseInVideoRegion(mouseX, mouseY)) {
+    if (!isMouseInVideoRegion(mouseX, mouseY, event->windowID)) {
         // Ignore scroll events outside the video region
         return;
     }
@@ -226,27 +234,45 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     }
 }
 
-bool SdlInputHandler::isMouseInVideoRegion(int mouseX, int mouseY, int windowWidth, int windowHeight)
+bool SdlInputHandler::isMouseInVideoRegion(int mouseX, int mouseY,
+                                           Uint32 windowId,
+                                           int windowWidth, int windowHeight)
 {
-    SDL_Rect src, dst;
-
-    if (windowWidth < 0 || windowHeight < 0) {
-        SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
+    SDL_Window* window = presentationWindow(windowId);
+    const auto* output = presentationOutput(window);
+    if (window == nullptr || output == nullptr) {
+        return false;
     }
 
-    src.x = src.y = 0;
-    src.w = m_StreamWidth;
-    src.h = m_StreamHeight;
+    if (windowWidth < 0 || windowHeight < 0) {
+        SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+    }
+    QPointF streamPoint;
+    return StationConnectPresentation::mapWindowPointToStream(
+                QPointF(mouseX, mouseY), QSize(windowWidth, windowHeight),
+                QSize(m_StreamWidth, m_StreamHeight),
+                m_PresentationLayout.canvasSize, output->canvasRect,
+                streamPoint, false);
+}
 
-    dst.x = dst.y = 0;
-    dst.w = windowWidth;
-    dst.h = windowHeight;
+SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
+{
+    if (windowId == 0) {
+        return m_Window;
+    }
+    SDL_Window* window = SDL_GetWindowFromID(windowId);
+    return presentationOutput(window) != nullptr ? window : nullptr;
+}
 
-    // Use the stream and window sizes to determine the video region
-    StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
-
-    return (mouseX >= dst.x && mouseX <= dst.x + dst.w) &&
-           (mouseY >= dst.y && mouseY <= dst.y + dst.h);
+const StationConnectPresentationOutput* SdlInputHandler::presentationOutput(
+        SDL_Window* window) const
+{
+    for (const auto& output : m_PresentationLayout.outputs) {
+        if (output.window == window) {
+            return &output;
+        }
+    }
+    return nullptr;
 }
 
 void SdlInputHandler::updatePointerRegionLock()

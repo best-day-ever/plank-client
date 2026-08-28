@@ -58,6 +58,10 @@
 #include <QWindow>
 #include <QScreen>
 
+#include <algorithm>
+#include <tuple>
+#include <utility>
+
 #define CONN_TEST_SERVER "qt.conntest.moonlight-stream.org"
 
 CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
@@ -329,7 +333,7 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
                             DecoderCaptureSource captureSource,
                             DecoderEncoderBackend encoderBackend)
 {
-    DECODER_PARAMETERS params;
+    DECODER_PARAMETERS params = {};
 
     // We should never have vsync enabled for test-mode.
     // It introduces unnecessary delay for renderers that may
@@ -348,6 +352,8 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
     params.selectionMode = selectionMode;
     params.captureSource = captureSource;
     params.encoderBackend = encoderBackend;
+    params.presentationLayout = !testOnly && s_ActiveSession != nullptr ?
+                &s_ActiveSession->m_PresentationLayout : nullptr;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -740,6 +746,11 @@ bool Session::initialize()
         return false;
     }
 
+    if (!snapshotClientDisplays()) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
+    }
+
     if (m_Computer->stationConnectAuthentication &&
             !configureStationConnectHostLayout()) {
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -1086,6 +1097,187 @@ int Session::getTargetDisplayIndex() const
     return displayIndex;
 }
 
+bool Session::snapshotClientDisplays()
+{
+    m_ClientDisplays.clear();
+    const int targetIndex = getTargetDisplayIndex();
+    m_TargetDisplayId = StreamUtils::getDisplayId(targetIndex);
+    const int displayCount = StreamUtils::getDisplayCount();
+    for (int index = 0; index < displayCount; ++index) {
+        ClientDisplaySnapshot snapshot;
+        snapshot.displayId = StreamUtils::getDisplayId(index);
+        SDL_DisplayMode nativeMode;
+        SDL_Rect safeArea;
+        if (snapshot.displayId == 0 ||
+                !SDL_GetDisplayBounds(snapshot.displayId,
+                                      &snapshot.logicalBounds) ||
+                !StreamUtils::getNativeDesktopMode(index, &nativeMode,
+                                                   &safeArea)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Unable to snapshot client display %d: %s",
+                         index, SDL_GetError());
+            return false;
+        }
+        snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
+        m_ClientDisplays.append(snapshot);
+    }
+
+    std::sort(m_ClientDisplays.begin(), m_ClientDisplays.end(),
+              [](const auto& left, const auto& right) {
+        return std::make_tuple(left.logicalBounds.x, left.logicalBounds.y) <
+                std::make_tuple(right.logicalBounds.x,
+                                right.logicalBounds.y);
+    });
+    m_UseMultiDisplayPresentation = m_IsFullScreen &&
+            strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+            m_ClientDisplays.size() == 2;
+    if (m_UseMultiDisplayPresentation) {
+        const auto& left = m_ClientDisplays.at(0).logicalBounds;
+        const auto& right = m_ClientDisplays.at(1).logicalBounds;
+        const bool horizontal = left.x + left.w <= right.x;
+        const bool overlapsVertically = left.y < right.y + right.h &&
+                right.y < left.y + left.h;
+        if (!horizontal || !overlapsVertically) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Two-output presentation requires client monitors arranged left to right; using the target output only");
+            m_UseMultiDisplayPresentation = false;
+        }
+    }
+
+    int canvasX = 0;
+    int canvasHeight = 0;
+    for (auto& display : m_ClientDisplays) {
+        display.canvasRect = QRect(canvasX, 0,
+                                   display.nativeSize.width(),
+                                   display.nativeSize.height());
+        canvasX += display.nativeSize.width();
+        canvasHeight = qMax(canvasHeight, display.nativeSize.height());
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "StationConnect client output %u: logical=%dx%d%+d%+d native=%dx%d canvas=%dx%d%+d%+d%s",
+                    display.displayId,
+                    display.logicalBounds.w, display.logicalBounds.h,
+                    display.logicalBounds.x, display.logicalBounds.y,
+                    display.nativeSize.width(), display.nativeSize.height(),
+                    display.canvasRect.width(), display.canvasRect.height(),
+                    display.canvasRect.x(), display.canvasRect.y(),
+                    display.displayId == m_TargetDisplayId ? " primary" : "");
+    }
+    if (m_ClientDisplays.isEmpty()) {
+        return false;
+    }
+    QSize targetNativeSize;
+    for (const auto& display : std::as_const(m_ClientDisplays)) {
+        if (display.displayId == m_TargetDisplayId) {
+            targetNativeSize = display.nativeSize;
+            break;
+        }
+    }
+    if (!targetNativeSize.isValid()) {
+        targetNativeSize = m_ClientDisplays.first().nativeSize;
+        m_TargetDisplayId = m_ClientDisplays.first().displayId;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect client presentation: outputs=%d canvas=%dx%d mode=%s",
+                m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1,
+                m_UseMultiDisplayPresentation ? canvasX : targetNativeSize.width(),
+                m_UseMultiDisplayPresentation ? canvasHeight : targetNativeSize.height(),
+                m_UseMultiDisplayPresentation ? "multi-output" : "single-output");
+    return true;
+}
+
+void Session::rebuildPresentationLayout()
+{
+    m_PresentationLayout = {};
+    if (m_Window == nullptr) {
+        return;
+    }
+
+    const bool multiOutputActive = m_UseMultiDisplayPresentation &&
+            (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
+    if (multiOutputActive) {
+        int canvasWidth = 0;
+        int canvasHeight = 0;
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            SDL_Window* window = display.displayId == m_TargetDisplayId ?
+                        m_Window : nullptr;
+            if (window == nullptr) {
+                for (SDL_Window* candidate : std::as_const(m_SecondaryWindows)) {
+                    if (SDL_GetDisplayForWindow(candidate) == display.displayId) {
+                        window = candidate;
+                        break;
+                    }
+                }
+            }
+            if (window == nullptr) {
+                continue;
+            }
+            m_PresentationLayout.outputs.append(
+                {window, display.canvasRect, window == m_Window});
+            canvasWidth = qMax(canvasWidth, display.canvasRect.right() + 1);
+            canvasHeight = qMax(canvasHeight, display.canvasRect.bottom() + 1);
+        }
+        m_PresentationLayout.canvasSize = QSize(canvasWidth, canvasHeight);
+    }
+    else {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(m_Window, &width, &height);
+        m_PresentationLayout.canvasSize = QSize(qMax(1, width), qMax(1, height));
+        m_PresentationLayout.outputs.append(
+            {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true});
+    }
+
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->setPresentationLayout(m_PresentationLayout);
+    }
+}
+
+SDL_Window* Session::windowForEvent(Uint32 windowId) const
+{
+    SDL_Window* window = SDL_GetWindowFromID(windowId);
+    if (window == m_Window || m_SecondaryWindows.contains(window)) {
+        return window;
+    }
+    return nullptr;
+}
+
+bool Session::anyPresentationWindowFocused() const
+{
+    if (m_Window != nullptr &&
+            (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS)) {
+        return true;
+    }
+    for (SDL_Window* window : m_SecondaryWindows) {
+        if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Session::setPresentationWindowsFullscreen(bool fullscreen)
+{
+    SDL_SetWindowFullscreen(m_Window, fullscreen ? m_FullScreenFlag : 0);
+    for (SDL_Window* window : m_SecondaryWindows) {
+        if (fullscreen) {
+            SDL_ShowWindow(window);
+            SDL_SetWindowFullscreen(window, m_FullScreenFlag);
+        }
+        else {
+            SDL_HideWindow(window);
+        }
+    }
+    rebuildPresentationLayout();
+}
+
+void Session::minimizePresentationWindows()
+{
+    SDL_MinimizeWindow(m_Window);
+    for (SDL_Window* window : m_SecondaryWindows) {
+        SDL_MinimizeWindow(window);
+    }
+}
+
 bool Session::configureStationConnectHostLayout()
 {
     QString layoutPolicy;
@@ -1123,23 +1315,12 @@ bool Session::configureStationConnectHostLayout()
     m_ResolvedScalingMode = scalingMode;
     if (layoutPolicy == NvOutputTopology::MatchClientHostLayout) {
         QVector<NvClientDisplay> displays;
-        const int displayCount = StreamUtils::getDisplayCount();
-        for (int displayIndex = 0; displayIndex < displayCount; ++displayIndex) {
-            const SDL_DisplayID displayId = StreamUtils::getDisplayId(displayIndex);
-            SDL_DisplayMode nativeMode;
-            SDL_Rect safeArea;
-            SDL_Rect bounds;
-            if (!StreamUtils::getNativeDesktopMode(displayIndex, &nativeMode, &safeArea) ||
-                    !SDL_GetDisplayBounds(displayId, &bounds)) {
-                const QString error = tr("Unable to detect the native layout of client monitor %1.")
-                        .arg(displayIndex + 1);
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s: %s",
-                             qPrintable(error), SDL_GetError());
-                emit displayLaunchError(error);
-                return false;
-            }
-            displays.append({QRect(bounds.x, bounds.y, bounds.w, bounds.h),
-                             QSize(nativeMode.w, nativeMode.h)});
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            displays.append({QRect(display.logicalBounds.x,
+                                   display.logicalBounds.y,
+                                   display.logicalBounds.w,
+                                   display.logicalBounds.h),
+                             display.nativeSize});
         }
 
         QString error;
@@ -1186,28 +1367,24 @@ bool Session::configureStationConnectHostLayout()
 
 QSize Session::configureStationConnectDisplayMode()
 {
-    const int displayIndex = getTargetDisplayIndex();
-    SDL_DisplayMode nativeMode;
-    SDL_Rect safeArea;
     QSize detectedResolution;
 
-    if (StreamUtils::getNativeDesktopMode(displayIndex, &nativeMode, &safeArea)) {
-        // On Wayland, the usable bounds are expressed in compositor-scaled
-        // logical coordinates. Stream resolution must use the panel's real
-        // pixels so fractional desktop scaling cannot introduce a filtered
-        // downscale followed by an enlargement during presentation.
-        detectedResolution = QSize(nativeMode.w, nativeMode.h);
-    }
-    else if (const SDL_DisplayMode* desktopMode =
-                 SDL_GetDesktopDisplayMode(StreamUtils::getDisplayId(displayIndex))) {
-        detectedResolution = QSize(desktopMode->w, desktopMode->h);
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Using current desktop mode because native display detection failed");
+    if (m_UseMultiDisplayPresentation) {
+        int width = 0;
+        int height = 0;
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            width += display.nativeSize.width();
+            height = qMax(height, display.nativeSize.height());
+        }
+        detectedResolution = QSize(width, height);
     }
     else {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Client display resolution detection failed: %s",
-                    SDL_GetError());
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            if (display.displayId == m_TargetDisplayId) {
+                detectedResolution = display.nativeSize;
+                break;
+            }
+        }
     }
 
     QSize nativeCanvasResolution;
@@ -1406,6 +1583,13 @@ void Session::toggleFullscreen()
 {
     bool fullScreen = !(SDL_GetWindowFlags(m_Window) & m_FullScreenFlag);
 
+    if (m_UseMultiDisplayPresentation) {
+        SDL_LockSpinlock(&m_DecoderLock);
+        delete m_VideoDecoder;
+        m_VideoDecoder = nullptr;
+        SDL_UnlockSpinlock(&m_DecoderLock);
+    }
+
 #if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN)
     // Destroy the video decoder before toggling full-screen because D3D9 can try
     // to put the window back into full-screen before we've managed to destroy
@@ -1422,13 +1606,19 @@ void Session::toggleFullscreen()
 #endif
 
     // Actually enter/leave fullscreen
-    SDL_SetWindowFullscreen(m_Window, fullScreen ? m_FullScreenFlag : 0);
+    setPresentationWindowsFullscreen(fullScreen);
 
     // Input handler might need to start/stop keyboard grab after changing modes
     m_InputHandler->updateKeyboardGrabState();
 
     // Input handler might need stop/stop mouse grab after changing modes
     m_InputHandler->updatePointerRegionLock();
+
+    if (m_UseMultiDisplayPresentation) {
+        SDL_Event resetEvent = {};
+        resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+        SDL_PushEvent(&resetEvent);
+    }
 }
 
 class AsyncConnectionStartThread : public QThread
@@ -2331,6 +2521,70 @@ void Session::execInternal()
 
     SDL_SetWindowPosition(m_Window, x, y);
 
+    if (m_UseMultiDisplayPresentation) {
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            if (display.displayId == m_TargetDisplayId) {
+                continue;
+            }
+
+            SDL_PropertiesID properties = SDL_CreateProperties();
+            const Uint32 flags = defaultWindowFlags |
+                    StreamUtils::getPlatformWindowFlags();
+            SDL_SetStringProperty(properties,
+                                  SDL_PROP_WINDOW_CREATE_TITLE_STRING,
+                                  windowName.c_str());
+            SDL_SetNumberProperty(properties,
+                                  SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER,
+                                  display.logicalBounds.w);
+            SDL_SetNumberProperty(properties,
+                                  SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER,
+                                  display.logicalBounds.h);
+            SDL_SetNumberProperty(properties,
+                                  SDL_PROP_WINDOW_CREATE_X_NUMBER,
+                                  SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
+            SDL_SetNumberProperty(properties,
+                                  SDL_PROP_WINDOW_CREATE_Y_NUMBER,
+                                  SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
+            SDL_SetNumberProperty(properties,
+                                  SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                                  flags);
+            SDL_SetBooleanProperty(properties,
+                                   SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
+                                   true);
+            SDL_Window* secondary = SDL_CreateWindowWithProperties(properties);
+            SDL_DestroyProperties(properties);
+            if (secondary == nullptr) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                             "Failed to create StationConnect fullscreen surface for client output %u: %s",
+                             display.displayId, SDL_GetError());
+                emit displayLaunchError(
+                    tr("Unable to create a fullscreen surface for the second client monitor."));
+                for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+                    SDL_DestroyWindow(window);
+                }
+                m_SecondaryWindows.clear();
+                SDL_DestroyWindow(m_Window);
+                m_Window = nullptr;
+                delete m_InputHandler;
+                m_InputHandler = nullptr;
+                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                QThreadPool::globalInstance()->start(
+                            new DeferredSessionCleanupTask(this));
+                return;
+            }
+            SDL_SetWindowFullscreenMode(secondary, nullptr);
+            SDL_SetWindowPosition(
+                secondary,
+                SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId),
+                SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
+            SDL_SetWindowFullscreen(secondary, m_FullScreenFlag);
+            m_SecondaryWindows.append(secondary);
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Created StationConnect Wayland fullscreen surface for output %u",
+                        display.displayId);
+        }
+    }
+
     if (!m_IsFullScreen) {
         // Windowed means a normal compositor-managed desktop window. Do not
         // inherit a maximized launcher state that can make it indistinguishable
@@ -2374,6 +2628,7 @@ void Session::execInternal()
 #endif
 
     m_InputHandler->setWindow(m_Window);
+    rebuildPresentationLayout();
 
     QImage iconImage(":/res/stationconnect-logo.png");
     iconImage = iconImage.scaled(ICON_SIZE,
@@ -2392,6 +2647,9 @@ void Session::execInternal()
         // This must be called before entering full-screen mode on Windows
         // or our icon will not persist when toggling to windowed mode
         SDL_SetWindowIcon(m_Window, iconSurface);
+        for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+            SDL_SetWindowIcon(window, iconSurface);
+        }
     }
 #endif
 
@@ -2401,7 +2659,7 @@ void Session::execInternal()
 
     // Enter full screen if requested
     if (m_IsFullScreen) {
-        SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag);
+        setPresentationWindowsFullscreen(true);
     }
 
     bool needsFirstEnterCapture = false;
@@ -2425,6 +2683,9 @@ void Session::execInternal()
     // causes an IME popup when certain keys are held down
     // on macOS.
     SDL_StopTextInput(m_Window);
+    for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+        SDL_StopTextInput(window);
+    }
 
     // Disable the screen saver if requested
     if (m_Preferences->keepAwake) {
@@ -2491,7 +2752,7 @@ void Session::execInternal()
             } else if (action == StationConnectToolbar::Action::Minimize) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "StationConnect toolbar minimize requested");
-                SDL_MinimizeWindow(m_Window);
+                minimizePresentationWindows();
             }
         }
 
@@ -2535,13 +2796,15 @@ void Session::execInternal()
             // whose input connection has already stopped.
             switch (event.type) {
             case SDL_EVENT_MOUSE_MOTION:
-                if (m_StationConnectToolbar) {
+                if (m_StationConnectToolbar &&
+                        event.motion.windowID == SDL_GetWindowID(m_Window)) {
                     m_StationConnectToolbar->observeMouseMotion(event.motion);
                 }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                if (m_StationConnectToolbar) {
+                if (m_StationConnectToolbar &&
+                        event.button.windowID == SDL_GetWindowID(m_Window)) {
                     const auto action =
                             m_StationConnectToolbar->handleMouseButton(event.button);
                     if (action == StationConnectToolbar::Action::Disconnect) {
@@ -2553,12 +2816,13 @@ void Session::execInternal()
                         toggleFullscreen();
                         m_StationConnectToolbar->notifyWindowChanged();
                     } else if (action == StationConnectToolbar::Action::Minimize) {
-                        SDL_MinimizeWindow(m_Window);
+                        minimizePresentationWindows();
                     }
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
-                if (m_StationConnectToolbar) {
+                if (m_StationConnectToolbar &&
+                        event.wheel.windowID == SDL_GetWindowID(m_Window)) {
                     m_StationConnectToolbar->handleMouseWheel(event.wheel);
                 }
                 break;
@@ -2577,10 +2841,12 @@ void Session::execInternal()
                 }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
-                if (m_StationConnectToolbar) {
-                    m_StationConnectToolbar->notifyFocusLost();
+                if (!anyPresentationWindowFocused()) {
+                    if (m_StationConnectToolbar) {
+                        m_StationConnectToolbar->notifyFocusLost();
+                    }
+                    m_InputHandler->notifyFocusLost();
                 }
-                m_InputHandler->notifyFocusLost();
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 m_InputHandler->notifyFocusGained();
@@ -2683,20 +2949,27 @@ void Session::execInternal()
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
         case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         case SDL_EVENT_WINDOW_MOUSE_ENTER:
-            if (m_StationConnectToolbar &&
+        {
+            SDL_Window* eventWindow = windowForEvent(event.window.windowID);
+            if (eventWindow == nullptr) {
+                break;
+            }
+            if (m_StationConnectToolbar && eventWindow == m_Window &&
                     event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 m_StationConnectToolbar->notifyWindowChanged();
             }
             // Early handling of some events
             switch (event.type) {
             case SDL_EVENT_WINDOW_FOCUS_LOST:
-                if (m_StationConnectToolbar) {
-                    m_StationConnectToolbar->notifyFocusLost();
+                if (!anyPresentationWindowFocused()) {
+                    if (m_StationConnectToolbar) {
+                        m_StationConnectToolbar->notifyFocusLost();
+                    }
+                    if (m_Preferences->muteOnFocusLoss) {
+                        m_AudioMuted = true;
+                    }
+                    m_InputHandler->notifyFocusLost();
                 }
-                if (m_Preferences->muteOnFocusLoss) {
-                    m_AudioMuted = true;
-                }
-                m_InputHandler->notifyFocusLost();
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 if (m_Preferences->muteOnFocusLoss) {
@@ -2714,6 +2987,13 @@ void Session::execInternal()
             if (needsFirstEnterCapture && event.type == SDL_EVENT_WINDOW_MOUSE_ENTER) {
                 m_InputHandler->setCaptureActive(true);
                 needsFirstEnterCapture = false;
+            }
+
+            // Secondary Vulkan swapchains resize themselves during the next
+            // frame. Only the primary window participates in decoder and
+            // toolbar lifecycle decisions.
+            if (eventWindow != m_Window) {
+                break;
             }
 
             // We want to recreate the decoder for resizes (full-screen toggles) and the initial shown event.
@@ -2799,8 +3079,12 @@ void Session::execInternal()
                         event.type,
                         event.window.data1,
                         event.window.data2);
+            SDL_Event resetEvent = {};
+            resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+            SDL_PushEvent(&resetEvent);
+            break;
+        }
 
-            // Fall through
         case SDL_EVENT_RENDER_DEVICE_RESET:
             if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -2903,7 +3187,8 @@ void Session::execInternal()
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (m_StationConnectToolbar) {
+            if (m_StationConnectToolbar &&
+                    event.button.windowID == SDL_GetWindowID(m_Window)) {
                 const auto action = m_StationConnectToolbar->handleMouseButton(event.button);
                 if (action == StationConnectToolbar::Action::Disconnect) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -2920,7 +3205,7 @@ void Session::execInternal()
                 if (action == StationConnectToolbar::Action::Minimize) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "StationConnect toolbar minimize requested");
-                    SDL_MinimizeWindow(m_Window);
+                    minimizePresentationWindows();
                     break;
                 }
                 if (action == StationConnectToolbar::Action::Consumed) {
@@ -2932,7 +3217,8 @@ void Session::execInternal()
         case SDL_EVENT_MOUSE_MOTION:
         {
             bool toolbarConsumedMotion = false;
-            if (m_StationConnectToolbar) {
+            if (m_StationConnectToolbar &&
+                    event.motion.windowID == SDL_GetWindowID(m_Window)) {
                 // The ordinary input path batches queued motion for efficient
                 // transport. Aggregate it here when the toolbar is present so
                 // the toolbar tracker and host receive the identical delta.
@@ -2942,6 +3228,11 @@ void Session::execInternal()
                                           SDL_EVENT_MOUSE_MOTION,
                                           SDL_EVENT_MOUSE_MOTION) > 0) {
                         if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
+                            if (nextMotionEvent.motion.windowID !=
+                                    event.motion.windowID) {
+                                SDL_PushEvent(&nextMotionEvent);
+                                break;
+                            }
                             event.motion.timestamp =
                                     nextMotionEvent.motion.timestamp;
                             event.motion.x = nextMotionEvent.motion.x;
@@ -2966,6 +3257,7 @@ void Session::execInternal()
         }
         case SDL_EVENT_MOUSE_WHEEL:
             if (m_StationConnectToolbar &&
+                    event.wheel.windowID == SDL_GetWindowID(m_Window) &&
                     m_StationConnectToolbar->handleMouseWheel(event.wheel)) {
                 break;
             }
@@ -2979,6 +3271,9 @@ DispatchDeferredCleanup:
     // so we can return to the Qt GUI ASAP.
     if (reconnectThread != nullptr) {
         SDL_HideWindow(m_Window);
+        for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+            SDL_HideWindow(window);
+        }
         m_ReconnectCancelled.store(true);
         m_ConnectionStartCancelled.store(true);
         reconnectThread->wait();
@@ -3042,7 +3337,12 @@ DispatchDeferredCleanup:
 
     // This must be called after the decoder is deleted, because
     // the renderer may want to interact with the window
+    for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+        SDL_DestroyWindow(window);
+    }
+    m_SecondaryWindows.clear();
     SDL_DestroyWindow(m_Window);
+    m_Window = nullptr;
 
     if (iconSurface != nullptr) {
         SDL_DestroySurface(iconSurface);

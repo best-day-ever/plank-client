@@ -6,6 +6,8 @@
 #include <Limelight.h>
 #include <SDL3/SDL.h>
 
+#include "../stationconnectpresentation.h"
+
 #define SDL_CODE_FRAME_READY 0
 
 #define MAX_SLICES 4
@@ -71,6 +73,7 @@ typedef struct _DECODER_PARAMETERS {
     bool enableFramePacing;
     bool enableIdentityGbr;
     bool testOnly;
+    const StationConnectPresentationLayout* presentationLayout;
 } DECODER_PARAMETERS, *PDECODER_PARAMETERS;
 
 #define WINDOW_STATE_CHANGE_SIZE 0x01

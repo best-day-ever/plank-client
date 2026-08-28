@@ -12,6 +12,7 @@
 
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 
 class PlVkRenderer : public IFFmpegRenderer {
 public:
@@ -58,9 +59,14 @@ private:
     bool tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDeviceProperties* deviceProps,
                              PDECODER_PARAMETERS decoderParams, bool hdrOutputRequired);
     bool isExtensionSupportedByPhysicalDevice(VkPhysicalDevice device, const char* extensionName);
-    bool isPresentModeSupportedByPhysicalDevice(VkPhysicalDevice device, VkPresentModeKHR presentMode);
-    bool isColorSpaceSupportedByPhysicalDevice(VkPhysicalDevice device, VkColorSpaceKHR colorSpace);
-    bool isSurfacePresentationSupportedByPhysicalDevice(VkPhysicalDevice device);
+    bool isPresentModeSupportedByPhysicalDevice(VkPhysicalDevice device,
+                                                VkSurfaceKHR surface,
+                                                VkPresentModeKHR presentMode);
+    bool isColorSpaceSupportedByPhysicalDevice(VkPhysicalDevice device,
+                                               VkSurfaceKHR surface,
+                                               VkColorSpaceKHR colorSpace);
+    bool isSurfacePresentationSupportedByPhysicalDevice(VkPhysicalDevice device,
+                                                        VkSurfaceKHR surface);
 
     // The backend renderer if we're frontend-only
     IFFmpegRenderer* m_Backend;
@@ -68,23 +74,29 @@ private:
 
     // SDL state
     SDL_Window* m_Window = nullptr;
+    QSize m_PresentationCanvasSize;
+
+    struct PresentationTarget {
+        SDL_Window* window = nullptr;
+        QRect canvasRect;
+        bool primary = false;
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        pl_swapchain swapchain = nullptr;
+        pl_swapchain_frame swapchainFrame = {};
+        bool hasPendingSwapchainFrame = false;
+    };
+    std::vector<PresentationTarget> m_PresentationTargets;
 
     // The libplacebo rendering state
     pl_log m_Log = nullptr;
     pl_vk_inst m_PlVkInstance = nullptr;
-    VkSurfaceKHR m_VkSurface = VK_NULL_HANDLE;
     pl_vulkan m_Vulkan = nullptr;
-    pl_swapchain m_Swapchain = nullptr;
     pl_renderer m_Renderer = nullptr;
     pl_tex m_Textures[PL_MAX_PLANES] = {};
     pl_color_space m_LastColorspace = {};
     SoftwareFrameAllocator m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
     std::mutex m_ImportedHostPoolMutex;
     std::unordered_map<size_t, AVBufferPool*> m_ImportedHostPools;
-
-    // Pending swapchain state shared between waitToRender(), renderFrame(), and cleanupRenderContext()
-    pl_swapchain_frame m_SwapchainFrame = {};
-    bool m_HasPendingSwapchainFrame = false;
 
     // Overlay state
     SDL_SpinLock m_OverlayLock = 0;

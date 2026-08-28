@@ -3,6 +3,7 @@
 #include <QSemaphore>
 #include <QSize>
 #include <QStringList>
+#include <QVector>
 #include <QWindow>
 
 #include <atomic>
@@ -220,6 +221,18 @@ private:
 
     int getTargetDisplayIndex() const;
 
+    bool snapshotClientDisplays();
+
+    void rebuildPresentationLayout();
+
+    SDL_Window* windowForEvent(Uint32 windowId) const;
+
+    bool anyPresentationWindowFocused() const;
+
+    void setPresentationWindowsFullscreen(bool fullscreen);
+
+    void minimizePresentationWindows();
+
     bool configureStationConnectHostLayout();
 
     QSize configureStationConnectDisplayMode();
@@ -338,6 +351,18 @@ private:
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
+
+    struct ClientDisplaySnapshot {
+        SDL_DisplayID displayId = 0;
+        SDL_Rect logicalBounds = {};
+        QSize nativeSize;
+        QRect canvasRect;
+    };
+    QVector<ClientDisplaySnapshot> m_ClientDisplays;
+    SDL_DisplayID m_TargetDisplayId = 0;
+    bool m_UseMultiDisplayPresentation = false;
+    QVector<SDL_Window*> m_SecondaryWindows;
+    StationConnectPresentationLayout m_PresentationLayout;
     SdlInputHandler* m_InputHandler;
     int m_FlushingWindowEventsRef;
 

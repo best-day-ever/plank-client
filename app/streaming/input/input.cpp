@@ -187,6 +187,21 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 #endif
 }
 
+void SdlInputHandler::setPresentationLayout(
+        const StationConnectPresentationLayout& layout)
+{
+    m_PresentationLayout = layout;
+    if (m_PresentationLayout.outputs.isEmpty() && m_Window != nullptr) {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(m_Window, &width, &height);
+        m_PresentationLayout.canvasSize = QSize(qMax(1, width), qMax(1, height));
+        m_PresentationLayout.outputs.append(
+            {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true});
+    }
+    updatePointerRegionLock();
+}
+
 bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
                                               unsigned int length)
 {
@@ -413,13 +428,11 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     m_AppliedRemoteCursorPosition = position;
     m_AppliedRemoteCursorPositionValid = true;
     m_AppliedRemoteCursorPositionSequence = position.sequence;
-    if (!ensureWaylandTabletCursorAttached()) {
-        return;
-    }
-
+    SDL_Window* targetWindow = nullptr;
     int x = 0;
     int y = 0;
-    if (!mapRemoteCursorPositionToWindow(position, x, y)) {
+    if (!mapRemoteCursorPositionToWindow(position, targetWindow, x, y) ||
+            !ensureWaylandTabletCursorAttached(targetWindow)) {
         return;
     }
     m_WaylandTabletCursor->setPosition(x, y);
@@ -589,7 +602,9 @@ void SdlInputHandler::updateKeyboardGrabState()
     // Don't close the window on Alt+F4 when keyboard grab is enabled
     SDL_SetHint(SDL_HINT_WINDOWS_CLOSE_ON_ALT_F4, shouldGrab ? "0" : "1");
 
-    SDL_SetWindowKeyboardGrab(m_Window, shouldGrab ? true : false);
+    for (const auto& output : m_PresentationLayout.outputs) {
+        SDL_SetWindowKeyboardGrab(output.window, shouldGrab ? true : false);
+    }
 
     m_KeyboardCaptureActive = shouldGrab;
 }
@@ -608,13 +623,19 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
     // always set when capture "fails" on SDL3, even though the user may have
     // configured the compositor to pass through system keys to us anyway.
     // See issues #1776 and #1900 for details.
-    Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
-    if (!(windowFlags & SDL_WINDOW_INPUT_FOCUS) || !m_KeyboardCaptureActive) {
+    bool focused = false;
+    bool fullscreen = false;
+    for (const auto& output : m_PresentationLayout.outputs) {
+        const Uint32 windowFlags = SDL_GetWindowFlags(output.window);
+        focused = focused || (windowFlags & SDL_WINDOW_INPUT_FOCUS);
+        fullscreen = fullscreen || (windowFlags & SDL_WINDOW_FULLSCREEN);
+    }
+    if (!focused || !m_KeyboardCaptureActive) {
         return false;
     }
 
     if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
-            !(windowFlags & SDL_WINDOW_FULLSCREEN)) {
+            !fullscreen) {
         return false;
     }
 
@@ -642,7 +663,8 @@ void SdlInputHandler::setCaptureActive(bool active)
         mouseX -= windowX;
         mouseY -= windowY;
 
-        if (isMouseInVideoRegion(mouseX, mouseY)) {
+        if (isMouseInVideoRegion(mouseX, mouseY,
+                                 SDL_GetWindowID(m_Window))) {
             // Synthesize a mouse event to synchronize the cursor
             SDL_MouseMotionEvent motionEvent = {};
             motionEvent.type = SDL_EVENT_MOUSE_MOTION;
@@ -700,39 +722,46 @@ void SdlInputHandler::activateCompositorCursor()
 }
 
 bool SdlInputHandler::mapRemoteCursorPositionToWindow(
-        const RemoteCursorPosition& position, int& x, int& y) const
+        const RemoteCursorPosition& position, SDL_Window*& window,
+        int& x, int& y) const
 {
     if (m_Window == nullptr || position.frameWidth == 0 ||
             position.frameHeight == 0) {
         return false;
     }
 
-    int windowWidth = 0;
-    int windowHeight = 0;
-    SDL_GetWindowSize(m_Window, &windowWidth, &windowHeight);
-    if (windowWidth <= 0 || windowHeight <= 0) {
-        return false;
+    const QPointF streamPoint(position.x, position.y);
+    for (const auto& output : m_PresentationLayout.outputs) {
+        int windowWidth = 0;
+        int windowHeight = 0;
+        SDL_GetWindowSize(output.window, &windowWidth, &windowHeight);
+        QPointF windowPoint;
+        if (StationConnectPresentation::mapStreamPointToWindow(
+                    streamPoint,
+                    QSize(position.frameWidth, position.frameHeight),
+                    m_PresentationLayout.canvasSize,
+                    output.canvasRect,
+                    QSize(windowWidth, windowHeight),
+                    windowPoint)) {
+            window = output.window;
+            x = qRound(windowPoint.x());
+            y = qRound(windowPoint.y());
+            return true;
+        }
     }
-
-    SDL_Rect source{0, 0, m_StreamWidth, m_StreamHeight};
-    SDL_Rect destination{0, 0, windowWidth, windowHeight};
-    StreamUtils::scaleSourceToDestinationSurface(&source, &destination);
-    x = destination.x + static_cast<int>(
-            (static_cast<std::uint64_t>(position.x) * destination.w) /
-            position.frameWidth);
-    y = destination.y + static_cast<int>(
-            (static_cast<std::uint64_t>(position.y) * destination.h) /
-            position.frameHeight);
-    return true;
+    return false;
 }
 
-bool SdlInputHandler::ensureWaylandTabletCursorAttached()
+bool SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
 {
-    if (!m_LocalCursorSupported || m_Window == nullptr) {
+    if (targetWindow == nullptr) {
+        targetWindow = m_Window;
+    }
+    if (!m_LocalCursorSupported || targetWindow == nullptr) {
         return false;
     }
     if (m_WaylandTabletCursor &&
-            m_WaylandTabletCursor->isAttachedTo(m_Window)) {
+            m_WaylandTabletCursor->isAttachedTo(targetWindow)) {
         return true;
     }
 
@@ -742,7 +771,7 @@ bool SdlInputHandler::ensureWaylandTabletCursorAttached()
         m_WaylandTabletCursor.reset();
     }
 
-    m_WaylandTabletCursor = StationConnectWaylandCursor::create(m_Window);
+    m_WaylandTabletCursor = StationConnectWaylandCursor::create(targetWindow);
     if (!m_WaylandTabletCursor) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Unable to attach StationConnect Wayland Wacom cursor surface");
@@ -762,10 +791,13 @@ bool SdlInputHandler::ensureWaylandTabletCursorAttached()
                     static_cast<int>(m_AppliedRemoteCursor.hotspotY));
     }
     if (m_AppliedRemoteCursorPositionValid) {
+        SDL_Window* positionWindow = nullptr;
         int x = 0;
         int y = 0;
         if (mapRemoteCursorPositionToWindow(
-                    m_AppliedRemoteCursorPosition, x, y)) {
+                    m_AppliedRemoteCursorPosition,
+                    positionWindow, x, y) &&
+                positionWindow == targetWindow) {
             m_WaylandTabletCursor->setPosition(x, y);
         }
     }

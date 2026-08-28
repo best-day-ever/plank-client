@@ -2,6 +2,7 @@
 
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
+#include "streaming/stationconnectpresentation.h"
 
 #include <SDL3/SDL.h>
 
@@ -27,6 +28,8 @@ public:
     ~SdlInputHandler();
 
     void setWindow(SDL_Window* window);
+
+    void setPresentationLayout(const StationConnectPresentationLayout& layout);
 
     void handleKeyEvent(SDL_KeyboardEvent* event);
 
@@ -72,7 +75,10 @@ public:
 
     void setCaptureActive(bool active);
 
-    bool isMouseInVideoRegion(int mouseX, int mouseY, int windowWidth = -1, int windowHeight = -1);
+    bool isMouseInVideoRegion(int mouseX, int mouseY,
+                              Uint32 windowId = 0,
+                              int windowWidth = -1,
+                              int windowHeight = -1);
 
     void updateKeyboardGrabState();
 
@@ -94,6 +100,7 @@ private:
     void performSpecialKeyCombo(KeyCombo combo);
 
     SDL_Window* m_Window;
+    StationConnectPresentationLayout m_PresentationLayout;
     bool m_NeedsManualCaptureOnLeave;
     bool m_MouseWasInVideoRegion;
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
@@ -154,12 +161,18 @@ private:
 
     void setCursorVisible(bool visible);
     void activateCompositorCursor();
-    bool ensureWaylandTabletCursorAttached();
+    bool ensureWaylandTabletCursorAttached(SDL_Window* targetWindow = nullptr);
     bool mapRemoteCursorPositionToWindow(const RemoteCursorPosition& position,
+                                         SDL_Window*& window,
                                          int& x, int& y) const;
     void updateTabletCursorVisibility();
-    bool sendAbsoluteMousePosition(int windowX, int windowY,
+    bool sendAbsoluteMousePosition(SDL_Window* window,
+                                   int windowX, int windowY,
                                    bool allowClampedPosition);
+
+    SDL_Window* presentationWindow(Uint32 windowId) const;
+    const StationConnectPresentationOutput* presentationOutput(
+        SDL_Window* window) const;
 
     struct {
         KeyCombo keyCombo;
