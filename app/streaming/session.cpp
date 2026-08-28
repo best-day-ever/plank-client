@@ -1177,8 +1177,9 @@ bool Session::snapshotClientDisplays()
         m_TargetDisplayId = m_ClientDisplays.first().displayId;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect client presentation: outputs=%d canvas=%dx%d mode=%s",
-                m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1,
+                "StationConnect client presentation: outputs=%lld canvas=%dx%d mode=%s",
+                static_cast<long long>(
+                    m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1),
                 m_UseMultiDisplayPresentation ? canvasX : targetNativeSize.width(),
                 m_UseMultiDisplayPresentation ? canvasHeight : targetNativeSize.height(),
                 m_UseMultiDisplayPresentation ? "multi-output" : "single-output");
