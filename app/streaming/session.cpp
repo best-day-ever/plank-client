@@ -2824,6 +2824,35 @@ void Session::execInternal()
     StationConnectReconnectThread* reconnectThread = nullptr;
     StationConnectReconnectState reconnectState;
     Uint64 reconnectDecisionDeadline = 0;
+    const auto handleStationConnectLocalUserEvent = [this](const SDL_UserEvent& userEvent) {
+        switch (userEvent.code) {
+        case SDL_CODE_STATIONCONNECT_BITRATE_APPLIED:
+            if (m_StationConnectToolbar) {
+                m_StationConnectToolbar->setAppliedBitrate(
+                            m_ConfirmedBitrateRequestKbps.load(std::memory_order_relaxed),
+                            m_ConfirmedBitrateAppliedKbps.load(std::memory_order_relaxed),
+                            m_ConfirmedBitratePeakKbps.load(std::memory_order_relaxed));
+            }
+            return true;
+        case SDL_CODE_STATIONCONNECT_CURSOR:
+            if (m_InputHandler != nullptr) {
+                m_InputHandler->applyPendingRemoteCursor();
+            }
+            return true;
+        case SDL_CODE_STATIONCONNECT_TABLET_CURSOR:
+            if (m_InputHandler != nullptr) {
+                m_InputHandler->applyPendingTabletCursorActivation();
+            }
+            return true;
+        case SDL_CODE_STATIONCONNECT_CURSOR_POSITION:
+            if (m_InputHandler != nullptr) {
+                m_InputHandler->applyPendingRemoteCursorPosition();
+            }
+            return true;
+        default:
+            return false;
+        }
+    };
     SDL_Event event;
     for (;;) {
         if (m_StationConnectToolbar) {
@@ -2893,6 +2922,16 @@ void Session::execInternal()
                 event.user.code == SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
         if (m_Reconnecting.load() &&
                 event.type != SDL_EVENT_QUIT && !reconnectCompletion) {
+            // Cursor shapes, host-authoritative Wacom positions, and toolbar
+            // bitrate confirmation are local presentation events. The new
+            // transport can deliver them before its reconnect worker posts
+            // completion. Apply them now so their one-shot pending latches do
+            // not remain set after this event is consumed.
+            if (event.type == SDL_EVENT_USER &&
+                    handleStationConnectLocalUserEvent(event.user)) {
+                continue;
+            }
+
             // Keep the local window, hotkeys, and toolbar alive while the
             // transport worker retries. Never forward these events to a host
             // whose input connection has already stopped.
@@ -2965,6 +3004,9 @@ void Session::execInternal()
             goto DispatchDeferredCleanup;
 
         case SDL_EVENT_USER:
+            if (handleStationConnectLocalUserEvent(event.user)) {
+                break;
+            }
             switch (event.user.code) {
             case SDL_CODE_STATIONCONNECT_RECONNECT:
                 if (reconnectThread != nullptr ||
@@ -3001,29 +3043,6 @@ void Session::execInternal()
                 }
                 break;
             }
-            case SDL_CODE_STATIONCONNECT_BITRATE_APPLIED:
-                if (m_StationConnectToolbar) {
-                    m_StationConnectToolbar->setAppliedBitrate(
-                                m_ConfirmedBitrateRequestKbps.load(std::memory_order_relaxed),
-                                m_ConfirmedBitrateAppliedKbps.load(std::memory_order_relaxed),
-                                m_ConfirmedBitratePeakKbps.load(std::memory_order_relaxed));
-                }
-                break;
-            case SDL_CODE_STATIONCONNECT_CURSOR:
-                if (m_InputHandler != nullptr) {
-                    m_InputHandler->applyPendingRemoteCursor();
-                }
-                break;
-            case SDL_CODE_STATIONCONNECT_TABLET_CURSOR:
-                if (m_InputHandler != nullptr) {
-                    m_InputHandler->applyPendingTabletCursorActivation();
-                }
-                break;
-            case SDL_CODE_STATIONCONNECT_CURSOR_POSITION:
-                if (m_InputHandler != nullptr) {
-                    m_InputHandler->applyPendingRemoteCursorPosition();
-                }
-                break;
             case SDL_CODE_FRAME_READY:
                 if (m_VideoDecoder != nullptr) {
                     m_VideoDecoder->renderFrameOnMainThread();
