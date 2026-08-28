@@ -1194,20 +1194,20 @@ void Session::rebuildPresentationLayout()
     }
 
     const bool multiOutputActive = m_UseMultiDisplayPresentation &&
-            (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN) != 0;
+            m_PresentationFullscreen && !m_SecondaryWindows.isEmpty();
     if (multiOutputActive) {
         int canvasWidth = 0;
         int canvasHeight = 0;
+        int secondaryIndex = 0;
         for (const auto& display : std::as_const(m_ClientDisplays)) {
             SDL_Window* window = display.displayId == m_TargetDisplayId ?
                         m_Window : nullptr;
-            if (window == nullptr) {
-                for (SDL_Window* candidate : std::as_const(m_SecondaryWindows)) {
-                    if (SDL_GetDisplayForWindow(candidate) == display.displayId) {
-                        window = candidate;
-                        break;
-                    }
-                }
+            if (window == nullptr &&
+                    secondaryIndex < m_SecondaryWindows.size()) {
+                // Secondary windows are created in the same stable display
+                // order as this snapshot. Keep intended presentation geometry
+                // independent of asynchronous compositor placement state.
+                window = m_SecondaryWindows.at(secondaryIndex++);
             }
             if (window == nullptr) {
                 continue;
@@ -1231,6 +1231,74 @@ void Session::rebuildPresentationLayout()
     if (m_InputHandler != nullptr) {
         m_InputHandler->setPresentationLayout(m_PresentationLayout);
     }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "StationConnect render presentation: outputs=%lld canvas=%dx%d fullscreen=%s",
+                static_cast<long long>(m_PresentationLayout.outputs.size()),
+                m_PresentationLayout.canvasSize.width(),
+                m_PresentationLayout.canvasSize.height(),
+                m_PresentationFullscreen ? "yes" : "no");
+}
+
+bool Session::placeFullscreenWindowOnDisplay(SDL_Window* window,
+                                             SDL_DisplayID displayId)
+{
+    if (!SDL_SyncWindow(window)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Timed out synchronizing new fullscreen surface before output placement: %s",
+                    SDL_GetError());
+    }
+
+    const int centered = SDL_WINDOWPOS_CENTERED_DISPLAY(displayId);
+    if (!SDL_SetWindowPosition(window, centered, centered)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to request fullscreen surface placement on output %u: %s",
+                     displayId, SDL_GetError());
+        return false;
+    }
+    if (!SDL_SyncWindow(window)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Timed out synchronizing fullscreen surface placement on output %u: %s",
+                    displayId, SDL_GetError());
+    }
+
+    SDL_DisplayID actualDisplay = SDL_GetDisplayForWindow(window);
+    if (actualDisplay == displayId) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Fullscreen surface assigned to requested client output %u",
+                    displayId);
+        return true;
+    }
+
+    // Some Wayland compositors retain the first fullscreen assignment until
+    // the toplevel has completed one windowed configure. Re-seed SDL's target
+    // display while windowed, then enter fullscreen again.
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "Fullscreen surface landed on output %u instead of %u; retrying through a synchronized windowed configure",
+                actualDisplay, displayId);
+    if (!SDL_SetWindowFullscreen(window, false) ||
+            !SDL_SyncWindow(window) ||
+            !SDL_SetWindowPosition(window, centered, centered) ||
+            !SDL_SyncWindow(window) ||
+            !SDL_SetWindowFullscreen(window, true) ||
+            !SDL_SyncWindow(window)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to reassign fullscreen surface to output %u: %s",
+                     displayId, SDL_GetError());
+        return false;
+    }
+
+    actualDisplay = SDL_GetDisplayForWindow(window);
+    if (actualDisplay != displayId) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Wayland compositor kept fullscreen surface on output %u instead of requested output %u",
+                     actualDisplay, displayId);
+        return false;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "Fullscreen surface assigned to requested client output %u after synchronized retry",
+                displayId);
+    return true;
 }
 
 SDL_Window* Session::windowForEvent(Uint32 windowId) const
@@ -1258,6 +1326,7 @@ bool Session::anyPresentationWindowFocused() const
 
 void Session::setPresentationWindowsFullscreen(bool fullscreen)
 {
+    m_PresentationFullscreen = fullscreen;
     SDL_SetWindowFullscreen(m_Window, fullscreen ? m_FullScreenFlag : 0);
     for (SDL_Window* window : m_SecondaryWindows) {
         if (fullscreen) {
@@ -2574,11 +2643,25 @@ void Session::execInternal()
                 return;
             }
             SDL_SetWindowFullscreenMode(secondary, nullptr);
-            SDL_SetWindowPosition(
-                secondary,
-                SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId),
-                SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
-            SDL_SetWindowFullscreen(secondary, m_FullScreenFlag);
+            SDL_SetWindowFullscreen(secondary, true);
+            if (!placeFullscreenWindowOnDisplay(secondary,
+                                                display.displayId)) {
+                SDL_DestroyWindow(secondary);
+                emit displayLaunchError(
+                    tr("Unable to place the second fullscreen surface on its client monitor."));
+                for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+                    SDL_DestroyWindow(window);
+                }
+                m_SecondaryWindows.clear();
+                SDL_DestroyWindow(m_Window);
+                m_Window = nullptr;
+                delete m_InputHandler;
+                m_InputHandler = nullptr;
+                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                QThreadPool::globalInstance()->start(
+                            new DeferredSessionCleanupTask(this));
+                return;
+            }
             m_SecondaryWindows.append(secondary);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Created StationConnect Wayland fullscreen surface for output %u",

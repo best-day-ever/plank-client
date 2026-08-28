@@ -225,6 +225,9 @@ private:
 
     void rebuildPresentationLayout();
 
+    bool placeFullscreenWindowOnDisplay(SDL_Window* window,
+                                        SDL_DisplayID displayId);
+
     SDL_Window* windowForEvent(Uint32 windowId) const;
 
     bool anyPresentationWindowFocused() const;
@@ -361,6 +364,7 @@ private:
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
     SDL_DisplayID m_TargetDisplayId = 0;
     bool m_UseMultiDisplayPresentation = false;
+    bool m_PresentationFullscreen = false;
     QVector<SDL_Window*> m_SecondaryWindows;
     StationConnectPresentationLayout m_PresentationLayout;
     SdlInputHandler* m_InputHandler;
