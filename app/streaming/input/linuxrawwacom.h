@@ -9,6 +9,44 @@
 #include <thread>
 #include <vector>
 
+enum class StationConnectWacomTransport
+{
+    ExactRawHid,
+    NormalizedPen,
+};
+
+struct StationConnectWacomTransportDecision
+{
+    StationConnectWacomTransport transport;
+    std::uint32_t vendor;
+    std::uint32_t product;
+};
+
+constexpr StationConnectWacomTransport stationConnectWacomTransportForUsbDevice(
+        std::uint32_t vendor, std::uint32_t product)
+{
+    constexpr std::uint32_t WacomVendorId = 0x056a;
+
+    if (vendor != WacomVendorId) {
+        return StationConnectWacomTransport::ExactRawHid;
+    }
+
+    // The first-generation Intuos Pro S/M/L devices require the real USB
+    // interface type during hid-wacom probing. UHID cannot reproduce that
+    // metadata, so use the existing normalized core-pen transport for the
+    // complete PTH-x51 generation. Newer Wacoms remain descriptor-driven.
+    switch (product) {
+    case 0x0314: // PTH-451
+    case 0x0315: // PTH-651
+    case 0x0317: // PTH-851
+        return StationConnectWacomTransport::NormalizedPen;
+    default:
+        return StationConnectWacomTransport::ExactRawHid;
+    }
+}
+
+StationConnectWacomTransportDecision stationConnectWacomTransportForConnectedDevice();
+
 class LinuxRawWacomInput
 {
 public:

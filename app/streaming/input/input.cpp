@@ -154,9 +154,30 @@ void SdlInputHandler::setWindow(SDL_Window *window)
     else if ((LiGetHostFeatureFlags() &
               (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
              (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
-        m_LinuxRawWacomInput.reset(new LinuxRawWacomInput(requestTabletCursor));
-        m_LinuxRawWacomInput->setActive(
-            (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+        const StationConnectWacomTransportDecision decision =
+            stationConnectWacomTransportForConnectedDevice();
+        if (decision.transport == StationConnectWacomTransport::NormalizedPen) {
+            if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                            "Using normalized pen transport for first-generation Intuos Pro %04x:%04x",
+                            static_cast<unsigned int>(decision.vendor),
+                            static_cast<unsigned int>(decision.product));
+                m_LinuxWacomInput.reset(new LinuxWacomInput(requestTabletCursor));
+                m_LinuxWacomInput->setActive(
+                    (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+            }
+            else {
+                SDL_LogError(SDL_LOG_CATEGORY_INPUT,
+                             "Host lacks normalized pen support required by first-generation Intuos Pro %04x:%04x",
+                             static_cast<unsigned int>(decision.vendor),
+                             static_cast<unsigned int>(decision.product));
+            }
+        }
+        else {
+            m_LinuxRawWacomInput.reset(new LinuxRawWacomInput(requestTabletCursor));
+            m_LinuxRawWacomInput->setActive(
+                (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+        }
     }
     else if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
         m_LinuxWacomInput.reset(new LinuxWacomInput(requestTabletCursor));

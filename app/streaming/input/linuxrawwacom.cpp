@@ -59,6 +59,57 @@ bool isWacomUsbDevice(udev_device* device)
     return end != vendor && *end == '\0' && value == kWacomVendorId;
 }
 
+StationConnectWacomTransportDecision connectedWacomTransportDecision()
+{
+    StationConnectWacomTransportDecision decision = {
+        StationConnectWacomTransport::ExactRawHid, 0, 0};
+    udev* context = udev_new();
+    if (context == nullptr) {
+        return decision;
+    }
+
+    std::vector<std::pair<std::string, std::uint32_t> > candidates;
+    udev_enumerate* enumerate = udev_enumerate_new(context);
+    udev_enumerate_add_match_subsystem(enumerate, "hidraw");
+    udev_enumerate_scan_devices(enumerate);
+    udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+    udev_list_entry* entry = nullptr;
+    udev_list_entry_foreach(entry, devices) {
+        udev_device* device = udev_device_new_from_syspath(
+            context, udev_list_entry_get_name(entry));
+        if (device != nullptr && isWacomUsbDevice(device)) {
+            udev_device* parent = udev_device_get_parent_with_subsystem_devtype(
+                device, "usb", "usb_device");
+            const char* product = parent != nullptr ?
+                udev_device_get_sysattr_value(parent, "idProduct") : nullptr;
+            char* end = nullptr;
+            const unsigned long value = product != nullptr ?
+                std::strtoul(product, &end, 16) : 0;
+            if (product != nullptr && end != product && *end == '\0' &&
+                    value <= 0xffff) {
+                candidates.push_back(std::make_pair(
+                    usbParentPath(device), static_cast<std::uint32_t>(value)));
+            }
+        }
+        if (device != nullptr) {
+            udev_device_unref(device);
+        }
+    }
+    udev_enumerate_unref(enumerate);
+    udev_unref(context);
+
+    if (candidates.empty()) {
+        return decision;
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    decision.vendor = kWacomVendorId;
+    decision.product = candidates.front().second;
+    decision.transport = stationConnectWacomTransportForUsbDevice(
+        decision.vendor, decision.product);
+    return decision;
+}
+
 unsigned long getReportIoctl(std::uint8_t type, std::size_t size)
 {
     switch (type) {
@@ -103,6 +154,11 @@ void writeLittle(T& destination, T value)
 }
 
 } // namespace
+
+StationConnectWacomTransportDecision stationConnectWacomTransportForConnectedDevice()
+{
+    return connectedWacomTransportDecision();
+}
 
 LinuxRawWacomInput::LinuxRawWacomInput(std::function<void()> tabletActivity)
     : m_Active(false),
