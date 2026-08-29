@@ -830,6 +830,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          int virtualMode2Choice,
                                          int scalingChoice, int videoProfile,
                                          int captureSource,
+                                         int dataPlane,
                                          QVariantList profileBitrates)
 {
     NvAddress manualAddress;
@@ -844,6 +845,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             !scalingMode.isEmpty() &&
             StreamingPreferences::isStationConnectProfileValidForCaptureSource(
                 videoProfile, captureSource) &&
+            dataPlane >= StreamingPreferences::SCDP_LEGACY &&
+            dataPlane <= StreamingPreferences::SCDP_DATASMASH &&
             parseProfileBitrates(profileBitrates, true,
                                  profileBitratesKbps)) {
         if (nickname.trimmed().isEmpty()) {
@@ -863,7 +866,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
 
             if (bookmark == nullptr) {
                 bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile,
-                                          captureSource, profileBitratesKbps);
+                                          captureSource, dataPlane,
+                                          profileBitratesKbps);
                 bookmark->stationConnectScalingMode = scalingMode;
                 bookmark->stationConnectHostLayout = hostLayout;
                 bookmark->stationConnectVirtualMode1 = virtualMode1;
@@ -881,6 +885,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             bookmark->stationConnectVirtualMode2 = virtualMode2;
             bookmark->stationConnectVideoProfile = videoProfile;
             bookmark->stationConnectCaptureSource = captureSource;
+            bookmark->stationConnectDataPlane = dataPlane;
             bookmark->stationConnectProfileBitratesKbps = profileBitratesKbps;
         }
 
@@ -912,6 +917,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString hostLayout, QString virtualMode1,
                                          QString virtualMode2,
                                          int videoProfile, int captureSource,
+                                         int dataPlane,
                                          const QVariantList& profileBitrates)
 {
     NvAddress manualAddress;
@@ -920,6 +926,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     if (computer == nullptr || nickname.isEmpty() ||
             !StreamingPreferences::isStationConnectProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
+            dataPlane < StreamingPreferences::SCDP_LEGACY ||
+            dataPlane > StreamingPreferences::SCDP_DATASMASH ||
             !parseProfileBitrates(profileBitrates, false,
                                   profileBitratesKbps) ||
             (scalingMode != NvOutputTopology::NativeScalingMode &&
@@ -966,7 +974,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
             computer->updateManualBookmark(manualAddress, nickname, scalingMode,
                                            hostLayout,
                                            virtualMode1, virtualMode2,
-                                           videoProfile, captureSource,
+                                           videoProfile, captureSource, dataPlane,
                                            profileBitratesKbps);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
@@ -987,7 +995,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
         computer->updateManualBookmark(manualAddress, nickname, scalingMode,
                                        hostLayout,
                                        virtualMode1, virtualMode2, videoProfile,
-                                       captureSource, profileBitratesKbps);
+                                       captureSource, dataPlane,
+                                       profileBitratesKbps);
     }
 
     handleComputerStateChanged(computer);

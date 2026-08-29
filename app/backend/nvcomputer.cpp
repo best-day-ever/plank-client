@@ -28,6 +28,7 @@
 #define SER_VIRTUALMODE2 "stationconnect-virtual-mode-2"
 #define SER_VIDEOPROFILE "stationconnect-video-profile"
 #define SER_CAPTURESOURCE "stationconnect-capture-source"
+#define SER_DATAPLANE "stationconnect-data-plane"
 #define SER_STATIONCONNECT_PROFILE_BITRATES "stationconnect-profile-bitrates-kbps"
 #define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
 #define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
@@ -44,7 +45,7 @@ QString manualBookmarkUuid(const NvAddress& address)
 }
 
 NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
-                       int captureSource,
+                       int captureSource, int dataPlane,
                        const QVector<int>& profileBitratesKbps)
 {
     this->uuid = manualBookmarkUuid(address);
@@ -54,6 +55,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->manualBookmark = true;
     this->stationConnectVideoProfile = videoProfile;
     this->stationConnectCaptureSource = captureSource;
+    this->stationConnectDataPlane = dataPlane;
     this->stationConnectProfileBitratesKbps = profileBitratesKbps;
     this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
     this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
@@ -75,6 +77,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
                                       QString hostLayout, QString virtualMode1,
                                       QString virtualMode2,
                                       int videoProfile, int captureSource,
+                                      int dataPlane,
                                       const QVector<int>& profileBitratesKbps)
 {
     QWriteLocker writeLocker(&lock);
@@ -120,6 +123,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     stationConnectVirtualMode2 = virtualMode2;
     stationConnectVideoProfile = videoProfile;
     stationConnectCaptureSource = captureSource;
+    stationConnectDataPlane = dataPlane;
     stationConnectProfileBitratesKbps = profileBitratesKbps;
     return addressChanged;
 }
@@ -173,6 +177,11 @@ NvComputer::NvComputer(QSettings& settings)
             settings.value(SER_CAPTURESOURCE,
                            static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT)).toInt(),
             static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10));
+    this->stationConnectDataPlane = qBound(
+            static_cast<int>(StreamingPreferences::SCDP_LEGACY),
+            settings.value(SER_DATAPLANE,
+                           static_cast<int>(StreamingPreferences::SCDP_LEGACY)).toInt(),
+            static_cast<int>(StreamingPreferences::SCDP_DATASMASH));
     if (!StreamingPreferences::isStationConnectProfileValidForCaptureSource(
                 this->stationConnectVideoProfile,
                 this->stationConnectCaptureSource)) {
@@ -254,6 +263,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_VIRTUALMODE2, stationConnectVirtualMode2);
     settings.setValue(SER_VIDEOPROFILE, stationConnectVideoProfile);
     settings.setValue(SER_CAPTURESOURCE, stationConnectCaptureSource);
+    settings.setValue(SER_DATAPLANE, stationConnectDataPlane);
     settings.setValue(
                 SER_STATIONCONNECT_PROFILE_BITRATES,
                 StreamingPreferences::stationConnectProfileBitratesToVariantList(
@@ -295,6 +305,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->stationConnectVirtualMode2 == that.stationConnectVirtualMode2 &&
            this->stationConnectVideoProfile == that.stationConnectVideoProfile &&
            this->stationConnectCaptureSource == that.stationConnectCaptureSource &&
+           this->stationConnectDataPlane == that.stationConnectDataPlane &&
            this->stationConnectProfileBitratesKbps ==
                that.stationConnectProfileBitratesKbps &&
            this->manualBookmark == that.manualBookmark &&

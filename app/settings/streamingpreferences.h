@@ -45,6 +45,13 @@ public:
     };
     Q_ENUM(StationConnectCaptureSource)
 
+    enum StationConnectDataPlane
+    {
+        SCDP_LEGACY,
+        SCDP_DATASMASH,
+    };
+    Q_ENUM(StationConnectDataPlane)
+
     static bool isStationConnectVideoProfileValid(int profile)
     {
         return profile >= SCVP_H264_10BIT_444 &&

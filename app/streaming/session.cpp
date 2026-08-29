@@ -57,6 +57,12 @@
 #include <QCursor>
 #include <QWindow>
 #include <QScreen>
+#include <QHostAddress>
+#include <QHostInfo>
+
+#ifdef STATIONCONNECT_DATASMASH
+#include "stationconnect_datasmash.h"
+#endif
 
 #include <algorithm>
 #include <tuple>
@@ -632,6 +638,10 @@ Session::Session(NvComputer* computer, NvApp& app,
               qBound(static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
                      computer->stationConnectCaptureSource,
                      static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10)))),
+      m_StationConnectDataPlane(static_cast<StreamingPreferences::StationConnectDataPlane>(
+              qBound(static_cast<int>(StreamingPreferences::SCDP_LEGACY),
+                     computer->stationConnectDataPlane,
+                     static_cast<int>(StreamingPreferences::SCDP_DATASMASH)))),
       m_StationConnectBitrateKbps(
               StreamingPreferences::stationConnectBitrateForProfile(
                   computer->stationConnectProfileBitratesKbps,
@@ -701,7 +711,98 @@ Session::Session(NvComputer* computer, NvApp& app,
 
 Session::~Session()
 {
+    stopDatasmashDataPlane();
     clearStationConnectReconnectCredentials();
+}
+
+bool Session::startDatasmashDataPlane(quint16 port,
+                                      const QString& certificateSha256,
+                                      const QString& token)
+{
+#ifndef STATIONCONNECT_DATASMASH
+    Q_UNUSED(port)
+    Q_UNUSED(certificateSha256)
+    Q_UNUSED(token)
+    return false;
+#else
+    stopDatasmashDataPlane();
+
+    QHostAddress remoteHost(m_Computer->activeAddress.address());
+    if (remoteHost.isNull()) {
+        const QHostInfo resolved = QHostInfo::fromName(
+                    m_Computer->activeAddress.address());
+        for (const QHostAddress& candidate : resolved.addresses()) {
+            if (candidate.protocol() == QAbstractSocket::IPv4Protocol) {
+                remoteHost = candidate;
+                break;
+            }
+        }
+        if (remoteHost.isNull() && !resolved.addresses().isEmpty()) {
+            remoteHost = resolved.addresses().first();
+        }
+    }
+    if (remoteHost.isNull()) {
+        qWarning() << "Unable to resolve the experimental datasmash endpoint";
+        return false;
+    }
+
+    const QString remoteAddress = remoteHost.protocol() == QAbstractSocket::IPv6Protocol ?
+                QStringLiteral("[%1]:%2").arg(remoteHost.toString()).arg(port) :
+                QStringLiteral("%1:%2").arg(remoteHost.toString()).arg(port);
+    const QByteArray remoteAddressUtf8 = remoteAddress.toUtf8();
+    const QByteArray serverNameUtf8("stationconnect");
+    const QByteArray certificateUtf8 = certificateSha256.toLatin1();
+    const QByteArray tokenUtf8 = token.toLatin1();
+
+    ScDatasmashConfig config {};
+    config.struct_size = sizeof(config);
+    config.abi_version = SC_DATASMASH_ABI_VERSION;
+    config.mode = SC_DATASMASH_MODE_CLIENT;
+    config.handshake_timeout_ms = 10000;
+    config.idle_timeout_ms = 30000;
+    config.keep_alive_interval_ms = 5000;
+    config.remote_address = remoteAddressUtf8.constData();
+    config.server_name = serverNameUtf8.constData();
+    config.certificate_sha256 = certificateUtf8.constData();
+    config.session_token = tokenUtf8.constData();
+
+    ScDatasmashEndpoint* endpoint = nullptr;
+    int result = sc_datasmash_endpoint_create(&config, &endpoint);
+    if (result == SC_DATASMASH_OK) {
+        result = sc_datasmash_endpoint_start(endpoint);
+    }
+    if (result == SC_DATASMASH_OK) {
+        result = sc_datasmash_endpoint_wait_ready(endpoint, 12000);
+    }
+    if (result != SC_DATASMASH_OK) {
+        QByteArray error(512, '\0');
+        if (endpoint != nullptr) {
+            sc_datasmash_endpoint_last_error(
+                        endpoint, error.data(), static_cast<size_t>(error.size()));
+            sc_datasmash_endpoint_stop(endpoint);
+            sc_datasmash_endpoint_destroy(endpoint);
+        }
+        qWarning() << "Experimental datasmash handshake failed:" << error.constData();
+        return false;
+    }
+
+    m_DatasmashEndpoint = endpoint;
+    qInfo() << "Experimental datasmash media and interaction connections are ready on UDP"
+            << port;
+    return true;
+#endif
+}
+
+void Session::stopDatasmashDataPlane()
+{
+#ifdef STATIONCONNECT_DATASMASH
+    if (m_DatasmashEndpoint != nullptr) {
+        sc_datasmash_endpoint_stop(m_DatasmashEndpoint);
+        sc_datasmash_endpoint_destroy(m_DatasmashEndpoint);
+        m_DatasmashEndpoint = nullptr;
+        qInfo() << "Experimental datasmash connections stopped";
+    }
+#endif
 }
 
 void Session::clearStationConnectReconnectCredentials()
@@ -1047,6 +1148,7 @@ private:
 
         // Finish cleanup of the connection state
         LiStopConnection();
+        m_Session->stopDatasmashDataPlane();
 
     }
 
@@ -1734,6 +1836,10 @@ bool Session::startConnectionAsync(bool reconnecting)
              m_Computer->currentGameId == m_App.id);
 
     QString rtspSessionUrl;
+    QString acceptedDataPlane;
+    quint16 datasmashPort = 0;
+    QString datasmashCertificateSha256;
+    QString datasmashToken;
     QString acceptedCaptureSource;
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
@@ -1745,6 +1851,9 @@ bool Session::startConnectionAsync(bool reconnecting)
         const QString captureSource =
                 m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
+        const QString dataPlane =
+                m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH ?
+                    QStringLiteral("datasmash") : QStringLiteral("legacy");
         const QString encoderBackend =
                 StreamingPreferences::isStationConnectNvencProfile(
                     m_StationConnectVideoProfile) ?
@@ -1787,10 +1896,15 @@ bool Session::startConnectionAsync(bool reconnecting)
                           hostLayout,
                           virtualModes.value(0),
                           virtualModes.value(1),
+                          dataPlane,
                           captureSource,
                           encoderBackend,
                           encodingMode,
                           rtspSessionUrl,
+                          acceptedDataPlane,
+                          datasmashPort,
+                          datasmashCertificateSha256,
+                          datasmashToken,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
                           acceptedEncodingMode);
@@ -2067,6 +2181,19 @@ bool Session::startConnectionAsync(bool reconnecting)
         return false;
     }
 
+    if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
+            !startDatasmashDataPlane(datasmashPort,
+                                     datasmashCertificateSha256,
+                                     datasmashToken)) {
+        datasmashToken.fill(QChar('\0'));
+        if (!reconnecting) {
+            emit displayLaunchError(
+                        tr("The experimental StationConnect data plane could not be established."));
+        }
+        return false;
+    }
+    datasmashToken.fill(QChar('\0'));
+
     QByteArray hostnameStr = m_Computer->activeAddress.address().toLatin1();
     QByteArray siAppVersion = m_Computer->appVersion.toLatin1();
 
@@ -2143,6 +2270,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
     if (err != 0) {
+        stopDatasmashDataPlane();
         // We already displayed an error dialog in the stage failure
         // listener.
         return false;
@@ -2152,6 +2280,7 @@ bool Session::startConnectionAsync(bool reconnecting)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Host does not advertise required StationConnect local cursor transport");
         LiStopConnection();
+        stopDatasmashDataPlane();
         emit displayLaunchError(
                     tr("This workstation does not support the required StationConnect local cursor protocol."));
         return false;
@@ -2197,6 +2326,7 @@ bool Session::beginStationConnectReconnect(
     }
     SDL_UnlockSpinlock(&m_DecoderLock);
     LiStopConnection();
+    stopDatasmashDataPlane();
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
     return true;
@@ -2267,6 +2397,7 @@ bool Session::runStationConnectReconnect()
         }
 
         LiStopConnection();
+        stopDatasmashDataPlane();
         {
             QWriteLocker lock(&m_Computer->lock);
             m_Computer->sessionToken.fill(QChar('\0'));

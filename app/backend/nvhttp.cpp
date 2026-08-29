@@ -225,10 +225,15 @@ NvHTTP::startApp(QString verb,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
+                 QString dataPlane,
                  QString captureSource,
                  QString encoderBackend,
                  QString encodingMode,
                  QString& rtspSessionUrl,
+                 QString& acceptedDataPlane,
+                 quint16& datasmashPort,
+                 QString& datasmashCertificateSha256,
+                 QString& datasmashToken,
                  QString& acceptedCaptureSource,
                  QString& acceptedEncoderBackend,
                  QString& acceptedEncodingMode)
@@ -244,6 +249,9 @@ NvHTTP::startApp(QString verb,
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
                 "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
+        stationConnectOutputArguments +=
+                "&scDataPlane=" +
+                QString::fromLatin1(QUrl::toPercentEncoding(dataPlane));
         stationConnectOutputArguments +=
                 "&scCaptureSource=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(captureSource));
@@ -302,15 +310,32 @@ NvHTTP::startApp(QString verb,
                                    LiGetLaunchUrlQueryParameters(),
                                    LAUNCH_TIMEOUT_MS);
 
-    qInfo() << "Launch response:" << response;
+    qInfo() << "StationConnect launch response received";
 
     // Throws if the request failed
     verifyResponseStatus(response);
 
     rtspSessionUrl = getXmlString(response, "sessionUrl0");
+    acceptedDataPlane = getXmlString(response, "StationConnectDataPlane");
+    datasmashPort = getXmlString(response, "StationConnectDatasmashPort").toUShort();
+    datasmashCertificateSha256 =
+            getXmlString(response, "StationConnectDatasmashCertificateSha256");
+    datasmashToken = getXmlString(response, "StationConnectDatasmashToken");
     acceptedCaptureSource = getXmlString(response, "StationConnectCaptureSource");
     acceptedEncoderBackend = getXmlString(response, "StationConnectEncoderBackend");
     acceptedEncodingMode = getXmlString(response, "StationConnectEncodingMode");
+    if (m_StationConnectAuthentication &&
+            (acceptedDataPlane.isEmpty() || acceptedDataPlane != dataPlane)) {
+        throw GfeHttpResponseException(
+                    400, "Host did not accept the requested data plane");
+    }
+    if (m_StationConnectAuthentication && dataPlane == QStringLiteral("datasmash") &&
+            (datasmashPort == 0 ||
+             QByteArray::fromHex(datasmashCertificateSha256.toLatin1()).size() != 32 ||
+             QByteArray::fromHex(datasmashToken.toLatin1()).size() != 32)) {
+        throw GfeHttpResponseException(
+                    400, "Host returned invalid datasmash launch credentials");
+    }
     if (m_StationConnectAuthentication &&
             (acceptedCaptureSource.isEmpty() || acceptedCaptureSource != captureSource)) {
         throw GfeHttpResponseException(

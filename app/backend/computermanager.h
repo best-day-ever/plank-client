@@ -233,13 +233,14 @@ public:
                                         int virtualMode2 = 1,
                                         int scaling = 1, int videoProfile = 0,
                                         int captureSource = 0,
+                                        int dataPlane = 0,
                                         QVariantList profileBitratesKbps = QVariantList());
 
     bool editManualBookmark(NvComputer* computer, QString address, QString nickname,
                             QString scalingMode,
                             QString hostLayout, QString virtualMode1,
                             QString virtualMode2,
-                            int videoProfile, int captureSource,
+                            int videoProfile, int captureSource, int dataPlane,
                             const QVariantList& profileBitratesKbps);
 
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());

@@ -219,6 +219,8 @@ CenteredGridView {
                         editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
                         editBookmarkDialog.originalCaptureSource =
                                 computerModel.stationConnectCaptureSource(index)
+                        editBookmarkDialog.originalDataPlane =
+                                computerModel.stationConnectDataPlane(index)
                         editBookmarkDialog.originalProfileBitratesKbps =
                                 computerModel.stationConnectProfileBitratesKbps(index)
                         editBookmarkDialog.open()
@@ -371,6 +373,7 @@ CenteredGridView {
         property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
         property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
         property int originalCaptureSource: StreamingPreferences.SCCS_NVFBC_8BIT
+        property int originalDataPlane: StreamingPreferences.SCDP_LEGACY
         property var originalProfileBitratesKbps: []
         property var profileBitratesKbps: []
         title: qsTr("Edit workstation bookmark")
@@ -411,6 +414,7 @@ CenteredGridView {
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
             editCaptureSource.currentIndex = originalCaptureSource
+            editDataPlane.currentIndex = originalDataPlane
             for (var i = 0; i < editEncodingProfile.model.count; i++) {
                 if (editEncodingProfile.model.get(i).val === originalProfile) {
                     editEncodingProfile.currentIndex = i
@@ -451,6 +455,8 @@ CenteredGridView {
                                                         editEncodingProfile.currentIndex).val,
                                                     editCaptureSourceModel.get(
                                                         editCaptureSource.currentIndex).val,
+                                                    editDataPlaneModel.get(
+                                                        editDataPlane.currentIndex).val,
                                                     profileBitratesKbps)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.helpText = ""
@@ -477,6 +483,27 @@ CenteredGridView {
             TextField {
                 id: editNicknameText
                 Layout.fillWidth: true
+            }
+
+            Label {
+                text: qsTr("Data plane")
+                font.bold: true
+            }
+            ComboBox {
+                id: editDataPlane
+                Layout.fillWidth: true
+                textRole: "text"
+                model: ListModel {
+                    id: editDataPlaneModel
+                    ListElement {
+                        text: qsTr("Legacy StationConnect transport")
+                        val: StreamingPreferences.SCDP_LEGACY
+                    }
+                    ListElement {
+                        text: qsTr("Datasmash single-port transport (Experimental)")
+                        val: StreamingPreferences.SCDP_DATASMASH
+                    }
+                }
             }
 
             Label {

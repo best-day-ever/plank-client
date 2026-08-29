@@ -21,6 +21,9 @@
 
 class ComputerManager;
 class StationConnectToolbar;
+#ifdef STATIONCONNECT_DATASMASH
+struct ScDatasmashEndpoint;
+#endif
 
 class SupportedVideoFormatList : public QList<int>
 {
@@ -202,6 +205,12 @@ private:
 
     void clearStationConnectReconnectCredentials();
 
+    bool startDatasmashDataPlane(quint16 port,
+                                 const QString& certificateSha256,
+                                 const QString& token);
+
+    void stopDatasmashDataPlane();
+
     bool validateLaunch(SDL_Window* testWindow);
 
     void emitLaunchWarning(QString text);
@@ -331,6 +340,10 @@ private:
     NvComputer* m_Computer;
     StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
     StreamingPreferences::StationConnectCaptureSource m_StationConnectCaptureSource;
+    StreamingPreferences::StationConnectDataPlane m_StationConnectDataPlane;
+#ifdef STATIONCONNECT_DATASMASH
+    ScDatasmashEndpoint* m_DatasmashEndpoint = nullptr;
+#endif
     int m_StationConnectBitrateKbps;
     ComputerManager* m_ComputerManager;
     NvApp m_App;
