@@ -52,6 +52,10 @@
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
 
+#ifdef STATIONCONNECT_DATASMASH
+#include <stationconnect_datasmash.h>
+#endif
+
 #if defined(Q_OS_WIN32)
 #define IS_UNSPECIFIED_HANDLE(x) ((x) == INVALID_HANDLE_VALUE || (x) == NULL)
 
@@ -516,6 +520,15 @@ int main(int argc, char *argv[])
     if (s_LoggerFile != nullptr && s_LoggerFile->isOpen()) {
         qInfo() << "Persistent client log:" << s_LoggerFile->fileName();
     }
+#endif
+
+#ifdef STATIONCONNECT_DATASMASH
+    if (sc_datasmash_abi_version() != SC_DATASMASH_ABI_VERSION) {
+        qCritical() << "StationConnect datasmash transport ABI mismatch";
+        return 9;
+    }
+    qInfo() << "StationConnect datasmash transport ABI"
+            << sc_datasmash_abi_version() << "is linked but inactive";
 #endif
 
 #ifdef Q_OS_WIN32

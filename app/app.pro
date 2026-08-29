@@ -1,6 +1,40 @@
 QT += core quick network quickcontrols2 svg
 CONFIG += c++17
 
+unix:!macx:contains(CONFIG, stationconnect-datasmash) {
+    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
+        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$(STATIONCONNECT_DATASMASH_TRANSPORT_DIR)
+    }
+    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
+        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/datasmash-transport)
+    }
+    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/Cargo.toml) {
+        error("StationConnect datasmash transport Cargo.toml is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    }
+    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash.h) {
+        error("StationConnect datasmash transport header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    }
+
+    STATIONCONNECT_CARGO = $$(CARGO)
+    isEmpty(STATIONCONNECT_CARGO): STATIONCONNECT_CARGO = cargo
+    STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR = $$OUT_PWD/stationconnect-datasmash-cargo
+    STATIONCONNECT_DATASMASH_LIBRARY = $$STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR/release/libstationconnect_datasmash_transport.a
+
+    stationconnect_datasmash_transport.target = $$STATIONCONNECT_DATASMASH_LIBRARY
+    stationconnect_datasmash_transport.depends = FORCE
+    stationconnect_datasmash_transport.commands = \
+        CARGO_TARGET_DIR=$$shell_quote($$STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR) \
+        $$shell_quote($$STATIONCONNECT_CARGO) build --locked --offline --release \
+        --manifest-path $$shell_quote($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/Cargo.toml)
+    QMAKE_EXTRA_TARGETS += stationconnect_datasmash_transport
+    PRE_TARGETDEPS += $$STATIONCONNECT_DATASMASH_LIBRARY
+    QMAKE_CLEAN += $$STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR
+
+    INCLUDEPATH += $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include
+    LIBS += $$STATIONCONNECT_DATASMASH_LIBRARY -ldl -lpthread -lm -lrt
+    DEFINES += STATIONCONNECT_DATASMASH=1
+}
+
 unix:!macx {
     TARGET = stationconnect-client
 } else {
