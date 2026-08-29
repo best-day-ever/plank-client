@@ -68,6 +68,7 @@
 #include <limits>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #define CONN_TEST_SERVER "qt.conntest.moonlight-stream.org"
 
@@ -767,55 +768,33 @@ bool Session::startDatasmashDataPlane(quint16 port,
     config.certificate_sha256 = certificateUtf8.constData();
     config.session_token = tokenUtf8.constData();
 
-    ScDatasmashEndpoint* endpoint = nullptr;
-    int result = sc_datasmash_endpoint_create(&config, &endpoint);
+    ScDatasmashNativeEndpoint* endpoint = nullptr;
+    int result = sc_datasmash_native_endpoint_create(&config, &endpoint);
     if (result == SC_DATASMASH_OK) {
-        result = sc_datasmash_endpoint_start(endpoint);
+        result = sc_datasmash_native_endpoint_start(endpoint);
     }
     if (result == SC_DATASMASH_OK) {
-        result = sc_datasmash_endpoint_wait_ready(endpoint, 12000);
+        result = sc_datasmash_native_endpoint_wait_ready(endpoint, 12000);
     }
     if (result != SC_DATASMASH_OK) {
         QByteArray error(512, '\0');
         if (endpoint != nullptr) {
-            sc_datasmash_endpoint_last_error(
+            sc_datasmash_native_endpoint_last_error(
                         endpoint, error.data(), static_cast<size_t>(error.size()));
-            sc_datasmash_endpoint_stop(endpoint);
-            sc_datasmash_endpoint_destroy(endpoint);
+            sc_datasmash_native_endpoint_stop(endpoint);
+            sc_datasmash_native_endpoint_destroy(endpoint);
         }
         qWarning() << "Experimental datasmash handshake failed:" << error.constData();
         return false;
     }
 
-    const size_t maxVideoPacketSize =
-            sc_datasmash_video_max_packet_size(endpoint);
-    const size_t maxAudioPacketSize =
-            sc_datasmash_audio_max_packet_size(endpoint);
-    if (maxVideoPacketSize <=
-            static_cast<size_t>(StationConnectPacketSize::MaxRtpHeaderSize) ||
-            maxAudioPacketSize == 0 ||
-            maxAudioPacketSize > 1400) {
-        qWarning() << "Experimental datasmash negotiated unusable media packet sizes:"
-                   << "video" << maxVideoPacketSize
-                   << "audio" << maxAudioPacketSize;
-        sc_datasmash_endpoint_stop(endpoint);
-        sc_datasmash_endpoint_destroy(endpoint);
-        return false;
-    }
-
     m_DatasmashEndpoint = endpoint;
-    m_DatasmashMaxVideoPacketSize = maxVideoPacketSize;
-    LiSetStationConnectVideoPacketReceiver(
-                &Session::datasmashVideoPacketReceiver, endpoint);
-    LiSetStationConnectAudioPacketReceiver(
-                &Session::datasmashAudioPacketReceiver, endpoint);
     LiSetStationConnectControlPacketSender(
                 &Session::datasmashControlPacketSender, endpoint);
     LiSetStationConnectControlPacketReceiver(
                 &Session::datasmashControlPacketReceiver, endpoint);
-    qInfo() << "Experimental datasmash media and interaction connections are ready on UDP"
-            << port << "with maximum packet sizes: video" << maxVideoPacketSize
-            << "audio" << maxAudioPacketSize;
+    qInfo() << "Experimental native KyProto media, input, and data protocols are ready on UDP"
+            << port;
     return true;
 #endif
 }
@@ -823,106 +802,147 @@ bool Session::startDatasmashDataPlane(quint16 port,
 void Session::stopDatasmashDataPlane()
 {
 #ifdef STATIONCONNECT_DATASMASH
+    stopDatasmashMediaReceivers();
     LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
     LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
     LiSetStationConnectControlPacketSender(nullptr, nullptr);
     LiSetStationConnectControlPacketReceiver(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
-        ScDatasmashStats stats {};
+        ScDatasmashNativeStats stats {};
         stats.struct_size = sizeof(stats);
-        stats.abi_version = SC_DATASMASH_ABI_VERSION;
-        if (sc_datasmash_endpoint_stats(m_DatasmashEndpoint, &stats) ==
+        if (sc_datasmash_native_endpoint_stats(m_DatasmashEndpoint, &stats) ==
                 SC_DATASMASH_OK) {
-            qInfo() << "Datasmash media transport: video-packets="
-                    << stats.video_packets_received
+            qInfo() << "Datasmash native transport: video-frames="
+                    << stats.video_frames_received
                     << "video-bytes=" << stats.video_bytes_received
-                    << "video-receive-queue-drops=" << stats.video_receive_queue_drops
-                    << "video-receive-queue-high-water="
-                    << stats.video_receive_queue_high_water
+                    << "video-receive-drops=" << stats.video_receive_drops
                     << "audio-packets=" << stats.audio_packets_received
                     << "audio-bytes=" << stats.audio_bytes_received
-                    << "audio-receive-queue-drops=" << stats.audio_receive_queue_drops
-                    << "audio-receive-queue-high-water="
-                    << stats.audio_receive_queue_high_water
-                    << "QUIC-lost=" << stats.media_quic_packets_lost
-                    << "QUIC-RTT-us=" << stats.media_quic_rtt_us
-                    << "control-packets-sent=" << stats.control_packets_sent
-                    << "control-bytes-sent=" << stats.control_bytes_sent
-                    << "control-packets-received="
-                    << stats.control_packets_received
-                    << "control-bytes-received="
-                    << stats.control_bytes_received
-                    << "control-send-queue-full="
-                    << stats.control_send_queue_full
-                    << "control-receive-queue-overflow="
-                    << stats.control_receive_queue_overflow
-                    << "control-send-queue-high-water="
-                    << stats.control_send_queue_high_water
-                    << "control-receive-queue-high-water="
-                    << stats.control_receive_queue_high_water
-                    << "interaction-QUIC-lost="
-                    << stats.interaction_quic_packets_lost
-                    << "interaction-QUIC-RTT-us="
-                    << stats.interaction_quic_rtt_us;
+                    << "audio-receive-drops=" << stats.audio_receive_drops
+                    << "data-sent=" << stats.data_packets_sent
+                    << "data-received=" << stats.data_packets_received
+                    << "QUIC-lost=" << stats.quic_packets_lost
+                    << "QUIC-RTT-us=" << stats.quic_rtt_us
+                    << "KyProto-drops=" << stats.kyproto_packets_dropped;
         }
-        sc_datasmash_endpoint_stop(m_DatasmashEndpoint);
-        sc_datasmash_endpoint_destroy(m_DatasmashEndpoint);
+        sc_datasmash_native_endpoint_stop(m_DatasmashEndpoint);
+        sc_datasmash_native_endpoint_destroy(m_DatasmashEndpoint);
         m_DatasmashEndpoint = nullptr;
-        m_DatasmashMaxVideoPacketSize = 0;
-        qInfo() << "Experimental datasmash connections stopped";
+        qInfo() << "Experimental native KyProto connection stopped";
     }
 #endif
 }
 
 #ifdef STATIONCONNECT_DATASMASH
-int Session::datasmashVideoPacketReceiver(void* context,
-                                          unsigned char* packet,
-                                          int packetCapacity,
-                                          int timeoutMs)
+void Session::startDatasmashMediaReceivers()
 {
-    if (context == nullptr || packet == nullptr || packetCapacity <= 0 ||
-            timeoutMs < 0) {
-        return -1;
+    stopDatasmashMediaReceivers();
+    if (m_DatasmashEndpoint == nullptr) {
+        return;
     }
-    size_t packetSize = 0;
-    const int result = sc_datasmash_video_receive(
-                static_cast<ScDatasmashEndpoint*>(context), packet,
-                static_cast<size_t>(packetCapacity), &packetSize,
-                static_cast<uint32_t>(timeoutMs));
-    if (result == SC_DATASMASH_TIMEOUT) {
-        return 0;
-    }
-    if (result != SC_DATASMASH_OK ||
-            packetSize > static_cast<size_t>(packetCapacity) ||
-            packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
-        return -1;
-    }
-    return static_cast<int>(packetSize);
+
+    m_DatasmashReceiversStopping.store(false);
+    m_DatasmashVideoThread = std::thread([this]() {
+        datasmashVideoReceiveLoop();
+    });
+    m_DatasmashAudioThread = std::thread([this]() {
+        datasmashAudioReceiveLoop();
+    });
 }
 
-int Session::datasmashAudioPacketReceiver(void* context,
-                                          unsigned char* packet,
-                                          int packetCapacity,
-                                          int timeoutMs)
+void Session::stopDatasmashMediaReceivers()
 {
-    if (context == nullptr || packet == nullptr || packetCapacity <= 0 ||
-            timeoutMs < 0) {
-        return -1;
+    m_DatasmashReceiversStopping.store(true);
+    if (m_DatasmashVideoThread.joinable()) {
+        m_DatasmashVideoThread.join();
     }
-    size_t packetSize = 0;
-    const int result = sc_datasmash_audio_receive(
-                static_cast<ScDatasmashEndpoint*>(context), packet,
-                static_cast<size_t>(packetCapacity), &packetSize,
-                static_cast<uint32_t>(timeoutMs));
-    if (result == SC_DATASMASH_TIMEOUT) {
-        return 0;
+    if (m_DatasmashAudioThread.joinable()) {
+        m_DatasmashAudioThread.join();
     }
-    if (result != SC_DATASMASH_OK ||
-            packetSize > static_cast<size_t>(packetCapacity) ||
-            packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
-        return -1;
+}
+
+void Session::datasmashVideoReceiveLoop()
+{
+    constexpr size_t InitialFrameCapacity = 1024 * 1024;
+    constexpr size_t MaximumFrameCapacity = 64 * 1024 * 1024;
+    std::vector<unsigned char> frame(InitialFrameCapacity);
+
+    while (!m_DatasmashReceiversStopping.load()) {
+        ScDatasmashNativeVideoFrameInfo info {};
+        info.struct_size = sizeof(info);
+        size_t frameSize = 0;
+        const int result = sc_datasmash_native_video_receive(
+                    m_DatasmashEndpoint, &info, frame.data(), frame.size(),
+                    &frameSize, 50);
+        if (result == SC_DATASMASH_TIMEOUT) {
+            continue;
+        }
+        if (result == SC_DATASMASH_ERROR_BUFFER_TOO_SMALL &&
+                frameSize > frame.size() &&
+                frameSize <= MaximumFrameCapacity) {
+            frame.resize(frameSize);
+            continue;
+        }
+        if (result != SC_DATASMASH_OK) {
+            if (!m_DatasmashReceiversStopping.load()) {
+                qWarning() << "Native KyProto video receive failed:" << result;
+            }
+            return;
+        }
+        if (frameSize > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+                info.frame_number > std::numeric_limits<uint32_t>::max()) {
+            qWarning() << "Native KyProto video frame metadata is out of range";
+            LiRequestIdrFrame();
+            continue;
+        }
+
+        const uint32_t flags =
+                (info.flags & SC_DATASMASH_NATIVE_VIDEO_FLAG_KEY) != 0 ?
+                    STATIONCONNECT_VIDEO_FRAME_FLAG_KEY : 0;
+        const int submitResult = LiSubmitStationConnectVideoFrame(
+                    frame.data(), static_cast<int>(frameSize),
+                    static_cast<uint32_t>(info.frame_number), flags,
+                    info.pts, info.host_processing_latency);
+        if (submitResult < 0) {
+            qWarning() << "Native KyProto video frame submission failed:"
+                       << submitResult << "frame" << info.frame_number;
+            LiRequestIdrFrame();
+        }
     }
-    return static_cast<int>(packetSize);
+}
+
+void Session::datasmashAudioReceiveLoop()
+{
+    constexpr size_t MaximumAudioPacketSize = 64 * 1024;
+    std::vector<unsigned char> packet(MaximumAudioPacketSize);
+
+    while (!m_DatasmashReceiversStopping.load()) {
+        ScDatasmashNativeAudioPacketInfo info {};
+        info.struct_size = sizeof(info);
+        size_t packetSize = 0;
+        const int result = sc_datasmash_native_audio_receive(
+                    m_DatasmashEndpoint, &info, packet.data(), packet.size(),
+                    &packetSize, 50);
+        if (result == SC_DATASMASH_TIMEOUT) {
+            continue;
+        }
+        if (result != SC_DATASMASH_OK ||
+                packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            if (!m_DatasmashReceiversStopping.load()) {
+                qWarning() << "Native KyProto audio receive failed:" << result;
+            }
+            return;
+        }
+
+        const int submitResult = LiSubmitStationConnectAudioPacket(
+                    packetSize == 0 ? nullptr : packet.data(),
+                    static_cast<int>(packetSize), info.frame_samples,
+                    info.missing_samples);
+        if (submitResult < 0) {
+            qWarning() << "Native KyProto audio packet submission failed:"
+                       << submitResult;
+        }
+    }
 }
 
 int Session::datasmashControlPacketSender(void* context,
@@ -932,8 +952,8 @@ int Session::datasmashControlPacketSender(void* context,
     if (context == nullptr || packet == nullptr || packetLength < 2) {
         return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
     }
-    return sc_datasmash_control_send(
-                static_cast<ScDatasmashEndpoint*>(context), packet,
+    return sc_datasmash_native_data_send(
+                static_cast<ScDatasmashNativeEndpoint*>(context), packet,
                 static_cast<size_t>(packetLength));
 }
 
@@ -947,8 +967,8 @@ int Session::datasmashControlPacketReceiver(void* context,
         return -1;
     }
     size_t packetSize = 0;
-    const int result = sc_datasmash_control_receive(
-                static_cast<ScDatasmashEndpoint*>(context), packet,
+    const int result = sc_datasmash_native_data_receive(
+                static_cast<ScDatasmashNativeEndpoint*>(context), packet,
                 static_cast<size_t>(packetCapacity), &packetSize,
                 static_cast<uint32_t>(timeoutMs));
     if (result == SC_DATASMASH_TIMEOUT) {
@@ -1305,6 +1325,9 @@ private:
         SDL_assert(m_Session->m_VideoDecoder == nullptr);
 
         // Finish cleanup of the connection state
+#ifdef STATIONCONNECT_DATASMASH
+        m_Session->stopDatasmashMediaReceivers();
+#endif
         LiStopConnection();
         m_Session->stopDatasmashDataPlane();
 
@@ -2422,37 +2445,6 @@ bool Session::startConnectionAsync(bool reconnecting)
         }
     }
 
-#ifdef STATIONCONNECT_DATASMASH
-    if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH) {
-        const int framingLimitedPacketSize =
-                StationConnectPacketSize::datasmashVideoPacketSize(
-                    m_StreamConfig.packetSize);
-        const size_t negotiatedPayloadLimit =
-                m_DatasmashMaxVideoPacketSize -
-                static_cast<size_t>(StationConnectPacketSize::MaxRtpHeaderSize);
-        const int negotiatedPacketSize = static_cast<int>(
-                negotiatedPayloadLimit -
-                negotiatedPayloadLimit % 16);
-        m_StreamConfig.packetSize = qMin(framingLimitedPacketSize,
-                                         negotiatedPacketSize);
-        if (m_StreamConfig.packetSize < 512) {
-            qWarning() << "Datasmash video packet budget is too small:"
-                       << m_StreamConfig.packetSize;
-            stopDatasmashDataPlane();
-            if (!reconnecting) {
-                emit displayLaunchError(
-                            tr("The experimental StationConnect video packet budget is too small."));
-            }
-            return false;
-        }
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Using datasmash video packet size: %d bytes "
-                    "(transport payload maximum: %zu bytes)",
-                    m_StreamConfig.packetSize,
-                    m_DatasmashMaxVideoPacketSize);
-    }
-#endif
-
     // moonlight-common-c fills missing callbacks in the caller-owned table.
     // Restore the pull/push decoder contract before every reuse of this
     // Session for a StationConnect desktop handoff.
@@ -2470,9 +2462,16 @@ bool Session::startConnectionAsync(bool reconnecting)
         return false;
     }
 
+#ifdef STATIONCONNECT_DATASMASH
+    if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH) {
+        startDatasmashMediaReceivers();
+    }
+#endif
+
     if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Host does not advertise required StationConnect local cursor transport");
+        stopDatasmashMediaReceivers();
         LiStopConnection();
         stopDatasmashDataPlane();
         emit displayLaunchError(
@@ -2519,6 +2518,9 @@ bool Session::beginStationConnectReconnect(
         }
     }
     SDL_UnlockSpinlock(&m_DecoderLock);
+#ifdef STATIONCONNECT_DATASMASH
+    stopDatasmashMediaReceivers();
+#endif
     LiStopConnection();
     stopDatasmashDataPlane();
     m_ReconnectCancelled.store(false);
@@ -2590,6 +2592,9 @@ bool Session::runStationConnectReconnect()
                        << "could not reach the host:" << error.toQString();
         }
 
+#ifdef STATIONCONNECT_DATASMASH
+        stopDatasmashMediaReceivers();
+#endif
         LiStopConnection();
         stopDatasmashDataPlane();
         {
@@ -3747,6 +3752,12 @@ DispatchDeferredCleanup:
     delete m_InputHandler;
     m_InputHandler = nullptr;
     clearStationConnectReconnectCredentials();
+
+#ifdef STATIONCONNECT_DATASMASH
+    // Native media threads call directly into the active decoder and audio
+    // renderer. Quiesce them before either renderer can be destroyed.
+    stopDatasmashMediaReceivers();
+#endif
 
     // Destroy the decoder, since this must be done on the main thread
     // NB: This must happen before LiStopConnection() for pull-based

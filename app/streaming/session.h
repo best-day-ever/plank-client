@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -22,7 +23,7 @@
 class ComputerManager;
 class StationConnectToolbar;
 #ifdef STATIONCONNECT_DATASMASH
-struct ScDatasmashEndpoint;
+struct ScDatasmashNativeEndpoint;
 #endif
 
 class SupportedVideoFormatList : public QList<int>
@@ -212,14 +213,10 @@ private:
     void stopDatasmashDataPlane();
 
 #ifdef STATIONCONNECT_DATASMASH
-    static int datasmashVideoPacketReceiver(void* context,
-                                            unsigned char* packet,
-                                            int packetCapacity,
-                                            int timeoutMs);
-    static int datasmashAudioPacketReceiver(void* context,
-                                            unsigned char* packet,
-                                            int packetCapacity,
-                                            int timeoutMs);
+    void startDatasmashMediaReceivers();
+    void stopDatasmashMediaReceivers();
+    void datasmashVideoReceiveLoop();
+    void datasmashAudioReceiveLoop();
     static int datasmashControlPacketSender(void* context,
                                             const unsigned char* packet,
                                             int packetLength);
@@ -360,8 +357,10 @@ private:
     StreamingPreferences::StationConnectCaptureSource m_StationConnectCaptureSource;
     StreamingPreferences::StationConnectDataPlane m_StationConnectDataPlane;
 #ifdef STATIONCONNECT_DATASMASH
-    ScDatasmashEndpoint* m_DatasmashEndpoint = nullptr;
-    size_t m_DatasmashMaxVideoPacketSize = 0;
+    ScDatasmashNativeEndpoint* m_DatasmashEndpoint = nullptr;
+    std::atomic_bool m_DatasmashReceiversStopping {false};
+    std::thread m_DatasmashVideoThread;
+    std::thread m_DatasmashAudioThread;
 #endif
     int m_StationConnectBitrateKbps;
     ComputerManager* m_ComputerManager;
