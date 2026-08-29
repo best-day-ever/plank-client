@@ -63,6 +63,7 @@
 #ifdef STATIONCONNECT_DATASMASH
 #include "stationconnect_datasmash.h"
 #include "stationconnect_datasmash_control.h"
+#include "stationconnect_datasmash_event.h"
 #endif
 
 #include <algorithm>
@@ -962,11 +963,12 @@ void Session::datasmashAudioReceiveLoop()
 
 void Session::datasmashDataReceiveLoop()
 {
-    unsigned char packet[SC_DATASMASH_CONTROL_MAX_PACKET_SIZE];
+    std::vector<unsigned char> packet(SC_DATASMASH_EVENT_MAX_PACKET_SIZE);
     while (!m_DatasmashReceiversStopping.load()) {
         size_t packetSize = 0;
         const int result = sc_datasmash_native_data_receive(
-                    m_DatasmashEndpoint, packet, sizeof(packet), &packetSize, 50);
+                    m_DatasmashEndpoint, packet.data(), packet.size(),
+                    &packetSize, 50);
         if (result == SC_DATASMASH_TIMEOUT) {
             continue;
         }
@@ -977,34 +979,114 @@ void Session::datasmashDataReceiveLoop()
             return;
         }
 
-        ScDatasmashControlPacket control {};
-        if (sc_datasmash_control_decode(packet, packetSize, &control) != 0) {
-            qWarning() << "Rejected malformed native KyProto control packet";
+        if (packetSize < sizeof(uint32_t)) {
+            qWarning() << "Rejected undersized native KyProto data record";
             LiNotifyStationConnectHostTermination(-1);
             return;
         }
-        switch (control.type) {
-        case SC_DATASMASH_CONTROL_VIDEO_BITRATE_APPLIED:
-            if (control.payload_size != 3 * sizeof(uint32_t)) {
+        const uint32_t magic = sc_datasmash_event_read_u32(packet.data());
+        if (magic == SC_DATASMASH_CONTROL_MAGIC) {
+            ScDatasmashControlPacket control {};
+            if (sc_datasmash_control_decode(
+                        packet.data(), packetSize, &control) != 0) {
+                qWarning() << "Rejected malformed native KyProto control packet";
                 LiNotifyStationConnectHostTermination(-1);
                 return;
             }
-            LiNotifyStationConnectVideoBitrateApplied(
-                        sc_datasmash_control_read_u32(control.payload),
-                        sc_datasmash_control_read_u32(control.payload + 4),
-                        sc_datasmash_control_read_u32(control.payload + 8));
-            break;
-        case SC_DATASMASH_CONTROL_HOST_TERMINATE:
-            if (control.payload_size != sizeof(uint32_t)) {
+            switch (control.type) {
+            case SC_DATASMASH_CONTROL_VIDEO_BITRATE_APPLIED:
+                if (control.payload_size != 3 * sizeof(uint32_t)) {
+                    LiNotifyStationConnectHostTermination(-1);
+                    return;
+                }
+                LiNotifyStationConnectVideoBitrateApplied(
+                            sc_datasmash_control_read_u32(control.payload),
+                            sc_datasmash_control_read_u32(control.payload + 4),
+                            sc_datasmash_control_read_u32(control.payload + 8));
+                break;
+            case SC_DATASMASH_CONTROL_HOST_TERMINATE:
+                if (control.payload_size != sizeof(uint32_t)) {
+                    LiNotifyStationConnectHostTermination(-1);
+                    return;
+                }
+                LiNotifyStationConnectHostTermination(
+                            sc_datasmash_control_read_u32(control.payload));
+                return;
+            default:
+                qWarning() << "Rejected unexpected native KyProto control type"
+                           << control.type;
                 LiNotifyStationConnectHostTermination(-1);
                 return;
             }
-            LiNotifyStationConnectHostTermination(
-                        sc_datasmash_control_read_u32(control.payload));
+            continue;
+        }
+
+        ScDatasmashEventPacket event {};
+        if (magic != SC_DATASMASH_EVENT_MAGIC ||
+                sc_datasmash_event_decode(
+                    packet.data(), packetSize, &event) != 0) {
+            qWarning() << "Rejected malformed native KyProto event record";
+            LiNotifyStationConnectHostTermination(-1);
             return;
+        }
+        switch (event.type) {
+        case SC_DATASMASH_EVENT_HDR_MODE: {
+            if (event.payload_size != SC_DATASMASH_EVENT_HDR_MODE_SIZE ||
+                    event.payload[1] != 0) {
+                LiNotifyStationConnectHostTermination(-1);
+                return;
+            }
+            SS_HDR_METADATA metadata {};
+            size_t offset = 2;
+            for (int index = 0; index < 3; ++index) {
+                metadata.displayPrimaries[index].x =
+                        sc_datasmash_event_read_u16(event.payload + offset);
+                metadata.displayPrimaries[index].y =
+                        sc_datasmash_event_read_u16(event.payload + offset + 2);
+                offset += 4;
+            }
+            metadata.whitePoint.x = sc_datasmash_event_read_u16(event.payload + offset);
+            metadata.whitePoint.y = sc_datasmash_event_read_u16(event.payload + offset + 2);
+            offset += 4;
+            metadata.maxDisplayLuminance = sc_datasmash_event_read_u16(event.payload + offset);
+            metadata.minDisplayLuminance = sc_datasmash_event_read_u16(event.payload + offset + 2);
+            metadata.maxContentLightLevel = sc_datasmash_event_read_u16(event.payload + offset + 4);
+            metadata.maxFrameAverageLightLevel = sc_datasmash_event_read_u16(event.payload + offset + 6);
+            metadata.maxFullFrameLuminance = sc_datasmash_event_read_u16(event.payload + offset + 8);
+            LiNotifyStationConnectHdrMode(event.payload[0] != 0, &metadata);
+            break;
+        }
+        case SC_DATASMASH_EVENT_RAW_HID_WACOM:
+            if (event.payload_size < sizeof(SC_RAW_HID_WIRE_HEADER) ||
+                    event.payload_size > sizeof(SC_RAW_HID_WIRE_HEADER) +
+                        SC_RAW_HID_MAX_PAYLOAD_SIZE) {
+                LiNotifyStationConnectHostTermination(-1);
+                return;
+            }
+            LiNotifyStationConnectRawHidControl(
+                        event.payload, event.payload_size);
+            break;
+        case SC_DATASMASH_EVENT_CURSOR_SHAPE:
+            if (event.payload_size < sizeof(SC_CURSOR_WIRE_HEADER) ||
+                    event.payload_size > sizeof(SC_CURSOR_WIRE_HEADER) +
+                        SC_CURSOR_MAX_CHUNK_SIZE) {
+                LiNotifyStationConnectHostTermination(-1);
+                return;
+            }
+            LiNotifyStationConnectCursorChunk(
+                        event.payload, event.payload_size);
+            break;
+        case SC_DATASMASH_EVENT_CURSOR_POSITION:
+            if (event.payload_size != sizeof(SC_CURSOR_POSITION_WIRE_MESSAGE)) {
+                LiNotifyStationConnectHostTermination(-1);
+                return;
+            }
+            LiNotifyStationConnectCursorPosition(
+                        event.payload, event.payload_size);
+            break;
         default:
-            qWarning() << "Rejected unexpected native KyProto control type"
-                       << control.type;
+            qWarning() << "Rejected unexpected native KyProto event type"
+                       << event.type;
             LiNotifyStationConnectHostTermination(-1);
             return;
         }
