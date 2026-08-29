@@ -989,7 +989,7 @@ Flickable {
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged
                     ToolTip.visible: hovered && StreamingPreferences.mdnsDiscoveryManaged
-                    ToolTip.text: qsTr("Managed by STATIONCONNECT_MDNS_DISCOVERY")
+                    ToolTip.text: qsTr("Managed by /etc/stationconnect/stationconnect-client.conf")
                     onCheckedChanged: {
                         // This is called on init, so only do the work if we've
                         // actually changed the value.

@@ -184,6 +184,7 @@ SOURCES += \
     cli/listapps.cpp \
     cli/startstream.cpp \
     settings/compatfetcher.cpp \
+    settings/stationconnectclientpolicy.cpp \
     settings/streamingpreferences.cpp \
     streaming/input/input.cpp \
     streaming/input/keyboard.cpp \
@@ -222,6 +223,7 @@ HEADERS += \
     cli/listapps.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
+    settings/stationconnectclientpolicy.h \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/stationconnectpointerlogic.h \

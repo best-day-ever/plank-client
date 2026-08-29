@@ -1,4 +1,5 @@
 #include "streamingpreferences.h"
+#include "stationconnectclientpolicy.h"
 #include "streaming/stationconnectpacketsize.h"
 #include <QSettings>
 #include <QTranslator>
@@ -85,20 +86,12 @@ void StreamingPreferences::reload()
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
     enableMdns = settings.value(SER_MDNS, false).toBool();
-    const QByteArray mdnsDiscoveryOverride =
-            qgetenv("STATIONCONNECT_MDNS_DISCOVERY").trimmed();
-    mdnsDiscoveryManaged =
-            qEnvironmentVariableIsSet("STATIONCONNECT_MDNS_DISCOVERY");
+    const StationConnectClientPolicy systemPolicy;
+    mdnsDiscoveryManaged = systemPolicy.managedBoolean(
+                QStringLiteral("network/mdns_discovery"), &enableMdns);
     if (mdnsDiscoveryManaged) {
-        if (mdnsDiscoveryOverride == "1") {
-            enableMdns = true;
-        }
-        else {
-            if (mdnsDiscoveryOverride != "0") {
-                qWarning() << "Invalid STATIONCONNECT_MDNS_DISCOVERY value; disabling mDNS discovery";
-            }
-            enableMdns = false;
-        }
+        qInfo() << "mDNS discovery is managed by"
+                << StationConnectClientPolicy::defaultConfigPath();
     }
     framePacing = settings.value(SER_FRAMEPACING, false).toBool();
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
