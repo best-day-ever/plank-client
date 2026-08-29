@@ -417,6 +417,13 @@ int main(int argc, char *argv[])
 {
     SDL_SetMainReady();
 
+    // Set the SDL3 application identity before any subsystem can initialize.
+    // On Wayland, GNOME uses this ID to match the stream window to our desktop
+    // entry and persist the user's keyboard-shortcut inhibitor decision.
+    SDL_SetAppMetadata("StationConnect Client",
+                       STATIONCONNECT_VERSION_STR,
+                       "la.instinctual.StationConnect.Client");
+
     // Set the app version for the QCommandLineParser's showVersion() command
     QCoreApplication::setApplicationVersion(STATIONCONNECT_VERSION_STR);
 
@@ -721,11 +728,6 @@ int main(int argc, char *argv[])
     // the mouse motion exactly how it was given to us.
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
 
-    // Set our app name for SDL's native PipeWire stream and screensaver
-    // inhibitor reporting.
-    SDL_SetHint("SDL_AUDIO_DEVICE_APP_NAME", "StationConnect Client");
-    SDL_SetHint("SDL_APP_NAME", "StationConnect Client");
-
     // We handle capturing the mouse ourselves when it leaves the window, so we don't need
     // SDL doing it for us behind our backs.
     SDL_SetHint("SDL_MOUSE_AUTO_CAPTURE", "0");
@@ -911,8 +913,6 @@ int main(int argc, char *argv[])
     // Match the StationConnect desktop entry so Wayland and X11 shells group
     // both the Qt launcher and SDL stream window under the packaged identity.
     app.setDesktopFileName("la.instinctual.StationConnect.Client");
-    qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "la.instinctual.StationConnect.Client");
-    qputenv("SDL_VIDEO_X11_WMCLASS", "la.instinctual.StationConnect.Client");
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
