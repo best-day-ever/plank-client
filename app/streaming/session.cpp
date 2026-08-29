@@ -789,10 +789,15 @@ bool Session::startDatasmashDataPlane(quint16 port,
 
     const size_t maxVideoPacketSize =
             sc_datasmash_video_max_packet_size(endpoint);
+    const size_t maxAudioPacketSize =
+            sc_datasmash_audio_max_packet_size(endpoint);
     if (maxVideoPacketSize <=
-            static_cast<size_t>(StationConnectPacketSize::MaxRtpHeaderSize)) {
-        qWarning() << "Experimental datasmash negotiated an unusable video packet size:"
-                   << maxVideoPacketSize;
+            static_cast<size_t>(StationConnectPacketSize::MaxRtpHeaderSize) ||
+            maxAudioPacketSize == 0 ||
+            maxAudioPacketSize > 1400) {
+        qWarning() << "Experimental datasmash negotiated unusable media packet sizes:"
+                   << "video" << maxVideoPacketSize
+                   << "audio" << maxAudioPacketSize;
         sc_datasmash_endpoint_stop(endpoint);
         sc_datasmash_endpoint_destroy(endpoint);
         return false;
@@ -802,8 +807,11 @@ bool Session::startDatasmashDataPlane(quint16 port,
     m_DatasmashMaxVideoPacketSize = maxVideoPacketSize;
     LiSetStationConnectVideoPacketReceiver(
                 &Session::datasmashVideoPacketReceiver, endpoint);
+    LiSetStationConnectAudioPacketReceiver(
+                &Session::datasmashAudioPacketReceiver, endpoint);
     qInfo() << "Experimental datasmash media and interaction connections are ready on UDP"
-            << port << "with maximum video packet size" << maxVideoPacketSize;
+            << port << "with maximum packet sizes: video" << maxVideoPacketSize
+            << "audio" << maxAudioPacketSize;
     return true;
 #endif
 }
@@ -812,18 +820,24 @@ void Session::stopDatasmashDataPlane()
 {
 #ifdef STATIONCONNECT_DATASMASH
     LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
+    LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
         ScDatasmashStats stats {};
         stats.struct_size = sizeof(stats);
         stats.abi_version = SC_DATASMASH_ABI_VERSION;
         if (sc_datasmash_endpoint_stats(m_DatasmashEndpoint, &stats) ==
                 SC_DATASMASH_OK) {
-            qInfo() << "Datasmash video transport: packets="
+            qInfo() << "Datasmash media transport: video-packets="
                     << stats.video_packets_received
-                    << "bytes=" << stats.video_bytes_received
-                    << "receive-queue-drops=" << stats.video_receive_queue_drops
-                    << "receive-queue-high-water="
+                    << "video-bytes=" << stats.video_bytes_received
+                    << "video-receive-queue-drops=" << stats.video_receive_queue_drops
+                    << "video-receive-queue-high-water="
                     << stats.video_receive_queue_high_water
+                    << "audio-packets=" << stats.audio_packets_received
+                    << "audio-bytes=" << stats.audio_bytes_received
+                    << "audio-receive-queue-drops=" << stats.audio_receive_queue_drops
+                    << "audio-receive-queue-high-water="
+                    << stats.audio_receive_queue_high_water
                     << "QUIC-lost=" << stats.media_quic_packets_lost
                     << "QUIC-RTT-us=" << stats.media_quic_rtt_us;
         }
@@ -848,6 +862,31 @@ int Session::datasmashVideoPacketReceiver(void* context,
     }
     size_t packetSize = 0;
     const int result = sc_datasmash_video_receive(
+                static_cast<ScDatasmashEndpoint*>(context), packet,
+                static_cast<size_t>(packetCapacity), &packetSize,
+                static_cast<uint32_t>(timeoutMs));
+    if (result == SC_DATASMASH_TIMEOUT) {
+        return 0;
+    }
+    if (result != SC_DATASMASH_OK ||
+            packetSize > static_cast<size_t>(packetCapacity) ||
+            packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return -1;
+    }
+    return static_cast<int>(packetSize);
+}
+
+int Session::datasmashAudioPacketReceiver(void* context,
+                                          unsigned char* packet,
+                                          int packetCapacity,
+                                          int timeoutMs)
+{
+    if (context == nullptr || packet == nullptr || packetCapacity <= 0 ||
+            timeoutMs < 0) {
+        return -1;
+    }
+    size_t packetSize = 0;
+    const int result = sc_datasmash_audio_receive(
                 static_cast<ScDatasmashEndpoint*>(context), packet,
                 static_cast<size_t>(packetCapacity), &packetSize,
                 static_cast<uint32_t>(timeoutMs));
@@ -2241,6 +2280,7 @@ bool Session::startConnectionAsync(bool reconnecting)
 
 #ifdef STATIONCONNECT_DATASMASH
     LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
+    LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
 #endif
     if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
             !startDatasmashDataPlane(datasmashPort,

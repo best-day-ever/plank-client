@@ -216,6 +216,10 @@ private:
                                             unsigned char* packet,
                                             int packetCapacity,
                                             int timeoutMs);
+    static int datasmashAudioPacketReceiver(void* context,
+                                            unsigned char* packet,
+                                            int packetCapacity,
+                                            int timeoutMs);
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);
