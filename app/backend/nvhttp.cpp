@@ -329,10 +329,16 @@ NvHTTP::startApp(QString verb,
         throw GfeHttpResponseException(
                     400, "Host did not accept the requested data plane");
     }
+    const auto isCanonicalSha256Hex = [](const QString& value) {
+        const QByteArray encoded = value.toLatin1();
+        const QByteArray decoded = QByteArray::fromHex(encoded);
+        return encoded.size() == 64 && decoded.size() == 32 &&
+                decoded.toHex() == encoded.toLower();
+    };
     if (m_StationConnectAuthentication && dataPlane == QStringLiteral("datasmash") &&
             (datasmashPort == 0 ||
-             QByteArray::fromHex(datasmashCertificateSha256.toLatin1()).size() != 32 ||
-             QByteArray::fromHex(datasmashToken.toLatin1()).size() != 32)) {
+             !isCanonicalSha256Hex(datasmashCertificateSha256) ||
+             !isCanonicalSha256Hex(datasmashToken))) {
         throw GfeHttpResponseException(
                     400, "Host returned invalid datasmash launch credentials");
     }
