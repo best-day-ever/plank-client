@@ -606,7 +606,7 @@ ApplicationWindow {
             ListModel {
                 id: addNativeEncodingProfileModel
                 ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
+                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR) — x264")
                     val: StreamingPreferences.SCVP_H264_10BIT_444
                 }
                 ListElement {

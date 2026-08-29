@@ -1039,7 +1039,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
                            identityBitDepth,
                            identityCodec,
                            m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
-                               " (NVENC)" : "",
+                               " (NVENC)" : " (x264)",
                            identityBitDepth);
             if (ret < 0 || ret >= length - offset) {
                 SDL_assert(false);
