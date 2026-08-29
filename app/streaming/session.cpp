@@ -792,6 +792,8 @@ bool Session::startDatasmashDataPlane(quint16 port,
     m_DatasmashEndpoint = endpoint;
     LiSetStationConnectNativeControlSender(
                 &Session::datasmashNativeControlSender, endpoint);
+    LiSetStationConnectNativeInputSender(
+                &Session::datasmashNativeInputSender, endpoint);
     qInfo() << "Experimental native KyProto media, input, and data protocols are ready on UDP"
             << port;
     return true;
@@ -812,6 +814,7 @@ void Session::stopDatasmashDataPlane()
     }
     stopDatasmashMediaReceivers();
     LiSetStationConnectNativeControlSender(nullptr, nullptr);
+    LiSetStationConnectNativeInputSender(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
         ScDatasmashNativeStats stats {};
         stats.struct_size = sizeof(stats);
@@ -824,6 +827,7 @@ void Session::stopDatasmashDataPlane()
                     << "audio-packets=" << stats.audio_packets_received
                     << "audio-bytes=" << stats.audio_bytes_received
                     << "audio-receive-drops=" << stats.audio_receive_drops
+                    << "input-sent=" << stats.input_packets_sent
                     << "data-sent=" << stats.data_packets_sent
                     << "data-received=" << stats.data_packets_received
                     << "QUIC-lost=" << stats.quic_packets_lost
@@ -1042,6 +1046,18 @@ int Session::datasmashNativeControlSender(void* context, uint32_t type,
     return sc_datasmash_native_data_send(
                 static_cast<ScDatasmashNativeEndpoint*>(context), packet,
                 packetSize);
+}
+
+int Session::datasmashNativeInputSender(void* context, uint8_t type,
+                                        const unsigned char* payload,
+                                        size_t payloadLength)
+{
+    if (context == nullptr || payload == nullptr || payloadLength == 0) {
+        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+    }
+    return sc_datasmash_native_input_send(
+                static_cast<ScDatasmashNativeEndpoint*>(context), type,
+                payload, payloadLength);
 }
 #endif
 
@@ -2426,6 +2442,7 @@ bool Session::startConnectionAsync(bool reconnecting)
 
 #ifdef STATIONCONNECT_DATASMASH
     LiSetStationConnectNativeControlSender(nullptr, nullptr);
+    LiSetStationConnectNativeInputSender(nullptr, nullptr);
 #endif
     if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
             !startDatasmashDataPlane(datasmashPort,

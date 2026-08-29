@@ -15,6 +15,20 @@ CONFIG += staticlib
 # Include global qmake defs
 include(../globaldefs.pri)
 
+unix:!macx:contains(CONFIG, stationconnect-datasmash) {
+    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
+        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$(STATIONCONNECT_DATASMASH_TRANSPORT_DIR)
+    }
+    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
+        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/datasmash-transport)
+    }
+    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash_input.h) {
+        error("StationConnect datasmash input header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    }
+    INCLUDEPATH += $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include
+    DEFINES += STATIONCONNECT_DATASMASH=1
+}
+
 win32 {
     contains(QT_ARCH, i386) {
         INCLUDEPATH += $$PWD/../libs/windows/include/x86

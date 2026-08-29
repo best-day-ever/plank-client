@@ -220,6 +220,9 @@ private:
     void datasmashDataReceiveLoop();
     static int datasmashNativeControlSender(void* context, uint32_t type,
                                             uint32_t value1, uint32_t value2);
+    static int datasmashNativeInputSender(void* context, uint8_t type,
+                                          const unsigned char* payload,
+                                          size_t payloadLength);
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);
