@@ -14,6 +14,9 @@ unix:!macx:contains(CONFIG, stationconnect-datasmash) {
     !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash.h) {
         error("StationConnect datasmash transport header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
     }
+    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash_control.h) {
+        error("StationConnect datasmash control header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    }
 
     STATIONCONNECT_CARGO = $$(CARGO)
     isEmpty(STATIONCONNECT_CARGO): STATIONCONNECT_CARGO = cargo

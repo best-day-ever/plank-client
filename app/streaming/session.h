@@ -217,13 +217,9 @@ private:
     void stopDatasmashMediaReceivers();
     void datasmashVideoReceiveLoop();
     void datasmashAudioReceiveLoop();
-    static int datasmashControlPacketSender(void* context,
-                                            const unsigned char* packet,
-                                            int packetLength);
-    static int datasmashControlPacketReceiver(void* context,
-                                              unsigned char* packet,
-                                              int packetCapacity,
-                                              int timeoutMs);
+    void datasmashDataReceiveLoop();
+    static int datasmashNativeControlSender(void* context, uint32_t type,
+                                            uint32_t value1, uint32_t value2);
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);
@@ -361,6 +357,7 @@ private:
     std::atomic_bool m_DatasmashReceiversStopping {false};
     std::thread m_DatasmashVideoThread;
     std::thread m_DatasmashAudioThread;
+    std::thread m_DatasmashDataThread;
 #endif
     int m_StationConnectBitrateKbps;
     ComputerManager* m_ComputerManager;

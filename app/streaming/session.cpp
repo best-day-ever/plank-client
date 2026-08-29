@@ -62,6 +62,7 @@
 
 #ifdef STATIONCONNECT_DATASMASH
 #include "stationconnect_datasmash.h"
+#include "stationconnect_datasmash_control.h"
 #endif
 
 #include <algorithm>
@@ -789,10 +790,8 @@ bool Session::startDatasmashDataPlane(quint16 port,
     }
 
     m_DatasmashEndpoint = endpoint;
-    LiSetStationConnectControlPacketSender(
-                &Session::datasmashControlPacketSender, endpoint);
-    LiSetStationConnectControlPacketReceiver(
-                &Session::datasmashControlPacketReceiver, endpoint);
+    LiSetStationConnectNativeControlSender(
+                &Session::datasmashNativeControlSender, endpoint);
     qInfo() << "Experimental native KyProto media, input, and data protocols are ready on UDP"
             << port;
     return true;
@@ -802,9 +801,17 @@ bool Session::startDatasmashDataPlane(quint16 port,
 void Session::stopDatasmashDataPlane()
 {
 #ifdef STATIONCONNECT_DATASMASH
+    if (m_DatasmashEndpoint != nullptr) {
+        unsigned char packet[SC_DATASMASH_CONTROL_MAX_PACKET_SIZE];
+        size_t packetSize = 0;
+        if (sc_datasmash_control_encode(
+                    SC_DATASMASH_CONTROL_CLIENT_DISCONNECT, nullptr, 0,
+                    packet, sizeof(packet), &packetSize) == 0) {
+            sc_datasmash_native_data_send(m_DatasmashEndpoint, packet, packetSize);
+        }
+    }
     stopDatasmashMediaReceivers();
-    LiSetStationConnectControlPacketSender(nullptr, nullptr);
-    LiSetStationConnectControlPacketReceiver(nullptr, nullptr);
+    LiSetStationConnectNativeControlSender(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
         ScDatasmashNativeStats stats {};
         stats.struct_size = sizeof(stats);
@@ -846,6 +853,9 @@ void Session::startDatasmashMediaReceivers()
     m_DatasmashAudioThread = std::thread([this]() {
         datasmashAudioReceiveLoop();
     });
+    m_DatasmashDataThread = std::thread([this]() {
+        datasmashDataReceiveLoop();
+    });
 }
 
 void Session::stopDatasmashMediaReceivers()
@@ -856,6 +866,9 @@ void Session::stopDatasmashMediaReceivers()
     }
     if (m_DatasmashAudioThread.joinable()) {
         m_DatasmashAudioThread.join();
+    }
+    if (m_DatasmashDataThread.joinable()) {
+        m_DatasmashDataThread.join();
     }
 }
 
@@ -943,41 +956,92 @@ void Session::datasmashAudioReceiveLoop()
     }
 }
 
-int Session::datasmashControlPacketSender(void* context,
-                                          const unsigned char* packet,
-                                          int packetLength)
+void Session::datasmashDataReceiveLoop()
 {
-    if (context == nullptr || packet == nullptr || packetLength < 2) {
+    unsigned char packet[SC_DATASMASH_CONTROL_MAX_PACKET_SIZE];
+    while (!m_DatasmashReceiversStopping.load()) {
+        size_t packetSize = 0;
+        const int result = sc_datasmash_native_data_receive(
+                    m_DatasmashEndpoint, packet, sizeof(packet), &packetSize, 50);
+        if (result == SC_DATASMASH_TIMEOUT) {
+            continue;
+        }
+        if (result != SC_DATASMASH_OK) {
+            if (!m_DatasmashReceiversStopping.load()) {
+                qWarning() << "Native KyProto control receive failed:" << result;
+            }
+            return;
+        }
+
+        ScDatasmashControlPacket control {};
+        if (sc_datasmash_control_decode(packet, packetSize, &control) != 0) {
+            qWarning() << "Rejected malformed native KyProto control packet";
+            LiNotifyStationConnectHostTermination(-1);
+            return;
+        }
+        switch (control.type) {
+        case SC_DATASMASH_CONTROL_VIDEO_BITRATE_APPLIED:
+            if (control.payload_size != 3 * sizeof(uint32_t)) {
+                LiNotifyStationConnectHostTermination(-1);
+                return;
+            }
+            LiNotifyStationConnectVideoBitrateApplied(
+                        sc_datasmash_control_read_u32(control.payload),
+                        sc_datasmash_control_read_u32(control.payload + 4),
+                        sc_datasmash_control_read_u32(control.payload + 8));
+            break;
+        case SC_DATASMASH_CONTROL_HOST_TERMINATE:
+            if (control.payload_size != sizeof(uint32_t)) {
+                LiNotifyStationConnectHostTermination(-1);
+                return;
+            }
+            LiNotifyStationConnectHostTermination(
+                        sc_datasmash_control_read_u32(control.payload));
+            return;
+        default:
+            qWarning() << "Rejected unexpected native KyProto control type"
+                       << control.type;
+            LiNotifyStationConnectHostTermination(-1);
+            return;
+        }
+    }
+}
+
+int Session::datasmashNativeControlSender(void* context, uint32_t type,
+                                          uint32_t value1, uint32_t value2)
+{
+    if (context == nullptr) {
+        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+    }
+    uint16_t wireType = 0;
+    uint32_t values[2] {value1, value2};
+    size_t valueCount = 0;
+    switch (type) {
+    case LI_SC_NATIVE_CONTROL_REQUEST_IDR:
+        wireType = SC_DATASMASH_CONTROL_REQUEST_IDR;
+        break;
+    case LI_SC_NATIVE_CONTROL_INVALIDATE_REFERENCE_FRAMES:
+        wireType = SC_DATASMASH_CONTROL_INVALIDATE_REFERENCE_FRAMES;
+        valueCount = 2;
+        break;
+    case LI_SC_NATIVE_CONTROL_SET_VIDEO_BITRATE:
+        wireType = SC_DATASMASH_CONTROL_SET_VIDEO_BITRATE;
+        valueCount = 1;
+        break;
+    default:
+        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+    }
+
+    unsigned char packet[SC_DATASMASH_CONTROL_MAX_PACKET_SIZE];
+    size_t packetSize = 0;
+    if (sc_datasmash_control_encode(
+                wireType, values, valueCount, packet, sizeof(packet),
+                &packetSize) != 0) {
         return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
     }
     return sc_datasmash_native_data_send(
                 static_cast<ScDatasmashNativeEndpoint*>(context), packet,
-                static_cast<size_t>(packetLength));
-}
-
-int Session::datasmashControlPacketReceiver(void* context,
-                                            unsigned char* packet,
-                                            int packetCapacity,
-                                            int timeoutMs)
-{
-    if (context == nullptr || packet == nullptr || packetCapacity <= 0 ||
-            timeoutMs < 0) {
-        return -1;
-    }
-    size_t packetSize = 0;
-    const int result = sc_datasmash_native_data_receive(
-                static_cast<ScDatasmashNativeEndpoint*>(context), packet,
-                static_cast<size_t>(packetCapacity), &packetSize,
-                static_cast<uint32_t>(timeoutMs));
-    if (result == SC_DATASMASH_TIMEOUT) {
-        return 0;
-    }
-    if (result != SC_DATASMASH_OK ||
-            packetSize > static_cast<size_t>(packetCapacity) ||
-            packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
-        return -1;
-    }
-    return static_cast<int>(packetSize);
+                packetSize);
 }
 #endif
 
@@ -2361,7 +2425,7 @@ bool Session::startConnectionAsync(bool reconnecting)
     }
 
 #ifdef STATIONCONNECT_DATASMASH
-    LiSetStationConnectControlPacketSender(nullptr, nullptr);
+    LiSetStationConnectNativeControlSender(nullptr, nullptr);
 #endif
     if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
             !startDatasmashDataPlane(datasmashPort,
