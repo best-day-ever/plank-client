@@ -223,6 +223,10 @@ private:
     static int datasmashControlPacketSender(void* context,
                                             const unsigned char* packet,
                                             int packetLength);
+    static int datasmashControlPacketReceiver(void* context,
+                                              unsigned char* packet,
+                                              int packetCapacity,
+                                              int timeoutMs);
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);

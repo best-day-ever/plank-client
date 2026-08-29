@@ -811,6 +811,8 @@ bool Session::startDatasmashDataPlane(quint16 port,
                 &Session::datasmashAudioPacketReceiver, endpoint);
     LiSetStationConnectControlPacketSender(
                 &Session::datasmashControlPacketSender, endpoint);
+    LiSetStationConnectControlPacketReceiver(
+                &Session::datasmashControlPacketReceiver, endpoint);
     qInfo() << "Experimental datasmash media and interaction connections are ready on UDP"
             << port << "with maximum packet sizes: video" << maxVideoPacketSize
             << "audio" << maxAudioPacketSize;
@@ -824,6 +826,7 @@ void Session::stopDatasmashDataPlane()
     LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
     LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
     LiSetStationConnectControlPacketSender(nullptr, nullptr);
+    LiSetStationConnectControlPacketReceiver(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
         ScDatasmashStats stats {};
         stats.struct_size = sizeof(stats);
@@ -843,12 +846,20 @@ void Session::stopDatasmashDataPlane()
                     << stats.audio_receive_queue_high_water
                     << "QUIC-lost=" << stats.media_quic_packets_lost
                     << "QUIC-RTT-us=" << stats.media_quic_rtt_us
-                    << "control-packets=" << stats.control_packets_sent
-                    << "control-bytes=" << stats.control_bytes_sent
+                    << "control-packets-sent=" << stats.control_packets_sent
+                    << "control-bytes-sent=" << stats.control_bytes_sent
+                    << "control-packets-received="
+                    << stats.control_packets_received
+                    << "control-bytes-received="
+                    << stats.control_bytes_received
                     << "control-send-queue-full="
                     << stats.control_send_queue_full
+                    << "control-receive-queue-overflow="
+                    << stats.control_receive_queue_overflow
                     << "control-send-queue-high-water="
                     << stats.control_send_queue_high_water
+                    << "control-receive-queue-high-water="
+                    << stats.control_receive_queue_high_water
                     << "interaction-QUIC-lost="
                     << stats.interaction_quic_packets_lost
                     << "interaction-QUIC-RTT-us="
@@ -924,6 +935,31 @@ int Session::datasmashControlPacketSender(void* context,
     return sc_datasmash_control_send(
                 static_cast<ScDatasmashEndpoint*>(context), packet,
                 static_cast<size_t>(packetLength));
+}
+
+int Session::datasmashControlPacketReceiver(void* context,
+                                            unsigned char* packet,
+                                            int packetCapacity,
+                                            int timeoutMs)
+{
+    if (context == nullptr || packet == nullptr || packetCapacity <= 0 ||
+            timeoutMs < 0) {
+        return -1;
+    }
+    size_t packetSize = 0;
+    const int result = sc_datasmash_control_receive(
+                static_cast<ScDatasmashEndpoint*>(context), packet,
+                static_cast<size_t>(packetCapacity), &packetSize,
+                static_cast<uint32_t>(timeoutMs));
+    if (result == SC_DATASMASH_TIMEOUT) {
+        return 0;
+    }
+    if (result != SC_DATASMASH_OK ||
+            packetSize > static_cast<size_t>(packetCapacity) ||
+            packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return -1;
+    }
+    return static_cast<int>(packetSize);
 }
 #endif
 
