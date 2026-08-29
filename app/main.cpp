@@ -528,7 +528,7 @@ int main(int argc, char *argv[])
         return 9;
     }
     qInfo() << "StationConnect datasmash transport ABI"
-            << sc_datasmash_abi_version() << "is linked but inactive";
+            << sc_datasmash_abi_version() << "is available";
 #endif
 
 #ifdef Q_OS_WIN32

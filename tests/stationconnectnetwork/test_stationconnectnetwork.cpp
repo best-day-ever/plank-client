@@ -13,6 +13,7 @@ private slots:
     void rejectsPhysicalAndMalformedInterfaces();
     void keepsEncryptedVideoInsideZeroTierMtu();
     void derivesVideoPacketSizeFromPhysicalMtu();
+    void reservesDatasmashFramingBudget();
 };
 
 void TestStationConnectNetwork::recognizesLinuxZeroTierInterface()
@@ -29,6 +30,17 @@ void TestStationConnectNetwork::derivesVideoPacketSizeFromPhysicalMtu()
     QVERIFY(StationConnectPacketSize::zeroTierPhysicalPayload(
                 StationConnectPacketSize::videoPacketSizeForPhysicalMtu(1432),
                 StationConnectPacketSize::ZeroTierExtendedFrameOverhead) <= 1432);
+}
+
+void TestStationConnectNetwork::reservesDatasmashFramingBudget()
+{
+    QCOMPARE(StationConnectPacketSize::DatasmashFramingBudget, 64);
+    QCOMPARE(StationConnectPacketSize::datasmashVideoPacketSize(1328), 1264);
+    QCOMPARE(StationConnectPacketSize::datasmashVideoPacketSize(64), 0);
+    QCOMPARE(StationConnectPacketSize::datasmashVideoPacketSize(63), 0);
+    QVERIFY(StationConnectPacketSize::datasmashPhysicalPayload(
+                1264, StationConnectPacketSize::ZeroTierExtendedFrameOverhead) <=
+            StationConnectPacketSize::ZeroTierPhysicalPayloadMtu);
 }
 
 void TestStationConnectNetwork::recognizesNamedZeroTierInterface()

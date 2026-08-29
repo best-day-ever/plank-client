@@ -65,6 +65,7 @@
 #endif
 
 #include <algorithm>
+#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -786,9 +787,23 @@ bool Session::startDatasmashDataPlane(quint16 port,
         return false;
     }
 
+    const size_t maxVideoPacketSize =
+            sc_datasmash_video_max_packet_size(endpoint);
+    if (maxVideoPacketSize <=
+            static_cast<size_t>(StationConnectPacketSize::MaxRtpHeaderSize)) {
+        qWarning() << "Experimental datasmash negotiated an unusable video packet size:"
+                   << maxVideoPacketSize;
+        sc_datasmash_endpoint_stop(endpoint);
+        sc_datasmash_endpoint_destroy(endpoint);
+        return false;
+    }
+
     m_DatasmashEndpoint = endpoint;
+    m_DatasmashMaxVideoPacketSize = maxVideoPacketSize;
+    LiSetStationConnectVideoPacketReceiver(
+                &Session::datasmashVideoPacketReceiver, endpoint);
     qInfo() << "Experimental datasmash media and interaction connections are ready on UDP"
-            << port;
+            << port << "with maximum video packet size" << maxVideoPacketSize;
     return true;
 #endif
 }
@@ -796,14 +811,57 @@ bool Session::startDatasmashDataPlane(quint16 port,
 void Session::stopDatasmashDataPlane()
 {
 #ifdef STATIONCONNECT_DATASMASH
+    LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
+        ScDatasmashStats stats {};
+        stats.struct_size = sizeof(stats);
+        stats.abi_version = SC_DATASMASH_ABI_VERSION;
+        if (sc_datasmash_endpoint_stats(m_DatasmashEndpoint, &stats) ==
+                SC_DATASMASH_OK) {
+            qInfo() << "Datasmash video transport: packets="
+                    << stats.video_packets_received
+                    << "bytes=" << stats.video_bytes_received
+                    << "receive-queue-drops=" << stats.video_receive_queue_drops
+                    << "receive-queue-high-water="
+                    << stats.video_receive_queue_high_water
+                    << "QUIC-lost=" << stats.media_quic_packets_lost
+                    << "QUIC-RTT-us=" << stats.media_quic_rtt_us;
+        }
         sc_datasmash_endpoint_stop(m_DatasmashEndpoint);
         sc_datasmash_endpoint_destroy(m_DatasmashEndpoint);
         m_DatasmashEndpoint = nullptr;
+        m_DatasmashMaxVideoPacketSize = 0;
         qInfo() << "Experimental datasmash connections stopped";
     }
 #endif
 }
+
+#ifdef STATIONCONNECT_DATASMASH
+int Session::datasmashVideoPacketReceiver(void* context,
+                                          unsigned char* packet,
+                                          int packetCapacity,
+                                          int timeoutMs)
+{
+    if (context == nullptr || packet == nullptr || packetCapacity <= 0 ||
+            timeoutMs < 0) {
+        return -1;
+    }
+    size_t packetSize = 0;
+    const int result = sc_datasmash_video_receive(
+                static_cast<ScDatasmashEndpoint*>(context), packet,
+                static_cast<size_t>(packetCapacity), &packetSize,
+                static_cast<uint32_t>(timeoutMs));
+    if (result == SC_DATASMASH_TIMEOUT) {
+        return 0;
+    }
+    if (result != SC_DATASMASH_OK ||
+            packetSize > static_cast<size_t>(packetCapacity) ||
+            packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return -1;
+    }
+    return static_cast<int>(packetSize);
+}
+#endif
 
 void Session::clearStationConnectReconnectCredentials()
 {
@@ -2181,6 +2239,9 @@ bool Session::startConnectionAsync(bool reconnecting)
         return false;
     }
 
+#ifdef STATIONCONNECT_DATASMASH
+    LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
+#endif
     if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
             !startDatasmashDataPlane(datasmashPort,
                                      datasmashCertificateSha256,
@@ -2258,6 +2319,37 @@ bool Session::startConnectionAsync(bool reconnecting)
             break;
         }
     }
+
+#ifdef STATIONCONNECT_DATASMASH
+    if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH) {
+        const int framingLimitedPacketSize =
+                StationConnectPacketSize::datasmashVideoPacketSize(
+                    m_StreamConfig.packetSize);
+        const size_t negotiatedPayloadLimit =
+                m_DatasmashMaxVideoPacketSize -
+                static_cast<size_t>(StationConnectPacketSize::MaxRtpHeaderSize);
+        const int negotiatedPacketSize = static_cast<int>(
+                negotiatedPayloadLimit -
+                negotiatedPayloadLimit % 16);
+        m_StreamConfig.packetSize = qMin(framingLimitedPacketSize,
+                                         negotiatedPacketSize);
+        if (m_StreamConfig.packetSize < 512) {
+            qWarning() << "Datasmash video packet budget is too small:"
+                       << m_StreamConfig.packetSize;
+            stopDatasmashDataPlane();
+            if (!reconnecting) {
+                emit displayLaunchError(
+                            tr("The experimental StationConnect video packet budget is too small."));
+            }
+            return false;
+        }
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Using datasmash video packet size: %d bytes "
+                    "(transport payload maximum: %zu bytes)",
+                    m_StreamConfig.packetSize,
+                    m_DatasmashMaxVideoPacketSize);
+    }
+#endif
 
     // moonlight-common-c fills missing callbacks in the caller-owned table.
     // Restore the pull/push decoder contract before every reuse of this

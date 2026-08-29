@@ -211,6 +211,13 @@ private:
 
     void stopDatasmashDataPlane();
 
+#ifdef STATIONCONNECT_DATASMASH
+    static int datasmashVideoPacketReceiver(void* context,
+                                            unsigned char* packet,
+                                            int packetCapacity,
+                                            int timeoutMs);
+#endif
+
     bool validateLaunch(SDL_Window* testWindow);
 
     void emitLaunchWarning(QString text);
@@ -343,6 +350,7 @@ private:
     StreamingPreferences::StationConnectDataPlane m_StationConnectDataPlane;
 #ifdef STATIONCONNECT_DATASMASH
     ScDatasmashEndpoint* m_DatasmashEndpoint = nullptr;
+    size_t m_DatasmashMaxVideoPacketSize = 0;
 #endif
     int m_StationConnectBitrateKbps;
     ComputerManager* m_ComputerManager;
