@@ -220,6 +220,9 @@ private:
                                             unsigned char* packet,
                                             int packetCapacity,
                                             int timeoutMs);
+    static int datasmashControlPacketSender(void* context,
+                                            const unsigned char* packet,
+                                            int packetLength);
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);

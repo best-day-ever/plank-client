@@ -809,6 +809,8 @@ bool Session::startDatasmashDataPlane(quint16 port,
                 &Session::datasmashVideoPacketReceiver, endpoint);
     LiSetStationConnectAudioPacketReceiver(
                 &Session::datasmashAudioPacketReceiver, endpoint);
+    LiSetStationConnectControlPacketSender(
+                &Session::datasmashControlPacketSender, endpoint);
     qInfo() << "Experimental datasmash media and interaction connections are ready on UDP"
             << port << "with maximum packet sizes: video" << maxVideoPacketSize
             << "audio" << maxAudioPacketSize;
@@ -821,6 +823,7 @@ void Session::stopDatasmashDataPlane()
 #ifdef STATIONCONNECT_DATASMASH
     LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
     LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
+    LiSetStationConnectControlPacketSender(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
         ScDatasmashStats stats {};
         stats.struct_size = sizeof(stats);
@@ -839,7 +842,17 @@ void Session::stopDatasmashDataPlane()
                     << "audio-receive-queue-high-water="
                     << stats.audio_receive_queue_high_water
                     << "QUIC-lost=" << stats.media_quic_packets_lost
-                    << "QUIC-RTT-us=" << stats.media_quic_rtt_us;
+                    << "QUIC-RTT-us=" << stats.media_quic_rtt_us
+                    << "control-packets=" << stats.control_packets_sent
+                    << "control-bytes=" << stats.control_bytes_sent
+                    << "control-send-queue-full="
+                    << stats.control_send_queue_full
+                    << "control-send-queue-high-water="
+                    << stats.control_send_queue_high_water
+                    << "interaction-QUIC-lost="
+                    << stats.interaction_quic_packets_lost
+                    << "interaction-QUIC-RTT-us="
+                    << stats.interaction_quic_rtt_us;
         }
         sc_datasmash_endpoint_stop(m_DatasmashEndpoint);
         sc_datasmash_endpoint_destroy(m_DatasmashEndpoint);
@@ -899,6 +912,18 @@ int Session::datasmashAudioPacketReceiver(void* context,
         return -1;
     }
     return static_cast<int>(packetSize);
+}
+
+int Session::datasmashControlPacketSender(void* context,
+                                          const unsigned char* packet,
+                                          int packetLength)
+{
+    if (context == nullptr || packet == nullptr || packetLength < 2) {
+        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+    }
+    return sc_datasmash_control_send(
+                static_cast<ScDatasmashEndpoint*>(context), packet,
+                static_cast<size_t>(packetLength));
 }
 #endif
 
@@ -2281,6 +2306,7 @@ bool Session::startConnectionAsync(bool reconnecting)
 #ifdef STATIONCONNECT_DATASMASH
     LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
     LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
+    LiSetStationConnectControlPacketSender(nullptr, nullptr);
 #endif
     if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
             !startDatasmashDataPlane(datasmashPort,
