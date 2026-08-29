@@ -803,8 +803,6 @@ void Session::stopDatasmashDataPlane()
 {
 #ifdef STATIONCONNECT_DATASMASH
     stopDatasmashMediaReceivers();
-    LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
-    LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
     LiSetStationConnectControlPacketSender(nullptr, nullptr);
     LiSetStationConnectControlPacketReceiver(nullptr, nullptr);
     if (m_DatasmashEndpoint != nullptr) {
@@ -2363,8 +2361,6 @@ bool Session::startConnectionAsync(bool reconnecting)
     }
 
 #ifdef STATIONCONNECT_DATASMASH
-    LiSetStationConnectVideoPacketReceiver(nullptr, nullptr);
-    LiSetStationConnectAudioPacketReceiver(nullptr, nullptr);
     LiSetStationConnectControlPacketSender(nullptr, nullptr);
 #endif
     if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
@@ -2452,6 +2448,8 @@ bool Session::startConnectionAsync(bool reconnecting)
             (m_VideoCallbacks.capabilities & CAPABILITY_PULL_RENDERER) ?
                 nullptr : drSubmitDecodeUnit;
 
+    LiSetStationConnectNativeMediaEnabled(
+                m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH);
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
