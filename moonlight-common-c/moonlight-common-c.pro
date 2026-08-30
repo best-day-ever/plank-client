@@ -64,9 +64,6 @@ SOURCES += \
     $$ENET_DIR/protocol.c \
     $$ENET_DIR/unix.c \
     $$ENET_DIR/win32.c \
-    $$COMMON_C_DIR/nanors/deps/obl/oblas_common.c \
-    $$COMMON_C_DIR/nanors/deps/obl/oblas_lite.c \
-    $$COMMON_C_DIR/nanors/rs.c \
     $$COMMON_C_DIR/src/AudioStream.c \
     $$COMMON_C_DIR/src/ByteBuffer.c \
     $$COMMON_C_DIR/src/Connection.c \
@@ -79,8 +76,6 @@ SOURCES += \
     $$COMMON_C_DIR/src/Platform.c \
     $$COMMON_C_DIR/src/PlatformCrypto.c \
     $$COMMON_C_DIR/src/PlatformSockets.c \
-    $$COMMON_C_DIR/src/RtpAudioQueue.c \
-    $$COMMON_C_DIR/src/RtpVideoQueue.c \
     $$COMMON_C_DIR/src/RtspConnection.c \
     $$COMMON_C_DIR/src/RtspParser.c \
     $$COMMON_C_DIR/src/SdpGenerator.c \
@@ -91,10 +86,7 @@ HEADERS += \
     $$COMMON_C_DIR/src/Limelight.h
 INCLUDEPATH += \
     $$ENET_DIR/include \
-    $$COMMON_C_DIR/src \
-    $$COMMON_C_DIR/nanors \
-    $$COMMON_C_DIR/nanors/deps \
-    $$COMMON_C_DIR/nanors/deps/obl
+    $$COMMON_C_DIR/src
 DEFINES += HAS_SOCKLEN_T
 
 CONFIG(debug, debug|release) {
