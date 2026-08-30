@@ -454,7 +454,6 @@ ApplicationWindow {
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
             addScalingChoice.currentIndex = 1
-            addDataPlane.currentIndex = 0
             addCaptureSource.currentIndex = 0
             addEncodingProfile.currentIndex = 3
             profileBitratesKbps = []
@@ -472,8 +471,6 @@ ApplicationWindow {
                                                        addEncodingProfile.currentIndex).val,
                                                    addCaptureSourceModel.get(
                                                        addCaptureSource.currentIndex).val,
-                                                   addDataPlaneModel.get(
-                                                       addDataPlane.currentIndex).val,
                                                    profileBitratesKbps)
             }
         }
@@ -523,29 +520,6 @@ ApplicationWindow {
                 Keys.onEnterPressed: {
                     if (addressText.text && text) {
                         addPcDialog.accept()
-                    }
-                }
-            }
-
-            Label {
-                text: qsTr("Data plane")
-                font.bold: true
-            }
-
-            ComboBox {
-                id: addDataPlane
-                Layout.fillWidth: true
-                textRole: "text"
-                currentIndex: 0
-                model: ListModel {
-                    id: addDataPlaneModel
-                    ListElement {
-                        text: qsTr("Legacy StationConnect transport")
-                        val: StreamingPreferences.SCDP_LEGACY
-                    }
-                    ListElement {
-                        text: qsTr("Datasmash single-port transport (Experimental)")
-                        val: StreamingPreferences.SCDP_DATASMASH
                     }
                 }
             }

@@ -225,12 +225,10 @@ NvHTTP::startApp(QString verb,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
-                 QString dataPlane,
                  QString captureSource,
                  QString encoderBackend,
                  QString encodingMode,
                  QString& rtspSessionUrl,
-                 QString& acceptedDataPlane,
                  quint16& datasmashPort,
                  QString& datasmashCertificateSha256,
                  QString& datasmashToken,
@@ -249,9 +247,6 @@ NvHTTP::startApp(QString verb,
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
                 "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
-        stationConnectOutputArguments +=
-                "&scDataPlane=" +
-                QString::fromLatin1(QUrl::toPercentEncoding(dataPlane));
         stationConnectOutputArguments +=
                 "&scCaptureSource=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(captureSource));
@@ -316,7 +311,6 @@ NvHTTP::startApp(QString verb,
     verifyResponseStatus(response);
 
     rtspSessionUrl = getXmlString(response, "sessionUrl0");
-    acceptedDataPlane = getXmlString(response, "StationConnectDataPlane");
     datasmashPort = getXmlString(response, "StationConnectDatasmashPort").toUShort();
     datasmashCertificateSha256 =
             getXmlString(response, "StationConnectDatasmashCertificateSha256");
@@ -324,18 +318,13 @@ NvHTTP::startApp(QString verb,
     acceptedCaptureSource = getXmlString(response, "StationConnectCaptureSource");
     acceptedEncoderBackend = getXmlString(response, "StationConnectEncoderBackend");
     acceptedEncodingMode = getXmlString(response, "StationConnectEncodingMode");
-    if (m_StationConnectAuthentication &&
-            (acceptedDataPlane.isEmpty() || acceptedDataPlane != dataPlane)) {
-        throw GfeHttpResponseException(
-                    400, "Host did not accept the requested data plane");
-    }
     const auto isCanonicalSha256Hex = [](const QString& value) {
         const QByteArray encoded = value.toLatin1();
         const QByteArray decoded = QByteArray::fromHex(encoded);
         return encoded.size() == 64 && decoded.size() == 32 &&
                 decoded.toHex() == encoded.toLower();
     };
-    if (m_StationConnectAuthentication && dataPlane == QStringLiteral("datasmash") &&
+    if (m_StationConnectAuthentication &&
             (datasmashPort == 0 ||
              !isCanonicalSha256Hex(datasmashCertificateSha256) ||
              !isCanonicalSha256Hex(datasmashToken))) {

@@ -51,8 +51,6 @@ public:
 
     Q_INVOKABLE int stationConnectCaptureSource(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectDataPlane(int computerIndex) const;
-
     Q_INVOKABLE QVariantList stationConnectProfileBitratesKbps(
             int computerIndex) const;
 
@@ -71,7 +69,6 @@ public:
                                           int virtualMode1Choice,
                                           int virtualMode2Choice,
                                           int videoProfile, int captureSource,
-                                          int dataPlane,
                                           const QVariantList& profileBitratesKbps);
 
 signals:

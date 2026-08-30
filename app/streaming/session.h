@@ -354,7 +354,6 @@ private:
     NvComputer* m_Computer;
     StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
     StreamingPreferences::StationConnectCaptureSource m_StationConnectCaptureSource;
-    StreamingPreferences::StationConnectDataPlane m_StationConnectDataPlane;
 #ifdef STATIONCONNECT_DATASMASH
     ScDatasmashNativeEndpoint* m_DatasmashEndpoint = nullptr;
     std::atomic_bool m_DatasmashReceiversStopping {false};

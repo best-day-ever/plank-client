@@ -642,10 +642,6 @@ Session::Session(NvComputer* computer, NvApp& app,
               qBound(static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
                      computer->stationConnectCaptureSource,
                      static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10)))),
-      m_StationConnectDataPlane(static_cast<StreamingPreferences::StationConnectDataPlane>(
-              qBound(static_cast<int>(StreamingPreferences::SCDP_LEGACY),
-                     computer->stationConnectDataPlane,
-                     static_cast<int>(StreamingPreferences::SCDP_DATASMASH)))),
       m_StationConnectBitrateKbps(
               StreamingPreferences::stationConnectBitrateForProfile(
                   computer->stationConnectProfileBitratesKbps,
@@ -2177,7 +2173,6 @@ bool Session::startConnectionAsync(bool reconnecting)
              m_Computer->currentGameId == m_App.id);
 
     QString rtspSessionUrl;
-    QString acceptedDataPlane;
     quint16 datasmashPort = 0;
     QString datasmashCertificateSha256;
     QString datasmashToken;
@@ -2192,9 +2187,6 @@ bool Session::startConnectionAsync(bool reconnecting)
         const QString captureSource =
                 m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
-        const QString dataPlane =
-                m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH ?
-                    QStringLiteral("datasmash") : QStringLiteral("legacy");
         const QString encoderBackend =
                 StreamingPreferences::isStationConnectNvencProfile(
                     m_StationConnectVideoProfile) ?
@@ -2237,12 +2229,10 @@ bool Session::startConnectionAsync(bool reconnecting)
                           hostLayout,
                           virtualModes.value(0),
                           virtualModes.value(1),
-                          dataPlane,
                           captureSource,
                           encoderBackend,
                           encodingMode,
                           rtspSessionUrl,
-                          acceptedDataPlane,
                           datasmashPort,
                           datasmashCertificateSha256,
                           datasmashToken,
@@ -2526,10 +2516,9 @@ bool Session::startConnectionAsync(bool reconnecting)
     LiSetStationConnectNativeControlSender(nullptr, nullptr);
     LiSetStationConnectNativeInputSender(nullptr, nullptr);
 #endif
-    if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH &&
-            !startDatasmashDataPlane(datasmashPort,
-                                     datasmashCertificateSha256,
-                                     datasmashToken)) {
+    if (!startDatasmashDataPlane(datasmashPort,
+                                 datasmashCertificateSha256,
+                                 datasmashToken)) {
         datasmashToken.fill(QChar('\0'));
         if (!reconnecting) {
             emit displayLaunchError(
@@ -2611,8 +2600,7 @@ bool Session::startConnectionAsync(bool reconnecting)
             (m_VideoCallbacks.capabilities & CAPABILITY_PULL_RENDERER) ?
                 nullptr : drSubmitDecodeUnit;
 
-    LiSetStationConnectNativeMediaEnabled(
-                m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH);
+    LiSetStationConnectNativeMediaEnabled(true);
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
@@ -2624,9 +2612,7 @@ bool Session::startConnectionAsync(bool reconnecting)
     }
 
 #ifdef STATIONCONNECT_DATASMASH
-    if (m_StationConnectDataPlane == StreamingPreferences::SCDP_DATASMASH) {
-        startDatasmashMediaReceivers();
-    }
+    startDatasmashMediaReceivers();
 #endif
 
     if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {

@@ -46,7 +46,7 @@ public:
     explicit NvComputer(QSettings& settings);
 
     NvComputer(NvAddress manualAddress, QString nickname, int videoProfile,
-               int captureSource, int dataPlane,
+               int captureSource,
                const QVector<int>& profileBitratesKbps);
 
     bool
@@ -54,7 +54,7 @@ public:
                          QString scalingMode,
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
-                         int videoProfile, int captureSource, int dataPlane,
+                         int videoProfile, int captureSource,
                          const QVector<int>& profileBitratesKbps);
 
     void
@@ -137,7 +137,6 @@ public:
     QString stationConnectVirtualMode2;
     int stationConnectVideoProfile = 0;
     int stationConnectCaptureSource = 0;
-    int stationConnectDataPlane = StreamingPreferences::SCDP_LEGACY;
     QVector<int> stationConnectProfileBitratesKbps =
             StreamingPreferences::stationConnectDefaultProfileBitrates();
     bool manualBookmark = false;

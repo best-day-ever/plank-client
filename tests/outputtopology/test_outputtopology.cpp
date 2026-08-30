@@ -23,7 +23,7 @@ void TestOutputTopology::parsesQualificationVector()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
     QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v9.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v10.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     QVERIFY(document.isObject());
@@ -56,7 +56,7 @@ void TestOutputTopology::roundTripsQualificationVector()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
     QVERIFY2(!root.isEmpty(), "STATIONCONNECT_REPO_ROOT must identify the repository root");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v9.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v10.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     NvOutputTopology topology;
@@ -78,7 +78,7 @@ void TestOutputTopology::rejectsDuplicateIdentity()
                                       {"width", 3840}, {"height", 2160}}},
     };
     QJsonObject document {
-        {"schema_version", 9}, {"feature_flags", 16383}, {"generation", "test"},
+        {"schema_version", 10}, {"feature_flags", 16383}, {"generation", "test"},
         {"layout", QJsonObject {{"kind", "dual-horizontal"}, {"virtual", true},
                                  {"virtual_modes", QJsonArray {"3840x2160", "3840x2160"}},
                                  {"output_count", 2}, {"startup_kind", "physical"},
@@ -94,7 +94,7 @@ void TestOutputTopology::rejectsDuplicateIdentity()
 void TestOutputTopology::rejectsConfiguredModeMismatch()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v9.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v10.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
     QJsonArray outputs = document.value("outputs").toArray();
@@ -182,7 +182,7 @@ void TestOutputTopology::enforcesHostDisplayPolicy()
 void TestOutputTopology::validatesRequestedLayoutGeometry()
 {
     const QByteArray root = qgetenv("STATIONCONNECT_REPO_ROOT");
-    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v9.json");
+    QFile file(QString::fromUtf8(root) + "/tests/protocol/output-topology-v10.json");
     QVERIFY(file.open(QIODevice::ReadOnly));
     QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
 
