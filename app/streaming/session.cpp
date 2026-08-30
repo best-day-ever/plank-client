@@ -2600,7 +2600,6 @@ bool Session::startConnectionAsync(bool reconnecting)
             (m_VideoCallbacks.capabilities & CAPABILITY_PULL_RENDERER) ?
                 nullptr : drSubmitDecodeUnit;
 
-    LiSetStationConnectNativeMediaEnabled(true);
     int err = LiStartConnection(&hostInfo, &m_StreamConfig, &k_ConnCallbacks,
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
