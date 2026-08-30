@@ -53,17 +53,7 @@ unix:!macx {
 }
 
 COMMON_C_DIR = $$PWD/moonlight-common-c
-ENET_DIR = $$COMMON_C_DIR/enet
 SOURCES += \
-    $$ENET_DIR/callbacks.c \
-    $$ENET_DIR/compress.c \
-    $$ENET_DIR/host.c \
-    $$ENET_DIR/list.c \
-    $$ENET_DIR/packet.c \
-    $$ENET_DIR/peer.c \
-    $$ENET_DIR/protocol.c \
-    $$ENET_DIR/unix.c \
-    $$ENET_DIR/win32.c \
     $$COMMON_C_DIR/src/AudioStream.c \
     $$COMMON_C_DIR/src/ByteBuffer.c \
     $$COMMON_C_DIR/src/Connection.c \
@@ -85,7 +75,6 @@ SOURCES += \
 HEADERS += \
     $$COMMON_C_DIR/src/Limelight.h
 INCLUDEPATH += \
-    $$ENET_DIR/include \
     $$COMMON_C_DIR/src
 DEFINES += HAS_SOCKLEN_T
 
