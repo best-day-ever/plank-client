@@ -883,11 +883,6 @@ void FFmpegVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
         dst.lastRtt = 0;
         dst.lastRttVariance = 0;
     }
-    else {
-        // Our logic to determine if RTT is valid depends on us never
-        // getting an RTT of 0. ENet currently ensures RTTs are >= 1.
-        SDL_assert(dst.lastRtt > 0);
-    }
 
     Uint64 now = SDL_GetTicks();
 
