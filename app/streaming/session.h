@@ -217,7 +217,7 @@ private:
                                  const QString& token,
                                  quint16 quicUdpPayloadMtu);
 
-    bool negotiateDatasmashSession(QString& errorMessage);
+    bool negotiateDatasmashSession(quint16 sessionPort, QString& errorMessage);
 
     void stopDatasmashDataPlane();
 

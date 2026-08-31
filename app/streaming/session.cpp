@@ -118,7 +118,8 @@ void Session::clStageFailed(int stage, int errorCode)
 
     QString failingEndpoint;
     if (stage == STAGE_SESSION_NEGOTIATION || stage == STAGE_CONTROL_STREAM_START) {
-        failingEndpoint = QStringLiteral("UDP %1").arg(DEFAULT_CONTROL_PORT);
+        failingEndpoint = QStringLiteral("UDP %1").arg(
+                    s_ActiveSession->m_Computer->activeAddress.port());
     }
 
     emit s_ActiveSession->stageFailed(QString::fromLocal8Bit(LiGetStageName(stage)),
@@ -158,7 +159,7 @@ void Session::clConnectionTerminated(int errorCode)
 
         emit s_ActiveSession->displayLaunchError(tr("No video received from host.") + "\n\n"+
                                                  tr("Check your firewall rules for UDP port %1.")
-                                                 .arg(DEFAULT_CONTROL_PORT));
+                                                 .arg(s_ActiveSession->m_Computer->activeAddress.port()));
         break;
 
     case ML_ERROR_NO_VIDEO_FRAME:
@@ -803,9 +804,10 @@ bool Session::startDatasmashDataPlane(quint16 port,
 #endif
 }
 
-bool Session::negotiateDatasmashSession(QString& errorMessage)
+bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessage)
 {
 #ifndef STATIONCONNECT_DATASMASH
+    Q_UNUSED(sessionPort)
     errorMessage = tr("Native StationConnect session negotiation is unavailable.");
     return false;
 #else
@@ -982,6 +984,7 @@ bool Session::negotiateDatasmashSession(QString& errorMessage)
     nativeConfiguration.audioPacketDurationMs = responsePacketDuration;
     nativeConfiguration.referenceFrameInvalidationSupported =
             static_cast<unsigned int>(referenceFrameInvalidation);
+    nativeConfiguration.sessionPort = sessionPort;
     nativeConfiguration.opusConfiguration.sampleRate = sampleRate;
     nativeConfiguration.opusConfiguration.channelCount = responseChannels;
     nativeConfiguration.opusConfiguration.streams = streams;
@@ -2762,7 +2765,7 @@ bool Session::startConnectionAsync(bool reconnecting)
     datasmashToken.fill(QChar('\0'));
 
     QString nativeNegotiationError;
-    if (!negotiateDatasmashSession(nativeNegotiationError)) {
+    if (!negotiateDatasmashSession(datasmashPort, nativeNegotiationError)) {
         stopDatasmashDataPlane();
         if (!reconnecting) {
             emit displayLaunchError(nativeNegotiationError);

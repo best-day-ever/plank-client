@@ -2,7 +2,7 @@
 
 #include <QHostAddress>
 
-#define DEFAULT_CONTROL_PORT 47989
+#define DEFAULT_CONTROL_PORT 28989
 
 class NvAddress
 {
