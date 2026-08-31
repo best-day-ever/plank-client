@@ -1,6 +1,6 @@
 #include "streamingpreferences.h"
+#include "backend/stationconnectnetwork.h"
 #include "stationconnectclientpolicy.h"
-#include "streaming/stationconnectpacketsize.h"
 #include <QSettings>
 #include <QTranslator>
 #include <QCoreApplication>
@@ -18,7 +18,7 @@
 #define SER_MDNS "mdns"
 #define SER_FRAMEPACING "framepacing"
 #define SER_CONNWARNINGS "connwarnings"
-#define SER_NETWORKMTU "stationconnect-network-mtu"
+#define SER_QUIC_UDP_PAYLOAD_MTU "stationconnect-quic-udp-payload-mtu"
 #define SER_STATIONCONNECT_UNREACHABLE_TIMEOUT "stationconnect-unreachable-timeout-seconds"
 #define SER_STATIONCONNECT_UNREACHABLE_ACTION "stationconnect-unreachable-action"
 #define SER_DETECTNETBLOCKING "detectnetblocking"
@@ -97,11 +97,11 @@ void StreamingPreferences::reload()
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
     detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
     showPerformanceOverlay = settings.value(SER_SHOWPERFOVERLAY, false).toBool();
-    networkMtu = settings.value(SER_NETWORKMTU, 0).toInt();
-    if (networkMtu != 0) {
-        networkMtu = qBound(StationConnectPacketSize::MinimumPhysicalPathMtu,
-                            networkMtu,
-                            StationConnectPacketSize::MaximumPhysicalPathMtu);
+    quicUdpPayloadMtu = settings.value(SER_QUIC_UDP_PAYLOAD_MTU, 0).toInt();
+    if (quicUdpPayloadMtu != 0 &&
+            (quicUdpPayloadMtu < StationConnectNetwork::MinimumQuicUdpPayloadMtu ||
+             quicUdpPayloadMtu > StationConnectNetwork::MaximumQuicUdpPayloadMtu)) {
+        quicUdpPayloadMtu = 0;
     }
     stationConnectUnreachableTimeoutSeconds = qBound(
                 5,
@@ -257,7 +257,7 @@ void StreamingPreferences::save()
     }
     settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
-    settings.setValue(SER_NETWORKMTU, networkMtu);
+    settings.setValue(SER_QUIC_UDP_PAYLOAD_MTU, quicUdpPayloadMtu);
     settings.setValue(SER_STATIONCONNECT_UNREACHABLE_TIMEOUT,
                       stationConnectUnreachableTimeoutSeconds);
     settings.setValue(SER_STATIONCONNECT_UNREACHABLE_ACTION,
@@ -271,9 +271,4 @@ void StreamingPreferences::save()
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
-}
-
-int StreamingPreferences::videoPacketSizeForMtu(int mtu) const
-{
-    return StationConnectPacketSize::videoPacketSizeForPhysicalMtu(mtu);
 }

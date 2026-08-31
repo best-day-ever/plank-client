@@ -271,7 +271,6 @@ HEADERS += \
     streaming/input/input.h \
     streaming/input/stationconnectpointerlogic.h \
     streaming/session.h \
-    streaming/stationconnectpacketsize.h \
     streaming/stationconnectdisplaymode.h \
     streaming/stationconnectpresentation.h \
     streaming/stationconnecttoolbar.h \

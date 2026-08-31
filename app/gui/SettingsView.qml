@@ -854,13 +854,13 @@ Flickable {
                 spacing: 5
 
                 CheckBox {
-                    id: automaticMtuCheckBox
+                    id: automaticQuicMtuCheckBox
                     width: parent.width
-                    text: qsTr("Determine network MTU automatically")
+                    text: qsTr("Determine QUIC MTU automatically")
                     font.pointSize: 12
-                    checked: StreamingPreferences.networkMtu === 0
+                    checked: StreamingPreferences.quicUdpPayloadMtu === 0
                     onClicked: {
-                        StreamingPreferences.networkMtu = checked ? 0 : mtuSpinBox.value
+                        StreamingPreferences.quicUdpPayloadMtu = checked ? 0 : quicMtuSpinBox.value
                     }
                 }
 
@@ -869,22 +869,23 @@ Flickable {
                     spacing: 8
 
                     Label {
-                        text: qsTr("Physical path MTU")
+                        text: qsTr("Maximum QUIC UDP payload")
                         font.pointSize: 12
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
                     SpinBox {
-                        id: mtuSpinBox
-                        from: 1280
-                        to: 9000
+                        id: quicMtuSpinBox
+                        from: 1200
+                        to: 65527
                         stepSize: 1
                         editable: true
-                        enabled: !automaticMtuCheckBox.checked
-                        value: StreamingPreferences.networkMtu === 0 ? 1432 : StreamingPreferences.networkMtu
+                        enabled: !automaticQuicMtuCheckBox.checked
+                        value: StreamingPreferences.quicUdpPayloadMtu === 0 ? 1344 :
+                                   StreamingPreferences.quicUdpPayloadMtu
                         onValueModified: {
                             if (enabled) {
-                                StreamingPreferences.networkMtu = value
+                                StreamingPreferences.quicUdpPayloadMtu = value
                             }
                         }
                     }
@@ -892,16 +893,9 @@ Flickable {
 
                 Label {
                     width: parent.width
-                    text: automaticMtuCheckBox.checked ?
-                              qsTr("Video packet size is selected per connection (1328 bytes on qualified ZeroTier paths).") :
-                              qsTr("Derived video packet size: %1 bytes").arg(StreamingPreferences.videoPacketSizeForMtu(mtuSpinBox.value))
-                    font.pointSize: 9
-                    wrapMode: Text.Wrap
-                }
-
-                Label {
-                    width: parent.width
-                    text: qsTr("Use the physical path MTU, not the larger MTU reported by a VPN interface.")
+                    text: automaticQuicMtuCheckBox.checked ?
+                              qsTr("Automatic uses 1344 bytes on detected ZeroTier routes and Quinn path discovery elsewhere.") :
+                              qsTr("The manual value is the complete QUIC UDP payload, excluding outer IP and UDP headers.")
                     font.pointSize: 9
                     wrapMode: Text.Wrap
                     opacity: 0.72

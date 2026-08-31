@@ -1,5 +1,4 @@
 #include "commandlineparser.h"
-#include "streaming/stationconnectpacketsize.h"
 
 #include <QCommandLineParser>
 #include <QFile>
@@ -281,7 +280,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     parser.addToggleOption("vsync", "V-Sync");
     parser.addValueOption("fps", "FPS");
-    parser.addValueOption("mtu", "physical network path MTU");
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
     parser.addToggleOption("audio-on-host", "audio on host PC");
@@ -305,15 +303,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->fps = parser.getIntOption("fps");
         if (!inRange(preferences->fps, 10, 480)) {
             fprintf(stderr, "Warning: FPS is out of the supported range (10 - 480 FPS). Performance may suffer!\n");
-        }
-    }
-
-    // Resolve --mtu option
-    if (parser.isSet("mtu")) {
-        preferences->networkMtu = parser.getIntOption("mtu");
-        if (preferences->networkMtu < StationConnectPacketSize::MinimumPhysicalPathMtu ||
-                preferences->networkMtu > StationConnectPacketSize::MaximumPhysicalPathMtu) {
-            parser.showError("MTU must be between 1280 and 9000 bytes");
         }
     }
 

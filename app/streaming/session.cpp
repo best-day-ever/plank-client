@@ -1,5 +1,5 @@
 #include "session.h"
-#include "stationconnectpacketsize.h"
+#include "backend/stationconnectnetwork.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/avsynccontroller.h"
 #include "streaming/stationconnectdisplaymode.h"
@@ -764,6 +764,18 @@ bool Session::startDatasmashDataPlane(quint16 port,
     config.handshake_timeout_ms = 10000;
     config.idle_timeout_ms = 30000;
     config.keep_alive_interval_ms = 5000;
+    if (m_Preferences->quicUdpPayloadMtu != 0) {
+        config.max_udp_payload_size = StationConnectNetwork::quicUdpPayloadMtuForRoute(
+                    m_Preferences->quicUdpPayloadMtu, false);
+        qInfo() << "Manual maximum QUIC UDP payload selected:"
+                << config.max_udp_payload_size << "bytes";
+    }
+    else if (m_Computer->getActiveAddressReachability() == NvComputer::RI_ZEROTIER) {
+        config.max_udp_payload_size = StationConnectNetwork::quicUdpPayloadMtuForRoute(
+                    0, true);
+        qInfo() << "ZeroTier route selected a maximum QUIC UDP payload of"
+                << config.max_udp_payload_size << "bytes";
+    }
     config.remote_address = remoteAddressUtf8.constData();
     config.server_name = serverNameUtf8.constData();
     config.certificate_sha256 = certificateUtf8.constData();
@@ -858,7 +870,8 @@ bool Session::negotiateDatasmashSession(QString& errorMessage)
             m_StreamConfig.bitrate >= 15000 &&
             (m_AudioCallbacks.capabilities & CAPABILITY_SLOW_OPUS_DECODER) == 0 &&
             (audioChannels <= 2 ||
-             m_Computer->getActiveAddressReachability() != NvComputer::RI_VPN);
+             !NvComputer::isVpnReachability(
+                 m_Computer->getActiveAddressReachability()));
     const int packetDurationMs =
             (m_AudioCallbacks.capabilities & CAPABILITY_SLOW_OPUS_DECODER) != 0 ?
                 10 : 5;
@@ -2744,47 +2757,6 @@ bool Session::startConnectionAsync(bool reconnecting)
     }
     if (!siGfeVersion.isEmpty()) {
         hostInfo.serverInfoGfeVersion = siGfeVersion.data();
-    }
-
-    if (m_Preferences->networkMtu != 0) {
-        // Derive a fragmentation-safe, 16-byte-aligned video packet size from
-        // the configured physical path MTU and conservative VPN framing.
-        // NB: Using STREAM_CFG_AUTO will cap our packet size at 1024 for remote hosts.
-        m_StreamConfig.streamingRemotely = STREAM_CFG_LOCAL;
-        m_StreamConfig.packetSize = StationConnectPacketSize::videoPacketSizeForPhysicalMtu(
-                    m_Preferences->networkMtu);
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Using configured physical MTU %d: video packet size %d bytes",
-                    m_Preferences->networkMtu,
-                    m_StreamConfig.packetSize);
-    }
-    else {
-        // Use 1392 byte video packets by default
-        m_StreamConfig.packetSize = 1392;
-
-        // getActiveAddressReachability() does network I/O, so we only attempt to check
-        // reachability if we've already contacted the PC successfully.
-        switch (m_Computer->getActiveAddressReachability()) {
-        case NvComputer::RI_LAN:
-            // This address is on-link, so treat it as a local address
-            // even if it's not in RFC 1918 space or it's an IPv6 address.
-            m_StreamConfig.streamingRemotely = STREAM_CFG_LOCAL;
-            break;
-        case NvComputer::RI_VPN:
-            // Keep the encrypted inner IPv4 packet inside one ZeroTier physical
-            // payload, including RTP, UDP/IP, and extended-frame overhead.
-            // Treat it as remote even if the target address is in RFC 1918 address space.
-            m_StreamConfig.streamingRemotely = STREAM_CFG_REMOTE;
-            m_StreamConfig.packetSize = StationConnectPacketSize::VpnVideoPacketSize;
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Using StationConnect VPN packet size: %d bytes",
-                        m_StreamConfig.packetSize);
-            break;
-        default:
-            // If we don't have reachability info, let moonlight-common-c decide.
-            m_StreamConfig.streamingRemotely = STREAM_CFG_AUTO;
-            break;
-        }
     }
 
     // moonlight-common-c fills missing callbacks in the caller-owned table.

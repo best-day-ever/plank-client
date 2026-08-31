@@ -432,6 +432,14 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
                 if (addr.ip() == s.localAddress()) {
                     qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
 
+                    if (StationConnectNetwork::isZeroTierInterface(nic.name(),
+                                                                   nic.humanReadableName())) {
+                        // Identify ZeroTier before broader virtual/VPN
+                        // heuristics so its qualified encapsulation budget is
+                        // available to the native QUIC transport.
+                        return ReachabilityType::RI_ZEROTIER;
+                    }
+
 #if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
                     qInfo() << "Interface Type:" << nic.type();
                     qInfo() << "Interface MTU:" << nic.maximumTransmissionUnit();
@@ -469,13 +477,6 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
 
                     if (nic.hardwareAddress().startsWith("00:FF", Qt::CaseInsensitive)) {
                         // OpenVPN TAP interfaces have a MAC address starting with 00:FF on Windows
-                        return ReachabilityType::RI_VPN;
-                    }
-
-                    if (StationConnectNetwork::isZeroTierInterface(nic.name(),
-                                                                   nic.humanReadableName())) {
-                        // Qt reports Linux ZeroTier interfaces as Ethernet, so
-                        // recognize their ztXXXXXXXX kernel name explicitly.
                         return ReachabilityType::RI_VPN;
                     }
 

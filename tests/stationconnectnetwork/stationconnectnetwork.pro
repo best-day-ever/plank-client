@@ -5,9 +5,7 @@ TEMPLATE = app
 SOURCES += test_stationconnectnetwork.cpp
 
 HEADERS += \
-    ../../app/backend/stationconnectnetwork.h \
-    ../../app/streaming/stationconnectpacketsize.h
+    ../../app/backend/stationconnectnetwork.h
 
 INCLUDEPATH += \
-    ../../app/backend \
-    ../../app/streaming
+    ../../app/backend

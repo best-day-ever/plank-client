@@ -1231,7 +1231,9 @@ private:
 
                 // If this wasn't added via mDNS but it is a RFC 1918 IPv4 address and not a VPN,
                 // go ahead and do the STUN request now to populate an external address.
-                if (!m_Mdns && addressIsSiteLocalV4 && newComputer->getActiveAddressReachability() != NvComputer::RI_VPN) {
+                if (!m_Mdns && addressIsSiteLocalV4 &&
+                        !NvComputer::isVpnReachability(
+                            newComputer->getActiveAddressReachability())) {
                     quint32 addr;
                     int err = LiFindExternalAddressIP4("stun.moonlight-stream.org", 3478, &addr);
                     if (err == 0) {

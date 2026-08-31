@@ -219,7 +219,7 @@ public:
     Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
-    Q_PROPERTY(int networkMtu MEMBER networkMtu NOTIFY networkMtuChanged)
+    Q_PROPERTY(int quicUdpPayloadMtu MEMBER quicUdpPayloadMtu NOTIFY quicUdpPayloadMtuChanged)
     Q_PROPERTY(int stationConnectUnreachableTimeoutSeconds MEMBER stationConnectUnreachableTimeoutSeconds NOTIFY stationConnectUnreachableTimeoutChanged)
     Q_PROPERTY(StationConnectUnreachableAction stationConnectUnreachableAction MEMBER stationConnectUnreachableAction NOTIFY stationConnectUnreachableActionChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
@@ -233,7 +233,6 @@ public:
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
 
     Q_INVOKABLE bool retranslate();
-    Q_INVOKABLE int videoPacketSizeForMtu(int mtu) const;
     Q_INVOKABLE int stationConnectDefaultBitrateKbps(int profile) const
     {
         return stationConnectDefaultBitrateForProfile(profile);
@@ -268,7 +267,7 @@ public:
     bool showPerformanceOverlay;
     bool muteOnFocusLoss;
     bool keepAwake;
-    int networkMtu;
+    int quicUdpPayloadMtu;
     int stationConnectUnreachableTimeoutSeconds;
     StationConnectUnreachableAction stationConnectUnreachableAction;
     AudioConfig audioConfig;
@@ -291,7 +290,7 @@ signals:
     void framePacingChanged();
     void connectionWarningsChanged();
     void detectNetworkBlockingChanged();
-    void networkMtuChanged();
+    void quicUdpPayloadMtuChanged();
     void stationConnectUnreachableTimeoutChanged();
     void stationConnectUnreachableActionChanged();
     void showPerformanceOverlayChanged();

@@ -71,7 +71,13 @@ public:
         RI_UNKNOWN,
         RI_LAN,
         RI_VPN,
+        RI_ZEROTIER,
     };
+
+    static bool isVpnReachability(ReachabilityType reachability)
+    {
+        return reachability == RI_VPN || reachability == RI_ZEROTIER;
+    }
 
     ReachabilityType
     getActiveAddressReachability() const;

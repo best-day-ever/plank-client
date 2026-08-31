@@ -1,7 +1,6 @@
 #include <QtTest>
 
 #include "stationconnectnetwork.h"
-#include "stationconnectpacketsize.h"
 
 class TestStationConnectNetwork : public QObject
 {
@@ -11,36 +10,13 @@ private slots:
     void recognizesLinuxZeroTierInterface();
     void recognizesNamedZeroTierInterface();
     void rejectsPhysicalAndMalformedInterfaces();
-    void keepsEncryptedVideoInsideZeroTierMtu();
-    void derivesVideoPacketSizeFromPhysicalMtu();
-    void reservesDatasmashFramingBudget();
+    void keepsQuicDatagramsInsideZeroTierMtu();
 };
 
 void TestStationConnectNetwork::recognizesLinuxZeroTierInterface()
 {
     QVERIFY(StationConnectNetwork::isZeroTierInterface(QStringLiteral("ztk4jiikvl"),
                                                         QStringLiteral("ztk4jiikvl")));
-}
-
-void TestStationConnectNetwork::derivesVideoPacketSizeFromPhysicalMtu()
-{
-    QCOMPARE(StationConnectPacketSize::videoPacketSizeForPhysicalMtu(1432), 1328);
-    QCOMPARE(StationConnectPacketSize::videoPacketSizeForPhysicalMtu(1500), 1392);
-    QCOMPARE(StationConnectPacketSize::videoPacketSizeForPhysicalMtu(9000) % 16, 0);
-    QVERIFY(StationConnectPacketSize::zeroTierPhysicalPayload(
-                StationConnectPacketSize::videoPacketSizeForPhysicalMtu(1432),
-                StationConnectPacketSize::ZeroTierExtendedFrameOverhead) <= 1432);
-}
-
-void TestStationConnectNetwork::reservesDatasmashFramingBudget()
-{
-    QCOMPARE(StationConnectPacketSize::DatasmashFramingBudget, 64);
-    QCOMPARE(StationConnectPacketSize::datasmashVideoPacketSize(1328), 1264);
-    QCOMPARE(StationConnectPacketSize::datasmashVideoPacketSize(64), 0);
-    QCOMPARE(StationConnectPacketSize::datasmashVideoPacketSize(63), 0);
-    QVERIFY(StationConnectPacketSize::datasmashPhysicalPayload(
-                1264, StationConnectPacketSize::ZeroTierExtendedFrameOverhead) <=
-            StationConnectPacketSize::ZeroTierPhysicalPayloadMtu);
 }
 
 void TestStationConnectNetwork::recognizesNamedZeroTierInterface()
@@ -59,19 +35,28 @@ void TestStationConnectNetwork::rejectsPhysicalAndMalformedInterfaces()
                                                          QStringLiteral("ztbad_name")));
 }
 
-void TestStationConnectNetwork::keepsEncryptedVideoInsideZeroTierMtu()
+void TestStationConnectNetwork::keepsQuicDatagramsInsideZeroTierMtu()
 {
-    QCOMPARE(StationConnectPacketSize::VpnVideoPacketSize, 1328);
-    QCOMPARE(StationConnectPacketSize::sunshineNegotiatedPacketSize(1328), 1296);
-    QCOMPARE(StationConnectPacketSize::sunshineEncryptedUdpPayload(1328), 1344);
-    QCOMPARE(StationConnectPacketSize::zeroTierPhysicalPayload(1328), 1410);
-    QCOMPARE(StationConnectPacketSize::zeroTierPhysicalPayload(
-                 1328, StationConnectPacketSize::ZeroTierExtendedFrameOverhead),
+    QCOMPARE(StationConnectNetwork::ZeroTierQuicUdpPayloadMtu, quint16(1344));
+    QCOMPARE(StationConnectNetwork::ZeroTierQuicApplicationDatagramSize, quint16(1306));
+    QCOMPARE(StationConnectNetwork::ZeroTierRaptorQVideoSymbolSize, quint16(1280));
+    QCOMPARE(StationConnectNetwork::quicUdpPayloadMtuForRoute(0, true), quint16(1344));
+    QCOMPARE(StationConnectNetwork::quicUdpPayloadMtuForRoute(0, false), quint16(0));
+    QCOMPARE(StationConnectNetwork::quicUdpPayloadMtuForRoute(1280, true), quint16(1280));
+    QCOMPARE(StationConnectNetwork::quicUdpPayloadMtuForRoute(1452, false), quint16(1452));
+    QCOMPARE(StationConnectNetwork::quicUdpPayloadMtuForRoute(1199, true), quint16(1344));
+    QCOMPARE(StationConnectNetwork::quicUdpPayloadMtuForRoute(65528, false), quint16(0));
+    QCOMPARE(StationConnectNetwork::ZeroTierQuicUdpPayloadMtu +
+                 StationConnectNetwork::InnerIpv4UdpOverhead + 38,
+             1410);
+    QCOMPARE(StationConnectNetwork::ZeroTierQuicUdpPayloadMtu +
+                 StationConnectNetwork::InnerIpv4UdpOverhead +
+                 StationConnectNetwork::ZeroTierExtendedFrameOverhead,
              1423);
-    QVERIFY(StationConnectPacketSize::zeroTierPhysicalPayload(1328) <=
-            StationConnectPacketSize::ZeroTierPhysicalPayloadMtu);
-    QVERIFY(StationConnectPacketSize::zeroTierPhysicalPayload(1392) >
-            StationConnectPacketSize::ZeroTierPhysicalPayloadMtu);
+    QVERIFY(StationConnectNetwork::ZeroTierQuicUdpPayloadMtu +
+                StationConnectNetwork::InnerIpv4UdpOverhead +
+                StationConnectNetwork::ZeroTierExtendedFrameOverhead <=
+            StationConnectNetwork::ZeroTierPhysicalUdpPayloadLimit);
 }
 
 QTEST_APPLESS_MAIN(TestStationConnectNetwork)
