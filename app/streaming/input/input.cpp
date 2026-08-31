@@ -595,6 +595,35 @@ void SdlInputHandler::finishRawHidReconnect()
 #endif
 }
 
+void SdlInputHandler::resetRemoteCursorPositionEpoch()
+{
+    // The login-screen and authenticated-desktop media workers each start
+    // their cursor position sequence at one. The input handler survives that
+    // handoff, so discard the old worker's high-water mark once its transport
+    // has stopped or the new worker's positions will be rejected until its
+    // counter catches up.
+    {
+        std::lock_guard<std::mutex> lock(m_RemoteCursorPositionMutex);
+        m_ReadyRemoteCursorPosition = {};
+        m_ReadyRemoteCursorPositionValid = false;
+        m_HighestRemoteCursorPositionSequence = 0;
+        m_RemoteCursorPositionUpdatePending.store(false);
+    }
+
+    m_AppliedRemoteCursorPosition = {};
+    m_AppliedRemoteCursorPositionValid = false;
+    m_AppliedRemoteCursorPositionSequence = 0;
+    m_TabletCursorActivationSequence = 0;
+    m_TabletCursorActivationPending.store(false);
+    for (auto& output : m_WaylandTabletCursorOutputs) {
+        output.cursor->setVisible(false);
+        output.cursor->dispatchPending();
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                "Reset StationConnect remote cursor position epoch for desktop reconnect");
+}
+
 bool SdlInputHandler::isCaptureActive()
 {
     return m_FakeMouseCaptureActive;

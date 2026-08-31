@@ -59,6 +59,8 @@ public:
     void beginRawHidReconnect();
     void finishRawHidReconnect();
 
+    void resetRemoteCursorPositionEpoch();
+
     void raiseAllKeys();
 
     void notifyMouseLeave();

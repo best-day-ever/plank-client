@@ -2669,6 +2669,7 @@ bool Session::beginStationConnectReconnect(
 #endif
     LiStopConnection();
     stopDatasmashDataPlane();
+    m_InputHandler->resetRemoteCursorPositionEpoch();
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
     return true;
