@@ -13,13 +13,13 @@ ToolButton {
     activeFocusOnTab: true
 
     icon.source: iconSource
-    icon.width: 24
-    icon.height: 24
+    icon.width: 21
+    icon.height: 21
     icon.color: theme.textPrimary
 
     background: Rectangle {
-        implicitWidth: 44
-        implicitHeight: 44
+        implicitWidth: 40
+        implicitHeight: 40
         radius: theme.radiusSmall
         color: control.down ? theme.surfacePressed :
                (control.hovered || control.visualFocus ? theme.surfaceHover : "transparent")

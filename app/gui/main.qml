@@ -203,7 +203,7 @@ ApplicationWindow {
 
     header: ToolBar {
         id: toolBar
-        height: 64
+        height: 56
 
         background: Rectangle {
             color: theme.chrome
@@ -223,7 +223,7 @@ ApplicationWindow {
             anchors.fill: parent
             text: stackView.currentItem ? stackView.currentItem.objectName : ""
             color: theme.textPrimary
-            font.pointSize: 17
+            font.pointSize: 15
             font.weight: Font.DemiBold
             elide: Label.ElideRight
             horizontalAlignment: Qt.AlignHCenter
@@ -253,7 +253,7 @@ ApplicationWindow {
                 id: stationConnectVersionLabel
                 text: SystemProperties.stationConnectVersionString
                 color: theme.textSecondary
-                font.pointSize: 10
+                font.pointSize: 9
                 font.weight: Font.Medium
                 horizontalAlignment: Qt.AlignLeft
                 verticalAlignment: Qt.AlignVCenter
@@ -497,7 +497,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            TextField {
+            StationConnectTextField {
                 id: addressText
                 Layout.fillWidth: true
                 focus: true
@@ -517,7 +517,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            TextField {
+            StationConnectTextField {
                 id: nicknameText
                 property bool manuallyEdited: false
 
@@ -543,7 +543,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            ComboBox {
+            StationConnectComboBox {
                 id: addCaptureSource
                 Layout.fillWidth: true
                 textRole: "text"
@@ -575,7 +575,7 @@ ApplicationWindow {
                 opacity: addCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
 
-            ComboBox {
+            StationConnectComboBox {
                 id: addEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
@@ -657,7 +657,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            ComboBox {
+            StationConnectComboBox {
                 id: addHostLayout
                 Layout.fillWidth: true
                 model: [
@@ -674,7 +674,7 @@ ApplicationWindow {
                 opacity: addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
 
-            ComboBox {
+            StationConnectComboBox {
                 id: addVirtualMode1
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex >= 2
@@ -688,7 +688,7 @@ ApplicationWindow {
                 opacity: addHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
 
-            ComboBox {
+            StationConnectComboBox {
                 id: addVirtualMode2
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex === 3
@@ -701,7 +701,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            ComboBox {
+            StationConnectComboBox {
                 id: addScalingChoice
                 Layout.fillWidth: true
                 currentIndex: 1

@@ -21,8 +21,8 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 24
     bottomMargin: 24
-    cellWidth: Math.min(840, availableWidth)
-    cellHeight: 94
+    cellWidth: Math.min(900, availableWidth)
+    cellHeight: 88
     Component.onCompleted: {
         // Don't show any highlighted item until interacting with them.
         // We do this here instead of onActivated to avoid losing the user's
@@ -127,7 +127,7 @@ CenteredGridView {
     delegate: NavigableItemDelegate {
         id: pcEntry
         width: pcGrid.cellWidth - 10
-        height: 82
+        height: 76
         grid: pcGrid
         Accessible.name: model.name
         hoverEnabled: true
@@ -136,8 +136,8 @@ CenteredGridView {
             radius: theme.radiusMedium
             color: pcEntry.down ? theme.surfacePressed :
                    (pcEntry.hovered || pcEntry.highlighted ? theme.surfaceHover : theme.surface)
-            border.width: 1
-            border.color: pcEntry.highlighted ? theme.accent : theme.borderSubtle
+            border.width: pcEntry.highlighted ? 1 : 0
+            border.color: theme.accent
 
             Behavior on color {
                 ColorAnimation { duration: 90 }
@@ -149,15 +149,15 @@ CenteredGridView {
         Image {
             id: stateIcon
             anchors.left: parent.left
-            anchors.leftMargin: 20
+            anchors.leftMargin: 18
             anchors.verticalCenter: parent.verticalCenter
             visible: !model.statusUnknown
             source: !model.online ? "qrc:/res/warning_FILL1_wght300_GRAD200_opsz24.svg" :
                                     (!model.authorized ? "qrc:/res/baseline-lock-24px.svg" :
                                                      "qrc:/res/baseline-check_circle_outline-24px.svg")
             sourceSize {
-                width: 32
-                height: 32
+                width: 28
+                height: 28
             }
         }
 
@@ -165,40 +165,66 @@ CenteredGridView {
             id: statusUnknownSpinner
             anchors.horizontalCenter: stateIcon.horizontalCenter
             anchors.verticalCenter: parent.verticalCenter
-            width: 32
-            height: 32
+            width: 28
+            height: 28
             visible: model.statusUnknown
         }
 
         Column {
+            id: workstationIdentity
             anchors.left: stateIcon.right
-            anchors.leftMargin: 16
-            anchors.right: parent.right
-            anchors.rightMargin: 18
+            anchors.leftMargin: 14
+            anchors.right: workstationStatus.left
+            anchors.rightMargin: 24
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 4
+            spacing: 3
 
             Label {
                 id: pcNameText
                 width: parent.width
                 text: model.name
                 color: theme.textPrimary
-                font.pointSize: 18
+                font.pointSize: 16
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
 
             Label {
                 width: parent.width
-                text: (model.address ? model.address + "  ·  " : "") +
-                      (model.statusUnknown ? qsTr("Checking") :
-                       (model.online ? qsTr("Online") +
-                        (model.stationConnectHostVersion ?
-                         "  ·  " + model.stationConnectHostVersion : "") :
-                        qsTr("Offline")))
+                text: model.address ? model.address : qsTr("Address unavailable")
                 color: theme.textSecondary
                 font.pointSize: 10
                 elide: Text.ElideRight
+            }
+        }
+
+        Column {
+            id: workstationStatus
+            width: 190
+            anchors.right: parent.right
+            anchors.rightMargin: 18
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+
+            Label {
+                width: parent.width
+                text: model.statusUnknown ? qsTr("Checking") :
+                      (model.online ? qsTr("Online") : qsTr("Offline"))
+                color: model.statusUnknown ? theme.textSecondary :
+                       (model.online ? theme.success : theme.textDisabled)
+                font.pointSize: 11
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignRight
+            }
+
+            Label {
+                width: parent.width
+                text: model.stationConnectHostVersion ?
+                          model.stationConnectHostVersion : " "
+                color: theme.textSecondary
+                font.pointSize: 9
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideLeft
             }
         }
 
@@ -363,13 +389,13 @@ CenteredGridView {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
-            TextField {
+            StationConnectTextField {
                 id: usernameField
                 placeholderText: qsTr("Username")
                 Layout.fillWidth: true
                 focus: true
             }
-            TextField {
+            StationConnectTextField {
                 id: passwordField
                 placeholderText: qsTr("Password")
                 echoMode: TextInput.Password
@@ -487,7 +513,7 @@ CenteredGridView {
                 text: qsTr("Address or hostname")
                 font.bold: true
             }
-            TextField {
+            StationConnectTextField {
                 id: editAddressText
                 Layout.fillWidth: true
             }
@@ -496,7 +522,7 @@ CenteredGridView {
                 text: qsTr("Nickname")
                 font.bold: true
             }
-            TextField {
+            StationConnectTextField {
                 id: editNicknameText
                 Layout.fillWidth: true
             }
@@ -505,7 +531,7 @@ CenteredGridView {
                 text: qsTr("Capture source")
                 font.bold: true
             }
-            ComboBox {
+            StationConnectComboBox {
                 id: editCaptureSource
                 Layout.fillWidth: true
                 textRole: "text"
@@ -535,7 +561,7 @@ CenteredGridView {
                 font.bold: true
                 opacity: editCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
-            ComboBox {
+            StationConnectComboBox {
                 id: editEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
@@ -615,7 +641,7 @@ CenteredGridView {
                 text: qsTr("Host display layout")
                 font.bold: true
             }
-            ComboBox {
+            StationConnectComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
                 model: [
@@ -639,7 +665,7 @@ CenteredGridView {
                 font.bold: true
                 opacity: editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
-            ComboBox {
+            StationConnectComboBox {
                 id: editVirtualMode1
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex >= 2
@@ -651,7 +677,7 @@ CenteredGridView {
                 font.bold: true
                 opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
-            ComboBox {
+            StationConnectComboBox {
                 id: editVirtualMode2
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
@@ -662,7 +688,7 @@ CenteredGridView {
                 text: qsTr("Scaling")
                 font.bold: true
             }
-            ComboBox {
+            StationConnectComboBox {
                 id: editScalingChoice
                 Layout.fillWidth: true
                 model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
@@ -750,7 +776,7 @@ CenteredGridView {
                 font.bold: true
             }
 
-            TextField {
+            StationConnectTextField {
                 id: editText
                 placeholderText: renamePcDialog.originalName
                 Layout.fillWidth: true

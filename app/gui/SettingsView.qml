@@ -193,7 +193,7 @@ Flickable {
                                 }
 
                                 RowLayout {
-                                    TextField {
+                                    StationConnectTextField {
                                         id: fpsField
                                         maximumLength: 4
                                         inputMethodHints: Qt.ImhDigitsOnly
@@ -411,7 +411,7 @@ Flickable {
                     ToolTip.text: qsTr("Borderless fills the display. Windowed provides a movable, resizable stream window with desktop decorations.")
                 }
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: vsyncCheck
                     width: parent.width
                     hoverEnabled: true
@@ -488,7 +488,7 @@ Flickable {
                 }
 
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: audioPcCheck
                     width: parent.width
                     text: qsTr("Mute host PC speakers while streaming")
@@ -504,7 +504,7 @@ Flickable {
                     ToolTip.text: qsTr("You must restart any game currently in progress for this setting to take effect")
                 }
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: muteOnFocusLossCheck
                     width: parent.width
                     text: qsTr("Mute audio stream when the client is not the active window")
@@ -698,7 +698,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: connectionWarningsCheck
                     width: parent.width
                     text: qsTr("Show connection quality warnings")
@@ -709,7 +709,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: keepAwakeCheck
                     width: parent.width
                     text: qsTr("Keep the display awake while streaming")
@@ -749,7 +749,7 @@ Flickable {
                     spacing: 5
                     width: parent.width
 
-                    CheckBox {
+                    StationConnectCheckBox {
                         id: captureSysKeysCheck
                         hoverEnabled: true
                         text: qsTr("Capture system keyboard shortcuts")
@@ -832,7 +832,7 @@ Flickable {
                 anchors.fill: parent
                 spacing: 8
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: automaticQuicMtuCheckBox
                     width: parent.width
                     text: qsTr("Determine QUIC MTU automatically")
@@ -952,7 +952,7 @@ Flickable {
                 anchors.fill: parent
                 spacing: 8
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: enableMdns
                     width: parent.width
                     text: qsTr("Automatically find PCs on the local network")
@@ -976,7 +976,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: detectNetworkBlocking
                     width: parent.width
                     text: qsTr("Automatically detect blocked connections (Recommended)")
@@ -987,7 +987,7 @@ Flickable {
                     }
                 }
 
-                CheckBox {
+                StationConnectCheckBox {
                     id: showPerformanceOverlay
                     width: parent.width
                     text: qsTr("Show performance stats while streaming")

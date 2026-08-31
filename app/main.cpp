@@ -951,13 +951,13 @@ int main(int argc, char *argv[])
 
     // These are defaults that we allow the user to override
     if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_MATERIAL_ACCENT")) {
-        qputenv("QT_QUICK_CONTROLS_MATERIAL_ACCENT", "#3484E4");
+        qputenv("QT_QUICK_CONTROLS_MATERIAL_ACCENT", "#5A9CE6");
     }
     if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_MATERIAL_VARIANT")) {
         qputenv("QT_QUICK_CONTROLS_MATERIAL_VARIANT", "Dense");
     }
     if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_MATERIAL_PRIMARY")) {
-        qputenv("QT_QUICK_CONTROLS_MATERIAL_PRIMARY", "#272D35");
+        qputenv("QT_QUICK_CONTROLS_MATERIAL_PRIMARY", "#393D43");
     }
 
     QQmlApplicationEngine engine;

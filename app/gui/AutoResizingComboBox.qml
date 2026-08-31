@@ -4,7 +4,7 @@ import QtQuick.Controls 2.2
 import SystemProperties 1.0
 
 // https://stackoverflow.com/questions/45029968/how-do-i-set-the-combobox-width-to-fit-the-largest-item
-ComboBox {
+StationConnectComboBox {
     StationConnectTheme {
         id: theme
     }
