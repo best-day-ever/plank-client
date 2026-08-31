@@ -10,8 +10,10 @@
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QTemporaryFile>
+#include <QThreadPool>
 #include <QRegularExpression>
 
 #ifdef Q_OS_UNIX
