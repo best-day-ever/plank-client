@@ -1059,18 +1059,36 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 
         offset += ret;
 
+        char beforeFecLossString[32];
+        char afterFecLossString[32];
+
         if (videoPacketLossPercent >= 0.0f) {
-            ret = snprintf(&output[offset],
-                           length - offset,
-                           "Incoming video packet loss (before FEC): %.*f%%\n",
-                           VideoPacketLossDisplayDecimalPlaces,
-                           videoPacketLossPercent);
+            snprintf(beforeFecLossString,
+                     sizeof(beforeFecLossString),
+                     "%.*f%%",
+                     VideoPacketLossDisplayDecimalPlaces,
+                     videoPacketLossPercent);
         }
         else {
-            ret = snprintf(&output[offset],
-                           length - offset,
-                           "Incoming video packet loss (before FEC): N/A\n");
+            snprintf(beforeFecLossString, sizeof(beforeFecLossString), "N/A");
         }
+
+        if (stats.renderedFrames != 0 && stats.totalFrames != 0) {
+            snprintf(afterFecLossString,
+                     sizeof(afterFecLossString),
+                     "%.*f%%",
+                     VideoPacketLossDisplayDecimalPlaces,
+                     (float)stats.networkDroppedFrames / stats.totalFrames * 100);
+        }
+        else {
+            snprintf(afterFecLossString, sizeof(afterFecLossString), "N/A");
+        }
+
+        ret = snprintf(&output[offset],
+                       length - offset,
+                       "Incoming video loss (before/after FEC): %s/%s\n",
+                       beforeFecLossString,
+                       afterFecLossString);
         if (ret < 0 || ret >= length - offset) {
             SDL_assert(false);
             return;
@@ -1106,14 +1124,11 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 
         ret = snprintf(&output[offset],
                        length - offset,
-                       "Incoming video frame loss (after FEC): %.2f%%\n"
-                       "Frames dropped by client frame queues: %.2f%%\n"
-                       "Client frame queue drops by reason (render/overflow): %u/%u\n"
+                       "Client frame queue drops (%%/render/overflow): %.2f%%/%u/%u\n"
                        "Average network latency: %s\n"
                        "Average decoding time: %.2f ms\n"
                        "Average frame queue delay: %.2f ms\n"
                        "Average rendering time (including monitor V-sync latency): %.2f ms\n",
-                       (float)stats.networkDroppedFrames / stats.totalFrames * 100,
                        (float)stats.pacerDroppedFrames / stats.decodedFrames * 100,
                        stats.renderQueueDroppedFrames,
                        stats.queueOverflowDroppedFrames,
