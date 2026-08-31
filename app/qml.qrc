@@ -17,6 +17,9 @@
         <file>gui/CenteredGridView.qml</file>
         <file>gui/StationConnectTheme.qml</file>
         <file>gui/StationConnectSection.qml</file>
+        <file>gui/StationConnectSettingsGrid.qml</file>
+        <file>gui/StationConnectSettingLabel.qml</file>
+        <file>gui/StationConnectSettingHelp.qml</file>
         <file>gui/StationConnectCheckBox.qml</file>
         <file>gui/StationConnectComboBox.qml</file>
         <file>gui/StationConnectTextField.qml</file>

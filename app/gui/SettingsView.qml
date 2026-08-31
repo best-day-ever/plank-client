@@ -19,7 +19,7 @@ Flickable {
 
     boundsBehavior: Flickable.OvershootBounds
 
-    contentWidth: settingsColumn1.width > settingsColumn2.width ? settingsColumn1.width : settingsColumn2.width
+    contentWidth: width
     contentHeight: settingsColumn1.height > settingsColumn2.height ? settingsColumn1.height : settingsColumn2.height
 
     ScrollBar.vertical: ScrollBar {
@@ -95,25 +95,15 @@ Flickable {
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Basic Settings")
 
-            Column {
-                anchors.fill: parent
-                spacing: 8
+            StationConnectSettingsGrid {
 
-                Label {
-                    width: parent.width
+                StationConnectSettingLabel {
                     id: frameRateTitle
                     text: qsTr("Frame rate")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
                 }
 
-
-                Row {
-                    spacing: 5
-                    width: parent.width
-
-
-                    AutoResizingComboBox {
+                AutoResizingComboBox {
+                        Layout.fillWidth: true
                         property int lastIndexValue
 
                         function updateFrameRateForSelection() {
@@ -316,7 +306,6 @@ Flickable {
                         }
 
                         id: fpsComboBox
-                        maximumWidth: parent.width / 2
                         textRole: "text"
                         // ::onActivated must be used, as it only listens for when the index is changed by a human
                         onActivated : {
@@ -327,19 +316,16 @@ Flickable {
                                 updateFrameRateForSelection()
                             }
                         }
-                    }
                 }
 
-                Label {
-                    width: parent.width
+                StationConnectSettingLabel {
                     id: windowModeTitle
                     text: qsTr("Window Mode")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
                     visible: SystemProperties.hasDesktopEnvironment
                 }
 
                 AutoResizingComboBox {
+                    Layout.fillWidth: true
                     function createModel() {
                         var model = Qt.createQmlObject('import QtQuick 2.0; ListModel {}', parent, '')
 
@@ -411,12 +397,16 @@ Flickable {
                     ToolTip.text: qsTr("Borderless fills the display. Windowed provides a movable, resizable stream window with desktop decorations.")
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("V-Sync")
+                }
+
                 StationConnectCheckBox {
                     id: vsyncCheck
-                    width: parent.width
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     hoverEnabled: true
-                    text: qsTr("V-Sync")
-                    font.pointSize:  12
+                    text: ""
+                    Accessible.name: qsTr("V-Sync")
                     checked: StreamingPreferences.enableVsync
                     onCheckedChanged: {
                         StreamingPreferences.enableVsync = checked
@@ -437,19 +427,15 @@ Flickable {
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Audio Settings")
 
-            Column {
-                anchors.fill: parent
-                spacing: 8
+            StationConnectSettingsGrid {
 
-                Label {
-                    width: parent.width
+                StationConnectSettingLabel {
                     id: resAudioTitle
                     text: qsTr("Audio configuration")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
                 }
 
                 AutoResizingComboBox {
+                    Layout.fillWidth: true
                     // ignore setting the index at first, and actually set it when the component is loaded
                     Component.onCompleted: {
                         var saved_audio = StreamingPreferences.audioConfig
@@ -487,12 +473,15 @@ Flickable {
                     }
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("Mute host PC speakers while streaming")
+                }
 
                 StationConnectCheckBox {
                     id: audioPcCheck
-                    width: parent.width
-                    text: qsTr("Mute host PC speakers while streaming")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Mute host PC speakers while streaming")
                     checked: !StreamingPreferences.playAudioOnHost
                     onCheckedChanged: {
                         StreamingPreferences.playAudioOnHost = !checked
@@ -504,11 +493,16 @@ Flickable {
                     ToolTip.text: qsTr("You must restart any game currently in progress for this setting to take effect")
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("Mute audio when the client is inactive")
+                    visible: SystemProperties.hasDesktopEnvironment
+                }
+
                 StationConnectCheckBox {
                     id: muteOnFocusLossCheck
-                    width: parent.width
-                    text: qsTr("Mute audio stream when the client is not the active window")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Mute audio stream when the client is not the active window")
                     visible: SystemProperties.hasDesktopEnvironment
                     checked: StreamingPreferences.muteOnFocusLoss
                     onCheckedChanged: {
@@ -528,19 +522,15 @@ Flickable {
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("UI Settings")
 
-            Column {
-                anchors.fill: parent
-                spacing: 8
+            StationConnectSettingsGrid {
 
-                Label {
-                    width: parent.width
+                StationConnectSettingLabel {
                     id: languageTitle
                     text: qsTr("Language")
-                    font.pointSize: 12
-                    wrapMode: Text.Wrap
                 }
 
                 AutoResizingComboBox {
+                    Layout.fillWidth: true
                     // ignore setting the index at first, and actually set it when the component is loaded
                     Component.onCompleted: {
                         var saved_language = StreamingPreferences.language
@@ -698,22 +688,30 @@ Flickable {
                     }
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("Connection quality warnings")
+                }
+
                 StationConnectCheckBox {
                     id: connectionWarningsCheck
-                    width: parent.width
-                    text: qsTr("Show connection quality warnings")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Show connection quality warnings")
                     checked: StreamingPreferences.connectionWarnings
                     onCheckedChanged: {
                         StreamingPreferences.connectionWarnings = checked
                     }
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("Keep display awake while streaming")
+                }
+
                 StationConnectCheckBox {
                     id: keepAwakeCheck
-                    width: parent.width
-                    text: qsTr("Keep the display awake while streaming")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Keep the display awake while streaming")
                     checked: StreamingPreferences.keepAwake
                     onCheckedChanged: {
                         StreamingPreferences.keepAwake = checked
@@ -741,19 +739,22 @@ Flickable {
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Input Settings")
 
-            Column {
-                anchors.fill: parent
-                spacing: 8
+            StationConnectSettingsGrid {
 
-                Row {
-                    spacing: 5
-                    width: parent.width
+                StationConnectSettingLabel {
+                    text: qsTr("Capture system keyboard shortcuts")
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.spaceMedium
 
                     StationConnectCheckBox {
                         id: captureSysKeysCheck
+                        Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                         hoverEnabled: true
-                        text: qsTr("Capture system keyboard shortcuts")
-                        font.pointSize: 12
+                        text: ""
+                        Accessible.name: qsTr("Capture system keyboard shortcuts")
                         enabled: SystemProperties.hasDesktopEnvironment
                         checked: StreamingPreferences.captureSysKeysMode !== StreamingPreferences.CSK_OFF || !SystemProperties.hasDesktopEnvironment
 
@@ -765,6 +766,7 @@ Flickable {
                     }
 
                     AutoResizingComboBox {
+                        Layout.fillWidth: true
                         // ignore setting the index at first, and actually set it when the component is loaded
                         Component.onCompleted: {
                             if (!visible) {
@@ -828,71 +830,66 @@ Flickable {
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Network Settings")
 
-            Column {
-                anchors.fill: parent
-                spacing: 8
+            StationConnectSettingsGrid {
+
+                StationConnectSettingLabel {
+                    text: qsTr("Determine QUIC MTU automatically")
+                }
 
                 StationConnectCheckBox {
                     id: automaticQuicMtuCheckBox
-                    width: parent.width
-                    text: qsTr("Determine QUIC MTU automatically")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Determine QUIC MTU automatically")
                     checked: StreamingPreferences.quicUdpPayloadMtu === 0
                     onClicked: {
                         StreamingPreferences.quicUdpPayloadMtu = checked ? 0 : quicMtuSpinBox.value
                     }
                 }
 
-                Row {
-                    width: parent.width
-                    spacing: 8
+                StationConnectSettingLabel {
+                    text: qsTr("Maximum QUIC UDP payload")
+                }
 
-                    Label {
-                        text: qsTr("Maximum QUIC UDP payload")
-                        font.pointSize: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-
-                    SpinBox {
-                        id: quicMtuSpinBox
-                        from: 1200
-                        to: 65527
-                        stepSize: 1
-                        editable: true
-                        enabled: !automaticQuicMtuCheckBox.checked
-                        value: StreamingPreferences.quicUdpPayloadMtu === 0 ? 1344 :
-                                   StreamingPreferences.quicUdpPayloadMtu
-                        onValueModified: {
-                            if (enabled) {
-                                StreamingPreferences.quicUdpPayloadMtu = value
-                            }
+                SpinBox {
+                    id: quicMtuSpinBox
+                    Layout.fillWidth: true
+                    from: 1200
+                    to: 65527
+                    stepSize: 1
+                    editable: true
+                    enabled: !automaticQuicMtuCheckBox.checked
+                    value: StreamingPreferences.quicUdpPayloadMtu === 0 ? 1344 :
+                               StreamingPreferences.quicUdpPayloadMtu
+                    onValueModified: {
+                        if (enabled) {
+                            StreamingPreferences.quicUdpPayloadMtu = value
                         }
                     }
                 }
 
-                Label {
-                    width: parent.width
+                Item {
+                    Layout.preferredWidth: 180
+                    Layout.preferredHeight: 1
+                }
+
+                StationConnectSettingHelp {
                     text: automaticQuicMtuCheckBox.checked ?
                               qsTr("Automatic uses 1344 bytes on detected ZeroTier routes and Quinn path discovery elsewhere.") :
                               qsTr("The manual value is the complete QUIC UDP payload, excluding outer IP and UDP headers.")
-                    font.pointSize: 9
-                    wrapMode: Text.Wrap
-                    opacity: 0.72
                 }
 
-                Label {
-                    width: parent.width
-                    topPadding: 5
+                StationConnectSettingLabel {
                     text: qsTr("Unreachable host timeout")
-                    font.pointSize: 12
                 }
 
-                Row {
-                    width: parent.width
-                    spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.spaceMedium
 
                     SpinBox {
                         id: unreachableTimeoutSpinBox
+                        Layout.fillWidth: true
                         from: 5
                         to: 300
                         stepSize: 5
@@ -905,14 +902,19 @@ Flickable {
 
                     Label {
                         text: qsTr("seconds")
-                        font.pointSize: 12
-                        anchors.verticalCenter: parent.verticalCenter
+                        color: theme.textSecondary
+                        font.pointSize: 10
+                        Layout.alignment: Qt.AlignVCenter
                     }
+                }
+
+                StationConnectSettingLabel {
+                    text: qsTr("When the host remains unreachable")
                 }
 
                 AutoResizingComboBox {
                     id: unreachableActionComboBox
-                    width: parent.width
+                    Layout.fillWidth: true
                     textRole: "text"
                     model: ListModel {
                         id: unreachableActionListModel
@@ -933,12 +935,13 @@ Flickable {
                     }
                 }
 
-                Label {
-                    width: parent.width
+                Item {
+                    Layout.preferredWidth: 180
+                    Layout.preferredHeight: 1
+                }
+
+                StationConnectSettingHelp {
                     text: qsTr("The stream window and toolbar remain responsive while StationConnect retries the host.")
-                    font.pointSize: 9
-                    wrapMode: Text.Wrap
-                    opacity: 0.72
                 }
             }
         }
@@ -948,15 +951,17 @@ Flickable {
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Advanced Settings")
 
-            Column {
-                anchors.fill: parent
-                spacing: 8
+            StationConnectSettingsGrid {
+
+                StationConnectSettingLabel {
+                    text: qsTr("Automatically find PCs on the local network")
+                }
 
                 StationConnectCheckBox {
                     id: enableMdns
-                    width: parent.width
-                    text: qsTr("Automatically find PCs on the local network")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Automatically find PCs on the local network")
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged
                     ToolTip.visible: hovered && StreamingPreferences.mdnsDiscoveryManaged
@@ -976,22 +981,30 @@ Flickable {
                     }
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("Automatically detect blocked connections")
+                }
+
                 StationConnectCheckBox {
                     id: detectNetworkBlocking
-                    width: parent.width
-                    text: qsTr("Automatically detect blocked connections (Recommended)")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Automatically detect blocked connections")
                     checked: StreamingPreferences.detectNetworkBlocking
                     onCheckedChanged: {
                         StreamingPreferences.detectNetworkBlocking = checked
                     }
                 }
 
+                StationConnectSettingLabel {
+                    text: qsTr("Show performance stats while streaming")
+                }
+
                 StationConnectCheckBox {
                     id: showPerformanceOverlay
-                    width: parent.width
-                    text: qsTr("Show performance stats while streaming")
-                    font.pointSize: 12
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    text: ""
+                    Accessible.name: qsTr("Show performance stats while streaming")
                     checked: StreamingPreferences.showPerformanceOverlay
                     onCheckedChanged: {
                         StreamingPreferences.showPerformanceOverlay = checked
