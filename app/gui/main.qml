@@ -415,7 +415,7 @@ ApplicationWindow {
         // keeping the dialog inside smaller launcher windows. The dialog still
         // blocks the launcher, but it must not wash out the UI behind it.
         width: Math.min(640, parent.width - 40)
-        height: Math.min(1100, parent.height - 20)
+        height: Math.min(implicitHeight, parent.height - 20)
         dim: false
 
         function suggestedNickname(address) {
