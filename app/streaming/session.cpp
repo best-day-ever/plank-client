@@ -1059,6 +1059,14 @@ void Session::stopDatasmashDataPlane()
                     << "video-FEC-source-symbols-missing="
                     << stats.video_fec_source_symbols_missing;
         }
+        QByteArray lastError(512, '\0');
+        sc_datasmash_native_endpoint_last_error(
+                    m_DatasmashEndpoint, lastError.data(),
+                    static_cast<size_t>(lastError.size()));
+        if (!lastError.isEmpty() && lastError.constData()[0] != '\0') {
+            qWarning() << "Datasmash native endpoint ended:"
+                       << lastError.constData();
+        }
         sc_datasmash_native_endpoint_stop(m_DatasmashEndpoint);
         sc_datasmash_native_endpoint_destroy(m_DatasmashEndpoint);
         m_DatasmashEndpoint = nullptr;
