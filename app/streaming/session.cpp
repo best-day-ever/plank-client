@@ -955,12 +955,18 @@ bool Session::negotiateDatasmashSession(QString& errorMessage)
     const int coupledStreams = audio.value(QStringLiteral("coupled_streams")).toInt();
     const int responsePacketDuration = audio.value(
                 QStringLiteral("packet_duration_ms")).toInt();
+    const int hostFeatureFlags = response.value(
+                QStringLiteral("host_feature_flags")).toInt();
+    const int referenceFrameInvalidation = response.value(
+                QStringLiteral("reference_frame_invalidation")).toInt(-1);
     if (responseVideoFormat != negotiatedVideoFormat || sampleRate != 48000 ||
             responseChannels != audioChannels || responseChannels <= 0 ||
             responseChannels > AUDIO_CONFIGURATION_MAX_CHANNEL_COUNT ||
             streams <= 0 || streams > responseChannels ||
             coupledStreams < 0 || coupledStreams > streams ||
             responsePacketDuration <= 0 || responsePacketDuration > 120 ||
+            (hostFeatureFlags & LI_FF_LOCAL_CURSOR) == 0 ||
+            (referenceFrameInvalidation != 0 && referenceFrameInvalidation != 1) ||
             mapping.size() != responseChannels) {
         errorMessage = tr("The host returned unsupported native audio or video values.");
         return false;
@@ -969,7 +975,11 @@ bool Session::negotiateDatasmashSession(QString& errorMessage)
     STATIONCONNECT_NATIVE_SESSION_CONFIGURATION nativeConfiguration {};
     nativeConfiguration.structSize = sizeof(nativeConfiguration);
     nativeConfiguration.negotiatedVideoFormat = responseVideoFormat;
+    nativeConfiguration.hostFeatureFlags =
+            static_cast<unsigned int>(hostFeatureFlags);
     nativeConfiguration.audioPacketDurationMs = responsePacketDuration;
+    nativeConfiguration.referenceFrameInvalidationSupported =
+            static_cast<unsigned int>(referenceFrameInvalidation);
     nativeConfiguration.opusConfiguration.sampleRate = sampleRate;
     nativeConfiguration.opusConfiguration.channelCount = responseChannels;
     nativeConfiguration.opusConfiguration.streams = streams;
@@ -990,6 +1000,7 @@ bool Session::negotiateDatasmashSession(QString& errorMessage)
 
     qInfo() << "Native QUIC session negotiated without RTSP: video format"
             << QString::number(responseVideoFormat, 16)
+            << "host features" << QString::number(hostFeatureFlags, 16)
             << "audio channels" << responseChannels
             << "packet duration" << responsePacketDuration << "ms";
     return true;
