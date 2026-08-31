@@ -42,9 +42,6 @@ public:
     int getDisplayRefreshRate(SDL_Window* window);
 
     static
-    bool hasFastAes();
-
-    static
     int getDrmFdForWindow(SDL_Window* window, bool* needsClose);
 
     static

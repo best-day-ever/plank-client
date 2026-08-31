@@ -55,7 +55,6 @@ unix:!macx {
 COMMON_C_DIR = $$PWD/moonlight-common-c
 SOURCES += \
     $$COMMON_C_DIR/src/AudioStream.c \
-    $$COMMON_C_DIR/src/ByteBuffer.c \
     $$COMMON_C_DIR/src/Connection.c \
     $$COMMON_C_DIR/src/ConnectionTester.c \
     $$COMMON_C_DIR/src/ControlStream.c \
@@ -70,7 +69,7 @@ SOURCES += \
     $$COMMON_C_DIR/src/RtspParser.c \
     $$COMMON_C_DIR/src/SdpGenerator.c \
     $$COMMON_C_DIR/src/SimpleStun.c \
-    $$COMMON_C_DIR/src/VideoDepacketizer.c \
+    $$COMMON_C_DIR/src/VideoFrameAssembler.c \
     $$COMMON_C_DIR/src/VideoStream.c
 HEADERS += \
     $$COMMON_C_DIR/src/Limelight.h
