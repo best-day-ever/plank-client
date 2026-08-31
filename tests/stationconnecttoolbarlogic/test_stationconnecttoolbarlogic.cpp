@@ -25,6 +25,7 @@ private slots:
     void calculatesOnePreFecLossInterval();
     void resetsPreFecLossAfterCounterRestart();
     void retainsTenSecondPeakForBothStatsViews();
+    void sharesPacketLossDisplayPrecision();
 };
 
 void TestStationConnectToolbarLogic::resolvesReportedAndDerivedDensity()
@@ -202,6 +203,11 @@ void TestStationConnectToolbarLogic::retainsTenSecondPeakForBothStatsViews()
     QCOMPARE(window.addSample(15000, 1.0f), 1.0f);
     window.reset();
     QCOMPARE(window.addSample(15001, 0.0f), 0.0f);
+}
+
+void TestStationConnectToolbarLogic::sharesPacketLossDisplayPrecision()
+{
+    QCOMPARE(VideoPacketLossDisplayDecimalPlaces, 2);
 }
 
 QTEST_APPLESS_MAIN(TestStationConnectToolbarLogic)

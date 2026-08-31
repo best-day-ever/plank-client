@@ -830,7 +830,8 @@ void StationConnectToolbar::redraw()
     painter.drawText(QRect(174, 16, 52, 17), Qt::AlignLeft | Qt::AlignVCenter,
                      m_PacketLossPercent < 0.0f ?
                          QString("--") :
-                         QString("%1%").arg(m_PacketLossPercent, 0, 'f', 1));
+                         QString("%1%").arg(m_PacketLossPercent, 0, 'f',
+                                             VideoPacketLossDisplayDecimalPlaces));
 
     QFont targetFont = labelFont;
     targetFont.setPixelSize(12);

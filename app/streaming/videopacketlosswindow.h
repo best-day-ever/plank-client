@@ -6,6 +6,8 @@
 #include <optional>
 #include <utility>
 
+inline constexpr int VideoPacketLossDisplayDecimalPlaces = 2;
+
 class VideoPacketLossInterval
 {
 public:

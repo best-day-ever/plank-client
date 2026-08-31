@@ -7,6 +7,7 @@
 #include <QWindow>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -161,6 +162,11 @@ public:
     float currentVideoPacketLossPercent() const
     {
         return m_CurrentVideoPacketLossPercent.load(std::memory_order_relaxed);
+    }
+
+    std::uint32_t currentNetworkRttMs() const
+    {
+        return m_CurrentNetworkRttMs.load(std::memory_order_relaxed);
     }
 
 signals:
@@ -425,6 +431,7 @@ private:
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
     std::atomic<float> m_CurrentVideoPacketLossPercent;
+    std::atomic<std::uint32_t> m_CurrentNetworkRttMs;
     std::mutex m_VideoPacketLossSamplesLock;
     VideoPacketLossPeakWindow m_VideoPacketLossPeakWindow;
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};

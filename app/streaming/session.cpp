@@ -680,7 +680,8 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_LastAudioTelemetryTime(0),
       m_CurrentRenderedFps(0.0f),
       m_CurrentVideoMbps(0.0f),
-      m_CurrentVideoPacketLossPercent(-1.0f)
+      m_CurrentVideoPacketLossPercent(-1.0f),
+      m_CurrentNetworkRttMs(0)
 {
     if (m_Computer->stationConnectAuthentication) {
         if (m_ComputerManager != nullptr) {
@@ -1081,6 +1082,7 @@ void Session::startDatasmashMediaReceivers()
         m_VideoPacketLossPeakWindow.reset();
     }
     m_CurrentVideoPacketLossPercent.store(-1.0f, std::memory_order_relaxed);
+    m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
     m_DatasmashReceiversStopping.store(false);
     m_DatasmashVideoThread = std::thread([this]() {
         datasmashVideoReceiveLoop();
@@ -1115,8 +1117,8 @@ void Session::datasmashVideoReceiveLoop()
     VideoPacketLossInterval packetLossInterval;
     Uint64 nextPacketLossSample = SDL_GetTicks();
 
-    const auto samplePacketLoss = [this, &packetLossInterval,
-                                   &nextPacketLossSample]() {
+    const auto sampleTransportTelemetry = [this, &packetLossInterval,
+                                           &nextPacketLossSample]() {
         const Uint64 now = SDL_GetTicks();
         if (now < nextPacketLossSample) {
             return;
@@ -1129,6 +1131,15 @@ void Session::datasmashVideoReceiveLoop()
                 SC_DATASMASH_OK) {
             return;
         }
+
+        const std::uint64_t roundedRttMs =
+                (stats.quic_rtt_us + 500) / 1000;
+        m_CurrentNetworkRttMs.store(
+                    static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                        roundedRttMs,
+                        std::numeric_limits<std::uint32_t>::max())),
+                    std::memory_order_relaxed);
+
         const auto packetLossPercent = packetLossInterval.addCumulative(
                     stats.video_fec_source_symbols,
                     stats.video_fec_source_symbols_missing);
@@ -1138,7 +1149,7 @@ void Session::datasmashVideoReceiveLoop()
     };
 
     while (!m_DatasmashReceiversStopping.load()) {
-        samplePacketLoss();
+        sampleTransportTelemetry();
         ScDatasmashNativeVideoFrameInfo info {};
         info.struct_size = sizeof(info);
         size_t frameSize = 0;
