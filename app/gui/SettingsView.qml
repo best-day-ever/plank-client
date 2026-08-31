@@ -11,6 +11,10 @@ Flickable {
     id: settingsPage
     objectName: qsTr("Settings")
 
+    StationConnectTheme {
+        id: theme
+    }
+
     signal languageChanged()
 
     boundsBehavior: Flickable.OvershootBounds
@@ -80,21 +84,20 @@ Flickable {
     }
 
     Column {
-        padding: 10
+        padding: 20
+        rightPadding: 10
         id: settingsColumn1
         width: settingsPage.width / 2
-        spacing: 15
+        spacing: theme.spaceMedium
 
-        GroupBox {
+        StationConnectSection {
             id: basicSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"skyblue\">" + qsTr("Basic Settings") + "</font>"
-            font.pointSize: 12
+            title: qsTr("Basic Settings")
 
             Column {
                 anchors.fill: parent
-                spacing: 5
+                spacing: 8
 
                 Label {
                     width: parent.width
@@ -428,17 +431,15 @@ Flickable {
             }
         }
 
-        GroupBox {
+        StationConnectSection {
 
             id: audioSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"skyblue\">" + qsTr("Audio Settings") + "</font>"
-            font.pointSize: 12
+            title: qsTr("Audio Settings")
 
             Column {
                 anchors.fill: parent
-                spacing: 5
+                spacing: 8
 
                 Label {
                     width: parent.width
@@ -522,16 +523,14 @@ Flickable {
             }
         }
 
-        GroupBox {
+        StationConnectSection {
             id: uiSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"skyblue\">" + qsTr("UI Settings") + "</font>"
-            font.pointSize: 12
+            title: qsTr("UI Settings")
 
             Column {
                 anchors.fill: parent
-                spacing: 5
+                spacing: 8
 
                 Label {
                     width: parent.width
@@ -730,23 +729,21 @@ Flickable {
     }
 
     Column {
-        padding: 10
-        rightPadding: 20
+        padding: 20
+        leftPadding: 10
         anchors.left: settingsColumn1.right
         id: settingsColumn2
         width: settingsPage.width / 2
-        spacing: 15
+        spacing: theme.spaceMedium
 
-        GroupBox {
+        StationConnectSection {
             id: inputSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"skyblue\">" + qsTr("Input Settings") + "</font>"
-            font.pointSize: 12
+            title: qsTr("Input Settings")
 
             Column {
                 anchors.fill: parent
-                spacing: 5
+                spacing: 8
 
                 Row {
                     spacing: 5
@@ -826,16 +823,14 @@ Flickable {
             }
         }
 
-        GroupBox {
+        StationConnectSection {
             id: networkSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"skyblue\">" + qsTr("Network Settings") + "</font>"
-            font.pointSize: 12
+            title: qsTr("Network Settings")
 
             Column {
                 anchors.fill: parent
-                spacing: 5
+                spacing: 8
 
                 CheckBox {
                     id: automaticQuicMtuCheckBox
@@ -948,16 +943,14 @@ Flickable {
             }
         }
 
-        GroupBox {
+        StationConnectSection {
             id: advancedSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
-            padding: 12
-            title: "<font color=\"skyblue\">" + qsTr("Advanced Settings") + "</font>"
-            font.pointSize: 12
+            title: qsTr("Advanced Settings")
 
             Column {
                 anchors.fill: parent
-                spacing: 5
+                spacing: 8
 
                 CheckBox {
                     id: enableMdns

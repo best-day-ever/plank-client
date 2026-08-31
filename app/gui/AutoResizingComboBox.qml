@@ -5,6 +5,10 @@ import SystemProperties 1.0
 
 // https://stackoverflow.com/questions/45029968/how-do-i-set-the-combobox-width-to-fit-the-largest-item
 ComboBox {
+    StationConnectTheme {
+        id: theme
+    }
+
     property int textWidth
     property int desiredWidth : leftPadding + textWidth + indicator.width + rightPadding
     property int maximumWidth : parent.width
@@ -39,7 +43,7 @@ ComboBox {
         // Override the popup color to improve contrast with the overridden
         // Material 2 background color set in main.qml.
         if (SystemProperties.usesMaterial3Theme) {
-            popup.background.color = "#424242"
+            popup.background.color = theme.surfaceRaised
         }
     }
 

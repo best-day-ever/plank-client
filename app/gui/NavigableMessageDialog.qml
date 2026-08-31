@@ -5,6 +5,10 @@ import QtQuick.Layouts 1.2
 NavigableDialog {
     id: dialog
 
+    StationConnectTheme {
+        id: messageTheme
+    }
+
     property alias text: dialogLabel.dialogText
     property alias showSpinner: dialogSpinner.visible
     property alias imageSrc: dialogImage.source
@@ -21,7 +25,7 @@ NavigableDialog {
     }
 
     RowLayout {
-        spacing: 10
+        spacing: 16
 
         BusyIndicator {
             id: dialogSpinner
@@ -36,8 +40,8 @@ NavigableDialog {
                         "qrc:/res/baseline-error_outline-24px.svg"
             sourceSize {
                 // The icon should be square so use the height as the width too
-                width: 50
-                height: 50
+                width: 36
+                height: 36
             }
             visible: !showSpinner
         }
@@ -47,6 +51,8 @@ NavigableDialog {
 
             id: dialogLabel
             text: dialogText + ((helpText && (standardButtons & Dialog.Help)) ? (helpTextSeparator + helpText) : "")
+            color: messageTheme.textPrimary
+            font.pointSize: 11
             wrapMode: Text.Wrap
             elide: Label.ElideRight
 

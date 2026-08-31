@@ -2,7 +2,22 @@ import QtQuick 2.0
 import QtQuick.Controls 2.2
 
 Menu {
+    id: control
     property var initiator
+
+    StationConnectTheme {
+        id: theme
+    }
+
+    padding: 6
+
+    background: Rectangle {
+        implicitWidth: 220
+        color: theme.surfaceRaised
+        radius: theme.radiusMedium
+        border.width: 1
+        border.color: theme.border
+    }
 
     onOpened: {
         // If the initiating object currently has keyboard focus,

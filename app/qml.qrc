@@ -15,5 +15,7 @@
         <file>gui/NavigableMessageDialog.qml</file>
         <file>gui/NavigableDialog.qml</file>
         <file>gui/CenteredGridView.qml</file>
+        <file>gui/StationConnectTheme.qml</file>
+        <file>gui/StationConnectSection.qml</file>
     </qresource>
 </RCC>

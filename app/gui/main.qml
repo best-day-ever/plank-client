@@ -17,18 +17,22 @@ ApplicationWindow {
     property bool clearOnBack: false
 
     id: window
+    title: qsTr("StationConnect Client")
     width: 1280
     height: 1200
     minimumHeight: 900
 
-    Component.onCompleted: {
-        // Override the background color to Material 2 colors for Qt 6.5+
-        // in order to improve contrast between GFE's placeholder box art
-        // and the background of the app grid.
-        if (SystemProperties.usesMaterial3Theme) {
-            Material.background = "#303030"
-        }
+    StationConnectTheme {
+        id: theme
+    }
 
+    Material.theme: Material.Dark
+    Material.background: theme.canvas
+    Material.foreground: theme.textPrimary
+    Material.primary: theme.chrome
+    Material.accent: theme.accent
+
+    Component.onCompleted: {
         // The StationConnect launcher is always a normal desktop window.
         window.show()
 
@@ -199,12 +203,18 @@ ApplicationWindow {
 
     header: ToolBar {
         id: toolBar
-        height: 60
-        anchors.topMargin: 5
-        anchors.bottomMargin: 5
+        height: 64
 
         background: Rectangle {
-            color: Qt.lighter(window.Material.background, 1.15)
+            color: theme.chrome
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: theme.borderSubtle
+            }
         }
 
         Label {
@@ -212,16 +222,18 @@ ApplicationWindow {
             visible: toolBar.width > 700
             anchors.fill: parent
             text: stackView.currentItem ? stackView.currentItem.objectName : ""
-            font.pointSize: 20
+            color: theme.textPrimary
+            font.pointSize: 17
+            font.weight: Font.DemiBold
             elide: Label.ElideRight
             horizontalAlignment: Qt.AlignHCenter
             verticalAlignment: Qt.AlignVCenter
         }
 
         RowLayout {
-            spacing: 10
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
+            spacing: theme.spaceSmall
+            anchors.leftMargin: theme.spaceMedium
+            anchors.rightMargin: theme.spaceMedium
             anchors.fill: parent
 
             NavigableToolButton {
@@ -240,7 +252,9 @@ ApplicationWindow {
             Label {
                 id: stationConnectVersionLabel
                 text: SystemProperties.stationConnectVersionString
-                font.pointSize: 12
+                color: theme.textSecondary
+                font.pointSize: 10
+                font.weight: Font.Medium
                 horizontalAlignment: Qt.AlignLeft
                 verticalAlignment: Qt.AlignVCenter
             }
