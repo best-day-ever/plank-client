@@ -231,7 +231,8 @@ public:
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
                                         int hostLayout = 0, int virtualMode1 = 9,
                                         int virtualMode2 = 1,
-                                        int scaling = 1, int videoProfile = 0,
+                                        int scaling = 1,
+                                        int videoProfile = StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444,
                                         int captureSource = 0,
                                         QVariantList profileBitratesKbps = QVariantList());
 

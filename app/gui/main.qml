@@ -417,7 +417,7 @@ ApplicationWindow {
                 return addEncodingProfile.model.get(
                             addEncodingProfile.currentIndex).val
             }
-            return StreamingPreferences.SCVP_H264_10BIT_444
+            return StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
         }
 
         function applyProfileBitrate() {
@@ -455,7 +455,7 @@ ApplicationWindow {
             addVirtualMode2.currentIndex = 1
             addScalingChoice.currentIndex = 1
             addCaptureSource.currentIndex = 0
-            addEncodingProfile.currentIndex = 3
+            addEncodingProfile.currentIndex = 6
             profileBitratesKbps = []
         }
 
@@ -549,7 +549,7 @@ ApplicationWindow {
                     if (currentIndex === 1) {
                         addEncodingProfile.currentIndex = 0
                     } else {
-                        addEncodingProfile.currentIndex = 3
+                        addEncodingProfile.currentIndex = 6
                     }
                     Qt.callLater(addPcDialog.applyProfileBitrate)
                 }
@@ -565,7 +565,7 @@ ApplicationWindow {
                 id: addEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
-                currentIndex: 3
+                currentIndex: 6
                 model: addCaptureSource.currentIndex === 0 ?
                            addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
                 onActivated: addPcDialog.applyProfileBitrate()
