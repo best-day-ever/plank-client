@@ -210,6 +210,8 @@ private:
                                  const QString& certificateSha256,
                                  const QString& token);
 
+    bool negotiateDatasmashSession(QString& errorMessage);
+
     void stopDatasmashDataPlane();
 
 #ifdef STATIONCONNECT_DATASMASH

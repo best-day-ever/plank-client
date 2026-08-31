@@ -59,11 +59,16 @@
 #include <QScreen>
 #include <QHostAddress>
 #include <QHostInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 
 #ifdef STATIONCONNECT_DATASMASH
 #include "stationconnect_datasmash.h"
 #include "stationconnect_datasmash_control.h"
 #include "stationconnect_datasmash_event.h"
+#include "stationconnect_datasmash_setup.h"
 #endif
 
 #include <algorithm>
@@ -793,6 +798,200 @@ bool Session::startDatasmashDataPlane(quint16 port,
                 &Session::datasmashNativeInputSender, endpoint);
     qInfo() << "Experimental native KyProto media, input, and data protocols are ready on UDP"
             << port;
+    return true;
+#endif
+}
+
+bool Session::negotiateDatasmashSession(QString& errorMessage)
+{
+#ifndef STATIONCONNECT_DATASMASH
+    errorMessage = tr("Native StationConnect session negotiation is unavailable.");
+    return false;
+#else
+    if (m_DatasmashEndpoint == nullptr) {
+        errorMessage = tr("The native StationConnect transport is not connected.");
+        return false;
+    }
+
+    const int negotiatedVideoFormat = m_StreamConfig.supportedVideoFormats;
+    int codec = 0;
+    int chroma = 1;
+    bool tenBit = false;
+    switch (negotiatedVideoFormat) {
+    case VIDEO_FORMAT_H264_HIGH8_422:
+        chroma = 2;
+        break;
+    case VIDEO_FORMAT_H264_HIGH8_444:
+        break;
+    case VIDEO_FORMAT_H264_HIGH10_422:
+        chroma = 2;
+        tenBit = true;
+        break;
+    case VIDEO_FORMAT_H264_HIGH10_444:
+        tenBit = true;
+        break;
+    case VIDEO_FORMAT_H265_REXT8_444:
+        codec = 1;
+        break;
+    case VIDEO_FORMAT_H265_REXT10_444:
+        codec = 1;
+        tenBit = true;
+        break;
+    default:
+        errorMessage = tr("The selected StationConnect video profile has no native negotiation mapping.");
+        return false;
+    }
+
+    int slicesPerFrame = (m_VideoCallbacks.capabilities >> 24) & 0xFF;
+    if (slicesPerFrame == 0) {
+        slicesPerFrame = 1;
+    }
+    const bool supportsReferenceFrameInvalidation = codec == 0 ?
+                (m_VideoCallbacks.capabilities &
+                 CAPABILITY_REFERENCE_FRAME_INVALIDATION_AVC) != 0 :
+                (m_VideoCallbacks.capabilities &
+                 CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC) != 0;
+    const int referenceFrames = supportsReferenceFrameInvalidation ? 0 : 1;
+    const int audioChannels = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(
+                m_StreamConfig.audioConfiguration);
+    const int audioChannelMask = CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(
+                m_StreamConfig.audioConfiguration);
+    const bool highQualityAudio =
+            m_StreamConfig.bitrate >= 15000 &&
+            (m_AudioCallbacks.capabilities & CAPABILITY_SLOW_OPUS_DECODER) == 0 &&
+            (audioChannels <= 2 ||
+             m_Computer->getActiveAddressReachability() != NvComputer::RI_VPN);
+    const int packetDurationMs =
+            (m_AudioCallbacks.capabilities & CAPABILITY_SLOW_OPUS_DECODER) != 0 ?
+                10 : 5;
+
+    const QJsonObject request {
+        {QStringLiteral("video"), QJsonObject {
+            {QStringLiteral("width"), m_StreamConfig.width},
+            {QStringLiteral("height"), m_StreamConfig.height},
+            {QStringLiteral("fps"), m_StreamConfig.fps},
+            {QStringLiteral("fps_x100"), m_StreamConfig.clientRefreshRateX100},
+            {QStringLiteral("slices_per_frame"), slicesPerFrame},
+            {QStringLiteral("reference_frames"), referenceFrames},
+            {QStringLiteral("encoder_csc_mode"),
+             (m_StreamConfig.colorSpace << 1) | m_StreamConfig.colorRange},
+            {QStringLiteral("codec"), codec},
+            {QStringLiteral("ten_bit"), tenBit},
+            {QStringLiteral("chroma"), chroma},
+            {QStringLiteral("intra_refresh"), 0},
+            {QStringLiteral("encoder_target_kbps"), m_StreamConfig.bitrate},
+            {QStringLiteral("negotiated_format"), negotiatedVideoFormat},
+        }},
+        {QStringLiteral("audio"), QJsonObject {
+            {QStringLiteral("channels"), audioChannels},
+            {QStringLiteral("channel_mask"), audioChannelMask},
+            {QStringLiteral("packet_duration_ms"), packetDurationMs},
+            {QStringLiteral("high_quality"), highQualityAudio},
+        }},
+    };
+    const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact);
+    std::vector<unsigned char> packet(
+                SC_DATASMASH_SETUP_HEADER_SIZE + static_cast<size_t>(payload.size()));
+    size_t packetSize = 0;
+    constexpr uint32_t RequestId = 1;
+    if (sc_datasmash_setup_encode(
+                SC_DATASMASH_SETUP_LAUNCH_REQUEST, 0,
+                SC_DATASMASH_SETUP_STATUS_OK, RequestId,
+                reinterpret_cast<const uint8_t*>(payload.constData()),
+                static_cast<size_t>(payload.size()),
+                packet.data(), packet.size(), &packetSize) != 0 ||
+            sc_datasmash_native_data_send(
+                m_DatasmashEndpoint, packet.data(), packetSize) !=
+                SC_DATASMASH_OK) {
+        errorMessage = tr("The native StationConnect launch request could not be sent.");
+        return false;
+    }
+
+    packet.resize(SC_DATASMASH_SETUP_MAX_PACKET_SIZE);
+    packetSize = 0;
+    if (sc_datasmash_native_data_receive(
+                m_DatasmashEndpoint, packet.data(), packet.size(),
+                &packetSize, 12000) != SC_DATASMASH_OK) {
+        errorMessage = tr("The host did not complete native session negotiation.");
+        return false;
+    }
+
+    ScDatasmashSetupPacket responsePacket {};
+    if (sc_datasmash_setup_decode(packet.data(), packetSize, &responsePacket) != 0 ||
+            responsePacket.request_id != RequestId ||
+            (responsePacket.flags & SC_DATASMASH_SETUP_FLAG_RESPONSE) == 0 ||
+            (responsePacket.type != SC_DATASMASH_SETUP_LAUNCH_RESPONSE &&
+             responsePacket.type != SC_DATASMASH_SETUP_ERROR)) {
+        errorMessage = tr("The host returned an invalid native session response.");
+        return false;
+    }
+
+    QJsonParseError parseError {};
+    const QJsonDocument responseDocument = QJsonDocument::fromJson(
+                QByteArray(reinterpret_cast<const char*>(responsePacket.payload),
+                           static_cast<int>(responsePacket.payload_size)),
+                &parseError);
+    if (parseError.error != QJsonParseError::NoError ||
+            !responseDocument.isObject()) {
+        errorMessage = tr("The host returned malformed native session values.");
+        return false;
+    }
+    const QJsonObject response = responseDocument.object();
+    if (responsePacket.status != SC_DATASMASH_SETUP_STATUS_OK ||
+            responsePacket.type == SC_DATASMASH_SETUP_ERROR) {
+        const QString hostMessage = response.value(QStringLiteral("message")).toString();
+        errorMessage = hostMessage.isEmpty() ?
+                    tr("The host rejected native session negotiation.") : hostMessage;
+        return false;
+    }
+
+    const QJsonObject audio = response.value(QStringLiteral("audio")).toObject();
+    const QJsonArray mapping = audio.value(QStringLiteral("mapping")).toArray();
+    const int responseVideoFormat = response.value(
+                QStringLiteral("video_format")).toInt();
+    const int sampleRate = audio.value(QStringLiteral("sample_rate")).toInt();
+    const int responseChannels = audio.value(QStringLiteral("channels")).toInt();
+    const int streams = audio.value(QStringLiteral("streams")).toInt();
+    const int coupledStreams = audio.value(QStringLiteral("coupled_streams")).toInt();
+    const int responsePacketDuration = audio.value(
+                QStringLiteral("packet_duration_ms")).toInt();
+    if (responseVideoFormat != negotiatedVideoFormat || sampleRate != 48000 ||
+            responseChannels != audioChannels || responseChannels <= 0 ||
+            responseChannels > AUDIO_CONFIGURATION_MAX_CHANNEL_COUNT ||
+            streams <= 0 || streams > responseChannels ||
+            coupledStreams < 0 || coupledStreams > streams ||
+            responsePacketDuration <= 0 || responsePacketDuration > 120 ||
+            mapping.size() != responseChannels) {
+        errorMessage = tr("The host returned unsupported native audio or video values.");
+        return false;
+    }
+
+    STATIONCONNECT_NATIVE_SESSION_CONFIGURATION nativeConfiguration {};
+    nativeConfiguration.structSize = sizeof(nativeConfiguration);
+    nativeConfiguration.negotiatedVideoFormat = responseVideoFormat;
+    nativeConfiguration.audioPacketDurationMs = responsePacketDuration;
+    nativeConfiguration.opusConfiguration.sampleRate = sampleRate;
+    nativeConfiguration.opusConfiguration.channelCount = responseChannels;
+    nativeConfiguration.opusConfiguration.streams = streams;
+    nativeConfiguration.opusConfiguration.coupledStreams = coupledStreams;
+    for (int index = 0; index < responseChannels; ++index) {
+        const int channel = mapping.at(index).toInt(-1);
+        if (channel < 0 || channel >= responseChannels) {
+            errorMessage = tr("The host returned an invalid native audio channel map.");
+            return false;
+        }
+        nativeConfiguration.opusConfiguration.mapping[index] =
+                static_cast<unsigned char>(channel);
+    }
+    if (LiSetStationConnectNativeSessionConfiguration(&nativeConfiguration) != 0) {
+        errorMessage = tr("The native StationConnect session values were rejected locally.");
+        return false;
+    }
+
+    qInfo() << "Native QUIC session negotiated without RTSP: video format"
+            << QString::number(responseVideoFormat, 16)
+            << "audio channels" << responseChannels
+            << "packet duration" << responsePacketDuration << "ms";
     return true;
 #endif
 }
@@ -2515,10 +2714,24 @@ bool Session::startConnectionAsync(bool reconnecting)
     }
     datasmashToken.fill(QChar('\0'));
 
+    QString nativeNegotiationError;
+    if (!negotiateDatasmashSession(nativeNegotiationError)) {
+        stopDatasmashDataPlane();
+        if (!reconnecting) {
+            emit displayLaunchError(nativeNegotiationError);
+        }
+        else {
+            qWarning() << "StationConnect native session negotiation failed:"
+                       << nativeNegotiationError;
+        }
+        return false;
+    }
+
     QByteArray hostnameStr = m_Computer->activeAddress.address().toLatin1();
     QByteArray siAppVersion = m_Computer->appVersion.toLatin1();
 
     SERVER_INFORMATION hostInfo;
+    LiInitializeServerInformation(&hostInfo);
     hostInfo.address = hostnameStr.data();
     hostInfo.serverInfoAppVersion = siAppVersion.data();
     hostInfo.serverCodecModeSupport = m_Computer->serverCodecModeSupport;
@@ -2532,12 +2745,9 @@ bool Session::startConnectionAsync(bool reconnecting)
         hostInfo.serverInfoGfeVersion = siGfeVersion.data();
     }
 
-    // Older GFE and Sunshine versions didn't have this field
-    QByteArray rtspSessionUrlStr;
-    if (!rtspSessionUrl.isEmpty()) {
-        rtspSessionUrlStr = rtspSessionUrl.toLatin1();
-        hostInfo.rtspSessionUrl = rtspSessionUrlStr.data();
-    }
+    // Session parameters were accepted over the reliable native QUIC data
+    // endpoint above. A TCP RTSP URL must never be consulted after that cut.
+    hostInfo.rtspSessionUrl = nullptr;
 
     if (m_Preferences->networkMtu != 0) {
         // Derive a fragmentation-safe, 16-byte-aligned video packet size from
