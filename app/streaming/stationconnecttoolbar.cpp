@@ -1,5 +1,6 @@
 #include "stationconnecttoolbar.h"
 #include "stationconnectwaylandtoolbar.h"
+#include "videopacketlosswindow.h"
 
 #include "input/input.h"
 #include "settings/streamingpreferences.h"
