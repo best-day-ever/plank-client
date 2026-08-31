@@ -869,7 +869,7 @@ Flickable {
                 }
 
                 Item {
-                    Layout.preferredWidth: 180
+                    Layout.preferredWidth: 280
                     Layout.preferredHeight: 1
                 }
 
@@ -936,7 +936,7 @@ Flickable {
                 }
 
                 Item {
-                    Layout.preferredWidth: 180
+                    Layout.preferredWidth: 280
                     Layout.preferredHeight: 1
                 }
 

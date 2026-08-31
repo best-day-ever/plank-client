@@ -7,11 +7,11 @@ Label {
         id: theme
     }
 
-    Layout.preferredWidth: 180
-    Layout.minimumWidth: 180
-    Layout.maximumWidth: 180
+    Layout.preferredWidth: 280
+    Layout.minimumWidth: 280
+    Layout.maximumWidth: 280
     Layout.alignment: Qt.AlignVCenter
     color: theme.textPrimary
-    font.pointSize: 11
+    font.pointSize: 10
     wrapMode: Text.Wrap
 }
