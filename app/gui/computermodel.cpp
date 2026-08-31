@@ -52,12 +52,8 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->state == NvComputer::CS_ONLINE;
     case AuthorizedRole:
         return computer->authorizationState == NvComputer::AS_AUTHORIZED;
-    case BusyRole:
-        return computer->currentGameId != 0;
     case StatusUnknownRole:
         return computer->state == NvComputer::CS_UNKNOWN;
-    case StationConnectAuthenticationRole:
-        return computer->stationConnectAuthentication;
     case StationConnectHostVersionRole:
         return computer->stationConnectHostMetadataVersion >= 1 ?
                     computer->stationConnectHostVersion : QString();
@@ -106,34 +102,12 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[NameRole] = "name";
     names[OnlineRole] = "online";
     names[AuthorizedRole] = "authorized";
-    names[BusyRole] = "busy";
     names[StatusUnknownRole] = "statusUnknown";
-    names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
     names[StationConnectHostVersionRole] = "stationConnectHostVersion";
     names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
 
     return names;
-}
-
-Session* ComputerModel::createSessionForCurrentGame(int computerIndex)
-{
-    Q_ASSERT(computerIndex < m_Computers.count());
-
-    NvComputer* computer = m_Computers[computerIndex];
-
-    // We must currently be streaming a game to use this function
-    Q_ASSERT(computer->currentGameId != 0);
-
-    for (NvApp& app : computer->appList) {
-        if (app.id == computer->currentGameId) {
-            return new Session(computer, app, nullptr, m_ComputerManager);
-        }
-    }
-
-    // We have a current running app but it's not in our app list
-    Q_ASSERT(false);
-    return nullptr;
 }
 
 Session* ComputerModel::createSessionForStationConnectDesktop(int computerIndex)

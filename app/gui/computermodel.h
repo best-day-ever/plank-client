@@ -12,9 +12,7 @@ class ComputerModel : public QAbstractListModel
         NameRole = Qt::UserRole,
         OnlineRole,
         AuthorizedRole,
-        BusyRole,
         StatusUnknownRole,
-        StationConnectAuthenticationRole,
         StationConnectHostVersionRole,
         ManualBookmarkRole,
         AddressRole
@@ -37,8 +35,6 @@ public:
     Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
-
-    Q_INVOKABLE Session* createSessionForCurrentGame(int computerIndex);
 
     Q_INVOKABLE Session* createSessionForStationConnectDesktop(int computerIndex);
 
