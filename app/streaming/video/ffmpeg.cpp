@@ -1045,9 +1045,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         ret = snprintf(&output[offset],
                        length - offset,
                        "Incoming video bitrate: %.2f Mbps\n"
-                       "Incoming frame rate from network: %.2f FPS\n"
-                       "Decoding frame rate: %.2f FPS\n"
-                       "Rendering frame rate: %.2f FPS\n",
+                       "Frame rate (network/decode/render): %.2f/%.2f/%.2f FPS\n",
                        stats.receivedVideoMbps,
                        stats.receivedFps,
                        stats.decodedFps,
@@ -1086,7 +1084,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 
         ret = snprintf(&output[offset],
                        length - offset,
-                       "Incoming video loss (before/after FEC): %s/%s\n",
+                       "Incoming video packet loss (before/after FEC): %s/%s\n",
                        beforeFecLossString,
                        afterFecLossString);
         if (ret < 0 || ret >= length - offset) {
@@ -1126,9 +1124,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
                        length - offset,
                        "Client frame queue drops (%%/render/overflow): %.2f%%/%u/%u\n"
                        "Average network latency: %s\n"
-                       "Average decoding time: %.2f ms\n"
-                       "Average frame queue delay: %.2f ms\n"
-                       "Average rendering time (including monitor V-sync latency): %.2f ms\n",
+                       "Frame time (decode/queue/render incl. V-sync): %.2f/%.2f/%.2f ms\n",
                        (float)stats.pacerDroppedFrames / stats.decodedFrames * 100,
                        stats.renderQueueDroppedFrames,
                        stats.queueOverflowDroppedFrames,
