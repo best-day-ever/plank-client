@@ -6,6 +6,7 @@
 #include "streaming/stationconnecttoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
+#include "backend/nvaddress.h"
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -115,11 +116,14 @@ void Session::clStageFailed(int stage, int errorCode)
         return;
     }
 
-    unsigned int portFlags = LiGetPortFlagsFromStage(stage);
+    QString failingEndpoint;
+    if (stage == STAGE_SESSION_NEGOTIATION || stage == STAGE_CONTROL_STREAM_START) {
+        failingEndpoint = QStringLiteral("UDP %1").arg(DEFAULT_CONTROL_PORT);
+    }
 
-    char failingPorts[128];
-    LiStringifyPortFlags(portFlags, ", ", failingPorts, sizeof(failingPorts));
-    emit s_ActiveSession->stageFailed(QString::fromLocal8Bit(LiGetStageName(stage)), errorCode, QString(failingPorts));
+    emit s_ActiveSession->stageFailed(QString::fromLocal8Bit(LiGetStageName(stage)),
+                                      errorCode,
+                                      failingEndpoint);
 }
 
 void Session::clConnectionTerminated(int errorCode)
@@ -144,8 +148,6 @@ void Session::clConnectionTerminated(int errorCode)
         return;
     }
 
-    unsigned int portFlags = LiGetPortFlagsFromTerminationErrorCode(errorCode);
-
     // Display the termination dialog if this was not intended
     switch (errorCode) {
     case ML_ERROR_GRACEFUL_TERMINATION:
@@ -154,11 +156,9 @@ void Session::clConnectionTerminated(int errorCode)
     case ML_ERROR_NO_VIDEO_TRAFFIC:
         s_ActiveSession->m_UnexpectedTermination = true;
 
-        char ports[128];
-        SDL_assert(portFlags != 0);
-        LiStringifyPortFlags(portFlags, ", ", ports, sizeof(ports));
         emit s_ActiveSession->displayLaunchError(tr("No video received from host.") + "\n\n"+
-                                                 tr("Check your firewall and port forwarding rules for port(s): %1").arg(ports));
+                                                 tr("Check your firewall rules for UDP port %1.")
+                                                 .arg(DEFAULT_CONTROL_PORT));
         break;
 
     case ML_ERROR_NO_VIDEO_FRAME:

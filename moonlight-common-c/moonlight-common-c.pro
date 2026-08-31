@@ -56,7 +56,6 @@ COMMON_C_DIR = $$PWD/moonlight-common-c
 SOURCES += \
     $$COMMON_C_DIR/src/AudioStream.c \
     $$COMMON_C_DIR/src/Connection.c \
-    $$COMMON_C_DIR/src/ConnectionTester.c \
     $$COMMON_C_DIR/src/ControlStream.c \
     $$COMMON_C_DIR/src/FakeCallbacks.c \
     $$COMMON_C_DIR/src/InputStream.c \
@@ -65,7 +64,6 @@ SOURCES += \
     $$COMMON_C_DIR/src/Platform.c \
     $$COMMON_C_DIR/src/PlatformCrypto.c \
     $$COMMON_C_DIR/src/PlatformSockets.c \
-    $$COMMON_C_DIR/src/SimpleStun.c \
     $$COMMON_C_DIR/src/VideoFrameAssembler.c \
     $$COMMON_C_DIR/src/VideoStream.c
 HEADERS += \
