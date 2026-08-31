@@ -63,15 +63,12 @@ QSslConfiguration stationConnectSslConfiguration()
 #define XML_NAME_EQUALS(x, y) ((x) == (u##y))
 #endif
 
-NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort,
-               QNetworkAccessManager* nam) :
+NvHTTP::NvHTTP(NvAddress address, QNetworkAccessManager* nam) :
     m_Nam(nam ? nam : new QNetworkAccessManager(this))
 {
-    m_BaseUrlHttp.setScheme("http");
     m_BaseUrlHttps.setScheme("https");
 
     setAddress(address);
-    setHttpsPort(httpsPort);
 
     // Never use a proxy server
     QNetworkProxy noProxy(QNetworkProxy::NoProxy);
@@ -79,10 +76,9 @@ NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort,
 }
 
 NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
-    NvHTTP(computer->activeAddress, computer->activeHttpsPort, nam)
+    NvHTTP(computer->activeAddress, nam)
 {
-    setStationConnectAuthentication(computer->stationConnectAuthentication,
-                                    computer->sessionToken);
+    setStationConnectSessionToken(computer->sessionToken);
 }
 
 void NvHTTP::setAddress(NvAddress address)
@@ -91,20 +87,12 @@ void NvHTTP::setAddress(NvAddress address)
 
     m_Address = address;
 
-    m_BaseUrlHttp.setHost(address.address());
     m_BaseUrlHttps.setHost(address.address());
-
-    m_BaseUrlHttp.setPort(address.port());
+    m_BaseUrlHttps.setPort(address.port());
 }
 
-void NvHTTP::setHttpsPort(uint16_t port)
+void NvHTTP::setStationConnectSessionToken(QString sessionToken)
 {
-    m_BaseUrlHttps.setPort(port);
-}
-
-void NvHTTP::setStationConnectAuthentication(bool enabled, QString sessionToken)
-{
-    m_StationConnectAuthentication = enabled;
     m_SessionToken = std::move(sessionToken);
 }
 
@@ -113,12 +101,7 @@ NvAddress NvHTTP::address()
     return m_Address;
 }
 
-uint16_t NvHTTP::httpPort()
-{
-    return m_BaseUrlHttp.port();
-}
-
-uint16_t NvHTTP::httpsPort()
+uint16_t NvHTTP::controlPort()
 {
     return m_BaseUrlHttps.port();
 }
@@ -164,49 +147,13 @@ NvHTTP::getCurrentGame(QString serverInfo)
 QString
 NvHTTP::getServerInfo(NvLogLevel logLevel, bool fastFail)
 {
-    QString serverInfo;
-
-    if (m_StationConnectAuthentication && httpsPort() != 0)
-    {
-        try
-        {
-            // Authenticated StationConnect status is available only over HTTPS.
-            serverInfo = openConnectionToString(m_BaseUrlHttps,
-                                                "serverinfo",
-                                                nullptr,
-                                                fastFail ? FAST_FAIL_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
-                                                logLevel);
-            // Throws if the request failed
-            verifyResponseStatus(serverInfo);
-        }
-        catch (const GfeHttpResponseException&)
-        {
-            throw;
-        }
-    }
-    else
-    {
-        // Initial discovery uses HTTP only to learn the HTTPS port and
-        // StationConnect protocol marker.
-        serverInfo = openConnectionToString(m_BaseUrlHttp,
-                                            "serverinfo",
-                                            nullptr,
-                                            fastFail ? FAST_FAIL_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
-                                            logLevel);
-        verifyResponseStatus(serverInfo);
-
-        // Populate the HTTPS port
-        uint16_t httpsPort = getXmlString(serverInfo, "HttpsPort").toUShort();
-        if (httpsPort == 0) {
-            httpsPort = DEFAULT_HTTPS_PORT;
-        }
-        setHttpsPort(httpsPort);
-
-        if (m_StationConnectAuthentication) {
-            return getServerInfo(logLevel, fastFail);
-        }
-    }
-
+    const QString serverInfo = openConnectionToString(
+                m_BaseUrlHttps,
+                "serverinfo",
+                nullptr,
+                fastFail ? FAST_FAIL_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+                logLevel);
+    verifyResponseStatus(serverInfo);
     return serverInfo;
 }
 
@@ -235,7 +182,7 @@ NvHTTP::startApp(QString verb,
                  QString& acceptedEncodingMode)
 {
     QString stationConnectOutputArguments;
-    if (m_StationConnectAuthentication && !captureDisplayMode.isEmpty()) {
+    if (!captureDisplayMode.isEmpty()) {
         stationConnectOutputArguments =
                 "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
                 "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
@@ -313,25 +260,21 @@ NvHTTP::startApp(QString verb,
         return encoded.size() == 64 && decoded.size() == 32 &&
                 decoded.toHex() == encoded.toLower();
     };
-    if (m_StationConnectAuthentication &&
-            (datasmashPort == 0 ||
-             !isCanonicalSha256Hex(datasmashCertificateSha256) ||
-             !isCanonicalSha256Hex(datasmashToken))) {
+    if (datasmashPort == 0 ||
+            !isCanonicalSha256Hex(datasmashCertificateSha256) ||
+            !isCanonicalSha256Hex(datasmashToken)) {
         throw GfeHttpResponseException(
                     400, "Host returned invalid datasmash launch credentials");
     }
-    if (m_StationConnectAuthentication &&
-            (acceptedCaptureSource.isEmpty() || acceptedCaptureSource != captureSource)) {
+    if (acceptedCaptureSource.isEmpty() || acceptedCaptureSource != captureSource) {
         throw GfeHttpResponseException(
                     400, "Host did not accept the requested capture source");
     }
-    if (m_StationConnectAuthentication &&
-            (acceptedEncoderBackend.isEmpty() || acceptedEncoderBackend != encoderBackend)) {
+    if (acceptedEncoderBackend.isEmpty() || acceptedEncoderBackend != encoderBackend) {
         throw GfeHttpResponseException(
                     400, "Host did not accept the requested encoder backend");
     }
-    if (m_StationConnectAuthentication &&
-            (acceptedEncodingMode.isEmpty() || acceptedEncodingMode != encodingMode)) {
+    if (acceptedEncodingMode.isEmpty() || acceptedEncodingMode != encodingMode) {
         throw GfeHttpResponseException(
                     400, "Host did not accept the requested encoding mode");
     }
@@ -503,9 +446,6 @@ NvHTTP::getXmlString(QString xml,
 
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
-    if (!m_StationConnectAuthentication) {
-        return;
-    }
     const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
     if (!isStationConnectCertificate(certificate)) {
         const auto alternativeNames = certificate.subjectAlternativeNames();
@@ -561,7 +501,7 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
 
 QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& body)
 {
-    if (!m_StationConnectAuthentication || !m_SessionToken.isEmpty()) {
+    if (!m_SessionToken.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid StationConnect authentication state");
     }
 
@@ -613,8 +553,7 @@ QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& b
 QString NvHTTP::authenticate(QString username, QString password)
 {
     SecureStringGuard passwordGuard(password);
-    if (!m_StationConnectAuthentication || !m_SessionToken.isEmpty() ||
-            username.isEmpty()) {
+    if (!m_SessionToken.isEmpty() || username.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid StationConnect authentication state");
     }
 
@@ -665,7 +604,7 @@ QString NvHTTP::authenticate(QString username, QString password)
 
 NvOutputTopology NvHTTP::getOutputTopology()
 {
-    if (!m_StationConnectAuthentication || m_SessionToken.isEmpty()) {
+    if (m_SessionToken.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid StationConnect topology state");
     }
     const QString response = openConnectionToString(
@@ -713,7 +652,6 @@ NvHTTP::openConnection(QUrl baseUrl,
     QNetworkRequest request(url);
 
     if (baseUrl.scheme() == "https") {
-        Q_ASSERT(m_StationConnectAuthentication);
         request.setSslConfiguration(stationConnectSslConfiguration());
         if (!m_SessionToken.isEmpty()) {
             request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toUtf8());

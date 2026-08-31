@@ -62,7 +62,6 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->state = CS_UNKNOWN;
     this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
-    this->activeHttpsPort = 0;
     this->maxLumaPixelsHEVC = 0;
     this->serverCodecModeSupport = 0;
     this->isSupportedServerVersion = true;
@@ -88,7 +87,6 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         remoteAddress = NvAddress();
         ipv6Address = NvAddress();
         activeAddress = NvAddress();
-        activeHttpsPort = 0;
         externalPort = address.port();
         serverUuid.clear();
         appList.clear();
@@ -130,13 +128,13 @@ NvComputer::NvComputer(QSettings& settings)
     this->uuid = settings.value(SER_UUID).toString();
     this->hasCustomName = settings.value(SER_CUSTOMNAME).toBool();
     this->localAddress = NvAddress(settings.value(SER_LOCALADDR).toString(),
-                                   settings.value(SER_LOCALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
+                                   settings.value(SER_LOCALPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
     this->remoteAddress = NvAddress(settings.value(SER_REMOTEADDR).toString(),
-                                    settings.value(SER_REMOTEPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
+                                    settings.value(SER_REMOTEPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
     this->ipv6Address = NvAddress(settings.value(SER_IPV6ADDR).toString(),
-                                  settings.value(SER_IPV6PORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
+                                  settings.value(SER_IPV6PORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
-                                    settings.value(SER_MANUALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
+                                    settings.value(SER_MANUALPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
     this->stationConnectScalingMode = settings.value(
                 SER_SCALINGMODE, NvOutputTopology::ScaledSpanMode).toString();
@@ -213,7 +211,6 @@ NvComputer::NvComputer(QSettings& settings)
     this->gpuModel = nullptr;
     this->isSupportedServerVersion = true;
     this->externalPort = this->remoteAddress.port();
-    this->activeHttpsPort = 0;
     this->stationConnectAuthentication = false;
     this->stationConnectHostMetadataVersion = 0;
     this->stationConnectHostVersion.clear();
@@ -347,21 +344,23 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     });
 
     // We can get an IPv4 loopback address if we're using the GS IPv6 Forwarder
-    this->localAddress = NvAddress(NvHTTP::getXmlString(serverInfo, "LocalIP"), http.httpPort());
+    this->localAddress = NvAddress(NvHTTP::getXmlString(serverInfo, "LocalIP"), http.controlPort());
     if (this->localAddress.address().startsWith("127.")) {
         this->localAddress = NvAddress();
     }
 
-    QString httpsPort = NvHTTP::getXmlString(serverInfo, "HttpsPort");
-    if (httpsPort.isEmpty() || (this->activeHttpsPort = httpsPort.toUShort()) == 0) {
-        this->activeHttpsPort = DEFAULT_HTTPS_PORT;
+    const QString advertisedControlPort = NvHTTP::getXmlString(serverInfo, "HttpsPort");
+    if (!advertisedControlPort.isEmpty() &&
+            advertisedControlPort.toUShort() != http.controlPort()) {
+        throw GfeHttpResponseException(
+                    400, "Host advertised a different StationConnect control port");
     }
 
     // This is an extension which is not present in GFE. It is present for Sunshine to be able
     // to support dynamic HTTP WAN ports without requiring the user to manually enter the port.
     QString remotePortStr = NvHTTP::getXmlString(serverInfo, "ExternalPort");
     if (remotePortStr.isEmpty() || (this->externalPort = remotePortStr.toUShort()) == 0) {
-        this->externalPort = http.httpPort();
+        this->externalPort = http.controlPort();
     }
 
     QString remoteAddress = NvHTTP::getXmlString(serverInfo, "ExternalIP");
@@ -617,7 +616,6 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
     ASSIGN_IF_CHANGED_AND_NONNULL(remoteAddress);
     ASSIGN_IF_CHANGED_AND_NONNULL(ipv6Address);
     ASSIGN_IF_CHANGED_AND_NONNULL(manualAddress);
-    ASSIGN_IF_CHANGED(activeHttpsPort);
     ASSIGN_IF_CHANGED(externalPort);
     ASSIGN_IF_CHANGED(stationConnectAuthentication);
     ASSIGN_IF_CHANGED(stationConnectHostMetadataVersion);

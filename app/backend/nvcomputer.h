@@ -104,7 +104,6 @@ public:
     ComputerState state;
     AuthorizationState authorizationState;
     NvAddress activeAddress;
-    uint16_t activeHttpsPort;
     int currentGameId;
     QString gfeVersion;
     QString appVersion;

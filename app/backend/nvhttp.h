@@ -110,8 +110,7 @@ public:
         NVLL_VERBOSE
     };
 
-    explicit NvHTTP(NvAddress address, uint16_t httpsPort,
-                    QNetworkAccessManager* nam = nullptr);
+    explicit NvHTTP(NvAddress address, QNetworkAccessManager* nam = nullptr);
 
     explicit NvHTTP(NvComputer* computer, QNetworkAccessManager* nam = nullptr);
 
@@ -144,18 +143,15 @@ public:
                            NvLogLevel logLevel = NvLogLevel::NVLL_VERBOSE);
 
     void setAddress(NvAddress address);
-    void setHttpsPort(uint16_t port);
 
-    void setStationConnectAuthentication(bool enabled, QString sessionToken = QString());
+    void setStationConnectSessionToken(QString sessionToken);
 
     QString authenticate(QString username, QString password);
     NvOutputTopology getOutputTopology();
 
     NvAddress address();
 
-    uint16_t httpPort();
-
-    uint16_t httpsPort();
+    uint16_t controlPort();
 
     static
     QVector<int>
@@ -195,7 +191,6 @@ public:
     QVector<NvDisplayMode>
     getDisplayModeList(QString serverInfo);
 
-    QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
 private:
     void
@@ -212,6 +207,5 @@ private:
 
     NvAddress m_Address;
     QNetworkAccessManager* m_Nam;
-    bool m_StationConnectAuthentication = false;
     QString m_SessionToken;
 };

@@ -22,7 +22,7 @@ bool parseManualAddress(const QString& address, NvAddress& manualAddress)
         return false;
     }
 
-    manualAddress = NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT));
+    manualAddress = NvAddress(url.host(), url.port(DEFAULT_CONTROL_PORT));
     return true;
 }
 
@@ -82,42 +82,19 @@ public:
 private:
     bool tryPollComputer(QNetworkAccessManager* nam, NvAddress address, bool& changed)
     {
-        bool stationConnectAuthentication;
         QString sessionToken;
         {
             QReadLocker lock(&m_Computer->lock);
-            stationConnectAuthentication = m_Computer->stationConnectAuthentication;
             sessionToken = m_Computer->sessionToken;
         }
-        NvHTTP http(address, 0, nam);
-        http.setStationConnectAuthentication(stationConnectAuthentication, sessionToken);
+        NvHTTP http(address, nam);
+        http.setStationConnectSessionToken(sessionToken);
 
         QString serverInfo;
         try {
             serverInfo = http.getServerInfo(NvHTTP::NvLogLevel::NVLL_NONE, true);
         } catch (...) {
-            if (stationConnectAuthentication) {
-                return false;
-            }
-
-            // StationConnect authorization is deliberately not persisted.
-            // Rediscover the protocol marker over minimal HTTP serverinfo.
-            try {
-                NvHTTP discoveryHttp(address, 0);
-                const QString discoveryInfo = discoveryHttp.getServerInfo(
-                            NvHTTP::NvLogLevel::NVLL_NONE, true);
-                NvComputer discoveredState(discoveryHttp, discoveryInfo);
-                discoveryHttp.setStationConnectAuthentication(
-                            discoveredState.stationConnectAuthentication);
-                if (!discoveredState.stationConnectAuthentication ||
-                        !m_Computer->acceptsServerUuid(discoveredState.uuid)) {
-                    return false;
-                }
-                changed = m_Computer->update(discoveredState, address);
-                return true;
-            } catch (...) {
-                return false;
-            }
+            return false;
         }
 
         NvComputer newState(http, serverInfo);
@@ -901,7 +878,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
     }
     else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
         // The user specified an IPv6 literal without URL escaping, so use the default port
-        addNewHost(NvAddress(address, DEFAULT_HTTP_PORT), false);
+        addNewHost(NvAddress(address, DEFAULT_CONTROL_PORT), false);
     }
     else {
         emit computerAddCompleted(false, false);
@@ -1064,8 +1041,9 @@ private:
                 if (m_ComputerManager->m_Prefs->detectNetworkBlocking) {
                     // We failed to connect to the specified PC. Let's test to make sure this network
                     // isn't blocking Moonlight, so we can tell the user about it.
-                    portTestResult = LiTestClientConnectivity("qt.conntest.moonlight-stream.org", 443,
-                                                              ML_PORT_FLAG_TCP_47984 | ML_PORT_FLAG_TCP_47989);
+                    portTestResult = LiTestClientConnectivity(
+                                "qt.conntest.moonlight-stream.org", 443,
+                                ML_PORT_FLAG_TCP_47989);
                 }
                 else {
                     portTestResult = 0;
@@ -1079,7 +1057,7 @@ private:
 
     void run()
     {
-        NvHTTP http(m_Address, 0);
+        NvHTTP http(m_Address);
 
         if (m_Mdns) {
             if (m_MdnsIpv6Address.isNull()) {
@@ -1094,7 +1072,7 @@ private:
             qInfo() << "Processing new PC at" << m_Address.toString() << "from user";
         }
 
-        // Initial HTTP serverinfo discovers the StationConnect marker and HTTPS port.
+        // Certificate-profile-validated HTTPS discovers the StationConnect identity.
         QString serverInfo = fetchServerInfo(http);
         if (serverInfo.isEmpty() && !m_MdnsIpv6Address.isNull()) {
             // Retry using the global IPv6 address if the IPv4 or link-local IPv6 address fails
@@ -1142,19 +1120,19 @@ private:
             if (!token.isEmpty()) {
                 newComputer->authorizationState = NvComputer::AS_AUTHORIZED;
             }
-            http.setStationConnectAuthentication(true, token);
+            http.setStationConnectSessionToken(token);
         }
 
-        // Fetch authenticated serverinfo over StationConnect TLS.
-        Q_ASSERT(http.httpsPort() != 0);
-        serverInfo = fetchServerInfo(http);
-        if (serverInfo.isEmpty()) {
-            delete newComputer;
-            return;
-        }
+        if (!newComputer->sessionToken.isEmpty()) {
+            serverInfo = fetchServerInfo(http);
+            if (serverInfo.isEmpty()) {
+                delete newComputer;
+                return;
+            }
 
-        NvComputer httpsComputer(http, serverInfo);
-        newComputer->update(httpsComputer);
+            NvComputer authenticatedComputer(http, serverInfo);
+            newComputer->update(authenticatedComputer);
+        }
 
         // Update addresses depending on the context
         if (m_Mdns) {
