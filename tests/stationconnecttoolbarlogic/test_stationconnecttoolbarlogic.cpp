@@ -2,6 +2,7 @@
 
 #include "stationconnecttoolbarlogic.h"
 #include "input/stationconnectpointerlogic.h"
+#include "videopacketlosswindow.h"
 
 using StationConnectToolbarLogic::ButtonRouter;
 
@@ -21,6 +22,9 @@ private slots:
     void keepsMultiButtonSequenceWithFirstOwner();
     void confinesToVideoWithoutToolbar();
     void reachesWindowEdgeWithToolbar();
+    void calculatesOnePreFecLossInterval();
+    void resetsPreFecLossAfterCounterRestart();
+    void retainsTenSecondPeakForBothStatsViews();
 };
 
 void TestStationConnectToolbarLogic::resolvesReportedAndDerivedDensity()
@@ -160,6 +164,44 @@ void TestStationConnectToolbarLogic::reachesWindowEdgeWithToolbar()
     QCOMPARE(rect.y, 0);
     QCOMPARE(rect.w, 3840);
     QCOMPARE(rect.h, 2160);
+}
+
+void TestStationConnectToolbarLogic::calculatesOnePreFecLossInterval()
+{
+    VideoPacketLossInterval interval;
+    QVERIFY(!interval.addCumulative(1000, 10).has_value());
+
+    const auto clean = interval.addCumulative(2000, 10);
+    QVERIFY(clean.has_value());
+    QCOMPARE(*clean, 0.0f);
+
+    const auto loss = interval.addCumulative(3000, 35);
+    QVERIFY(loss.has_value());
+    QCOMPARE(*loss, 2.5f);
+}
+
+void TestStationConnectToolbarLogic::resetsPreFecLossAfterCounterRestart()
+{
+    VideoPacketLossInterval interval;
+    QVERIFY(!interval.addCumulative(1000, 10).has_value());
+    QVERIFY(interval.addCumulative(2000, 20).has_value());
+    QVERIFY(!interval.addCumulative(50, 1).has_value());
+
+    const auto restarted = interval.addCumulative(150, 3);
+    QVERIFY(restarted.has_value());
+    QCOMPARE(*restarted, 2.0f);
+    QVERIFY(!interval.addCumulative(100, 101).has_value());
+}
+
+void TestStationConnectToolbarLogic::retainsTenSecondPeakForBothStatsViews()
+{
+    VideoPacketLossPeakWindow window;
+    QCOMPARE(window.addSample(1000, 0.5f), 0.5f);
+    QCOMPARE(window.addSample(5000, 4.0f), 4.0f);
+    QCOMPARE(window.addSample(10999, 0.0f), 4.0f);
+    QCOMPARE(window.addSample(15000, 1.0f), 1.0f);
+    window.reset();
+    QCOMPARE(window.addSample(15001, 0.0f), 0.0f);
 }
 
 QTEST_APPLESS_MAIN(TestStationConnectToolbarLogic)

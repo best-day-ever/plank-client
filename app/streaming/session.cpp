@@ -341,7 +341,7 @@ void Session::clVideoPacketLossUpdate(float packetLossPercent)
 
 bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
                             SDL_Window* window, int videoFormat, int width, int height,
-                            int frameRate, bool enableVsync, bool enableFramePacing, bool testOnly,
+                            int frameRate, bool enableVsync, bool testOnly,
                             IVideoDecoder*& chosenDecoder, bool enableIdentityGbr,
                             DecoderCaptureSource captureSource,
                             DecoderEncoderBackend encoderBackend)
@@ -359,7 +359,10 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
     params.videoFormat = videoFormat;
     params.window = window;
     params.enableVsync = enableVsync;
-    params.enableFramePacing = enableFramePacing;
+    // StationConnect is a latency-first Wayland workstation client. Keep the
+    // optional software pacer disabled; renderers may still force pacing when
+    // their backend requires it for correctness.
+    params.enableFramePacing = false;
     params.enableIdentityGbr = enableIdentityGbr;
     params.testOnly = testOnly;
     params.selectionMode = selectionMode;
@@ -507,7 +510,7 @@ void Session::getDecoderInfo(SDL_Window* window,
     // Try a regular hardware accelerated HEVC decoder now
     if (chooseDecoder(DecoderSelectionMode::ExactHardwareOnly,
                       window, VIDEO_FORMAT_H265, 1920, 1080, 60,
-                      false, false, true, decoder)) {
+                      false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
         maxResolution = decoder->getDecoderMaxResolution();
@@ -520,7 +523,7 @@ void Session::getDecoderInfo(SDL_Window* window,
 #if 0 // See AV1 comment at the top of this function
     if (chooseDecoder(DecoderSelectionMode::ExactHardwareOnly,
                       window, VIDEO_FORMAT_AV1_MAIN8, 1920, 1080, 60,
-                      false, false, true, decoder)) {
+                      false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
         maxResolution = decoder->getDecoderMaxResolution();
@@ -534,7 +537,7 @@ void Session::getDecoderInfo(SDL_Window* window,
     // This will fall back to software decoding, so it should always work.
     if (chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                       window, VIDEO_FORMAT_H264, 1920, 1080, 60,
-                      false, false, true, decoder)) {
+                      false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
         maxResolution = decoder->getDecoderMaxResolution();
@@ -556,7 +559,7 @@ Session::getDecoderAvailability(SDL_Window* window,
 
     if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                        window, videoFormat, width, height, frameRate,
-                       false, false, true, decoder, enableIdentityGbr)) {
+                       false, true, decoder, enableIdentityGbr)) {
         return DecoderAvailability::None;
     }
 
@@ -577,7 +580,7 @@ bool Session::populateDecoderProperties(SDL_Window* window)
                        m_StreamConfig.width,
                        m_StreamConfig.height,
                        m_StreamConfig.fps,
-                       false, false, true, decoder,
+                       false, true, decoder,
                        isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()),
                        m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
                            DecoderCaptureSource::NativeX11_10Bit :
@@ -1050,7 +1053,11 @@ void Session::stopDatasmashDataPlane()
                     << "data-received=" << stats.data_packets_received
                     << "QUIC-lost=" << stats.quic_packets_lost
                     << "QUIC-RTT-us=" << stats.quic_rtt_us
-                    << "KyProto-drops=" << stats.kyproto_packets_dropped;
+                    << "KyProto-drops=" << stats.kyproto_packets_dropped
+                    << "video-FEC-source-symbols="
+                    << stats.video_fec_source_symbols
+                    << "video-FEC-source-symbols-missing="
+                    << stats.video_fec_source_symbols_missing;
         }
         sc_datasmash_native_endpoint_stop(m_DatasmashEndpoint);
         sc_datasmash_native_endpoint_destroy(m_DatasmashEndpoint);
@@ -1068,6 +1075,11 @@ void Session::startDatasmashMediaReceivers()
         return;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(m_VideoPacketLossSamplesLock);
+        m_VideoPacketLossPeakWindow.reset();
+    }
+    m_CurrentVideoPacketLossPercent.store(-1.0f, std::memory_order_relaxed);
     m_DatasmashReceiversStopping.store(false);
     m_DatasmashVideoThread = std::thread([this]() {
         datasmashVideoReceiveLoop();
@@ -1099,8 +1111,33 @@ void Session::datasmashVideoReceiveLoop()
     constexpr size_t InitialFrameCapacity = 1024 * 1024;
     constexpr size_t MaximumFrameCapacity = 64 * 1024 * 1024;
     std::vector<unsigned char> frame(InitialFrameCapacity);
+    VideoPacketLossInterval packetLossInterval;
+    Uint64 nextPacketLossSample = SDL_GetTicks();
+
+    const auto samplePacketLoss = [this, &packetLossInterval,
+                                   &nextPacketLossSample]() {
+        const Uint64 now = SDL_GetTicks();
+        if (now < nextPacketLossSample) {
+            return;
+        }
+        nextPacketLossSample = now + 1000;
+
+        ScDatasmashNativeStats stats {};
+        stats.struct_size = sizeof(stats);
+        if (sc_datasmash_native_endpoint_stats(m_DatasmashEndpoint, &stats) !=
+                SC_DATASMASH_OK) {
+            return;
+        }
+        const auto packetLossPercent = packetLossInterval.addCumulative(
+                    stats.video_fec_source_symbols,
+                    stats.video_fec_source_symbols_missing);
+        if (packetLossPercent.has_value()) {
+            clVideoPacketLossUpdate(*packetLossPercent);
+        }
+    };
 
     while (!m_DatasmashReceiversStopping.load()) {
+        samplePacketLoss();
         ScDatasmashNativeVideoFrameInfo info {};
         info.struct_size = sizeof(info);
         size_t frameSize = 0;
@@ -3897,9 +3934,7 @@ void Session::execInternal()
                 if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                                    m_Window, m_ActiveVideoFormat, m_ActiveVideoWidth,
                                    m_ActiveVideoHeight, m_ActiveVideoFrameRate,
-                                   enableVsync,
-                                   enableVsync && m_Preferences->framePacing,
-                                   false,
+                                   enableVsync, false,
                                    s_ActiveSession->m_VideoDecoder,
                                    isIdentityGbrEnabledForFormat(m_ActiveVideoFormat),
                                    m_StationConnectCaptureSource ==

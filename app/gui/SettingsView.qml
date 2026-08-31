@@ -425,22 +425,6 @@ Flickable {
                     ToolTip.text: qsTr("Disabling V-Sync allows sub-frame rendering latency, but it can display visible tearing")
                 }
 
-                CheckBox {
-                    id: framePacingCheck
-                    width: parent.width
-                    hoverEnabled: true
-                    text: qsTr("Frame pacing")
-                    font.pointSize:  12
-                    enabled: StreamingPreferences.enableVsync
-                    checked: StreamingPreferences.enableVsync && StreamingPreferences.framePacing
-                    onCheckedChanged: {
-                        StreamingPreferences.framePacing = checked
-                    }
-                    ToolTip.delay: 1000
-                    ToolTip.timeout: 5000
-                    ToolTip.visible: hovered
-                    ToolTip.text: qsTr("Frame pacing reduces micro-stutter by delaying frames that come in too early")
-                }
             }
         }
 
@@ -978,7 +962,7 @@ Flickable {
                 CheckBox {
                     id: enableMdns
                     width: parent.width
-                    text: qsTr("Automatically find PCs on the local network (Recommended)")
+                    text: qsTr("Automatically find PCs on the local network")
                     font.pointSize: 12
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged

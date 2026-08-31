@@ -216,7 +216,6 @@ public:
     Q_PROPERTY(bool playAudioOnHost MEMBER playAudioOnHost NOTIFY playAudioOnHostChanged)
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
     Q_PROPERTY(bool mdnsDiscoveryManaged MEMBER mdnsDiscoveryManaged CONSTANT)
-    Q_PROPERTY(bool framePacing MEMBER framePacing NOTIFY framePacingChanged)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
     Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(int quicUdpPayloadMtu MEMBER quicUdpPayloadMtu NOTIFY quicUdpPayloadMtuChanged)
@@ -261,7 +260,6 @@ public:
     bool playAudioOnHost;
     bool enableMdns;
     bool mdnsDiscoveryManaged;
-    bool framePacing;
     bool connectionWarnings;
     bool detectNetworkBlocking;
     bool showPerformanceOverlay;
@@ -287,7 +285,6 @@ signals:
     void audioConfigChanged();
     void stationConnectToolbarPinnedChanged();
     void windowModeChanged();
-    void framePacingChanged();
     void connectionWarningsChanged();
     void detectNetworkBlockingChanged();
     void quicUdpPayloadMtuChanged();

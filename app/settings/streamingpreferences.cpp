@@ -16,7 +16,6 @@
 #define SER_STATIONCONNECT_TOOLBAR_PINNED "stationconnecttoolbarpinned"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
-#define SER_FRAMEPACING "framepacing"
 #define SER_CONNWARNINGS "connwarnings"
 #define SER_QUIC_UDP_PAYLOAD_MTU "stationconnect-quic-udp-payload-mtu"
 #define SER_STATIONCONNECT_UNREACHABLE_TIMEOUT "stationconnect-unreachable-timeout-seconds"
@@ -93,7 +92,6 @@ void StreamingPreferences::reload()
         qInfo() << "mDNS discovery is managed by"
                 << StationConnectClientPolicy::defaultConfigPath();
     }
-    framePacing = settings.value(SER_FRAMEPACING, false).toBool();
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
     detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
     showPerformanceOverlay = settings.value(SER_SHOWPERFOVERLAY, false).toBool();
@@ -255,7 +253,6 @@ void StreamingPreferences::save()
     if (!mdnsDiscoveryManaged) {
         settings.setValue(SER_MDNS, enableMdns);
     }
-    settings.setValue(SER_FRAMEPACING, framePacing);
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
     settings.setValue(SER_QUIC_UDP_PAYLOAD_MTU, quicUdpPayloadMtu);
     settings.setValue(SER_STATIONCONNECT_UNREACHABLE_TIMEOUT,

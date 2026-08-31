@@ -283,8 +283,7 @@ private:
     static
     bool chooseDecoder(DecoderSelectionMode selectionMode,
                        SDL_Window* window, int videoFormat, int width, int height,
-                       int frameRate, bool enableVsync, bool enableFramePacing,
-                       bool testOnly,
+                       int frameRate, bool enableVsync, bool testOnly,
                        IVideoDecoder*& chosenDecoder,
                        bool enableIdentityGbr = false,
                        DecoderCaptureSource captureSource =

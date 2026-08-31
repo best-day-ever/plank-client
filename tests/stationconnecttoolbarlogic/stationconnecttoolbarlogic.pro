@@ -6,4 +6,5 @@ SOURCES += test_stationconnecttoolbarlogic.cpp
 
 HEADERS += ../../app/streaming/stationconnecttoolbarlogic.h
 HEADERS += ../../app/streaming/input/stationconnectpointerlogic.h
+HEADERS += ../../app/streaming/videopacketlosswindow.h
 INCLUDEPATH += ../../app/streaming

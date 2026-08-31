@@ -283,7 +283,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
     parser.addToggleOption("audio-on-host", "audio on host PC");
-    parser.addToggleOption("frame-pacing", "frame pacing");
     parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
@@ -322,9 +321,6 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
 
     // Resolve --audio-on-host and --no-audio-on-host options
     preferences->playAudioOnHost = parser.getToggleOptionValue("audio-on-host", preferences->playAudioOnHost);
-
-    // Resolve --frame-pacing and --no-frame-pacing options
-    preferences->framePacing = parser.getToggleOptionValue("frame-pacing", preferences->framePacing);
 
     // Resolve --mute-on-focus-loss and --no-mute-on-focus-loss options
     preferences->muteOnFocusLoss = parser.getToggleOptionValue("mute-on-focus-loss", preferences->muteOnFocusLoss);
