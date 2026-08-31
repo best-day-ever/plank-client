@@ -7,8 +7,8 @@ Label {
         id: theme
     }
 
-    Layout.column: 1
     Layout.fillWidth: true
+    Layout.minimumWidth: 0
     color: theme.textSecondary
     font.pointSize: 9
     wrapMode: Text.Wrap

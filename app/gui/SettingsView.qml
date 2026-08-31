@@ -104,6 +104,7 @@ Flickable {
 
                 AutoResizingComboBox {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         property int lastIndexValue
 
                         function updateFrameRateForSelection() {
@@ -326,6 +327,7 @@ Flickable {
 
                 AutoResizingComboBox {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     function createModel() {
                         var model = Qt.createQmlObject('import QtQuick 2.0; ListModel {}', parent, '')
 
@@ -436,6 +438,7 @@ Flickable {
 
                 AutoResizingComboBox {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     // ignore setting the index at first, and actually set it when the component is loaded
                     Component.onCompleted: {
                         var saved_audio = StreamingPreferences.audioConfig
@@ -531,6 +534,7 @@ Flickable {
 
                 AutoResizingComboBox {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     // ignore setting the index at first, and actually set it when the component is loaded
                     Component.onCompleted: {
                         var saved_language = StreamingPreferences.language
@@ -747,6 +751,7 @@ Flickable {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: theme.spaceMedium
 
                     StationConnectCheckBox {
@@ -767,6 +772,7 @@ Flickable {
 
                     AutoResizingComboBox {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         // ignore setting the index at first, and actually set it when the component is loaded
                         Component.onCompleted: {
                             if (!visible) {
@@ -854,6 +860,7 @@ Flickable {
                 SpinBox {
                     id: quicMtuSpinBox
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     from: 1200
                     to: 65527
                     stepSize: 1
@@ -885,11 +892,13 @@ Flickable {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     spacing: theme.spaceMedium
 
                     SpinBox {
                         id: unreachableTimeoutSpinBox
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         from: 5
                         to: 300
                         stepSize: 5
@@ -915,6 +924,7 @@ Flickable {
                 AutoResizingComboBox {
                     id: unreachableActionComboBox
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     textRole: "text"
                     model: ListModel {
                         id: unreachableActionListModel
