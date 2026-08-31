@@ -13,8 +13,11 @@ namespace StationConnectNetwork
 constexpr quint16 ZeroTierPhysicalUdpPayloadLimit = 1432;
 constexpr quint16 ZeroTierExtendedFrameOverhead = 51;
 constexpr quint16 InnerIpv4UdpOverhead = 28;
+constexpr quint16 InnerIpv6UdpOverhead = 48;
 constexpr quint16 MinimumQuicUdpPayloadMtu = 1200;
 constexpr quint16 MaximumQuicUdpPayloadMtu = 65527;
+constexpr quint16 MaximumAutomaticQuicUdpPayloadMtu = 1452;
+constexpr quint16 AutomaticPathSafetyMargin = 20;
 constexpr quint16 ZeroTierQuicUdpPayloadMtu = 1344;
 constexpr quint16 ConservativeQuicDatagramOverhead = 38;
 constexpr quint16 KyProtoVideoFecHeaderSize = 26;
@@ -29,14 +32,35 @@ static_assert(ZeroTierQuicUdpPayloadMtu + InnerIpv4UdpOverhead +
 static_assert(ZeroTierRaptorQVideoSymbolSize == 1280,
               "The qualified ZeroTier path must retain 1280-byte RaptorQ symbols");
 
-inline quint16 quicUdpPayloadMtuForRoute(int configuredMtu, bool isZeroTier)
+inline quint16 quicUdpPayloadMtuForRoute(int configuredMtu,
+                                         bool isZeroTier,
+                                         quint32 interfaceMtu = 0,
+                                         bool isIpv6 = false)
 {
     if (configuredMtu >= MinimumQuicUdpPayloadMtu &&
             configuredMtu <= MaximumQuicUdpPayloadMtu) {
         return quint16(configuredMtu);
     }
 
-    return isZeroTier ? ZeroTierQuicUdpPayloadMtu : 0;
+    if (isZeroTier) {
+        return ZeroTierQuicUdpPayloadMtu;
+    }
+
+    const quint32 networkOverhead = isIpv6 ? InnerIpv6UdpOverhead :
+                                            InnerIpv4UdpOverhead;
+    if (interfaceMtu > networkOverhead + AutomaticPathSafetyMargin) {
+        const quint32 payloadMtu = interfaceMtu - networkOverhead -
+                                   AutomaticPathSafetyMargin;
+        if (payloadMtu >= MinimumQuicUdpPayloadMtu) {
+            return quint16(qMin(payloadMtu,
+                                quint32(MaximumAutomaticQuicUdpPayloadMtu)));
+        }
+    }
+
+    // Keeping both endpoints at the minimum QUIC payload is safer than
+    // allowing DPLPMTUD to shrink the path underneath a RaptorQ object that
+    // was already packetized with larger symbols.
+    return MinimumQuicUdpPayloadMtu;
 }
 
 inline bool isZeroTierInterface(const QString& interfaceName,

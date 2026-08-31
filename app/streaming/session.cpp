@@ -723,12 +723,14 @@ Session::~Session()
 
 bool Session::startDatasmashDataPlane(quint16 port,
                                       const QString& certificateSha256,
-                                      const QString& token)
+                                      const QString& token,
+                                      quint16 quicUdpPayloadMtu)
 {
 #ifndef STATIONCONNECT_DATASMASH
     Q_UNUSED(port)
     Q_UNUSED(certificateSha256)
     Q_UNUSED(token)
+    Q_UNUSED(quicUdpPayloadMtu)
     return false;
 #else
     stopDatasmashDataPlane();
@@ -767,18 +769,9 @@ bool Session::startDatasmashDataPlane(quint16 port,
     config.handshake_timeout_ms = 10000;
     config.idle_timeout_ms = 30000;
     config.keep_alive_interval_ms = 5000;
-    if (m_Preferences->quicUdpPayloadMtu != 0) {
-        config.max_udp_payload_size = StationConnectNetwork::quicUdpPayloadMtuForRoute(
-                    m_Preferences->quicUdpPayloadMtu, false);
-        qInfo() << "Manual maximum QUIC UDP payload selected:"
-                << config.max_udp_payload_size << "bytes";
-    }
-    else if (m_Computer->getActiveAddressReachability() == NvComputer::RI_ZEROTIER) {
-        config.max_udp_payload_size = StationConnectNetwork::quicUdpPayloadMtuForRoute(
-                    0, true);
-        qInfo() << "ZeroTier route selected a maximum QUIC UDP payload of"
-                << config.max_udp_payload_size << "bytes";
-    }
+    config.max_udp_payload_size = quicUdpPayloadMtu;
+    qInfo() << "Using the negotiated fixed maximum QUIC UDP payload:"
+            << config.max_udp_payload_size << "bytes";
     config.remote_address = remoteAddressUtf8.constData();
     config.server_name = serverNameUtf8.constData();
     config.certificate_sha256 = certificateUtf8.constData();
@@ -2425,6 +2418,28 @@ bool Session::startConnectionAsync(bool reconnecting)
     QString acceptedCaptureSource;
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
+    quint16 quicUdpPayloadMtu = 0;
+    if (m_Preferences->quicUdpPayloadMtu != 0) {
+        quicUdpPayloadMtu = StationConnectNetwork::quicUdpPayloadMtuForRoute(
+                    m_Preferences->quicUdpPayloadMtu, false);
+        qInfo() << "Manual fixed QUIC UDP payload ceiling:"
+                << quicUdpPayloadMtu << "bytes";
+    }
+    else {
+        quint32 routeInterfaceMtu = 0;
+        bool routeIsIpv6 = false;
+        const NvComputer::ReachabilityType routeReachability =
+                m_Computer->getActiveAddressReachability(&routeInterfaceMtu,
+                                                          &routeIsIpv6);
+        quicUdpPayloadMtu = StationConnectNetwork::quicUdpPayloadMtuForRoute(
+                    0,
+                    routeReachability == NvComputer::RI_ZEROTIER,
+                    routeInterfaceMtu,
+                    routeIsIpv6);
+        qInfo() << "Automatically resolved fixed QUIC UDP payload ceiling:"
+                << quicUdpPayloadMtu << "bytes from interface MTU"
+                << routeInterfaceMtu << (routeIsIpv6 ? "(IPv6)" : "(IPv4)");
+    }
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
@@ -2478,6 +2493,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                           captureSource,
                           encoderBackend,
                           encodingMode,
+                          quicUdpPayloadMtu,
                           datasmashPort,
                           datasmashCertificateSha256,
                           datasmashToken,
@@ -2763,7 +2779,8 @@ bool Session::startConnectionAsync(bool reconnecting)
 #endif
     if (!startDatasmashDataPlane(datasmashPort,
                                  datasmashCertificateSha256,
-                                 datasmashToken)) {
+                                 datasmashToken,
+                                 quicUdpPayloadMtu)) {
         datasmashToken.fill(QChar('\0'));
         if (!reconnecting) {
             emit displayLaunchError(

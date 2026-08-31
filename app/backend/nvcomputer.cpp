@@ -397,8 +397,16 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
 }
 
-NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
+NvComputer::ReachabilityType NvComputer::getActiveAddressReachability(
+        quint32* interfaceMtu, bool* isIpv6) const
 {
+    if (interfaceMtu != nullptr) {
+        *interfaceMtu = 0;
+    }
+    if (isIpv6 != nullptr) {
+        *isIpv6 = false;
+    }
+
     NvAddress copyOfActiveAddress;
 
     {
@@ -430,6 +438,13 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
             const auto allInterfaceAddresses = nic.addressEntries();
             for (const QNetworkAddressEntry& addr : allInterfaceAddresses) {
                 if (addr.ip() == s.localAddress()) {
+                    if (interfaceMtu != nullptr) {
+                        *interfaceMtu = nic.maximumTransmissionUnit();
+                    }
+                    if (isIpv6 != nullptr) {
+                        *isIpv6 = s.localAddress().protocol() ==
+                                QAbstractSocket::IPv6Protocol;
+                    }
                     qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
 
                     if (StationConnectNetwork::isZeroTierInterface(nic.name(),

@@ -174,6 +174,7 @@ public:
              QString captureSource,
              QString encoderBackend,
              QString encodingMode,
+             quint16 quicUdpPayloadMtu,
              quint16& datasmashPort,
              QString& datasmashCertificateSha256,
              QString& datasmashToken,

@@ -174,6 +174,7 @@ NvHTTP::startApp(QString verb,
                  QString captureSource,
                  QString encoderBackend,
                  QString encodingMode,
+                 quint16 quicUdpPayloadMtu,
                  quint16& datasmashPort,
                  QString& datasmashCertificateSha256,
                  QString& datasmashToken,
@@ -196,6 +197,12 @@ NvHTTP::startApp(QString verb,
         stationConnectOutputArguments +=
                 "&scEncodingMode=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(encodingMode));
+        if ((stationConnectFeatureFlags &
+             NvOutputTopology::FixedTransportMtuFeature) != 0) {
+            stationConnectOutputArguments +=
+                    "&scQuicUdpPayloadMtu=" +
+                    QString::number(quicUdpPayloadMtu);
+        }
         if ((stationConnectFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
             stationConnectOutputArguments +=
@@ -251,6 +258,8 @@ NvHTTP::startApp(QString verb,
     datasmashCertificateSha256 =
             getXmlString(response, "StationConnectDatasmashCertificateSha256");
     datasmashToken = getXmlString(response, "StationConnectDatasmashToken");
+    const quint16 acceptedQuicUdpPayloadMtu =
+            getXmlString(response, "StationConnectQuicUdpPayloadMtu").toUShort();
     acceptedCaptureSource = getXmlString(response, "StationConnectCaptureSource");
     acceptedEncoderBackend = getXmlString(response, "StationConnectEncoderBackend");
     acceptedEncodingMode = getXmlString(response, "StationConnectEncodingMode");
@@ -265,6 +274,10 @@ NvHTTP::startApp(QString verb,
             !isCanonicalSha256Hex(datasmashToken)) {
         throw GfeHttpResponseException(
                     400, "Host returned invalid datasmash launch credentials");
+    }
+    if (acceptedQuicUdpPayloadMtu != quicUdpPayloadMtu) {
+        throw GfeHttpResponseException(
+                    400, "Host did not accept the fixed QUIC UDP payload ceiling");
     }
     if (acceptedCaptureSource.isEmpty() || acceptedCaptureSource != captureSource) {
         throw GfeHttpResponseException(

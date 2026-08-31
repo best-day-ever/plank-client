@@ -208,7 +208,8 @@ private:
 
     bool startDatasmashDataPlane(quint16 port,
                                  const QString& certificateSha256,
-                                 const QString& token);
+                                 const QString& token,
+                                 quint16 quicUdpPayloadMtu);
 
     bool negotiateDatasmashSession(QString& errorMessage);
 

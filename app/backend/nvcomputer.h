@@ -80,7 +80,8 @@ public:
     }
 
     ReachabilityType
-    getActiveAddressReachability() const;
+    getActiveAddressReachability(quint32* interfaceMtu = nullptr,
+                                 bool* isIpv6 = nullptr) const;
 
     QVector<NvAddress>
     uniqueAddresses() const;
