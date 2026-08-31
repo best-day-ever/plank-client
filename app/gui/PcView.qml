@@ -21,7 +21,9 @@ CenteredGridView {
     activeFocusOnTab: true
     topMargin: 24
     bottomMargin: 24
-    cellWidth: Math.min(900, availableWidth)
+    // A workstation is the primary object on this page, so let its row use
+    // the complete content width instead of stopping at an arbitrary cap.
+    cellWidth: availableWidth
     cellHeight: 88
     Component.onCompleted: {
         // Don't show any highlighted item until interacting with them.
@@ -126,7 +128,7 @@ CenteredGridView {
 
     delegate: NavigableItemDelegate {
         id: pcEntry
-        width: pcGrid.cellWidth - 10
+        width: pcGrid.cellWidth
         height: 76
         grid: pcGrid
         Accessible.name: model.name

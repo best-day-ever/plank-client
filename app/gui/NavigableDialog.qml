@@ -22,6 +22,17 @@ Dialog {
         border.color: theme.border
     }
 
+    // The Material footer uses a separately rounded background. Against our
+    // custom dialog surface, its lower corners look like resize handles.
+    // Keep the footer flush with the dialog instead.
+    footer: DialogButtonBox {
+        visible: count > 0
+
+        background: Rectangle {
+            color: theme.surfaceRaised
+        }
+    }
+
     onAboutToHide: {
         // We must force focus back to the last item for platforms without
         // support for more than one active window like Steam Link. If
