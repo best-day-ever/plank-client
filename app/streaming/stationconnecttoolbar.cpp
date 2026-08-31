@@ -138,7 +138,7 @@ StationConnectToolbar::StationConnectToolbar(
     } else {
         m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, m_Visible);
     }
-    // The host receives the exact target in RTSP. Send it over the live
+    // The host receives the exact target during native setup. Send it over the live
     // control stream too, then retry until the host confirms its applied
     // target.
     queueBitrateRequest(SDL_GetTicks(), true);

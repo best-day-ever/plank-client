@@ -65,9 +65,6 @@ SOURCES += \
     $$COMMON_C_DIR/src/Platform.c \
     $$COMMON_C_DIR/src/PlatformCrypto.c \
     $$COMMON_C_DIR/src/PlatformSockets.c \
-    $$COMMON_C_DIR/src/RtspConnection.c \
-    $$COMMON_C_DIR/src/RtspParser.c \
-    $$COMMON_C_DIR/src/SdpGenerator.c \
     $$COMMON_C_DIR/src/SimpleStun.c \
     $$COMMON_C_DIR/src/VideoFrameAssembler.c \
     $$COMMON_C_DIR/src/VideoStream.c

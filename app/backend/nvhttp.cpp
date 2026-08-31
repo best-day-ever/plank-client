@@ -15,7 +15,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QtEndian>
 #include <QNetworkProxy>
 
 #define FAST_FAIL_TIMEOUT_MS 2000
@@ -228,7 +227,6 @@ NvHTTP::startApp(QString verb,
                  QString captureSource,
                  QString encoderBackend,
                  QString encodingMode,
-                 QString& rtspSessionUrl,
                  quint16& datasmashPort,
                  QString& datasmashCertificateSha256,
                  QString& datasmashToken,
@@ -236,11 +234,6 @@ NvHTTP::startApp(QString verb,
                  QString& acceptedEncoderBackend,
                  QString& acceptedEncodingMode)
 {
-    int riKeyId;
-
-    memcpy(&riKeyId, streamConfig->remoteInputAesIv, sizeof(riKeyId));
-    riKeyId = qFromBigEndian(riKeyId);
-
     QString stationConnectOutputArguments;
     if (m_StationConnectAuthentication && !captureDisplayMode.isEmpty()) {
         stationConnectOutputArguments =
@@ -291,8 +284,6 @@ NvHTTP::startApp(QString verb,
                                    QString::number(streamConfig->height)+"x"+
                                    QString::number(streamConfig->fps)+
                                    "&additionalStates=1"+
-                                   "&rikey="+QByteArray(streamConfig->remoteInputAesKey, sizeof(streamConfig->remoteInputAesKey)).toHex()+
-                                   "&rikeyid="+QString::number(riKeyId)+
                                    ((streamConfig->supportedVideoFormats & VIDEO_FORMAT_MASK_10BIT) ?
                                        "&hdrMode=1&clientHdrCapVersion=0&clientHdrCapSupportedFlagsInUint32=0&clientHdrCapMetaDataId=NV_STATIC_METADATA_TYPE_1&clientHdrCapDisplayData=0x0x0x0x0x0x0x0x0x0x0" :
                                         "")+
@@ -301,8 +292,7 @@ NvHTTP::startApp(QString verb,
                                    "&remoteControllersBitmap="+QString::number(gamepadMask)+
                                    "&gcmap="+QString::number(gamepadMask)+
                                    "&gcpersist="+QString::number(persistGameControllersOnDisconnect ? 1 : 0)+
-                                   stationConnectOutputArguments+
-                                   LiGetLaunchUrlQueryParameters(),
+                                   stationConnectOutputArguments,
                                    LAUNCH_TIMEOUT_MS);
 
     qInfo() << "StationConnect launch response received";
@@ -310,7 +300,6 @@ NvHTTP::startApp(QString verb,
     // Throws if the request failed
     verifyResponseStatus(response);
 
-    rtspSessionUrl = getXmlString(response, "sessionUrl0");
     datasmashPort = getXmlString(response, "StationConnectDatasmashPort").toUShort();
     datasmashCertificateSha256 =
             getXmlString(response, "StationConnectDatasmashCertificateSha256");

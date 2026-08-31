@@ -47,8 +47,6 @@
 #define SDL_CODE_STATIONCONNECT_CURSOR_POSITION 109
 #define SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE 110
 
-#include <openssl/rand.h>
-
 #include <QtEndian>
 #include <QCoreApplication>
 #include <QThreadPool>
@@ -998,7 +996,7 @@ bool Session::negotiateDatasmashSession(QString& errorMessage)
         return false;
     }
 
-    qInfo() << "Native QUIC session negotiated without RTSP: video format"
+    qInfo() << "Native QUIC session negotiated: video format"
             << QString::number(responseVideoFormat, 16)
             << "host features" << QString::number(hostFeatureFlags, 16)
             << "audio channels" << responseChannels
@@ -1455,12 +1453,6 @@ bool Session::initialize()
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Video bitrate: %d kbps",
                 m_StreamConfig.bitrate);
-
-    RAND_bytes(reinterpret_cast<unsigned char*>(m_StreamConfig.remoteInputAesKey),
-               sizeof(m_StreamConfig.remoteInputAesKey));
-
-    // Only the first 4 bytes are populated in the RI key IV
-    RAND_bytes(reinterpret_cast<unsigned char*>(m_StreamConfig.remoteInputAesIv), 4);
 
     switch (m_Preferences->audioConfig)
     {
@@ -2369,7 +2361,6 @@ bool Session::startConnectionAsync(bool reconnecting)
     Q_ASSERT(m_Computer->currentGameId == 0 ||
              m_Computer->currentGameId == m_App.id);
 
-    QString rtspSessionUrl;
     quint16 datasmashPort = 0;
     QString datasmashCertificateSha256;
     QString datasmashToken;
@@ -2429,7 +2420,6 @@ bool Session::startConnectionAsync(bool reconnecting)
                           captureSource,
                           encoderBackend,
                           encodingMode,
-                          rtspSessionUrl,
                           datasmashPort,
                           datasmashCertificateSha256,
                           datasmashToken,
@@ -2755,10 +2745,6 @@ bool Session::startConnectionAsync(bool reconnecting)
     if (!siGfeVersion.isEmpty()) {
         hostInfo.serverInfoGfeVersion = siGfeVersion.data();
     }
-
-    // Session parameters were accepted over the reliable native QUIC data
-    // endpoint above. A TCP RTSP URL must never be consulted after that cut.
-    hostInfo.rtspSessionUrl = nullptr;
 
     if (m_Preferences->networkMtu != 0) {
         // Derive a fragmentation-safe, 16-byte-aligned video packet size from

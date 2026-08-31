@@ -178,7 +178,6 @@ public:
              QString captureSource,
              QString encoderBackend,
              QString encodingMode,
-             QString& rtspSessionUrl,
              quint16& datasmashPort,
              QString& datasmashCertificateSha256,
              QString& datasmashToken,

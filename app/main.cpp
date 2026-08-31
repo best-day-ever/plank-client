@@ -82,8 +82,6 @@ static QTextStream s_LoggerStream(stderr);
 static QThreadPool s_LoggerThread;
 static QMutex s_SyncLoggerMutex;
 static bool s_SuppressVerboseOutput;
-static QRegularExpression k_RikeyRegex("&rikey=\\w+");
-static QRegularExpression k_RikeyIdRegex("&rikeyid=[\\d-]+");
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
 #define MAX_LOG_SIZE_BYTES (10 * 1024 * 1024)
@@ -137,8 +135,6 @@ void logToLoggerStream(QString& message)
 #endif
 
     // Strip session encryption keys and IVs from the logs
-    message.replace(k_RikeyRegex, "&rikey=REDACTED");
-    message.replace(k_RikeyIdRegex, "&rikeyid=REDACTED");
 
 #ifdef LOG_TO_FILE
     if (s_LoggerFileStream.device() != nullptr && !s_LogLimitReached) {
