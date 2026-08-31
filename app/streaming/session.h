@@ -183,7 +183,7 @@ signals:
     void displayLaunchWarning(QString text);
 
 
-    void sessionFinished(int portTestResult);
+    void sessionFinished();
 
     // Emitted after sessionFinished() when the session is ready to be destroyed
     void readyForDeletion();
@@ -409,8 +409,6 @@ private:
     int m_FlushingWindowEventsRef;
 
     bool m_AsyncConnectionSuccess;
-    int m_PortTestResults;
-
     int m_ActiveVideoFormat;
     int m_ActiveVideoWidth;
     int m_ActiveVideoHeight;

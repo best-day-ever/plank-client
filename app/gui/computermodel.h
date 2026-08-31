@@ -14,7 +14,6 @@ class ComputerModel : public QAbstractListModel
         AuthorizedRole,
         BusyRole,
         StatusUnknownRole,
-        ServerSupportedRole,
         StationConnectAuthenticationRole,
         StationConnectHostVersionRole,
         ManualBookmarkRole,
@@ -36,8 +35,6 @@ public:
     Q_INVOKABLE void deleteComputer(int computerIndex);
 
     Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
-
-    Q_INVOKABLE void testConnectionForComputer(int computerIndex);
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
@@ -73,7 +70,6 @@ public:
 
 signals:
     void authenticationCompleted(QVariant error);
-    void connectionTestCompleted(int result, QString blockedPorts);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);

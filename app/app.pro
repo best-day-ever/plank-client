@@ -222,11 +222,8 @@ SOURCES += \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
     backend/computermanager.cpp \
-    backend/boxartmanager.cpp \
     cli/commandlineparser.cpp \
-    cli/listapps.cpp \
     cli/startstream.cpp \
-    settings/compatfetcher.cpp \
     settings/stationconnectclientpolicy.cpp \
     settings/streamingpreferences.cpp \
     streaming/input/input.cpp \
@@ -242,7 +239,6 @@ SOURCES += \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
-    gui/appmodel.cpp \
     streaming/bandwidth.cpp \
     streaming/streamutils.cpp \
     path.cpp \
@@ -254,16 +250,13 @@ HEADERS += \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/nvapp.h \
-    settings/compatfetcher.h \
     utils.h \
     backend/computerseeker.h \
     backend/nvcomputer.h \
     backend/stationconnectnetwork.h \
     backend/nvhttp.h \
     backend/computermanager.h \
-    backend/boxartmanager.h \
     cli/commandlineparser.h \
-    cli/listapps.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
     settings/stationconnectclientpolicy.h \
@@ -278,7 +271,6 @@ HEADERS += \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
-    gui/appmodel.h \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \

@@ -1,7 +1,5 @@
 #include "computermodel.h"
 
-#include <QThreadPool>
-
 #include <utility>
 
 namespace {
@@ -58,8 +56,6 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->currentGameId != 0;
     case StatusUnknownRole:
         return computer->state == NvComputer::CS_UNKNOWN;
-    case ServerSupportedRole:
-        return computer->isSupportedServerVersion;
     case StationConnectAuthenticationRole:
         return computer->stationConnectAuthentication;
     case StationConnectHostVersionRole:
@@ -112,7 +108,6 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[AuthorizedRole] = "authorized";
     names[BusyRole] = "busy";
     names[StatusUnknownRole] = "statusUnknown";
-    names[ServerSupportedRole] = "serverSupported";
     names[StationConnectAuthenticationRole] = "stationConnectAuthentication";
     names[StationConnectHostVersionRole] = "stationConnectHostVersion";
     names[ManualBookmarkRole] = "manualBookmark";
@@ -293,35 +288,6 @@ void ComputerModel::renameComputer(int computerIndex, QString name)
     Q_ASSERT(computerIndex < m_Computers.count());
 
     m_ComputerManager->renameHost(m_Computers[computerIndex], name);
-}
-
-class DeferredTestConnectionTask : public QObject, public QRunnable
-{
-    Q_OBJECT
-public:
-    void run()
-    {
-        unsigned int portTestResult = LiTestClientConnectivity("qt.conntest.moonlight-stream.org", 443, ML_PORT_FLAG_ALL);
-        if (portTestResult == ML_TEST_RESULT_INCONCLUSIVE) {
-            emit connectionTestCompleted(-1, QString());
-        }
-        else {
-            char blockedPorts[512];
-            LiStringifyPortFlags(portTestResult, "\n", blockedPorts, sizeof(blockedPorts));
-            emit connectionTestCompleted(portTestResult, QString(blockedPorts));
-        }
-    }
-
-signals:
-    void connectionTestCompleted(int result, QString blockedPorts);
-};
-
-void ComputerModel::testConnectionForComputer(int)
-{
-    DeferredTestConnectionTask* testConnectionTask = new DeferredTestConnectionTask();
-    QObject::connect(testConnectionTask, &DeferredTestConnectionTask::connectionTestCompleted,
-                     this, &ComputerModel::connectionTestCompleted);
-    QThreadPool::globalInstance()->start(testConnectionTask);
 }
 
 void ComputerModel::authenticateComputer(int computerIndex, QString username,

@@ -1,5 +1,4 @@
 #include "computermanager.h"
-#include "boxartmanager.h"
 #include "nvhttp.h"
 
 #include <Limelight.h>
@@ -228,7 +227,6 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs)
     : m_Prefs(prefs),
       m_PollingRef(0),
       m_MdnsBrowser(nullptr),
-      m_CompatFetcher(nullptr),
       m_NeedsDelayedFlush(false)
 {
     QSettings settings;
@@ -250,9 +248,6 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs)
         m_LastSerializedHosts[computer->uuid] = *computer;
     }
     settings.endArray();
-
-    // Fetch latest compatibility data asynchronously
-    m_CompatFetcher.start();
 
     // Start the delayed flush thread to handle saveHosts() calls
     m_DelayedFlushThread = new DelayedFlushThread(this);
@@ -593,9 +588,6 @@ public:
         // Delete the polling entry first. This will stop all polling threads too.
         delete pollingEntry;
 
-        // Delete cached box art
-        BoxArtManager::deleteBoxArt(m_Computer);
-
         // Finally, delete the computer itself. This must be done
         // last because the polling thread might be using it.
         delete m_Computer;
@@ -874,14 +866,14 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             saveHosts();
             emit computerStateChanged(bookmark);
         }
-        emit computerAddCompleted(true, false);
+        emit computerAddCompleted(true);
     }
     else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
         // The user specified an IPv6 literal without URL escaping, so use the default port
         addNewHost(NvAddress(address, DEFAULT_CONTROL_PORT), false);
     }
     else {
-        emit computerAddCompleted(false, false);
+        emit computerAddCompleted(false);
     }
 }
 
@@ -995,7 +987,7 @@ public:
     }
 
 signals:
-    void computerAddCompleted(QVariant success, QVariant detectedPortBlocking);
+    void computerAddCompleted(QVariant success);
 
     void computerStateChanged(NvComputer* computer);
 
@@ -1036,20 +1028,7 @@ private:
             return serverInfo;
         } catch (...) {
             if (!m_Mdns) {
-                unsigned int portTestResult;
-
-                if (m_ComputerManager->m_Prefs->detectNetworkBlocking) {
-                    // We failed to connect to the specified PC. Let's test to make sure this network
-                    // isn't blocking Moonlight, so we can tell the user about it.
-                    portTestResult = LiTestClientConnectivity(
-                                "qt.conntest.moonlight-stream.org", 443,
-                                ML_PORT_FLAG_TCP_47989);
-                }
-                else {
-                    portTestResult = 0;
-                }
-
-                emit computerAddCompleted(false, portTestResult != 0 && portTestResult != ML_TEST_RESULT_INCONCLUSIVE);
+                emit computerAddCompleted(false);
             }
             return QString();
         }
@@ -1090,7 +1069,7 @@ private:
             qWarning() << "Rejecting a host outside the StationConnect protocol";
             delete newComputer;
             if (!m_Mdns) {
-                emit computerAddCompleted(false, false);
+                emit computerAddCompleted(false);
             }
             return;
         }
@@ -1143,18 +1122,6 @@ private:
                 newComputer->localAddress = m_Address;
             }
 
-            // Get the WAN IP address using STUN if we're on mDNS over IPv4
-            if (QHostAddress(newComputer->localAddress.address()).protocol() == QAbstractSocket::IPv4Protocol) {
-                quint32 addr;
-                int err = LiFindExternalAddressIP4("stun.moonlight-stream.org", 3478, &addr);
-                if (err == 0) {
-                    newComputer->setRemoteAddress(QHostAddress(qFromBigEndian(addr)));
-                }
-                else {
-                    qWarning() << "STUN failed to get WAN address:" << err;
-                }
-            }
-
             if (!m_MdnsIpv6Address.isNull()) {
                 Q_ASSERT(QHostAddress(m_MdnsIpv6Address.address()).protocol() == QAbstractSocket::IPv6Protocol);
                 newComputer->ipv6Address = m_MdnsIpv6Address;
@@ -1163,12 +1130,6 @@ private:
         else {
             newComputer->manualAddress = m_Address;
         }
-
-        QHostAddress hostAddress(m_Address.address());
-        bool addressIsSiteLocalV4 =
-                hostAddress.isInSubnet(QHostAddress("10.0.0.0"), 8) ||
-                hostAddress.isInSubnet(QHostAddress("172.16.0.0"), 12) ||
-                hostAddress.isInSubnet(QHostAddress("192.168.0.0"), 16);
 
         {
             // Check if this PC already exists using opportunistic read lock
@@ -1210,7 +1171,7 @@ private:
 
                 // For non-mDNS clients, let them know it succeeded
                 if (!m_Mdns) {
-                    emit computerAddCompleted(true, false);
+                    emit computerAddCompleted(true);
                 }
 
                 // Tell our client if something changed
@@ -1229,24 +1190,9 @@ private:
                 // Drop the lock before notifying
                 m_ComputerManager->m_Lock.unlock();
 
-                // If this wasn't added via mDNS but it is a RFC 1918 IPv4 address and not a VPN,
-                // go ahead and do the STUN request now to populate an external address.
-                if (!m_Mdns && addressIsSiteLocalV4 &&
-                        !NvComputer::isVpnReachability(
-                            newComputer->getActiveAddressReachability())) {
-                    quint32 addr;
-                    int err = LiFindExternalAddressIP4("stun.moonlight-stream.org", 3478, &addr);
-                    if (err == 0) {
-                        newComputer->setRemoteAddress(QHostAddress(qFromBigEndian(addr)));
-                    }
-                    else {
-                        qWarning() << "STUN failed to get WAN address:" << err;
-                    }
-                }
-
                 // For non-mDNS clients, let them know it succeeded
                 if (!m_Mdns) {
-                    emit computerAddCompleted(true, false);
+                    emit computerAddCompleted(true);
                 }
 
                 // Tell our client about this new PC

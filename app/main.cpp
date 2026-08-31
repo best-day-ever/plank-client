@@ -40,13 +40,11 @@
 #include <openssl/ssl.h>
 #endif
 
-#include "cli/listapps.h"
 #include "cli/startstream.h"
 #include "cli/commandlineparser.h"
 #include "path.h"
 #include "utils.h"
 #include "gui/computermodel.h"
-#include "gui/appmodel.h"
 #include "backend/computermanager.h"
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
@@ -81,7 +79,6 @@ static QElapsedTimer s_LoggerTime;
 static QTextStream s_LoggerStream(stderr);
 static QThreadPool s_LoggerThread;
 static QMutex s_SyncLoggerMutex;
-static bool s_SuppressVerboseOutput;
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
 #define MAX_LOG_SIZE_BYTES (10 * 1024 * 1024)
@@ -173,27 +170,15 @@ void sdlLogToDiskHandler(void*, int category, SDL_LogPriority priority, const ch
 
     switch (priority) {
     case SDL_LOG_PRIORITY_VERBOSE:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         priorityTxt = "Verbose";
         break;
     case SDL_LOG_PRIORITY_DEBUG:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         priorityTxt = "Debug";
         break;
     case SDL_LOG_PRIORITY_INFO:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         priorityTxt = "Info";
         break;
     case SDL_LOG_PRIORITY_WARN:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         priorityTxt = "Warn";
         break;
     case SDL_LOG_PRIORITY_ERROR:
@@ -219,21 +204,12 @@ void qtLogToDiskHandler(QtMsgType type, const QMessageLogContext&, const QString
 
     switch (type) {
     case QtDebugMsg:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         typeTxt = "Debug";
         break;
     case QtInfoMsg:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         typeTxt = "Info";
         break;
     case QtWarningMsg:
-        if (s_SuppressVerboseOutput) {
-            return;
-        }
         typeTxt = "Warning";
         break;
     case QtCriticalMsg:
@@ -260,10 +236,6 @@ void ffmpegLogToDiskHandler(void* ptr, int level, const char* fmt, va_list vl)
     if ((level & 0xFF) > av_log_get_level()) {
         return;
     }
-    else if ((level & 0xFF) > AV_LOG_WARNING && s_SuppressVerboseOutput) {
-        return;
-    }
-
     // We need to use the *previous* printPrefix value to determine whether to
     // print the prefix this time. av_log_format_line() will set the printPrefix
     // value to indicate whether the prefix should be printed *next time*.
@@ -829,15 +801,6 @@ int main(int argc, char *argv[])
 
     GlobalCommandLineParser parser;
     GlobalCommandLineParser::ParseResult commandLineParserResult = parser.parse(app.arguments());
-    switch (commandLineParserResult) {
-    case GlobalCommandLineParser::ListRequested:
-        // Don't log to the console since it will jumble the command output
-        s_SuppressVerboseOutput = true;
-        break;
-    default:
-        break;
-    }
-
     const int compileVersion = SDL_VERSION;
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Compiled with SDL %d.%d.%d",
@@ -925,7 +888,6 @@ int main(int argc, char *argv[])
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
-    qmlRegisterType<AppModel>("AppModel", 1, 0, "AppModel");
     qmlRegisterUncreatableType<Session>("Session", 1, 0, "Session", "Session cannot be created from QML");
     qmlRegisterSingletonType<ComputerManager>("ComputerManager", 1, 0,
                                               "ComputerManager",
@@ -962,8 +924,6 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     QString initialView;
-    bool hasGUI = true;
-
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::NormalStartRequested:
         initialView = "qrc:/gui/PcView.qml";
@@ -985,25 +945,17 @@ int main(int argc, char *argv[])
             engine.rootContext()->setContextProperty("launcher", launcher);
             break;
         }
-    case GlobalCommandLineParser::ListRequested:
-        {
-            ListCommandLineParser listParser;
-            listParser.parse(app.arguments());
-            auto launcher = new CliListApps::Launcher(listParser.getHost(), listParser, &app);
-            launcher->execute(new ComputerManager(StreamingPreferences::get()));
-            hasGUI = false;
-            break;
-        }
     }
 
-    if (hasGUI) {
-        engine.rootContext()->setContextProperty("initialView", initialView);
-        engine.rootContext()->setContextProperty("runConfigChecks", commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
+    engine.rootContext()->setContextProperty("initialView", initialView);
+    engine.rootContext()->setContextProperty(
+                "runConfigChecks",
+                commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
 
-        // Load the main.qml file
-        engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
-        if (engine.rootObjects().isEmpty())
-            return -1;
+    // Load the main.qml file
+    engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
+    if (engine.rootObjects().isEmpty()) {
+        return -1;
     }
 
     int err = app.exec();
@@ -1025,8 +977,7 @@ int main(int argc, char *argv[])
     s_LoggerThread.waitForDone();
 
 #ifdef Q_OS_WIN32
-    // Without an explicit flush, console redirection for the list command
-    // doesn't work reliably (sometimes the target file contains no text).
+    // Ensure redirected command-line output reaches the destination file.
     fflush(stderr);
     fflush(stdout);
 #endif

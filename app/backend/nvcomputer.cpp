@@ -1,6 +1,5 @@
 #include "nvcomputer.h"
 #include "nvapp.h"
-#include "settings/compatfetcher.h"
 #include "settings/streamingpreferences.h"
 #include "stationconnectnetwork.h"
 
@@ -21,7 +20,6 @@
 #define SER_IPV6PORT "ipv6port"
 #define SER_APPLIST "apps"
 #define SER_CUSTOMNAME "customname"
-#define SER_NVIDIASOFTWARE "nvidiasw"
 #define SER_SCALINGMODE "stationconnect-scaling-mode"
 #define SER_HOSTLAYOUT "stationconnect-host-layout"
 #define SER_VIRTUALMODE1 "stationconnect-virtual-mode-1"
@@ -62,10 +60,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->state = CS_UNKNOWN;
     this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
-    this->maxLumaPixelsHEVC = 0;
     this->serverCodecModeSupport = 0;
-    this->isSupportedServerVersion = true;
-    this->isNvidiaServerSoftware = false;
     this->externalPort = address.port();
 }
 
@@ -101,13 +96,8 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         stationConnectTopologyVersion = 0;
         stationConnectFeatureFlags = 0;
         displayModes.clear();
-        maxLumaPixelsHEVC = 0;
         serverCodecModeSupport = 0;
-        gpuModel.clear();
-        gfeVersion.clear();
         appVersion.clear();
-        isSupportedServerVersion = true;
-        isNvidiaServerSoftware = false;
     }
 
     name = nickname;
@@ -135,7 +125,6 @@ NvComputer::NvComputer(QSettings& settings)
                                   settings.value(SER_IPV6PORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
-    this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
     this->stationConnectScalingMode = settings.value(
                 SER_SCALINGMODE, NvOutputTopology::ScaledSpanMode).toString();
     if (this->stationConnectScalingMode != NvOutputTopology::NativeScalingMode &&
@@ -204,12 +193,8 @@ NvComputer::NvComputer(QSettings& settings)
     this->currentGameId = 0;
     this->authorizationState = AS_UNKNOWN;
     this->state = CS_UNKNOWN;
-    this->gfeVersion = nullptr;
     this->appVersion = nullptr;
-    this->maxLumaPixelsHEVC = 0;
     this->serverCodecModeSupport = 0;
-    this->gpuModel = nullptr;
-    this->isSupportedServerVersion = true;
     this->externalPort = this->remoteAddress.port();
     this->stationConnectAuthentication = false;
     this->stationConnectHostMetadataVersion = 0;
@@ -217,15 +202,6 @@ NvComputer::NvComputer(QSettings& settings)
     this->stationConnectTopologyVersion = 0;
     this->stationConnectFeatureFlags = 0;
     this->sessionToken.clear();
-}
-
-void NvComputer::setRemoteAddress(QHostAddress address)
-{
-    QWriteLocker lock(&this->lock);
-
-    Q_ASSERT(this->externalPort != 0);
-
-    this->remoteAddress = NvAddress(address, this->externalPort);
 }
 
 void NvComputer::serialize(QSettings& settings, bool serializeApps) const
@@ -244,7 +220,6 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_MANUALADDR, manualAddress.address());
     settings.setValue(SER_MANUALPORT, manualAddress.port());
     settings.remove("srvcert");
-    settings.setValue(SER_NVIDIASOFTWARE, isNvidiaServerSoftware);
     settings.setValue(SER_SCALINGMODE, stationConnectScalingMode);
     settings.setValue(SER_HOSTLAYOUT, stationConnectHostLayout);
     settings.setValue(SER_VIRTUALMODE1, stationConnectVirtualMode1);
@@ -285,7 +260,6 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->remoteAddress == that.remoteAddress &&
            this->ipv6Address == that.ipv6Address &&
            this->manualAddress == that.manualAddress &&
-           this->isNvidiaServerSoftware == that.isNvidiaServerSoftware &&
            this->stationConnectScalingMode == that.stationConnectScalingMode &&
            this->stationConnectHostLayout == that.stationConnectHostLayout &&
            this->stationConnectVirtualMode1 == that.stationConnectVirtualMode1 &&
@@ -328,14 +302,6 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
         this->serverCodecModeSupport = SCM_H264;
     }
 
-    QString maxLumaPixelsHEVC = NvHTTP::getXmlString(serverInfo, "MaxLumaPixelsHEVC");
-    if (!maxLumaPixelsHEVC.isEmpty()) {
-        this->maxLumaPixelsHEVC = maxLumaPixelsHEVC.toInt();
-    }
-    else {
-        this->maxLumaPixelsHEVC = 0;
-    }
-
     this->displayModes = NvHTTP::getDisplayModeList(serverInfo);
     std::stable_sort(this->displayModes.begin(), this->displayModes.end(),
                      [](const NvDisplayMode& mode1, const NvDisplayMode& mode2) {
@@ -371,11 +337,6 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
         this->remoteAddress = NvAddress();
     }
 
-    // Real Nvidia host software (GeForce Experience and RTX Experience) both use the 'Mjolnir'
-    // codename in the state field and no version of Sunshine does. We can use this to bypass
-    // some assumptions about Nvidia hardware that don't apply to Sunshine hosts.
-    this->isNvidiaServerSoftware = NvHTTP::getXmlString(serverInfo, "state").contains("MJOLNIR");
-
     this->stationConnectAuthentication =
             NvHTTP::getXmlString(serverInfo, "StationConnectAuth") == "1";
     this->stationConnectHostMetadataVersion =
@@ -390,11 +351,8 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
                 AS_AUTHORIZED : AS_UNAUTHORIZED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
     this->appVersion = NvHTTP::getXmlString(serverInfo, "appversion");
-    this->gfeVersion = NvHTTP::getXmlString(serverInfo, "GfeVersion");
-    this->gpuModel = NvHTTP::getXmlString(serverInfo, "gputype");
     this->activeAddress = http.address();
     this->state = NvComputer::CS_ONLINE;
-    this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
 }
 
 NvComputer::ReachabilityType NvComputer::getActiveAddressReachability(
@@ -651,12 +609,7 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
     ASSIGN_IF_CHANGED(currentGameId);
     ASSIGN_IF_CHANGED(activeAddress);
     ASSIGN_IF_CHANGED(state);
-    ASSIGN_IF_CHANGED(gfeVersion);
     ASSIGN_IF_CHANGED(appVersion);
-    ASSIGN_IF_CHANGED(isSupportedServerVersion);
-    ASSIGN_IF_CHANGED(isNvidiaServerSoftware);
-    ASSIGN_IF_CHANGED(maxLumaPixelsHEVC);
-    ASSIGN_IF_CHANGED(gpuModel);
     ASSIGN_IF_CHANGED_AND_NONEMPTY(displayModes);
 
     if (!that.appList.isEmpty()) {

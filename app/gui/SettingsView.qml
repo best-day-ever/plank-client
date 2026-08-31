@@ -681,10 +681,6 @@ Flickable {
                                 ToolTip.show(qsTr("You must restart Moonlight for this change to take effect"), 5000)
                             }
                             else {
-                                // Force the back operation to pop any AppView pages that exist.
-                                // The AppView stops working after retranslate() for some reason.
-                                window.clearOnBack = true
-
                                 // Signal other controls to adjust their text
                                 languageChanged()
                             }
@@ -988,21 +984,6 @@ Flickable {
                                 ComputerManager.startPolling()
                             }
                         }
-                    }
-                }
-
-                StationConnectSettingLabel {
-                    text: qsTr("Automatically detect blocked connections")
-                }
-
-                StationConnectCheckBox {
-                    id: detectNetworkBlocking
-                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
-                    text: ""
-                    Accessible.name: qsTr("Automatically detect blocked connections")
-                    checked: StreamingPreferences.detectNetworkBlocking
-                    onCheckedChanged: {
-                        StreamingPreferences.detectNetworkBlocking = checked
                     }
                 }
 

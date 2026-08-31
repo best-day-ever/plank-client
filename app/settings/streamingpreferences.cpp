@@ -20,7 +20,6 @@
 #define SER_QUIC_UDP_PAYLOAD_MTU "stationconnect-quic-udp-payload-mtu"
 #define SER_STATIONCONNECT_UNREACHABLE_TIMEOUT "stationconnect-unreachable-timeout-seconds"
 #define SER_STATIONCONNECT_UNREACHABLE_ACTION "stationconnect-unreachable-action"
-#define SER_DETECTNETBLOCKING "detectnetblocking"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_CAPTURESYSKEYS "capturesyskeys"
@@ -93,7 +92,6 @@ void StreamingPreferences::reload()
                 << StationConnectClientPolicy::defaultConfigPath();
     }
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
-    detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
     showPerformanceOverlay = settings.value(SER_SHOWPERFOVERLAY, false).toBool();
     quicUdpPayloadMtu = settings.value(SER_QUIC_UDP_PAYLOAD_MTU, 0).toInt();
     if (quicUdpPayloadMtu != 0 &&
@@ -259,7 +257,6 @@ void StreamingPreferences::save()
                       stationConnectUnreachableTimeoutSeconds);
     settings.setValue(SER_STATIONCONNECT_UNREACHABLE_ACTION,
                       static_cast<int>(stationConnectUnreachableAction));
-    settings.setValue(SER_DETECTNETBLOCKING, detectNetworkBlocking);
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
     settings.setValue(SER_STATIONCONNECT_TOOLBAR_PINNED, stationConnectToolbarPinned);

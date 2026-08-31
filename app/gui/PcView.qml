@@ -51,7 +51,6 @@ CenteredGridView {
         loginDialog.close()
         if (error !== undefined) {
             errorDialog.text = error
-            errorDialog.helpText = ""
             errorDialog.open()
         } else {
             launchStationConnectDesktop(pcIndex)
@@ -63,7 +62,6 @@ CenteredGridView {
         var session = computerModel.createSessionForStationConnectDesktop(pcIndex)
         if (session === null) {
             errorDialog.text = qsTr("The workstation did not provide its Desktop session.")
-            errorDialog.helpText = ""
             errorDialog.open()
             return
         }
@@ -77,17 +75,10 @@ CenteredGridView {
         stackView.push(segue)
     }
 
-    function addComplete(success, detectedPortBlocking)
+    function addComplete(success)
     {
         if (!success) {
             errorDialog.text = qsTr("Unable to connect to the specified PC.")
-
-            if (detectedPortBlocking) {
-                errorDialog.text += "\n\n" + qsTr("This PC's Internet connection is blocking Moonlight. Streaming over the Internet may not work while connected to this network.")
-            }
-            else {
-                errorDialog.helpText = qsTr("Click the Help button for possible solutions.")
-            }
 
             errorDialog.open()
         }
@@ -98,7 +89,6 @@ CenteredGridView {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
         model.authenticationCompleted.connect(authenticationComplete)
-        model.connectionTestCompleted.connect(testConnectionDialog.connectionTestComplete)
         return model
     }
 
@@ -242,16 +232,6 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("View All Apps")
-                    onTriggered: {
-                        var component = Qt.createComponent("AppView.qml")
-                        var appView = component.createObject(stackView, {"computerIndex": index, "objectName": model.name, "showHiddenGames": true})
-                        stackView.push(appView)
-                    }
-                    visible: false
-                }
-                NavigableMenuItem {
-                    parentMenu: pcContextMenu
                     text: qsTr("Edit bookmark…")
                     visible: model.manualBookmark
                     onTriggered: {
@@ -276,15 +256,6 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Test Network")
-                    onTriggered: {
-                        computerModel.testConnectionForComputer(index)
-                        testConnectionDialog.open()
-                    }
-                }
-
-                NavigableMenuItem {
-                    parentMenu: pcContextMenu
                     text: qsTr("Rename PC")
                     onTriggered: {
                         renamePcDialog.pcIndex = index
@@ -307,12 +278,7 @@ CenteredGridView {
 
         onClicked: {
             if (model.online) {
-                if (!model.serverSupported) {
-                    errorDialog.text = qsTr("The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.").arg(model.name)
-                    errorDialog.helpText = ""
-                    errorDialog.open()
-                }
-                else if (model.authorized) {
+                if (model.authorized) {
                     launchStationConnectDesktop(index)
                 }
                 else {
@@ -359,10 +325,6 @@ CenteredGridView {
 
     ErrorMessageDialog {
         id: errorDialog
-
-        // Using Setup-Guide here instead of Troubleshooting because it's likely that users
-        // will arrive here by forgetting to enable GameStream or not forwarding ports.
-        helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide"
     }
 
     NavigableDialog {
@@ -503,7 +465,6 @@ CenteredGridView {
                                                         editCaptureSource.currentIndex).val,
                                                     profileBitratesKbps)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
-                errorDialog.helpText = ""
                 errorDialog.open()
             }
         }
@@ -715,37 +676,6 @@ CenteredGridView {
 
         onAccepted: {
             computerModel.deleteComputer(pcIndex)
-        }
-    }
-
-    NavigableMessageDialog {
-        id: testConnectionDialog
-        closePolicy: Popup.CloseOnEscape
-        standardButtons: Dialog.Ok
-
-        onAboutToShow: {
-            testConnectionDialog.text = qsTr("Moonlight is testing your network connection to determine if any required ports are blocked.") + "\n\n" + qsTr("This may take a few seconds…")
-            showSpinner = true
-        }
-
-        function connectionTestComplete(result, blockedPorts)
-        {
-            if (result === -1) {
-                text = qsTr("The network test could not be performed because none of Moonlight's connection testing servers were reachable from this PC. Check your Internet connection or try again later.")
-                imageSrc = "qrc:/res/baseline-warning-24px.svg"
-            }
-            else if (result === 0) {
-                text = qsTr("This network does not appear to be blocking Moonlight. If you still have trouble connecting, check your PC's firewall settings.") + "\n\n" + qsTr("If you are trying to stream over the Internet, install the Moonlight Internet Hosting Tool on your gaming PC and run the included Internet Streaming Tester to check your gaming PC's Internet connection.")
-                imageSrc = "qrc:/res/baseline-check_circle_outline-24px.svg"
-            }
-            else {
-                text = qsTr("Your PC's current network connection seems to be blocking Moonlight. Streaming over the Internet may not work while connected to this network.") + "\n\n" + qsTr("The following network ports were blocked:") + "\n"
-                text += blockedPorts
-                imageSrc = "qrc:/res/baseline-error_outline-24px.svg"
-            }
-
-            // Stop showing the spinner and show the image instead
-            showSpinner = false
         }
     }
 

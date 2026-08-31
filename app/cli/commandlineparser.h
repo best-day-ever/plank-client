@@ -11,7 +11,6 @@ public:
     enum ParseResult {
         NormalStartRequested,
         StreamRequested,
-        ListRequested,
     };
 
     GlobalCommandLineParser();
@@ -42,22 +41,4 @@ private:
     QMap<QString, StreamingPreferences::WindowMode> m_WindowModeMap;
     QMap<QString, StreamingPreferences::AudioConfig> m_AudioConfigMap;
     QMap<QString, StreamingPreferences::CaptureSysKeysMode> m_CaptureSysKeysModeMap;
-};
-
-class ListCommandLineParser
-{
-public:
-    ListCommandLineParser();
-    virtual ~ListCommandLineParser();
-
-    void parse(const QStringList &args);
-
-    QString getHost() const;
-    bool isPrintCSV() const;
-    bool isVerbose() const;
-
-private:
-    QString m_Host;
-    bool m_PrintCSV;
-    bool m_Verbose;
 };

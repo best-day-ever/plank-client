@@ -13,10 +13,6 @@ NavigableDialog {
     property alias showSpinner: dialogSpinner.visible
     property alias imageSrc: dialogImage.source
 
-    property string helpText
-    property string helpUrl : "https://github.com/moonlight-stream/moonlight-docs/wiki/Troubleshooting"
-    property string helpTextSeparator : " "
-
     onOpened: {
         // Force keyboard focus on the label so keyboard navigation works
         if (dialogButtonBox.count > 0) {
@@ -50,7 +46,7 @@ NavigableDialog {
             property string dialogText
 
             id: dialogLabel
-            text: dialogText + ((helpText && (standardButtons & Dialog.Help)) ? (helpTextSeparator + helpText) : "")
+            text: dialogText
             color: messageTheme.textPrimary
             font.pointSize: 11
             wrapMode: Text.Wrap
@@ -74,11 +70,6 @@ NavigableDialog {
             Keys.onEnterPressed: clicked()
             Keys.onRightPressed: nextItemInFocusChain(true).forceActiveFocus(Qt.TabFocus)
             Keys.onLeftPressed: nextItemInFocusChain(false).forceActiveFocus(Qt.TabFocus)
-        }
-
-        onHelpRequested: {
-            Qt.openUrlExternally(helpUrl)
-            close()
         }
     }
 }

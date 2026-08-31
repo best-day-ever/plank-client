@@ -62,7 +62,6 @@ SystemProperties::SystemProperties()
     }
 
     // Assume we can probably launch a browser if we're in a GUI environment
-    hasBrowser = hasDesktopEnvironment;
 
     // Populate data that requires talking to SDL. We do it all in one shot
     // and cache the results to speed up future queries on this data.

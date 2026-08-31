@@ -57,9 +57,6 @@ public:
                          int videoProfile, int captureSource,
                          const QVector<int>& profileBitratesKbps);
 
-    void
-    setRemoteAddress(QHostAddress);
-
     bool
     update(const NvComputer& that, NvAddress expectedAddress = NvAddress());
 
@@ -112,13 +109,9 @@ public:
     AuthorizationState authorizationState;
     NvAddress activeAddress;
     int currentGameId;
-    QString gfeVersion;
     QString appVersion;
     QVector<NvDisplayMode> displayModes;
-    int maxLumaPixelsHEVC;
     int serverCodecModeSupport;
-    QString gpuModel;
-    bool isSupportedServerVersion;
     bool stationConnectAuthentication = false;
     int stationConnectHostMetadataVersion = 0;
     QString stationConnectHostVersion;
@@ -136,7 +129,6 @@ public:
     bool hasCustomName;
     QString uuid;
     QVector<NvApp> appList;
-    bool isNvidiaServerSoftware;
     QString stationConnectScalingMode;
     QString stationConnectHostLayout;
     QString stationConnectVirtualMode1;

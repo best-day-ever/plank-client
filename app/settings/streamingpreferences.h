@@ -217,7 +217,6 @@ public:
     Q_PROPERTY(bool enableMdns MEMBER enableMdns NOTIFY enableMdnsChanged)
     Q_PROPERTY(bool mdnsDiscoveryManaged MEMBER mdnsDiscoveryManaged CONSTANT)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
-    Q_PROPERTY(bool detectNetworkBlocking MEMBER detectNetworkBlocking NOTIFY detectNetworkBlockingChanged)
     Q_PROPERTY(int quicUdpPayloadMtu MEMBER quicUdpPayloadMtu NOTIFY quicUdpPayloadMtuChanged)
     Q_PROPERTY(int stationConnectUnreachableTimeoutSeconds MEMBER stationConnectUnreachableTimeoutSeconds NOTIFY stationConnectUnreachableTimeoutChanged)
     Q_PROPERTY(StationConnectUnreachableAction stationConnectUnreachableAction MEMBER stationConnectUnreachableAction NOTIFY stationConnectUnreachableActionChanged)
@@ -261,7 +260,6 @@ public:
     bool enableMdns;
     bool mdnsDiscoveryManaged;
     bool connectionWarnings;
-    bool detectNetworkBlocking;
     bool showPerformanceOverlay;
     bool muteOnFocusLoss;
     bool keepAwake;
@@ -286,7 +284,6 @@ signals:
     void stationConnectToolbarPinnedChanged();
     void windowModeChanged();
     void connectionWarningsChanged();
-    void detectNetworkBlockingChanged();
     void quicUdpPayloadMtuChanged();
     void stationConnectUnreachableTimeoutChanged();
     void stationConnectUnreachableActionChanged();

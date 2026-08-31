@@ -75,8 +75,6 @@
 #include <utility>
 #include <vector>
 
-#define CONN_TEST_SERVER "qt.conntest.moonlight-stream.org"
-
 CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clStageStarting,
     nullptr,
@@ -117,9 +115,7 @@ void Session::clStageFailed(int stage, int errorCode)
         return;
     }
 
-    // Perform the port test now, while we're on the async connection thread and not blocking the UI.
     unsigned int portFlags = LiGetPortFlagsFromStage(stage);
-    s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
 
     char failingPorts[128];
     LiStringifyPortFlags(portFlags, ", ", failingPorts, sizeof(failingPorts));
@@ -149,7 +145,6 @@ void Session::clConnectionTerminated(int errorCode)
     }
 
     unsigned int portFlags = LiGetPortFlagsFromTerminationErrorCode(errorCode);
-    s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
 
     // Display the termination dialog if this was not intended
     switch (errorCode) {
@@ -670,7 +665,6 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_InputHandler(nullptr),
       m_FlushingWindowEventsRef(0),
       m_AsyncConnectionSuccess(false),
-      m_PortTestResults(0),
       m_OpusDecoder(nullptr),
       m_AudioRenderer(nullptr),
       m_AudioSampleCount(0),
@@ -1503,8 +1497,8 @@ bool Session::initialize()
         }
     }
 
-    qInfo() << "Server GPU:" << m_Computer->gpuModel;
-    qInfo() << "Server GFE version:" << m_Computer->gfeVersion;
+    qInfo() << "StationConnect host version:"
+            << m_Computer->stationConnectHostVersion;
 
     LiInitializeVideoCallbacks(&m_VideoCallbacks);
     m_VideoCallbacks.setup = drSetup;
@@ -1619,11 +1613,6 @@ void Session::emitLaunchWarning(QString text)
 
 bool Session::validateLaunch(SDL_Window* testWindow)
 {
-    if (!m_Computer->isSupportedServerVersion) {
-        emit displayLaunchError(tr("The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.").arg(m_Computer->name));
-        return false;
-    }
-
     m_SupportedVideoFormats.removeByMask(
                 ~m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport));
     if (m_SupportedVideoFormats.isEmpty()) {
@@ -1655,16 +1644,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         return false;
     }
 
-    if (m_StreamConfig.width >= 3840) {
-        // Only allow 4K on GFE 3.x+
-        if (m_Computer->gfeVersion.isEmpty() || m_Computer->gfeVersion.startsWith("2.")) {
-            emitLaunchWarning(tr("GeForce Experience 3.0 or higher is required for 4K streaming."));
-
-            m_StreamConfig.width = 1920;
-            m_StreamConfig.height = 1080;
-        }
-    }
-
     // Test if audio works at the specified audio configuration
     bool audioTestPassed = testAudio(m_StreamConfig.audioConfiguration);
 
@@ -1680,25 +1659,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     // If nothing worked, warn the user that audio will not work
     if (!audioTestPassed) {
         emitLaunchWarning(tr("Failed to open audio device. Audio will be unavailable during this session."));
-    }
-
-    // NVENC will fail to initialize when any dimension exceeds 4096 using:
-    // - H.264 on all versions of NVENC
-    // - HEVC prior to Pascal
-    //
-    // However, if we aren't using Nvidia hosting software, don't assume anything about
-    // encoding capabilities by using HEVC Main 10 support. It will likely be wrong.
-    if ((m_StreamConfig.width > 4096 || m_StreamConfig.height > 4096) && m_Computer->isNvidiaServerSoftware) {
-        // Pascal added support for 8K HEVC encoding support. Maxwell 2 could encode HEVC but only up to 4K.
-        // We can't directly identify Pascal, but we can look for HEVC Main10 which was added in the same generation.
-        if (m_Computer->maxLumaPixelsHEVC == 0 || !(m_Computer->serverCodecModeSupport & SCM_HEVC_MAIN10)) {
-            emit displayLaunchError(tr("Your host PC's GPU doesn't support streaming video resolutions over 4K."));
-            return false;
-        }
-        else if ((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) == 0) {
-            emit displayLaunchError(tr("Video resolutions over 4K are not supported by the H.264 codec."));
-            return false;
-        }
     }
 
     return true;
@@ -1724,7 +1684,7 @@ private:
 
     void run() override
     {
-        emit m_Session->sessionFinished(m_Session->m_PortTestResults);
+        emit m_Session->sessionFinished();
 
         // The video decoder must already be destroyed, since it could
         // try to interact with APIs that can only be called between
@@ -2823,15 +2783,6 @@ bool Session::startConnectionAsync(bool reconnecting)
     hostInfo.serverInfoAppVersion = siAppVersion.data();
     hostInfo.serverCodecModeSupport = m_Computer->serverCodecModeSupport;
 
-    // Older GFE versions didn't have this field
-    QByteArray siGfeVersion;
-    if (!m_Computer->gfeVersion.isEmpty()) {
-        siGfeVersion = m_Computer->gfeVersion.toLatin1();
-    }
-    if (!siGfeVersion.isEmpty()) {
-        hostInfo.serverInfoGfeVersion = siGfeVersion.data();
-    }
-
     // moonlight-common-c fills missing callbacks in the caller-owned table.
     // Restore the pull/push decoder contract before every reuse of this
     // Session for a StationConnect desktop handoff.
@@ -3185,7 +3136,7 @@ void Session::execInternal()
     // NB: This initializes the SDL video subsystem, so it must be
     // called on the main thread.
     if (!initialize()) {
-        emit sessionFinished(0);
+        emit sessionFinished();
         emit readyForDeletion();
         return;
     }
