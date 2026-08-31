@@ -13,6 +13,9 @@ private slots:
     void explicitFalseIsManaged();
     void explicitTrueIsManaged();
     void invalidValueFailsClosed();
+    void omittedPortUsesBuiltInDefault();
+    void configuredPortIsReturned();
+    void invalidPortUsesBuiltInDefault();
 };
 
 void TestStationConnectClientPolicy::omittedValueIsNotManaged()
@@ -73,6 +76,44 @@ void TestStationConnectClientPolicy::invalidValueFailsClosed()
     const StationConnectClientPolicy policy(path);
     QVERIFY(policy.managedBoolean(QStringLiteral("network/mdns_discovery"), &value));
     QVERIFY(!value);
+}
+
+void TestStationConnectClientPolicy::omittedPortUsesBuiltInDefault()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+
+    const StationConnectClientPolicy policy(
+                directory.filePath(QStringLiteral("client.conf")));
+    QCOMPARE(policy.networkPort(), StationConnectClientPolicy::BuiltInNetworkPort);
+}
+
+void TestStationConnectClientPolicy::configuredPortIsReturned()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("client.conf"));
+    {
+        QSettings settings(path, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("network/port"), 31000);
+    }
+
+    const StationConnectClientPolicy policy(path);
+    QCOMPARE(policy.networkPort(), quint16(31000));
+}
+
+void TestStationConnectClientPolicy::invalidPortUsesBuiltInDefault()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("client.conf"));
+    {
+        QSettings settings(path, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("network/port"), 70000);
+    }
+
+    const StationConnectClientPolicy policy(path);
+    QCOMPARE(policy.networkPort(), StationConnectClientPolicy::BuiltInNetworkPort);
 }
 
 QTEST_APPLESS_MAIN(TestStationConnectClientPolicy)

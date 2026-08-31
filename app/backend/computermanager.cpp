@@ -1,5 +1,6 @@
 #include "computermanager.h"
 #include "nvhttp.h"
+#include "settings/stationconnectclientpolicy.h"
 
 #include <Limelight.h>
 #include <QtEndian>
@@ -21,7 +22,8 @@ bool parseManualAddress(const QString& address, NvAddress& manualAddress)
         return false;
     }
 
-    manualAddress = NvAddress(url.host(), url.port(DEFAULT_CONTROL_PORT));
+    const StationConnectClientPolicy policy;
+    manualAddress = NvAddress(url.host(), url.port(policy.networkPort()));
     return true;
 }
 
@@ -870,7 +872,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
     }
     else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
         // The user specified an IPv6 literal without URL escaping, so use the default port
-        addNewHost(NvAddress(address, DEFAULT_CONTROL_PORT), false);
+        addNewHost(NvAddress(address, StationConnectClientPolicy().networkPort()), false);
     }
     else {
         emit computerAddCompleted(false);

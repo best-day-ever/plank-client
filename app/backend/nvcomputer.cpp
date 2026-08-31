@@ -1,5 +1,6 @@
 #include "nvcomputer.h"
 #include "nvapp.h"
+#include "settings/stationconnectclientpolicy.h"
 #include "settings/streamingpreferences.h"
 #include "stationconnectnetwork.h"
 
@@ -114,17 +115,18 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
 
 NvComputer::NvComputer(QSettings& settings)
 {
+    const quint16 defaultPort = StationConnectClientPolicy().networkPort();
     this->name = settings.value(SER_NAME).toString();
     this->uuid = settings.value(SER_UUID).toString();
     this->hasCustomName = settings.value(SER_CUSTOMNAME).toBool();
     this->localAddress = NvAddress(settings.value(SER_LOCALADDR).toString(),
-                                   settings.value(SER_LOCALPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
+                                   settings.value(SER_LOCALPORT, QVariant(defaultPort)).toUInt());
     this->remoteAddress = NvAddress(settings.value(SER_REMOTEADDR).toString(),
-                                    settings.value(SER_REMOTEPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
+                                    settings.value(SER_REMOTEPORT, QVariant(defaultPort)).toUInt());
     this->ipv6Address = NvAddress(settings.value(SER_IPV6ADDR).toString(),
-                                  settings.value(SER_IPV6PORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
+                                  settings.value(SER_IPV6PORT, QVariant(defaultPort)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
-                                    settings.value(SER_MANUALPORT, QVariant(DEFAULT_CONTROL_PORT)).toUInt());
+                                    settings.value(SER_MANUALPORT, QVariant(defaultPort)).toUInt());
     this->stationConnectScalingMode = settings.value(
                 SER_SCALINGMODE, NvOutputTopology::ScaledSpanMode).toString();
     if (this->stationConnectScalingMode != NvOutputTopology::NativeScalingMode &&

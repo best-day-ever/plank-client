@@ -38,3 +38,19 @@ bool StationConnectClientPolicy::managedBoolean(const QString& key, bool* value)
 
     return true;
 }
+
+quint16 StationConnectClientPolicy::networkPort() const
+{
+    QSettings policy(m_ConfigPath, QSettings::IniFormat);
+    bool valid = false;
+    const int configuredPort = policy.value(
+                QStringLiteral("network/port"), BuiltInNetworkPort).toInt(&valid);
+    if (!valid || configuredPort < 1024 || configuredPort > 65535) {
+        qWarning() << "Invalid StationConnect network port" << configuredPort
+                   << "in" << m_ConfigPath << "- using"
+                   << BuiltInNetworkPort;
+        return BuiltInNetworkPort;
+    }
+
+    return static_cast<quint16>(configuredPort);
+}
