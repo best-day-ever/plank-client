@@ -319,5 +319,3 @@ void ComputerModel::handleComputerStateChanged(NvComputer* computer)
         emit dataChanged(createIndex(index, 0), createIndex(index, 0));
     }
 }
-
-#include "computermodel.moc"
