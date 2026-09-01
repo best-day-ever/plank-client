@@ -348,20 +348,31 @@ CenteredGridView {
         }
 
         ColumnLayout {
+            spacing: 8
+
             Label {
                 text: qsTr("Use your workstation operating-system account.")
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
+            Label {
+                text: qsTr("Username")
+                color: theme.textSecondary
+                Layout.fillWidth: true
+            }
             PlankTextField {
                 id: usernameField
-                placeholderText: qsTr("Username")
                 Layout.fillWidth: true
                 focus: true
             }
+            Label {
+                text: qsTr("Password")
+                color: theme.textSecondary
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+            }
             PlankTextField {
                 id: passwordField
-                placeholderText: qsTr("Password")
                 echoMode: TextInput.Password
                 Layout.fillWidth: true
                 Keys.onReturnPressed: loginDialog.accept()
