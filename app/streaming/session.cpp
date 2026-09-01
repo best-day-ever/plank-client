@@ -2637,12 +2637,14 @@ bool Session::startConnectionAsync(bool reconnecting,
 
                 constexpr int DecisionPollMs = 50;
                 m_ActiveSessionTakeoverDecision.store(0);
+                m_WaitingForActiveSessionTakeoverDecision.store(true);
                 emit activeSessionTakeoverRequested(
                             tr("This workstation already has an active PLANK session. Disconnect the existing client and continue?"));
                 while (m_ActiveSessionTakeoverDecision.load() == 0 &&
                        !m_ConnectionStartCancelled.load()) {
                     SDL_Delay(DecisionPollMs);
                 }
+                m_WaitingForActiveSessionTakeoverDecision.store(false);
                 if (m_ActiveSessionTakeoverDecision.exchange(0) != 1 ||
                         m_ConnectionStartCancelled.load()) {
                     qInfo() << "PLANK active-session takeover was cancelled";
@@ -2822,8 +2824,11 @@ void Session::cancelConnectionStart()
 void Session::respondToActiveSessionTakeover(bool takeOver)
 {
     int expected = 0;
-    m_ActiveSessionTakeoverDecision.compare_exchange_strong(
-                expected, takeOver ? 1 : -1);
+    if (m_ActiveSessionTakeoverDecision.compare_exchange_strong(
+                expected, takeOver ? 1 : -1)) {
+        qInfo() << "PLANK active-session takeover decision:"
+                << (takeOver ? "take over" : "cancel");
+    }
 }
 
 bool Session::beginPlankReconnect(
@@ -3107,14 +3112,20 @@ void Session::exec(QWindow* qtWindow)
         // to update the Qt UI to allow warning messages to display and
         // make sure that the Qt window can hide itself.
         while (!execThread.wait(10) && m_Window == nullptr) {
+            const bool allowUserInput =
+                    m_WaitingForSessionCleanup.load() ||
+                    m_WaitingForActiveSessionTakeoverDecision.load();
             QCoreApplication::processEvents(
-                        m_WaitingForSessionCleanup.load() ?
+                        allowUserInput ?
                             QEventLoop::AllEvents :
                             QEventLoop::ExcludeUserInputEvents);
             QCoreApplication::sendPostedEvents();
         }
+        const bool allowUserInput =
+                m_WaitingForSessionCleanup.load() ||
+                m_WaitingForActiveSessionTakeoverDecision.load();
         QCoreApplication::processEvents(
-                    m_WaitingForSessionCleanup.load() ?
+                    allowUserInput ?
                         QEventLoop::AllEvents :
                         QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
@@ -3163,8 +3174,11 @@ void Session::execInternal()
         // Kick off the async connection thread while we sit here and pump the event loop
         asyncConnThread.start();
         while (!asyncConnThread.wait(10)) {
+            const bool allowUserInput =
+                    m_WaitingForSessionCleanup.load() ||
+                    m_WaitingForActiveSessionTakeoverDecision.load();
             QCoreApplication::processEvents(
-                        m_WaitingForSessionCleanup.load() ?
+                        allowUserInput ?
                             QEventLoop::AllEvents :
                             QEventLoop::ExcludeUserInputEvents);
             QCoreApplication::sendPostedEvents();
