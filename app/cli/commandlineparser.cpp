@@ -112,7 +112,7 @@ public:
     #if defined(Q_OS_WIN32)
         UINT flags = MB_OK | MB_TOPMOST | MB_SETFOREGROUND;
         flags |= (type == Info ? MB_ICONINFORMATION : MB_ICONERROR);
-        QString title = "StationConnect";
+        QString title = "PLANK";
         MessageBoxW(nullptr, reinterpret_cast<const wchar_t *>(message.utf16()),
                     reinterpret_cast<const wchar_t *>(title.utf16()), flags);
     #endif
@@ -201,12 +201,12 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
     parser.setupCommonOptions();
     parser.setApplicationDescription(
         "\n"
-        "Starts StationConnect normally if no arguments are given.\n"
+        "Starts PLANK normally if no arguments are given.\n"
         "\n"
         "Available actions:\n"
         "  stream          Start a workstation session\n"
         "\n"
-        "See 'stationconnect-client <action> --help' for help of specific action."
+        "See 'plank-client <action> --help' for help of specific action."
     );
     parser.addPositionalArgument("action", "Action to execute", "<action>");
     parser.parse(args);
@@ -257,8 +257,8 @@ StreamCommandLineParser::StreamCommandLineParser()
 
 StreamCommandLineParser::~StreamCommandLineParser()
 {
-    m_StationConnectPassword.fill(QChar('\0'));
-    m_StationConnectPassword.clear();
+    m_PlankPassword.fill(QChar('\0'));
+    m_PlankPassword.clear();
 }
 
 void StreamCommandLineParser::parse(const QStringList &args, StreamingPreferences *preferences)
@@ -280,13 +280,13 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
     parser.addToggleOption("audio-on-host", "audio on host PC");
-    parser.addToggleOption("mute-on-focus-loss", "mute audio when Moonlight window loses focus");
+    parser.addToggleOption("mute-on-focus-loss", "mute audio when PLANK Client window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());
-    parser.addValueOption("stationconnect-user", "StationConnect workstation username");
-    parser.addFlagOption("stationconnect-password-stdin",
-                         "StationConnect password read from standard input");
+    parser.addValueOption("plank-user", "PLANK workstation username");
+    parser.addFlagOption("plank-password-stdin",
+                         "PLANK password read from standard input");
 
     if (!parser.parse(args)) {
         parser.showError(parser.errorText());
@@ -333,20 +333,20 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         preferences->captureSysKeysMode = mapValue(m_CaptureSysKeysModeMap, parser.getChoiceOptionValue("capture-system-keys"));
     }
 
-    const bool hasStationConnectUser = parser.isSet("stationconnect-user");
-    const bool hasStationConnectPassword = parser.isSet("stationconnect-password-stdin");
-    if (hasStationConnectUser != hasStationConnectPassword) {
-        parser.showError("--stationconnect-user and --stationconnect-password-stdin must be used together");
+    const bool hasPlankUser = parser.isSet("plank-user");
+    const bool hasPlankPassword = parser.isSet("plank-password-stdin");
+    if (hasPlankUser != hasPlankPassword) {
+        parser.showError("--plank-user and --plank-password-stdin must be used together");
     }
-    if (hasStationConnectUser) {
-        m_StationConnectUsername = parser.value("stationconnect-user");
-        if (m_StationConnectUsername.isEmpty()) {
-            parser.showError("StationConnect username must not be empty");
+    if (hasPlankUser) {
+        m_PlankUsername = parser.value("plank-user");
+        if (m_PlankUsername.isEmpty()) {
+            parser.showError("PLANK username must not be empty");
         }
 
         QFile passwordInput;
         if (!passwordInput.open(stdin, QIODevice::ReadOnly)) {
-            parser.showError("Unable to read the StationConnect password from standard input");
+            parser.showError("Unable to read the PLANK password from standard input");
         }
         QByteArray passwordBytes;
         {
@@ -361,9 +361,9 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
         }
         if (passwordBytes.isEmpty() || passwordBytes.size() > 4096) {
             passwordBytes.fill('\0');
-            parser.showError("StationConnect password must contain between 1 and 4096 bytes");
+            parser.showError("PLANK password must contain between 1 and 4096 bytes");
         }
-        m_StationConnectPassword = QString::fromUtf8(passwordBytes);
+        m_PlankPassword = QString::fromUtf8(passwordBytes);
         passwordBytes.fill('\0');
     }
 
@@ -394,12 +394,12 @@ QString StreamCommandLineParser::getAppName() const
     return m_AppName;
 }
 
-QString StreamCommandLineParser::getStationConnectUsername() const
+QString StreamCommandLineParser::getPlankUsername() const
 {
-    return m_StationConnectUsername;
+    return m_PlankUsername;
 }
 
-QString StreamCommandLineParser::takeStationConnectPassword()
+QString StreamCommandLineParser::takePlankPassword()
 {
-    return std::move(m_StationConnectPassword);
+    return std::move(m_PlankPassword);
 }

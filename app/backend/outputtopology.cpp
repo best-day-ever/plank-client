@@ -383,7 +383,7 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
                 .arg(display.nativeSize.width()).arg(display.nativeSize.height());
         if (!qualifiedVirtualModes().contains(mode)) {
             if (error != nullptr) {
-                *error = QStringLiteral("Client monitor resolution %1 is not a qualified StationConnect virtual mode.")
+                *error = QStringLiteral("Client monitor resolution %1 is not a qualified PLANK virtual mode.")
                         .arg(mode);
             }
             hostLayout.clear();

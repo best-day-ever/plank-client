@@ -1,8 +1,8 @@
 #include "nvcomputer.h"
 #include "nvapp.h"
-#include "settings/stationconnectclientpolicy.h"
+#include "settings/plankclientpolicy.h"
 #include "settings/streamingpreferences.h"
-#include "stationconnectnetwork.h"
+#include "planknetwork.h"
 
 #include <QCryptographicHash>
 #include <QJsonDocument>
@@ -21,22 +21,22 @@
 #define SER_IPV6PORT "ipv6port"
 #define SER_APPLIST "apps"
 #define SER_CUSTOMNAME "customname"
-#define SER_SCALINGMODE "stationconnect-scaling-mode"
-#define SER_HOSTLAYOUT "stationconnect-host-layout"
-#define SER_VIRTUALMODE1 "stationconnect-virtual-mode-1"
-#define SER_VIRTUALMODE2 "stationconnect-virtual-mode-2"
-#define SER_VIDEOPROFILE "stationconnect-video-profile"
-#define SER_CAPTURESOURCE "stationconnect-capture-source"
-#define SER_STATIONCONNECT_PROFILE_BITRATES "stationconnect-profile-bitrates-kbps"
-#define SER_OUTPUTTOPOLOGY "stationconnect-output-topology"
-#define SER_MANUALBOOKMARK "stationconnect-manual-bookmark"
-#define SER_SERVERUUID "stationconnect-server-uuid"
+#define SER_PLANK_SCALING_MODE "plank-scaling-mode"
+#define SER_HOSTLAYOUT "plank-host-layout"
+#define SER_VIRTUALMODE1 "plank-virtual-mode-1"
+#define SER_VIRTUALMODE2 "plank-virtual-mode-2"
+#define SER_VIDEOPROFILE "plank-video-profile"
+#define SER_CAPTURESOURCE "plank-capture-source"
+#define SER_PLANK_PROFILE_BITRATES "plank-profile-bitrates-kbps"
+#define SER_OUTPUTTOPOLOGY "plank-output-topology"
+#define SER_MANUALBOOKMARK "plank-manual-bookmark"
+#define SER_SERVERUUID "plank-server-uuid"
 
 namespace {
 QString manualBookmarkUuid(const NvAddress& address)
 {
     const QByteArray bookmarkKey = address.toString().toUtf8();
-    return QStringLiteral("stationconnect-bookmark-") +
+    return QStringLiteral("plank-bookmark-") +
             QString::fromLatin1(QCryptographicHash::hash(
                                     bookmarkKey, QCryptographicHash::Sha256).toHex().left(32));
 }
@@ -51,13 +51,13 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->hasCustomName = true;
     this->manualAddress = address;
     this->manualBookmark = true;
-    this->stationConnectVideoProfile = videoProfile;
-    this->stationConnectCaptureSource = captureSource;
-    this->stationConnectProfileBitratesKbps = profileBitratesKbps;
-    this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
-    this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
-    this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
-    this->stationConnectVirtualMode2 = QStringLiteral("1280x2160");
+    this->plankVideoProfile = videoProfile;
+    this->plankCaptureSource = captureSource;
+    this->plankProfileBitratesKbps = profileBitratesKbps;
+    this->plankScalingMode = NvOutputTopology::ScaledSpanMode;
+    this->plankHostLayout = NvOutputTopology::MatchClientHostLayout;
+    this->plankVirtualMode1 = QStringLiteral("3840x2160");
+    this->plankVirtualMode2 = QStringLiteral("1280x2160");
     this->state = CS_UNKNOWN;
     this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
@@ -91,11 +91,11 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         authorizationState = AS_UNKNOWN;
         state = CS_UNKNOWN;
         currentGameId = 0;
-        stationConnectAuthentication = false;
-        stationConnectHostMetadataVersion = 0;
-        stationConnectHostVersion.clear();
-        stationConnectTopologyVersion = 0;
-        stationConnectFeatureFlags = 0;
+        plankAuthentication = false;
+        plankHostMetadataVersion = 0;
+        plankHostVersion.clear();
+        plankTopologyVersion = 0;
+        plankFeatureFlags = 0;
         displayModes.clear();
         serverCodecModeSupport = 0;
         appVersion.clear();
@@ -103,19 +103,19 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
 
     name = nickname;
     hasCustomName = true;
-    stationConnectScalingMode = scalingMode;
-    stationConnectHostLayout = hostLayout;
-    stationConnectVirtualMode1 = virtualMode1;
-    stationConnectVirtualMode2 = virtualMode2;
-    stationConnectVideoProfile = videoProfile;
-    stationConnectCaptureSource = captureSource;
-    stationConnectProfileBitratesKbps = profileBitratesKbps;
+    plankScalingMode = scalingMode;
+    plankHostLayout = hostLayout;
+    plankVirtualMode1 = virtualMode1;
+    plankVirtualMode2 = virtualMode2;
+    plankVideoProfile = videoProfile;
+    plankCaptureSource = captureSource;
+    plankProfileBitratesKbps = profileBitratesKbps;
     return addressChanged;
 }
 
 NvComputer::NvComputer(QSettings& settings)
 {
-    const quint16 defaultPort = StationConnectClientPolicy().networkPort();
+    const quint16 defaultPort = PlankClientPolicy().networkPort();
     this->name = settings.value(SER_NAME).toString();
     this->uuid = settings.value(SER_UUID).toString();
     this->hasCustomName = settings.value(SER_CUSTOMNAME).toBool();
@@ -127,51 +127,51 @@ NvComputer::NvComputer(QSettings& settings)
                                   settings.value(SER_IPV6PORT, QVariant(defaultPort)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(defaultPort)).toUInt());
-    this->stationConnectScalingMode = settings.value(
-                SER_SCALINGMODE, NvOutputTopology::ScaledSpanMode).toString();
-    if (this->stationConnectScalingMode != NvOutputTopology::NativeScalingMode &&
-            this->stationConnectScalingMode != NvOutputTopology::ScaledSpanMode) {
-        this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
+    this->plankScalingMode = settings.value(
+                SER_PLANK_SCALING_MODE, NvOutputTopology::ScaledSpanMode).toString();
+    if (this->plankScalingMode != NvOutputTopology::NativeScalingMode &&
+            this->plankScalingMode != NvOutputTopology::ScaledSpanMode) {
+        this->plankScalingMode = NvOutputTopology::ScaledSpanMode;
     }
-    this->stationConnectHostLayout =
+    this->plankHostLayout =
             settings.value(SER_HOSTLAYOUT,
                            NvOutputTopology::MatchClientHostLayout).toString();
-    if (this->stationConnectHostLayout != NvOutputTopology::MatchClientHostLayout &&
-            this->stationConnectHostLayout != NvOutputTopology::PhysicalHostLayout &&
-            this->stationConnectHostLayout != NvOutputTopology::SingleHostLayout &&
-            this->stationConnectHostLayout != NvOutputTopology::DualHorizontalHostLayout) {
-        this->stationConnectHostLayout = NvOutputTopology::MatchClientHostLayout;
+    if (this->plankHostLayout != NvOutputTopology::MatchClientHostLayout &&
+            this->plankHostLayout != NvOutputTopology::PhysicalHostLayout &&
+            this->plankHostLayout != NvOutputTopology::SingleHostLayout &&
+            this->plankHostLayout != NvOutputTopology::DualHorizontalHostLayout) {
+        this->plankHostLayout = NvOutputTopology::MatchClientHostLayout;
     }
-    this->stationConnectVirtualMode1 =
+    this->plankVirtualMode1 =
             settings.value(SER_VIRTUALMODE1, QStringLiteral("3840x2160")).toString();
-    this->stationConnectVirtualMode2 =
+    this->plankVirtualMode2 =
             settings.value(SER_VIRTUALMODE2, QStringLiteral("1280x2160")).toString();
-    if (!NvOutputTopology::qualifiedVirtualModes().contains(this->stationConnectVirtualMode1)) {
-        this->stationConnectVirtualMode1 = QStringLiteral("3840x2160");
+    if (!NvOutputTopology::qualifiedVirtualModes().contains(this->plankVirtualMode1)) {
+        this->plankVirtualMode1 = QStringLiteral("3840x2160");
     }
-    if (!NvOutputTopology::qualifiedVirtualModes().contains(this->stationConnectVirtualMode2)) {
-        this->stationConnectVirtualMode2 = QStringLiteral("1280x2160");
+    if (!NvOutputTopology::qualifiedVirtualModes().contains(this->plankVirtualMode2)) {
+        this->plankVirtualMode2 = QStringLiteral("1280x2160");
     }
-    this->stationConnectVideoProfile = qBound(
-            static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
+    this->plankVideoProfile = qBound(
+            static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444),
             settings.value(SER_VIDEOPROFILE,
-                           static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444)).toInt(),
-            static_cast<int>(StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444));
-    this->stationConnectCaptureSource = qBound(
-            static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
+                           static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444)).toInt(),
+            static_cast<int>(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444));
+    this->plankCaptureSource = qBound(
+            static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT),
             settings.value(SER_CAPTURESOURCE,
-                           static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT)).toInt(),
-            static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10));
-    if (!StreamingPreferences::isStationConnectProfileValidForCaptureSource(
-                this->stationConnectVideoProfile,
-                this->stationConnectCaptureSource)) {
-        this->stationConnectVideoProfile = StreamingPreferences::SCVP_H264_10BIT_444;
+                           static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT)).toInt(),
+            static_cast<int>(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10));
+    if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
+                this->plankVideoProfile,
+                this->plankCaptureSource)) {
+        this->plankVideoProfile = StreamingPreferences::PLANK_PROFILE_H264_10BIT_444;
     }
-    if (!StreamingPreferences::stationConnectProfileBitratesFromVariantList(
-                settings.value(SER_STATIONCONNECT_PROFILE_BITRATES).toList(),
-                this->stationConnectProfileBitratesKbps)) {
-        this->stationConnectProfileBitratesKbps =
-                StreamingPreferences::stationConnectDefaultProfileBitrates();
+    if (!StreamingPreferences::plankProfileBitratesFromVariantList(
+                settings.value(SER_PLANK_PROFILE_BITRATES).toList(),
+                this->plankProfileBitratesKbps)) {
+        this->plankProfileBitratesKbps =
+                StreamingPreferences::plankDefaultProfileBitrates();
     }
     this->manualBookmark = settings.value(SER_MANUALBOOKMARK, false).toBool();
     this->serverUuid = settings.value(SER_SERVERUUID).toString();
@@ -198,11 +198,11 @@ NvComputer::NvComputer(QSettings& settings)
     this->appVersion = nullptr;
     this->serverCodecModeSupport = 0;
     this->externalPort = this->remoteAddress.port();
-    this->stationConnectAuthentication = false;
-    this->stationConnectHostMetadataVersion = 0;
-    this->stationConnectHostVersion.clear();
-    this->stationConnectTopologyVersion = 0;
-    this->stationConnectFeatureFlags = 0;
+    this->plankAuthentication = false;
+    this->plankHostMetadataVersion = 0;
+    this->plankHostVersion.clear();
+    this->plankTopologyVersion = 0;
+    this->plankFeatureFlags = 0;
     this->sessionToken.clear();
 }
 
@@ -222,16 +222,16 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_MANUALADDR, manualAddress.address());
     settings.setValue(SER_MANUALPORT, manualAddress.port());
     settings.remove("srvcert");
-    settings.setValue(SER_SCALINGMODE, stationConnectScalingMode);
-    settings.setValue(SER_HOSTLAYOUT, stationConnectHostLayout);
-    settings.setValue(SER_VIRTUALMODE1, stationConnectVirtualMode1);
-    settings.setValue(SER_VIRTUALMODE2, stationConnectVirtualMode2);
-    settings.setValue(SER_VIDEOPROFILE, stationConnectVideoProfile);
-    settings.setValue(SER_CAPTURESOURCE, stationConnectCaptureSource);
+    settings.setValue(SER_PLANK_SCALING_MODE, plankScalingMode);
+    settings.setValue(SER_HOSTLAYOUT, plankHostLayout);
+    settings.setValue(SER_VIRTUALMODE1, plankVirtualMode1);
+    settings.setValue(SER_VIRTUALMODE2, plankVirtualMode2);
+    settings.setValue(SER_VIDEOPROFILE, plankVideoProfile);
+    settings.setValue(SER_CAPTURESOURCE, plankCaptureSource);
     settings.setValue(
-                SER_STATIONCONNECT_PROFILE_BITRATES,
-                StreamingPreferences::stationConnectProfileBitratesToVariantList(
-                    stationConnectProfileBitratesKbps));
+                SER_PLANK_PROFILE_BITRATES,
+                StreamingPreferences::plankProfileBitratesToVariantList(
+                    plankProfileBitratesKbps));
     settings.setValue(SER_MANUALBOOKMARK, manualBookmark);
     settings.setValue(SER_SERVERUUID, serverUuid);
     if (!outputTopology.outputs.isEmpty()) {
@@ -262,14 +262,14 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->remoteAddress == that.remoteAddress &&
            this->ipv6Address == that.ipv6Address &&
            this->manualAddress == that.manualAddress &&
-           this->stationConnectScalingMode == that.stationConnectScalingMode &&
-           this->stationConnectHostLayout == that.stationConnectHostLayout &&
-           this->stationConnectVirtualMode1 == that.stationConnectVirtualMode1 &&
-           this->stationConnectVirtualMode2 == that.stationConnectVirtualMode2 &&
-           this->stationConnectVideoProfile == that.stationConnectVideoProfile &&
-           this->stationConnectCaptureSource == that.stationConnectCaptureSource &&
-           this->stationConnectProfileBitratesKbps ==
-               that.stationConnectProfileBitratesKbps &&
+           this->plankScalingMode == that.plankScalingMode &&
+           this->plankHostLayout == that.plankHostLayout &&
+           this->plankVirtualMode1 == that.plankVirtualMode1 &&
+           this->plankVirtualMode2 == that.plankVirtualMode2 &&
+           this->plankVideoProfile == that.plankVideoProfile &&
+           this->plankCaptureSource == that.plankCaptureSource &&
+           this->plankProfileBitratesKbps ==
+               that.plankProfileBitratesKbps &&
            this->manualBookmark == that.manualBookmark &&
            this->serverUuid == that.serverUuid &&
            this->outputTopology.toJson() == that.outputTopology.toJson() &&
@@ -286,7 +286,7 @@ void NvComputer::sortAppList()
 NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 {
     this->manualBookmark = false;
-    this->stationConnectScalingMode = NvOutputTopology::ScaledSpanMode;
+    this->plankScalingMode = NvOutputTopology::ScaledSpanMode;
 
     this->hasCustomName = false;
     this->name = NvHTTP::getXmlString(serverInfo, "hostname");
@@ -321,7 +321,7 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     if (!advertisedControlPort.isEmpty() &&
             advertisedControlPort.toUShort() != http.controlPort()) {
         throw GfeHttpResponseException(
-                    400, "Host advertised a different StationConnect control port");
+                    400, "Host advertised a different PLANK control port");
     }
 
     // This is an extension which is not present in GFE. It is present for Sunshine to be able
@@ -339,16 +339,16 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
         this->remoteAddress = NvAddress();
     }
 
-    this->stationConnectAuthentication =
-            NvHTTP::getXmlString(serverInfo, "StationConnectAuth") == "1";
-    this->stationConnectHostMetadataVersion =
-            NvHTTP::getXmlString(serverInfo, "StationConnectHostMetadataVersion").toInt();
-    this->stationConnectHostVersion =
-            NvHTTP::getXmlString(serverInfo, "StationConnectHostVersion");
-    this->stationConnectTopologyVersion =
-            NvHTTP::getXmlString(serverInfo, "StationConnectTopologyVersion").toInt();
-    this->stationConnectFeatureFlags =
-            NvHTTP::getXmlString(serverInfo, "StationConnectFeatureFlags").toInt();
+    this->plankAuthentication =
+            NvHTTP::getXmlString(serverInfo, "PlankAuth") == "1";
+    this->plankHostMetadataVersion =
+            NvHTTP::getXmlString(serverInfo, "PlankHostMetadataVersion").toInt();
+    this->plankHostVersion =
+            NvHTTP::getXmlString(serverInfo, "PlankHostVersion");
+    this->plankTopologyVersion =
+            NvHTTP::getXmlString(serverInfo, "PlankTopologyVersion").toInt();
+    this->plankFeatureFlags =
+            NvHTTP::getXmlString(serverInfo, "PlankFeatureFlags").toInt();
     this->authorizationState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
                 AS_AUTHORIZED : AS_UNAUTHORIZED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
@@ -407,7 +407,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability(
                     }
                     qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
 
-                    if (StationConnectNetwork::isZeroTierInterface(nic.name(),
+                    if (PlankNetwork::isZeroTierInterface(nic.name(),
                                                                    nic.humanReadableName())) {
                         // Identify ZeroTier before broader virtual/VPN
                         // heuristics so its qualified encapsulation budget is
@@ -593,12 +593,12 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
     ASSIGN_IF_CHANGED_AND_NONNULL(ipv6Address);
     ASSIGN_IF_CHANGED_AND_NONNULL(manualAddress);
     ASSIGN_IF_CHANGED(externalPort);
-    ASSIGN_IF_CHANGED(stationConnectAuthentication);
-    ASSIGN_IF_CHANGED(stationConnectHostMetadataVersion);
-    ASSIGN_IF_CHANGED(stationConnectHostVersion);
-    ASSIGN_IF_CHANGED(stationConnectTopologyVersion);
-    ASSIGN_IF_CHANGED(stationConnectFeatureFlags);
-    if (stationConnectAuthentication && sessionToken.isEmpty()) {
+    ASSIGN_IF_CHANGED(plankAuthentication);
+    ASSIGN_IF_CHANGED(plankHostMetadataVersion);
+    ASSIGN_IF_CHANGED(plankHostVersion);
+    ASSIGN_IF_CHANGED(plankTopologyVersion);
+    ASSIGN_IF_CHANGED(plankFeatureFlags);
+    if (plankAuthentication && sessionToken.isEmpty()) {
         if (authorizationState != AS_UNAUTHORIZED) {
             authorizationState = AS_UNAUTHORIZED;
             changed = true;

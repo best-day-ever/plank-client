@@ -21,7 +21,7 @@ public:
     Q_PROPERTY(QString friendlyNativeArchName MEMBER friendlyNativeArchName CONSTANT)
     Q_PROPERTY(bool hasDesktopEnvironment MEMBER hasDesktopEnvironment CONSTANT)
     Q_PROPERTY(QSize maximumResolution MEMBER maximumResolution CONSTANT)
-    Q_PROPERTY(QString stationConnectVersionString MEMBER stationConnectVersionString CONSTANT)
+    Q_PROPERTY(QString plankVersionString MEMBER plankVersionString CONSTANT)
     Q_PROPERTY(bool usesMaterial3Theme MEMBER usesMaterial3Theme CONSTANT)
 
     Q_INVOKABLE void refreshDisplays();
@@ -45,6 +45,6 @@ private:
     QList<QRect> monitorNativeResolutions;
     QList<QRect> monitorSafeAreaResolutions;
     QList<int> monitorRefreshRates;
-    QString stationConnectVersionString;
+    QString plankVersionString;
     bool usesMaterial3Theme;
 };

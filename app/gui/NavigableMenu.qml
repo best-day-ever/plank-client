@@ -5,7 +5,7 @@ Menu {
     id: control
     property var initiator
 
-    StationConnectTheme {
+    PlankTheme {
         id: theme
     }
 

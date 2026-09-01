@@ -9,26 +9,26 @@
 #include <thread>
 #include <vector>
 
-enum class StationConnectWacomTransport
+enum class PlankWacomTransport
 {
     ExactRawHid,
     NormalizedPen,
 };
 
-struct StationConnectWacomTransportDecision
+struct PlankWacomTransportDecision
 {
-    StationConnectWacomTransport transport;
+    PlankWacomTransport transport;
     std::uint32_t vendor;
     std::uint32_t product;
 };
 
-constexpr StationConnectWacomTransport stationConnectWacomTransportForUsbDevice(
+constexpr PlankWacomTransport plankWacomTransportForUsbDevice(
         std::uint32_t vendor, std::uint32_t product)
 {
     constexpr std::uint32_t WacomVendorId = 0x056a;
 
     if (vendor != WacomVendorId) {
-        return StationConnectWacomTransport::ExactRawHid;
+        return PlankWacomTransport::ExactRawHid;
     }
 
     // The first-generation Intuos Pro S/M/L devices require the real USB
@@ -39,13 +39,13 @@ constexpr StationConnectWacomTransport stationConnectWacomTransportForUsbDevice(
     case 0x0314: // PTH-451
     case 0x0315: // PTH-651
     case 0x0317: // PTH-851
-        return StationConnectWacomTransport::NormalizedPen;
+        return PlankWacomTransport::NormalizedPen;
     default:
-        return StationConnectWacomTransport::ExactRawHid;
+        return PlankWacomTransport::ExactRawHid;
     }
 }
 
-StationConnectWacomTransportDecision stationConnectWacomTransportForConnectedDevice();
+PlankWacomTransportDecision plankWacomTransportForConnectedDevice();
 
 class LinuxRawWacomInput
 {

@@ -1,9 +1,9 @@
 #include "session.h"
-#include "backend/stationconnectnetwork.h"
+#include "backend/planknetwork.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/avsynccontroller.h"
-#include "streaming/stationconnectdisplaymode.h"
-#include "streaming/stationconnecttoolbar.h"
+#include "streaming/plankdisplaymode.h"
+#include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
@@ -41,12 +41,12 @@
 
 
 #define SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER 100
-#define SDL_CODE_STATIONCONNECT_RECONNECT 105
-#define SDL_CODE_STATIONCONNECT_BITRATE_APPLIED 106
-#define SDL_CODE_STATIONCONNECT_CURSOR 107
-#define SDL_CODE_STATIONCONNECT_TABLET_CURSOR 108
-#define SDL_CODE_STATIONCONNECT_CURSOR_POSITION 109
-#define SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE 110
+#define SDL_CODE_PLANK_RECONNECT 105
+#define SDL_CODE_PLANK_BITRATE_APPLIED 106
+#define SDL_CODE_PLANK_CURSOR 107
+#define SDL_CODE_PLANK_TABLET_CURSOR 108
+#define SDL_CODE_PLANK_CURSOR_POSITION 109
+#define SDL_CODE_PLANK_REPLANK_COMPLETE 110
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -63,11 +63,11 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 
-#ifdef STATIONCONNECT_DATASMASH
-#include "stationconnect_datasmash.h"
-#include "stationconnect_datasmash_control.h"
-#include "stationconnect_datasmash_event.h"
-#include "stationconnect_datasmash_setup.h"
+#ifdef PLANK_TRANSPORT
+#include "plank_transport.h"
+#include "plank_transport_control.h"
+#include "plank_transport_event.h"
+#include "plank_transport_setup.h"
 #endif
 
 #include <algorithm>
@@ -111,7 +111,7 @@ void Session::clStageFailed(int stage, int errorCode)
 {
     if (s_ActiveSession->m_Reconnecting.load()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect reconnect stage failed: %s (%d)",
+                    "PLANK reconnect stage failed: %s (%d)",
                     LiGetStageName(stage), errorCode);
         return;
     }
@@ -129,23 +129,23 @@ void Session::clStageFailed(int stage, int errorCode)
 
 void Session::clConnectionTerminated(int errorCode)
 {
-    if (s_ActiveSession->m_Computer->stationConnectAuthentication &&
+    if (s_ActiveSession->m_Computer->plankAuthentication &&
             s_ActiveSession->m_CanReconnect.load() &&
             !s_ActiveSession->m_Reconnecting.load() &&
             !s_ActiveSession->m_ReconnectRequested.exchange(true)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect transport ended (%d); starting responsive reconnect",
+                    "PLANK transport ended (%d); starting responsive reconnect",
                     errorCode);
         SDL_Event event = {};
         event.type = SDL_EVENT_USER;
-        event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT;
+        event.user.code = SDL_CODE_PLANK_RECONNECT;
         SDL_PushEvent(&event);
         return;
     }
 
     if (s_ActiveSession->m_Reconnecting.load()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect reconnect attempt ended: %d", errorCode);
+                    "PLANK reconnect attempt ended: %d", errorCode);
         return;
     }
 
@@ -274,7 +274,7 @@ void Session::clVideoBitrateApplied(
 
     SDL_Event event = {};
     event.type = SDL_EVENT_USER;
-    event.user.code = SDL_CODE_STATIONCONNECT_BITRATE_APPLIED;
+    event.user.code = SDL_CODE_PLANK_BITRATE_APPLIED;
     SDL_PushEvent(&event);
 }
 
@@ -286,7 +286,7 @@ void Session::clCursorChunk(const unsigned char* data, unsigned int length)
     if (s_ActiveSession->m_InputHandler->handleRemoteCursorChunk(data, length)) {
         SDL_Event event = {};
         event.type = SDL_EVENT_USER;
-        event.user.code = SDL_CODE_STATIONCONNECT_CURSOR;
+        event.user.code = SDL_CODE_PLANK_CURSOR;
         SDL_PushEvent(&event);
     }
 }
@@ -299,7 +299,7 @@ void Session::clCursorPosition(const unsigned char* data, unsigned int length)
     if (s_ActiveSession->m_InputHandler->handleRemoteCursorPosition(data, length)) {
         SDL_Event event = {};
         event.type = SDL_EVENT_USER;
-        event.user.code = SDL_CODE_STATIONCONNECT_CURSOR_POSITION;
+        event.user.code = SDL_CODE_PLANK_CURSOR_POSITION;
         SDL_PushEvent(&event);
     }
 }
@@ -308,7 +308,7 @@ void Session::postTabletCursorActivationEvent()
 {
     SDL_Event event = {};
     event.type = SDL_EVENT_USER;
-    event.user.code = SDL_CODE_STATIONCONNECT_TABLET_CURSOR;
+    event.user.code = SDL_CODE_PLANK_TABLET_CURSOR;
     SDL_PushEvent(&event);
 }
 
@@ -355,7 +355,7 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
     params.videoFormat = videoFormat;
     params.window = window;
     params.enableVsync = enableVsync;
-    // StationConnect is a latency-first Wayland workstation client. Keep the
+    // PLANK is a latency-first Wayland workstation client. Keep the
     // optional software pacer disabled; renderers may still force pacing when
     // their backend requires it for correctness.
     params.enableFramePacing = false;
@@ -443,8 +443,8 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
                         "8-bit HEVC 4:4:4 -> 8-bit RGB identity presentation");
         }
         else {
-            const bool native10 = s_ActiveSession->m_StationConnectCaptureSource ==
-                    StreamingPreferences::SCCS_X11_NATIVE10;
+            const bool native10 = s_ActiveSession->m_PlankCaptureSource ==
+                    StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10;
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Video precision: %s -> 10-bit %s 4:4:4 -> "
                         "10-bit RGB identity presentation",
@@ -578,11 +578,11 @@ bool Session::populateDecoderProperties(SDL_Window* window)
                        m_StreamConfig.fps,
                        false, true, decoder,
                        isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()),
-                       m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
+                       m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
                            DecoderCaptureSource::NativeX11_10Bit :
                            DecoderCaptureSource::Nvfbc8Bit,
-                       StreamingPreferences::isStationConnectNvencProfile(
-                           m_StationConnectVideoProfile) ?
+                       StreamingPreferences::isPlankNvencProfile(
+                           m_PlankVideoProfile) ?
                            DecoderEncoderBackend::NvencDirect :
                            DecoderEncoderBackend::SoftwareCuda)) {
         return false;
@@ -636,18 +636,18 @@ Session::Session(NvComputer* computer, NvApp& app,
     : m_Preferences(preferences ? preferences : StreamingPreferences::get()),
       m_IsFullScreen(m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED || !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer),
-      m_StationConnectVideoProfile(static_cast<StreamingPreferences::StationConnectVideoProfile>(
-              qBound(static_cast<int>(StreamingPreferences::SCVP_H264_10BIT_444),
-                     computer->stationConnectVideoProfile,
-                     static_cast<int>(StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444)))),
-      m_StationConnectCaptureSource(static_cast<StreamingPreferences::StationConnectCaptureSource>(
-              qBound(static_cast<int>(StreamingPreferences::SCCS_NVFBC_8BIT),
-                     computer->stationConnectCaptureSource,
-                     static_cast<int>(StreamingPreferences::SCCS_X11_NATIVE10)))),
-      m_StationConnectBitrateKbps(
-              StreamingPreferences::stationConnectBitrateForProfile(
-                  computer->stationConnectProfileBitratesKbps,
-                  computer->stationConnectVideoProfile)),
+      m_PlankVideoProfile(static_cast<StreamingPreferences::PlankVideoProfile>(
+              qBound(static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444),
+                     computer->plankVideoProfile,
+                     static_cast<int>(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444)))),
+      m_PlankCaptureSource(static_cast<StreamingPreferences::PlankCaptureSource>(
+              qBound(static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT),
+                     computer->plankCaptureSource,
+                     static_cast<int>(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10)))),
+      m_PlankBitrateKbps(
+              StreamingPreferences::plankBitrateForProfile(
+                  computer->plankProfileBitratesKbps,
+                  computer->plankVideoProfile)),
       m_ComputerManager(computerManager),
       m_App(app),
       m_Window(nullptr),
@@ -671,24 +671,24 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_AudioSampleCount(0),
       m_DropAudioEndTime(0),
       m_AudioMediaFramesReceived(0),
-      m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("STATIONCONNECT_AV_SYNC_TELEMETRY") > 0),
+      m_AvSyncTelemetryEnabled(qEnvironmentVariableIntValue("PLANK_AV_SYNC_TELEMETRY") > 0),
       m_LastAudioTelemetryTime(0),
       m_CurrentRenderedFps(0.0f),
       m_CurrentVideoMbps(0.0f),
       m_CurrentVideoPacketLossPercent(-1.0f),
       m_CurrentNetworkRttMs(0)
 {
-    if (m_Computer->stationConnectAuthentication) {
+    if (m_Computer->plankAuthentication) {
         if (m_ComputerManager != nullptr) {
-            m_ComputerManager->takeStationConnectReconnectCredentials(
-                        m_Computer, m_StationConnectUsername,
-                        m_StationConnectPassword);
-            m_CanReconnect.store(!m_StationConnectUsername.isEmpty() &&
-                                 !m_StationConnectPassword.isEmpty());
+            m_ComputerManager->takePlankReconnectCredentials(
+                        m_Computer, m_PlankUsername,
+                        m_PlankPassword);
+            m_CanReconnect.store(!m_PlankUsername.isEmpty() &&
+                                 !m_PlankPassword.isEmpty());
         }
-        StationConnectAvSync::resetVideoClock();
+        PlankAvSync::resetVideoClock();
 
-        // StationConnect is a qualified workstation protocol, not a generic
+        // PLANK is a qualified workstation protocol, not a generic
         // game-streaming profile. Its stream size is selected after SDL video
         // initialization from the target client display or explicit override.
         // The bookmark owns one startup encoder target for each exact encoding
@@ -696,14 +696,14 @@ Session::Session(NvComputer* computer, NvApp& app,
         // never writes changes back to the bookmark.
         m_Preferences->fps = 60;
         m_Preferences->identityGbrBitDepth =
-                (m_StationConnectVideoProfile ==
-                     StreamingPreferences::SCVP_H264_8BIT_422 ||
-                 m_StationConnectVideoProfile ==
-                     StreamingPreferences::SCVP_H264_8BIT_444 ||
-                 m_StationConnectVideoProfile ==
-                     StreamingPreferences::SCVP_NVENC_H264_8BIT_444 ||
-                 m_StationConnectVideoProfile ==
-                     StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444) ? 8 : 10;
+                (m_PlankVideoProfile ==
+                     StreamingPreferences::PLANK_PROFILE_H264_8BIT_422 ||
+                 m_PlankVideoProfile ==
+                     StreamingPreferences::PLANK_PROFILE_H264_8BIT_444 ||
+                 m_PlankVideoProfile ==
+                     StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444 ||
+                 m_PlankVideoProfile ==
+                     StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444) ? 8 : 10;
         // Decoder selection is internal and exact-profile constrained. Hardware
         // is accepted only after a test frame proves the requested bit depth,
         // chroma sampling, and identity mapping; otherwise the same profile
@@ -713,23 +713,23 @@ Session::Session(NvComputer* computer, NvApp& app,
 
 Session::~Session()
 {
-    stopDatasmashDataPlane();
-    clearStationConnectReconnectCredentials();
+    stopPlankTransportDataPlane();
+    clearPlankReconnectCredentials();
 }
 
-bool Session::startDatasmashDataPlane(quint16 port,
+bool Session::startPlankTransportDataPlane(quint16 port,
                                       const QString& certificateSha256,
                                       const QString& token,
                                       quint16 quicUdpPayloadMtu)
 {
-#ifndef STATIONCONNECT_DATASMASH
+#ifndef PLANK_TRANSPORT
     Q_UNUSED(port)
     Q_UNUSED(certificateSha256)
     Q_UNUSED(token)
     Q_UNUSED(quicUdpPayloadMtu)
     return false;
 #else
-    stopDatasmashDataPlane();
+    stopPlankTransportDataPlane();
 
     QHostAddress remoteHost(m_Computer->activeAddress.address());
     if (remoteHost.isNull()) {
@@ -746,7 +746,7 @@ bool Session::startDatasmashDataPlane(quint16 port,
         }
     }
     if (remoteHost.isNull()) {
-        qWarning() << "Unable to resolve the experimental datasmash endpoint";
+        qWarning() << "Unable to resolve the PLANK transport endpoint";
         return false;
     }
 
@@ -754,14 +754,14 @@ bool Session::startDatasmashDataPlane(quint16 port,
                 QStringLiteral("[%1]:%2").arg(remoteHost.toString()).arg(port) :
                 QStringLiteral("%1:%2").arg(remoteHost.toString()).arg(port);
     const QByteArray remoteAddressUtf8 = remoteAddress.toUtf8();
-    const QByteArray serverNameUtf8("stationconnect");
+    const QByteArray serverNameUtf8("plank");
     const QByteArray certificateUtf8 = certificateSha256.toLatin1();
     const QByteArray tokenUtf8 = token.toLatin1();
 
-    ScDatasmashConfig config {};
+    PlankTransportConfig config {};
     config.struct_size = sizeof(config);
-    config.abi_version = SC_DATASMASH_ABI_VERSION;
-    config.mode = SC_DATASMASH_MODE_CLIENT;
+    config.abi_version = PLANK_TRANSPORT_ABI_VERSION;
+    config.mode = PLANK_TRANSPORT_MODE_CLIENT;
     config.handshake_timeout_ms = 10000;
     config.idle_timeout_ms = 30000;
     config.keep_alive_interval_ms = 5000;
@@ -773,46 +773,46 @@ bool Session::startDatasmashDataPlane(quint16 port,
     config.certificate_sha256 = certificateUtf8.constData();
     config.session_token = tokenUtf8.constData();
 
-    ScDatasmashNativeEndpoint* endpoint = nullptr;
-    int result = sc_datasmash_native_endpoint_create(&config, &endpoint);
-    if (result == SC_DATASMASH_OK) {
-        result = sc_datasmash_native_endpoint_start(endpoint);
+    PlankTransportNativeEndpoint* endpoint = nullptr;
+    int result = plank_transport_native_endpoint_create(&config, &endpoint);
+    if (result == PLANK_TRANSPORT_OK) {
+        result = plank_transport_native_endpoint_start(endpoint);
     }
-    if (result == SC_DATASMASH_OK) {
-        result = sc_datasmash_native_endpoint_wait_ready(endpoint, 12000);
+    if (result == PLANK_TRANSPORT_OK) {
+        result = plank_transport_native_endpoint_wait_ready(endpoint, 12000);
     }
-    if (result != SC_DATASMASH_OK) {
+    if (result != PLANK_TRANSPORT_OK) {
         QByteArray error(512, '\0');
         if (endpoint != nullptr) {
-            sc_datasmash_native_endpoint_last_error(
+            plank_transport_native_endpoint_last_error(
                         endpoint, error.data(), static_cast<size_t>(error.size()));
-            sc_datasmash_native_endpoint_stop(endpoint);
-            sc_datasmash_native_endpoint_destroy(endpoint);
+            plank_transport_native_endpoint_stop(endpoint);
+            plank_transport_native_endpoint_destroy(endpoint);
         }
-        qWarning() << "Experimental datasmash handshake failed:" << error.constData();
+        qWarning() << "Experimental plank_transport handshake failed:" << error.constData();
         return false;
     }
 
-    m_DatasmashEndpoint = endpoint;
-    LiSetStationConnectNativeControlSender(
-                &Session::datasmashNativeControlSender, endpoint);
-    LiSetStationConnectNativeInputSender(
-                &Session::datasmashNativeInputSender, endpoint);
+    m_PlankTransportEndpoint = endpoint;
+    LiSetPlankNativeControlSender(
+                &Session::plankTransportNativeControlSender, endpoint);
+    LiSetPlankNativeInputSender(
+                &Session::plankTransportNativeInputSender, endpoint);
     qInfo() << "Experimental native KyProto media, input, and data protocols are ready on UDP"
             << port;
     return true;
 #endif
 }
 
-bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessage)
+bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& errorMessage)
 {
-#ifndef STATIONCONNECT_DATASMASH
+#ifndef PLANK_TRANSPORT
     Q_UNUSED(sessionPort)
-    errorMessage = tr("Native StationConnect session negotiation is unavailable.");
+    errorMessage = tr("Native PLANK session negotiation is unavailable.");
     return false;
 #else
-    if (m_DatasmashEndpoint == nullptr) {
-        errorMessage = tr("The native StationConnect transport is not connected.");
+    if (m_PlankTransportEndpoint == nullptr) {
+        errorMessage = tr("The native PLANK transport is not connected.");
         return false;
     }
 
@@ -841,7 +841,7 @@ bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessa
         tenBit = true;
         break;
     default:
-        errorMessage = tr("The selected StationConnect video profile has no native negotiation mapping.");
+        errorMessage = tr("The selected PLANK video profile has no native negotiation mapping.");
         return false;
     }
 
@@ -895,37 +895,37 @@ bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessa
     };
     const QByteArray payload = QJsonDocument(request).toJson(QJsonDocument::Compact);
     std::vector<unsigned char> packet(
-                SC_DATASMASH_SETUP_HEADER_SIZE + static_cast<size_t>(payload.size()));
+                PLANK_TRANSPORT_SETUP_HEADER_SIZE + static_cast<size_t>(payload.size()));
     size_t packetSize = 0;
     constexpr uint32_t RequestId = 1;
-    if (sc_datasmash_setup_encode(
-                SC_DATASMASH_SETUP_LAUNCH_REQUEST, 0,
-                SC_DATASMASH_SETUP_STATUS_OK, RequestId,
+    if (plank_transport_setup_encode(
+                PLANK_TRANSPORT_SETUP_LAUNCH_REQUEST, 0,
+                PLANK_TRANSPORT_SETUP_STATUS_OK, RequestId,
                 reinterpret_cast<const uint8_t*>(payload.constData()),
                 static_cast<size_t>(payload.size()),
                 packet.data(), packet.size(), &packetSize) != 0 ||
-            sc_datasmash_native_data_send(
-                m_DatasmashEndpoint, packet.data(), packetSize) !=
-                SC_DATASMASH_OK) {
-        errorMessage = tr("The native StationConnect launch request could not be sent.");
+            plank_transport_native_data_send(
+                m_PlankTransportEndpoint, packet.data(), packetSize) !=
+                PLANK_TRANSPORT_OK) {
+        errorMessage = tr("The native PLANK launch request could not be sent.");
         return false;
     }
 
-    packet.resize(SC_DATASMASH_SETUP_MAX_PACKET_SIZE);
+    packet.resize(PLANK_TRANSPORT_SETUP_MAX_PACKET_SIZE);
     packetSize = 0;
-    if (sc_datasmash_native_data_receive(
-                m_DatasmashEndpoint, packet.data(), packet.size(),
-                &packetSize, 12000) != SC_DATASMASH_OK) {
+    if (plank_transport_native_data_receive(
+                m_PlankTransportEndpoint, packet.data(), packet.size(),
+                &packetSize, 12000) != PLANK_TRANSPORT_OK) {
         errorMessage = tr("The host did not complete native session negotiation.");
         return false;
     }
 
-    ScDatasmashSetupPacket responsePacket {};
-    if (sc_datasmash_setup_decode(packet.data(), packetSize, &responsePacket) != 0 ||
+    PlankTransportSetupPacket responsePacket {};
+    if (plank_transport_setup_decode(packet.data(), packetSize, &responsePacket) != 0 ||
             responsePacket.request_id != RequestId ||
-            (responsePacket.flags & SC_DATASMASH_SETUP_FLAG_RESPONSE) == 0 ||
-            (responsePacket.type != SC_DATASMASH_SETUP_LAUNCH_RESPONSE &&
-             responsePacket.type != SC_DATASMASH_SETUP_ERROR)) {
+            (responsePacket.flags & PLANK_TRANSPORT_SETUP_FLAG_RESPONSE) == 0 ||
+            (responsePacket.type != PLANK_TRANSPORT_SETUP_LAUNCH_RESPONSE &&
+             responsePacket.type != PLANK_TRANSPORT_SETUP_ERROR)) {
         errorMessage = tr("The host returned an invalid native session response.");
         return false;
     }
@@ -941,8 +941,8 @@ bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessa
         return false;
     }
     const QJsonObject response = responseDocument.object();
-    if (responsePacket.status != SC_DATASMASH_SETUP_STATUS_OK ||
-            responsePacket.type == SC_DATASMASH_SETUP_ERROR) {
+    if (responsePacket.status != PLANK_TRANSPORT_SETUP_STATUS_OK ||
+            responsePacket.type == PLANK_TRANSPORT_SETUP_ERROR) {
         const QString hostMessage = response.value(QStringLiteral("message")).toString();
         errorMessage = hostMessage.isEmpty() ?
                     tr("The host rejected native session negotiation.") : hostMessage;
@@ -976,7 +976,7 @@ bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessa
         return false;
     }
 
-    STATIONCONNECT_NATIVE_SESSION_CONFIGURATION nativeConfiguration {};
+    PLANK_NATIVE_SESSION_CONFIGURATION nativeConfiguration {};
     nativeConfiguration.structSize = sizeof(nativeConfiguration);
     nativeConfiguration.negotiatedVideoFormat = responseVideoFormat;
     nativeConfiguration.hostFeatureFlags =
@@ -998,8 +998,8 @@ bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessa
         nativeConfiguration.opusConfiguration.mapping[index] =
                 static_cast<unsigned char>(channel);
     }
-    if (LiSetStationConnectNativeSessionConfiguration(&nativeConfiguration) != 0) {
-        errorMessage = tr("The native StationConnect session values were rejected locally.");
+    if (LiSetPlankNativeSessionConfiguration(&nativeConfiguration) != 0) {
+        errorMessage = tr("The native PLANK session values were rejected locally.");
         return false;
     }
 
@@ -1012,27 +1012,27 @@ bool Session::negotiateDatasmashSession(quint16 sessionPort, QString& errorMessa
 #endif
 }
 
-void Session::stopDatasmashDataPlane()
+void Session::stopPlankTransportDataPlane()
 {
-#ifdef STATIONCONNECT_DATASMASH
-    if (m_DatasmashEndpoint != nullptr) {
-        unsigned char packet[SC_DATASMASH_CONTROL_MAX_PACKET_SIZE];
+#ifdef PLANK_TRANSPORT
+    if (m_PlankTransportEndpoint != nullptr) {
+        unsigned char packet[PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE];
         size_t packetSize = 0;
-        if (sc_datasmash_control_encode(
-                    SC_DATASMASH_CONTROL_CLIENT_DISCONNECT, nullptr, 0,
+        if (plank_transport_control_encode(
+                    PLANK_TRANSPORT_CONTROL_CLIENT_DISCONNECT, nullptr, 0,
                     packet, sizeof(packet), &packetSize) == 0) {
-            sc_datasmash_native_data_send(m_DatasmashEndpoint, packet, packetSize);
+            plank_transport_native_data_send(m_PlankTransportEndpoint, packet, packetSize);
         }
     }
-    stopDatasmashMediaReceivers();
-    LiSetStationConnectNativeControlSender(nullptr, nullptr);
-    LiSetStationConnectNativeInputSender(nullptr, nullptr);
-    if (m_DatasmashEndpoint != nullptr) {
-        ScDatasmashNativeStats stats {};
+    stopPlankTransportMediaReceivers();
+    LiSetPlankNativeControlSender(nullptr, nullptr);
+    LiSetPlankNativeInputSender(nullptr, nullptr);
+    if (m_PlankTransportEndpoint != nullptr) {
+        PlankTransportNativeStats stats {};
         stats.struct_size = sizeof(stats);
-        if (sc_datasmash_native_endpoint_stats(m_DatasmashEndpoint, &stats) ==
-                SC_DATASMASH_OK) {
-            qInfo() << "Datasmash native transport: video-frames="
+        if (plank_transport_native_endpoint_stats(m_PlankTransportEndpoint, &stats) ==
+                PLANK_TRANSPORT_OK) {
+            qInfo() << "PlankTransport native transport: video-frames="
                     << stats.video_frames_received
                     << "video-bytes=" << stats.video_bytes_received
                     << "video-receive-drops=" << stats.video_receive_drops
@@ -1051,26 +1051,26 @@ void Session::stopDatasmashDataPlane()
                     << stats.video_fec_source_symbols_missing;
         }
         QByteArray lastError(512, '\0');
-        sc_datasmash_native_endpoint_last_error(
-                    m_DatasmashEndpoint, lastError.data(),
+        plank_transport_native_endpoint_last_error(
+                    m_PlankTransportEndpoint, lastError.data(),
                     static_cast<size_t>(lastError.size()));
         if (!lastError.isEmpty() && lastError.constData()[0] != '\0') {
-            qWarning() << "Datasmash native endpoint ended:"
+            qWarning() << "PlankTransport native endpoint ended:"
                        << lastError.constData();
         }
-        sc_datasmash_native_endpoint_stop(m_DatasmashEndpoint);
-        sc_datasmash_native_endpoint_destroy(m_DatasmashEndpoint);
-        m_DatasmashEndpoint = nullptr;
+        plank_transport_native_endpoint_stop(m_PlankTransportEndpoint);
+        plank_transport_native_endpoint_destroy(m_PlankTransportEndpoint);
+        m_PlankTransportEndpoint = nullptr;
         qInfo() << "Experimental native KyProto connection stopped";
     }
 #endif
 }
 
-#ifdef STATIONCONNECT_DATASMASH
-void Session::startDatasmashMediaReceivers()
+#ifdef PLANK_TRANSPORT
+void Session::startPlankTransportMediaReceivers()
 {
-    stopDatasmashMediaReceivers();
-    if (m_DatasmashEndpoint == nullptr) {
+    stopPlankTransportMediaReceivers();
+    if (m_PlankTransportEndpoint == nullptr) {
         return;
     }
 
@@ -1080,33 +1080,33 @@ void Session::startDatasmashMediaReceivers()
     }
     m_CurrentVideoPacketLossPercent.store(-1.0f, std::memory_order_relaxed);
     m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
-    m_DatasmashReceiversStopping.store(false);
-    m_DatasmashVideoThread = std::thread([this]() {
-        datasmashVideoReceiveLoop();
+    m_PlankTransportReceiversStopping.store(false);
+    m_PlankTransportVideoThread = std::thread([this]() {
+        plankTransportVideoReceiveLoop();
     });
-    m_DatasmashAudioThread = std::thread([this]() {
-        datasmashAudioReceiveLoop();
+    m_PlankTransportAudioThread = std::thread([this]() {
+        plankTransportAudioReceiveLoop();
     });
-    m_DatasmashDataThread = std::thread([this]() {
-        datasmashDataReceiveLoop();
+    m_PlankTransportDataThread = std::thread([this]() {
+        plankTransportDataReceiveLoop();
     });
 }
 
-void Session::stopDatasmashMediaReceivers()
+void Session::stopPlankTransportMediaReceivers()
 {
-    m_DatasmashReceiversStopping.store(true);
-    if (m_DatasmashVideoThread.joinable()) {
-        m_DatasmashVideoThread.join();
+    m_PlankTransportReceiversStopping.store(true);
+    if (m_PlankTransportVideoThread.joinable()) {
+        m_PlankTransportVideoThread.join();
     }
-    if (m_DatasmashAudioThread.joinable()) {
-        m_DatasmashAudioThread.join();
+    if (m_PlankTransportAudioThread.joinable()) {
+        m_PlankTransportAudioThread.join();
     }
-    if (m_DatasmashDataThread.joinable()) {
-        m_DatasmashDataThread.join();
+    if (m_PlankTransportDataThread.joinable()) {
+        m_PlankTransportDataThread.join();
     }
 }
 
-void Session::datasmashVideoReceiveLoop()
+void Session::plankTransportVideoReceiveLoop()
 {
     constexpr size_t InitialFrameCapacity = 1024 * 1024;
     constexpr size_t MaximumFrameCapacity = 64 * 1024 * 1024;
@@ -1122,10 +1122,10 @@ void Session::datasmashVideoReceiveLoop()
         }
         nextPacketLossSample = now + 1000;
 
-        ScDatasmashNativeStats stats {};
+        PlankTransportNativeStats stats {};
         stats.struct_size = sizeof(stats);
-        if (sc_datasmash_native_endpoint_stats(m_DatasmashEndpoint, &stats) !=
-                SC_DATASMASH_OK) {
+        if (plank_transport_native_endpoint_stats(m_PlankTransportEndpoint, &stats) !=
+                PLANK_TRANSPORT_OK) {
             return;
         }
 
@@ -1145,25 +1145,25 @@ void Session::datasmashVideoReceiveLoop()
         }
     };
 
-    while (!m_DatasmashReceiversStopping.load()) {
+    while (!m_PlankTransportReceiversStopping.load()) {
         sampleTransportTelemetry();
-        ScDatasmashNativeVideoFrameInfo info {};
+        PlankTransportNativeVideoFrameInfo info {};
         info.struct_size = sizeof(info);
         size_t frameSize = 0;
-        const int result = sc_datasmash_native_video_receive(
-                    m_DatasmashEndpoint, &info, frame.data(), frame.size(),
+        const int result = plank_transport_native_video_receive(
+                    m_PlankTransportEndpoint, &info, frame.data(), frame.size(),
                     &frameSize, 50);
-        if (result == SC_DATASMASH_TIMEOUT) {
+        if (result == PLANK_TRANSPORT_TIMEOUT) {
             continue;
         }
-        if (result == SC_DATASMASH_ERROR_BUFFER_TOO_SMALL &&
+        if (result == PLANK_TRANSPORT_ERROR_BUFFER_TOO_SMALL &&
                 frameSize > frame.size() &&
                 frameSize <= MaximumFrameCapacity) {
             frame.resize(frameSize);
             continue;
         }
-        if (result != SC_DATASMASH_OK) {
-            if (!m_DatasmashReceiversStopping.load()) {
+        if (result != PLANK_TRANSPORT_OK) {
+            if (!m_PlankTransportReceiversStopping.load()) {
                 qWarning() << "Native KyProto video receive failed:" << result;
             }
             return;
@@ -1176,9 +1176,9 @@ void Session::datasmashVideoReceiveLoop()
         }
 
         const uint32_t flags =
-                (info.flags & SC_DATASMASH_NATIVE_VIDEO_FLAG_KEY) != 0 ?
-                    STATIONCONNECT_VIDEO_FRAME_FLAG_KEY : 0;
-        const int submitResult = LiSubmitStationConnectVideoFrame(
+                (info.flags & PLANK_TRANSPORT_NATIVE_VIDEO_FLAG_KEY) != 0 ?
+                    PLANK_VIDEO_FRAME_FLAG_KEY : 0;
+        const int submitResult = LiSubmitPlankVideoFrame(
                     frame.data(), static_cast<int>(frameSize),
                     static_cast<uint32_t>(info.frame_number), flags,
                     info.pts, info.host_processing_latency);
@@ -1190,30 +1190,30 @@ void Session::datasmashVideoReceiveLoop()
     }
 }
 
-void Session::datasmashAudioReceiveLoop()
+void Session::plankTransportAudioReceiveLoop()
 {
     constexpr size_t MaximumAudioPacketSize = 64 * 1024;
     std::vector<unsigned char> packet(MaximumAudioPacketSize);
 
-    while (!m_DatasmashReceiversStopping.load()) {
-        ScDatasmashNativeAudioPacketInfo info {};
+    while (!m_PlankTransportReceiversStopping.load()) {
+        PlankTransportNativeAudioPacketInfo info {};
         info.struct_size = sizeof(info);
         size_t packetSize = 0;
-        const int result = sc_datasmash_native_audio_receive(
-                    m_DatasmashEndpoint, &info, packet.data(), packet.size(),
+        const int result = plank_transport_native_audio_receive(
+                    m_PlankTransportEndpoint, &info, packet.data(), packet.size(),
                     &packetSize, 50);
-        if (result == SC_DATASMASH_TIMEOUT) {
+        if (result == PLANK_TRANSPORT_TIMEOUT) {
             continue;
         }
-        if (result != SC_DATASMASH_OK ||
+        if (result != PLANK_TRANSPORT_OK ||
                 packetSize > static_cast<size_t>(std::numeric_limits<int>::max())) {
-            if (!m_DatasmashReceiversStopping.load()) {
+            if (!m_PlankTransportReceiversStopping.load()) {
                 qWarning() << "Native KyProto audio receive failed:" << result;
             }
             return;
         }
 
-        const int submitResult = LiSubmitStationConnectAudioPacket(
+        const int submitResult = LiSubmitPlankAudioPacket(
                     packetSize == 0 ? nullptr : packet.data(),
                     static_cast<int>(packetSize), info.frame_samples,
                     info.missing_samples);
@@ -1224,19 +1224,19 @@ void Session::datasmashAudioReceiveLoop()
     }
 }
 
-void Session::datasmashDataReceiveLoop()
+void Session::plankTransportDataReceiveLoop()
 {
-    std::vector<unsigned char> packet(SC_DATASMASH_EVENT_MAX_PACKET_SIZE);
-    while (!m_DatasmashReceiversStopping.load()) {
+    std::vector<unsigned char> packet(PLANK_TRANSPORT_EVENT_MAX_PACKET_SIZE);
+    while (!m_PlankTransportReceiversStopping.load()) {
         size_t packetSize = 0;
-        const int result = sc_datasmash_native_data_receive(
-                    m_DatasmashEndpoint, packet.data(), packet.size(),
+        const int result = plank_transport_native_data_receive(
+                    m_PlankTransportEndpoint, packet.data(), packet.size(),
                     &packetSize, 50);
-        if (result == SC_DATASMASH_TIMEOUT) {
+        if (result == PLANK_TRANSPORT_TIMEOUT) {
             continue;
         }
-        if (result != SC_DATASMASH_OK) {
-            if (!m_DatasmashReceiversStopping.load()) {
+        if (result != PLANK_TRANSPORT_OK) {
+            if (!m_PlankTransportReceiversStopping.load()) {
                 qWarning() << "Native KyProto control receive failed:" << result;
             }
             return;
@@ -1244,174 +1244,174 @@ void Session::datasmashDataReceiveLoop()
 
         if (packetSize < sizeof(uint32_t)) {
             qWarning() << "Rejected undersized native KyProto data record";
-            LiNotifyStationConnectHostTermination(-1);
+            LiNotifyPlankHostTermination(-1);
             return;
         }
-        const uint32_t magic = sc_datasmash_event_read_u32(packet.data());
-        if (magic == SC_DATASMASH_CONTROL_MAGIC) {
-            ScDatasmashControlPacket control {};
-            if (sc_datasmash_control_decode(
+        const uint32_t magic = plank_transport_event_read_u32(packet.data());
+        if (magic == PLANK_TRANSPORT_CONTROL_MAGIC) {
+            PlankTransportControlPacket control {};
+            if (plank_transport_control_decode(
                         packet.data(), packetSize, &control) != 0) {
                 qWarning() << "Rejected malformed native KyProto control packet";
-                LiNotifyStationConnectHostTermination(-1);
+                LiNotifyPlankHostTermination(-1);
                 return;
             }
             switch (control.type) {
-            case SC_DATASMASH_CONTROL_VIDEO_BITRATE_APPLIED:
+            case PLANK_TRANSPORT_CONTROL_VIDEO_BITRATE_APPLIED:
                 if (control.payload_size != 3 * sizeof(uint32_t)) {
-                    LiNotifyStationConnectHostTermination(-1);
+                    LiNotifyPlankHostTermination(-1);
                     return;
                 }
-                LiNotifyStationConnectVideoBitrateApplied(
-                            sc_datasmash_control_read_u32(control.payload),
-                            sc_datasmash_control_read_u32(control.payload + 4),
-                            sc_datasmash_control_read_u32(control.payload + 8));
+                LiNotifyPlankVideoBitrateApplied(
+                            plank_transport_control_read_u32(control.payload),
+                            plank_transport_control_read_u32(control.payload + 4),
+                            plank_transport_control_read_u32(control.payload + 8));
                 break;
-            case SC_DATASMASH_CONTROL_HOST_TERMINATE:
+            case PLANK_TRANSPORT_CONTROL_HOST_TERMINATE:
                 if (control.payload_size != sizeof(uint32_t)) {
-                    LiNotifyStationConnectHostTermination(-1);
+                    LiNotifyPlankHostTermination(-1);
                     return;
                 }
-                LiNotifyStationConnectHostTermination(
-                            sc_datasmash_control_read_u32(control.payload));
+                LiNotifyPlankHostTermination(
+                            plank_transport_control_read_u32(control.payload));
                 return;
             default:
                 qWarning() << "Rejected unexpected native KyProto control type"
                            << control.type;
-                LiNotifyStationConnectHostTermination(-1);
+                LiNotifyPlankHostTermination(-1);
                 return;
             }
             continue;
         }
 
-        ScDatasmashEventPacket event {};
-        if (magic != SC_DATASMASH_EVENT_MAGIC ||
-                sc_datasmash_event_decode(
+        PlankTransportEventPacket event {};
+        if (magic != PLANK_TRANSPORT_EVENT_MAGIC ||
+                plank_transport_event_decode(
                     packet.data(), packetSize, &event) != 0) {
             qWarning() << "Rejected malformed native KyProto event record";
-            LiNotifyStationConnectHostTermination(-1);
+            LiNotifyPlankHostTermination(-1);
             return;
         }
         switch (event.type) {
-        case SC_DATASMASH_EVENT_HDR_MODE: {
-            if (event.payload_size != SC_DATASMASH_EVENT_HDR_MODE_SIZE ||
+        case PLANK_TRANSPORT_EVENT_HDR_MODE: {
+            if (event.payload_size != PLANK_TRANSPORT_EVENT_HDR_MODE_SIZE ||
                     event.payload[1] != 0) {
-                LiNotifyStationConnectHostTermination(-1);
+                LiNotifyPlankHostTermination(-1);
                 return;
             }
             SS_HDR_METADATA metadata {};
             size_t offset = 2;
             for (int index = 0; index < 3; ++index) {
                 metadata.displayPrimaries[index].x =
-                        sc_datasmash_event_read_u16(event.payload + offset);
+                        plank_transport_event_read_u16(event.payload + offset);
                 metadata.displayPrimaries[index].y =
-                        sc_datasmash_event_read_u16(event.payload + offset + 2);
+                        plank_transport_event_read_u16(event.payload + offset + 2);
                 offset += 4;
             }
-            metadata.whitePoint.x = sc_datasmash_event_read_u16(event.payload + offset);
-            metadata.whitePoint.y = sc_datasmash_event_read_u16(event.payload + offset + 2);
+            metadata.whitePoint.x = plank_transport_event_read_u16(event.payload + offset);
+            metadata.whitePoint.y = plank_transport_event_read_u16(event.payload + offset + 2);
             offset += 4;
-            metadata.maxDisplayLuminance = sc_datasmash_event_read_u16(event.payload + offset);
-            metadata.minDisplayLuminance = sc_datasmash_event_read_u16(event.payload + offset + 2);
-            metadata.maxContentLightLevel = sc_datasmash_event_read_u16(event.payload + offset + 4);
-            metadata.maxFrameAverageLightLevel = sc_datasmash_event_read_u16(event.payload + offset + 6);
-            metadata.maxFullFrameLuminance = sc_datasmash_event_read_u16(event.payload + offset + 8);
-            LiNotifyStationConnectHdrMode(event.payload[0] != 0, &metadata);
+            metadata.maxDisplayLuminance = plank_transport_event_read_u16(event.payload + offset);
+            metadata.minDisplayLuminance = plank_transport_event_read_u16(event.payload + offset + 2);
+            metadata.maxContentLightLevel = plank_transport_event_read_u16(event.payload + offset + 4);
+            metadata.maxFrameAverageLightLevel = plank_transport_event_read_u16(event.payload + offset + 6);
+            metadata.maxFullFrameLuminance = plank_transport_event_read_u16(event.payload + offset + 8);
+            LiNotifyPlankHdrMode(event.payload[0] != 0, &metadata);
             break;
         }
-        case SC_DATASMASH_EVENT_RAW_HID_WACOM:
-            if (event.payload_size < sizeof(SC_RAW_HID_WIRE_HEADER) ||
-                    event.payload_size > sizeof(SC_RAW_HID_WIRE_HEADER) +
-                        SC_RAW_HID_MAX_PAYLOAD_SIZE) {
-                LiNotifyStationConnectHostTermination(-1);
+        case PLANK_TRANSPORT_EVENT_RAW_HID_WACOM:
+            if (event.payload_size < sizeof(PLANK_RAW_HID_WIRE_HEADER) ||
+                    event.payload_size > sizeof(PLANK_RAW_HID_WIRE_HEADER) +
+                        PLANK_RAW_HID_MAX_PAYLOAD_SIZE) {
+                LiNotifyPlankHostTermination(-1);
                 return;
             }
-            LiNotifyStationConnectRawHidControl(
+            LiNotifyPlankRawHidControl(
                         event.payload, event.payload_size);
             break;
-        case SC_DATASMASH_EVENT_CURSOR_SHAPE:
-            if (event.payload_size < sizeof(SC_CURSOR_WIRE_HEADER) ||
-                    event.payload_size > sizeof(SC_CURSOR_WIRE_HEADER) +
-                        SC_CURSOR_MAX_CHUNK_SIZE) {
-                LiNotifyStationConnectHostTermination(-1);
+        case PLANK_TRANSPORT_EVENT_CURSOR_SHAPE:
+            if (event.payload_size < sizeof(PLANK_CURSOR_WIRE_HEADER) ||
+                    event.payload_size > sizeof(PLANK_CURSOR_WIRE_HEADER) +
+                        PLANK_CURSOR_MAX_CHUNK_SIZE) {
+                LiNotifyPlankHostTermination(-1);
                 return;
             }
-            LiNotifyStationConnectCursorChunk(
+            LiNotifyPlankCursorChunk(
                         event.payload, event.payload_size);
             break;
-        case SC_DATASMASH_EVENT_CURSOR_POSITION:
-            if (event.payload_size != sizeof(SC_CURSOR_POSITION_WIRE_MESSAGE)) {
-                LiNotifyStationConnectHostTermination(-1);
+        case PLANK_TRANSPORT_EVENT_CURSOR_POSITION:
+            if (event.payload_size != sizeof(PLANK_CURSOR_POSITION_WIRE_MESSAGE)) {
+                LiNotifyPlankHostTermination(-1);
                 return;
             }
-            LiNotifyStationConnectCursorPosition(
+            LiNotifyPlankCursorPosition(
                         event.payload, event.payload_size);
             break;
         default:
             qWarning() << "Rejected unexpected native KyProto event type"
                        << event.type;
-            LiNotifyStationConnectHostTermination(-1);
+            LiNotifyPlankHostTermination(-1);
             return;
         }
     }
 }
 
-int Session::datasmashNativeControlSender(void* context, uint32_t type,
+int Session::plankTransportNativeControlSender(void* context, uint32_t type,
                                           uint32_t value1, uint32_t value2)
 {
     if (context == nullptr) {
-        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+        return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
     }
     uint16_t wireType = 0;
     uint32_t values[2] {value1, value2};
     size_t valueCount = 0;
     switch (type) {
     case LI_SC_NATIVE_CONTROL_REQUEST_IDR:
-        wireType = SC_DATASMASH_CONTROL_REQUEST_IDR;
+        wireType = PLANK_TRANSPORT_CONTROL_REQUEST_IDR;
         break;
     case LI_SC_NATIVE_CONTROL_INVALIDATE_REFERENCE_FRAMES:
-        wireType = SC_DATASMASH_CONTROL_INVALIDATE_REFERENCE_FRAMES;
+        wireType = PLANK_TRANSPORT_CONTROL_INVALIDATE_REFERENCE_FRAMES;
         valueCount = 2;
         break;
     case LI_SC_NATIVE_CONTROL_SET_VIDEO_BITRATE:
-        wireType = SC_DATASMASH_CONTROL_SET_VIDEO_BITRATE;
+        wireType = PLANK_TRANSPORT_CONTROL_SET_VIDEO_BITRATE;
         valueCount = 1;
         break;
     default:
-        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+        return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
     }
 
-    unsigned char packet[SC_DATASMASH_CONTROL_MAX_PACKET_SIZE];
+    unsigned char packet[PLANK_TRANSPORT_CONTROL_MAX_PACKET_SIZE];
     size_t packetSize = 0;
-    if (sc_datasmash_control_encode(
+    if (plank_transport_control_encode(
                 wireType, values, valueCount, packet, sizeof(packet),
                 &packetSize) != 0) {
-        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+        return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
     }
-    return sc_datasmash_native_data_send(
-                static_cast<ScDatasmashNativeEndpoint*>(context), packet,
+    return plank_transport_native_data_send(
+                static_cast<PlankTransportNativeEndpoint*>(context), packet,
                 packetSize);
 }
 
-int Session::datasmashNativeInputSender(void* context, uint8_t type,
+int Session::plankTransportNativeInputSender(void* context, uint8_t type,
                                         const unsigned char* payload,
                                         size_t payloadLength)
 {
     if (context == nullptr || payload == nullptr || payloadLength == 0) {
-        return SC_DATASMASH_ERROR_INVALID_ARGUMENT;
+        return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
     }
-    return sc_datasmash_native_input_send(
-                static_cast<ScDatasmashNativeEndpoint*>(context), type,
+    return plank_transport_native_input_send(
+                static_cast<PlankTransportNativeEndpoint*>(context), type,
                 payload, payloadLength);
 }
 #endif
 
-void Session::clearStationConnectReconnectCredentials()
+void Session::clearPlankReconnectCredentials()
 {
     m_CanReconnect.store(false);
-    m_StationConnectPassword.fill(QChar('\0'));
-    m_StationConnectPassword.clear();
-    m_StationConnectUsername.clear();
+    m_PlankPassword.fill(QChar('\0'));
+    m_PlankPassword.clear();
+    m_PlankUsername.clear();
 }
 
 bool Session::initialize()
@@ -1432,18 +1432,18 @@ bool Session::initialize()
     }
 #endif
 
-    if (!StreamingPreferences::isStationConnectProfileValidForCaptureSource(
-                m_StationConnectVideoProfile,
-                m_StationConnectCaptureSource)) {
+    if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
+                m_PlankVideoProfile,
+                m_PlankCaptureSource)) {
         const QString error = tr("The selected capture source and encoding profile are not compatible.");
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
         emit displayLaunchError(error);
         return false;
     }
-    if (m_StationConnectCaptureSource == StreamingPreferences::SCCS_NVFBC_8BIT &&
-            m_StationConnectVideoProfile ==
-                StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444 &&
-            (m_Computer->stationConnectFeatureFlags &
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT &&
+            m_PlankVideoProfile ==
+                StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444 &&
+            (m_Computer->plankFeatureFlags &
              NvOutputTopology::NvfbcHevc10NvencFeature) == 0) {
         const QString error = tr("The host does not support NvFBC with the HEVC 10-bit NVENC profile.");
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
@@ -1463,21 +1463,21 @@ bool Session::initialize()
         return false;
     }
 
-    if (m_Computer->stationConnectAuthentication &&
-            !configureStationConnectHostLayout()) {
+    if (m_Computer->plankAuthentication &&
+            !configurePlankHostLayout()) {
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
 
-    const QSize stationConnectResolution = configureStationConnectDisplayMode();
-    if (!stationConnectResolution.isValid()) {
+    const QSize plankResolution = configurePlankDisplayMode();
+    if (!plankResolution.isValid()) {
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
-    m_StreamConfig.width = stationConnectResolution.width();
-    m_StreamConfig.height = stationConnectResolution.height();
+    m_StreamConfig.width = plankResolution.width();
+    m_StreamConfig.height = plankResolution.height();
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
@@ -1500,14 +1500,14 @@ bool Session::initialize()
         }
     }
 
-    qInfo() << "StationConnect host version:"
-            << m_Computer->stationConnectHostVersion;
+    qInfo() << "PLANK host version:"
+            << m_Computer->plankHostVersion;
 
     LiInitializeVideoCallbacks(&m_VideoCallbacks);
     m_VideoCallbacks.setup = drSetup;
 
     m_StreamConfig.fps = m_Preferences->fps;
-    m_StreamConfig.bitrate = m_StationConnectBitrateKbps;
+    m_StreamConfig.bitrate = m_PlankBitrateKbps;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Video bitrate: %d kbps",
@@ -1539,28 +1539,28 @@ bool Session::initialize()
                 "Audio channel mask: %X",
                 CHANNEL_MASK_FROM_AUDIO_CONFIGURATION(m_StreamConfig.audioConfiguration));
 
-    // StationConnect advertises exactly the selected profile. Do not silently
+    // PLANK advertises exactly the selected profile. Do not silently
     // substitute another bit depth or chroma format when probing fails.
     int selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_444;
-    switch (m_StationConnectVideoProfile) {
-    case StreamingPreferences::SCVP_H264_8BIT_422:
+    switch (m_PlankVideoProfile) {
+    case StreamingPreferences::PLANK_PROFILE_H264_8BIT_422:
         selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_422;
         break;
-    case StreamingPreferences::SCVP_H264_8BIT_444:
+    case StreamingPreferences::PLANK_PROFILE_H264_8BIT_444:
         selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_444;
         break;
-    case StreamingPreferences::SCVP_H264_10BIT_422:
+    case StreamingPreferences::PLANK_PROFILE_H264_10BIT_422:
         selectedVideoFormat = VIDEO_FORMAT_H264_HIGH10_422;
         break;
-    case StreamingPreferences::SCVP_H264_10BIT_444:
+    case StreamingPreferences::PLANK_PROFILE_H264_10BIT_444:
         break;
-    case StreamingPreferences::SCVP_NVENC_H264_8BIT_444:
+    case StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444:
         selectedVideoFormat = VIDEO_FORMAT_H264_HIGH8_444;
         break;
-    case StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444:
+    case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444:
         selectedVideoFormat = VIDEO_FORMAT_H265_REXT8_444;
         break;
-    case StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444:
+    case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444:
         selectedVideoFormat = VIDEO_FORMAT_H265_REXT10_444;
         break;
     }
@@ -1619,7 +1619,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     m_SupportedVideoFormats.removeByMask(
                 ~m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport));
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("The selected StationConnect encoding profile is not supported by both this host and client."));
+        emit displayLaunchError(tr("The selected PLANK encoding profile is not supported by both this host and client."));
         return false;
     }
 
@@ -1643,7 +1643,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         }
     }
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("This client cannot decode the selected StationConnect encoding profile."));
+        emit displayLaunchError(tr("This client cannot decode the selected PLANK encoding profile."));
         return false;
     }
 
@@ -1695,11 +1695,11 @@ private:
         SDL_assert(m_Session->m_VideoDecoder == nullptr);
 
         // Finish cleanup of the connection state
-#ifdef STATIONCONNECT_DATASMASH
-        m_Session->stopDatasmashMediaReceivers();
+#ifdef PLANK_TRANSPORT
+        m_Session->stopPlankTransportMediaReceivers();
 #endif
         LiStopConnection();
-        m_Session->stopDatasmashDataPlane();
+        m_Session->stopPlankTransportDataPlane();
 
     }
 
@@ -1816,7 +1816,7 @@ bool Session::snapshotClientDisplays()
         canvasX += display.nativeSize.width();
         canvasHeight = qMax(canvasHeight, display.nativeSize.height());
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect client output %u: logical=%dx%d%+d%+d native=%dx%d canvas=%dx%d%+d%+d%s",
+                    "PLANK client output %u: logical=%dx%d%+d%+d native=%dx%d canvas=%dx%d%+d%+d%s",
                     display.displayId,
                     display.logicalBounds.w, display.logicalBounds.h,
                     display.logicalBounds.x, display.logicalBounds.y,
@@ -1840,7 +1840,7 @@ bool Session::snapshotClientDisplays()
         m_TargetDisplayId = m_ClientDisplays.first().displayId;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect client presentation: outputs=%lld canvas=%dx%d mode=%s",
+                "PLANK client presentation: outputs=%lld canvas=%dx%d mode=%s",
                 static_cast<long long>(
                     m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1),
                 m_UseMultiDisplayPresentation ? canvasX : targetNativeSize.width(),
@@ -1896,7 +1896,7 @@ void Session::rebuildPresentationLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect render presentation: outputs=%lld canvas=%dx%d fullscreen=%s",
+                "PLANK render presentation: outputs=%lld canvas=%dx%d fullscreen=%s",
                 static_cast<long long>(m_PresentationLayout.outputs.size()),
                 m_PresentationLayout.canvasSize.width(),
                 m_PresentationLayout.canvasSize.height(),
@@ -2011,7 +2011,7 @@ void Session::minimizePresentationWindows()
     }
 }
 
-bool Session::configureStationConnectHostLayout()
+bool Session::configurePlankHostLayout()
 {
     QString layoutPolicy;
     QString scalingMode;
@@ -2020,10 +2020,10 @@ bool Session::configureStationConnectHostLayout()
     bool hostRejectsRequestedLayout = false;
     {
         QReadLocker lock(&m_Computer->lock);
-        layoutPolicy = m_Computer->stationConnectHostLayout;
-        scalingMode = m_Computer->stationConnectScalingMode;
-        virtualMode1 = m_Computer->stationConnectVirtualMode1;
-        virtualMode2 = m_Computer->stationConnectVirtualMode2;
+        layoutPolicy = m_Computer->plankHostLayout;
+        scalingMode = m_Computer->plankScalingMode;
+        virtualMode1 = m_Computer->plankVirtualMode1;
+        virtualMode2 = m_Computer->plankVirtualMode2;
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
         hostRejectsRequestedLayout = hostPolicyKnown &&
                 !m_Computer->outputTopology.allowsBookmarkHostLayout(layoutPolicy);
@@ -2091,14 +2091,14 @@ bool Session::configureStationConnectHostLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect host layout: policy=%s resolved=%s modes=%s scaling=%s",
+                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s",
                 qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
                 qPrintable(m_ResolvedVirtualModes.join(',')),
                 qPrintable(m_ResolvedScalingMode));
     return true;
 }
 
-QSize Session::configureStationConnectDisplayMode()
+QSize Session::configurePlankDisplayMode()
 {
     QSize detectedResolution;
 
@@ -2144,11 +2144,11 @@ QSize Session::configureStationConnectDisplayMode()
         selectedResolution = nativeCanvasResolution;
     }
     else {
-        selectedResolution = StationConnectDisplayMode::resolve(
+        selectedResolution = PlankDisplayMode::resolve(
             detectedResolution, nativeCanvasResolution);
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect client physical resolution: detected=%dx%d host-native=%dx%d selected=%dx%d scaling=%s resolution-policy=%s",
+                "PLANK client physical resolution: detected=%dx%d host-native=%dx%d selected=%dx%d scaling=%s resolution-policy=%s",
                 detectedResolution.width(), detectedResolution.height(),
                 nativeCanvasResolution.width(), nativeCanvasResolution.height(),
                 selectedResolution.width(), selectedResolution.height(),
@@ -2203,7 +2203,7 @@ void Session::getWindowDimensions(int& x, int& y,
 
 void Session::updateOptimalWindowDisplayMode()
 {
-    // A StationConnect Wayland session is a desktop surface, not a monitor
+    // A PLANK Wayland session is a desktop surface, not a monitor
     // mode switch. Let the compositor size the fullscreen surface and keep
     // SDL's window and pointer coordinates in the same space. SDL 3.4.2 can
     // otherwise retain the pre-fullscreen viewport for pointer events while
@@ -2381,20 +2381,20 @@ bool Session::startConnectionAsync(bool reconnecting)
         SDL_Delay(1500);
     }
 
-    // StationConnect never terminates a host application remotely. Only resume
+    // PLANK never terminates a host application remotely. Only resume
     // the already-running Desktop application or launch it from an idle host.
     Q_ASSERT(m_Computer->currentGameId == 0 ||
              m_Computer->currentGameId == m_App.id);
 
-    quint16 datasmashPort = 0;
-    QString datasmashCertificateSha256;
-    QString datasmashToken;
+    quint16 plankTransportPort = 0;
+    QString plankTransportCertificateSha256;
+    QString plankTransportToken;
     QString acceptedCaptureSource;
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
     quint16 quicUdpPayloadMtu = 0;
     if (m_Preferences->quicUdpPayloadMtu != 0) {
-        quicUdpPayloadMtu = StationConnectNetwork::quicUdpPayloadMtuForRoute(
+        quicUdpPayloadMtu = PlankNetwork::quicUdpPayloadMtuForRoute(
                     m_Preferences->quicUdpPayloadMtu, false);
         qInfo() << "Manual fixed QUIC UDP payload ceiling:"
                 << quicUdpPayloadMtu << "bytes";
@@ -2405,7 +2405,7 @@ bool Session::startConnectionAsync(bool reconnecting)
         const NvComputer::ReachabilityType routeReachability =
                 m_Computer->getActiveAddressReachability(&routeInterfaceMtu,
                                                           &routeIsIpv6);
-        quicUdpPayloadMtu = StationConnectNetwork::quicUdpPayloadMtuForRoute(
+        quicUdpPayloadMtu = PlankNetwork::quicUdpPayloadMtuForRoute(
                     0,
                     routeReachability == NvComputer::RI_ZEROTIER,
                     routeInterfaceMtu,
@@ -2420,33 +2420,33 @@ bool Session::startConnectionAsync(bool reconnecting)
         const QString hostLayout = m_ResolvedHostLayout;
         const QStringList virtualModes = m_ResolvedVirtualModes;
         const QString captureSource =
-                m_StationConnectCaptureSource == StreamingPreferences::SCCS_X11_NATIVE10 ?
+                m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
         const QString encoderBackend =
-                StreamingPreferences::isStationConnectNvencProfile(
-                    m_StationConnectVideoProfile) ?
+                StreamingPreferences::isPlankNvencProfile(
+                    m_PlankVideoProfile) ?
                     QStringLiteral("nvenc-direct") : QStringLiteral("software-cuda");
         QString encodingMode;
-        switch (m_StationConnectVideoProfile) {
-        case StreamingPreferences::SCVP_H264_8BIT_422:
+        switch (m_PlankVideoProfile) {
+        case StreamingPreferences::PLANK_PROFILE_H264_8BIT_422:
             encodingMode = QStringLiteral("h264-8-422-software");
             break;
-        case StreamingPreferences::SCVP_H264_8BIT_444:
+        case StreamingPreferences::PLANK_PROFILE_H264_8BIT_444:
             encodingMode = QStringLiteral("h264-8-444-software");
             break;
-        case StreamingPreferences::SCVP_H264_10BIT_422:
+        case StreamingPreferences::PLANK_PROFILE_H264_10BIT_422:
             encodingMode = QStringLiteral("h264-10-422-software");
             break;
-        case StreamingPreferences::SCVP_NVENC_H264_8BIT_444:
+        case StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444:
             encodingMode = QStringLiteral("h264-8-444-nvenc");
             break;
-        case StreamingPreferences::SCVP_NVENC_HEVC_8BIT_444:
+        case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444:
             encodingMode = QStringLiteral("hevc-8-444-nvenc");
             break;
-        case StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444:
+        case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444:
             encodingMode = QStringLiteral("hevc-10-444-nvenc");
             break;
-        case StreamingPreferences::SCVP_H264_10BIT_444:
+        case StreamingPreferences::PLANK_PROFILE_H264_10BIT_444:
             encodingMode = QStringLiteral("h264-10-444-software");
             break;
         }
@@ -2458,8 +2458,8 @@ bool Session::startConnectionAsync(bool reconnecting)
                           false,
                           NvOutputTopology::ScaledSpanMode,
                           m_Computer->outputTopology.generation,
-                          m_Computer->stationConnectTopologyVersion,
-                          m_Computer->stationConnectFeatureFlags &
+                          m_Computer->plankTopologyVersion,
+                          m_Computer->plankFeatureFlags &
                               NvOutputTopology::SupportedFeatureFlags,
                           hostLayout,
                           virtualModes.value(0),
@@ -2468,9 +2468,9 @@ bool Session::startConnectionAsync(bool reconnecting)
                           encoderBackend,
                           encodingMode,
                           quicUdpPayloadMtu,
-                          datasmashPort,
-                          datasmashCertificateSha256,
-                          datasmashToken,
+                          plankTransportPort,
+                          plankTransportCertificateSha256,
+                          plankTransportToken,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
                           acceptedEncodingMode);
@@ -2479,12 +2479,12 @@ bool Session::startConnectionAsync(bool reconnecting)
             startApp();
         } catch (const GfeHttpResponseException& e) {
             const bool displayTransitionStarted =
-                    m_Computer->stationConnectAuthentication &&
+                    m_Computer->plankAuthentication &&
                     e.getStatusCode() == 425 &&
                     QString::fromUtf8(e.getStatusMessage()) ==
-                        QStringLiteral("StationConnect host display transition started");
+                        QStringLiteral("PLANK host display transition started");
             const bool previousSessionStillActive =
-                    m_Computer->stationConnectAuthentication &&
+                    m_Computer->plankAuthentication &&
                     e.getStatusCode() == 400 &&
                     QString::fromUtf8(e.getStatusMessage()) ==
                         QStringLiteral("An app is already running on this host");
@@ -2494,15 +2494,15 @@ bool Session::startConnectionAsync(bool reconnecting)
                 constexpr int CancellationPollMs = 50;
                 bool started = false;
 
-                if (m_StationConnectUsername.isEmpty() ||
-                        m_StationConnectPassword.isEmpty()) {
+                if (m_PlankUsername.isEmpty() ||
+                        m_PlankPassword.isEmpty()) {
                     throw;
                 }
                 m_WaitingForSessionCleanup.store(true);
                 emit sessionCleanupWaitChanged(
                             true,
                             tr("Applying workstation display layout..."));
-                qInfo() << "StationConnect host display transition started; waiting up to"
+                qInfo() << "PLANK host display transition started; waiting up to"
                         << MaximumWaitMs << "ms";
                 bool authenticationRefreshRequired = false;
 
@@ -2528,17 +2528,17 @@ bool Session::startConnectionAsync(bool reconnecting)
                             }
                             http = std::make_unique<NvHTTP>(m_Computer);
                             const QString token = http->authenticate(
-                                        m_StationConnectUsername,
-                                        m_StationConnectPassword);
+                                        m_PlankUsername,
+                                        m_PlankPassword);
                             {
                                 QWriteLocker lock(&m_Computer->lock);
                                 m_Computer->sessionToken = token;
                                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             }
                             authenticationRefreshRequired = false;
-                            qInfo() << "StationConnect authenticated to the replacement display worker";
+                            qInfo() << "PLANK authenticated to the replacement display worker";
                         } catch (const QtNetworkReplyException& retryError) {
-                            qInfo() << "StationConnect replacement display worker is not ready for authentication:"
+                            qInfo() << "PLANK replacement display worker is not ready for authentication:"
                                     << retryError.toQString();
                             continue;
                         }
@@ -2555,7 +2555,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                         }
                         if (!topology.matchesRequestedHostLayout(hostLayout,
                                                                  virtualModes)) {
-                            qInfo() << "StationConnect display transition is still pending:"
+                            qInfo() << "PLANK display transition is still pending:"
                                     << topology.layoutKind << topology.virtualModes;
                             continue;
                         }
@@ -2569,7 +2569,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                         }
                         if (retryError.getStatusCode() == 401) {
                             authenticationRefreshRequired = true;
-                            qInfo() << "StationConnect display worker changed; authentication will be refreshed once";
+                            qInfo() << "PLANK display worker changed; authentication will be refreshed once";
                             continue;
                         }
                         if (retryError.getStatusCode() != 425 &&
@@ -2578,10 +2578,10 @@ bool Session::startConnectionAsync(bool reconnecting)
                             emit sessionCleanupWaitChanged(false, QString());
                             throw;
                         }
-                        qInfo() << "StationConnect display transition wait attempt failed:"
+                        qInfo() << "PLANK display transition wait attempt failed:"
                                 << retryError.toQString();
                     } catch (const QtNetworkReplyException& retryError) {
-                        qInfo() << "StationConnect display transition worker is not ready:"
+                        qInfo() << "PLANK display transition worker is not ready:"
                                 << retryError.toQString();
                     }
                 }
@@ -2589,7 +2589,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                 m_WaitingForSessionCleanup.store(false);
                 emit sessionCleanupWaitChanged(false, QString());
                 if (!started && m_ConnectionStartCancelled.load()) {
-                    qInfo() << "StationConnect connection cancelled during display transition";
+                    qInfo() << "PLANK connection cancelled during display transition";
                     return false;
                 }
                 if (!started) {
@@ -2599,7 +2599,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                     }
                     return false;
                 }
-                qInfo() << "StationConnect display transition completed; launch succeeded";
+                qInfo() << "PLANK display transition completed; launch succeeded";
             }
             else if (previousSessionStillActive) {
                 constexpr int RetryIntervalMs = 500;
@@ -2611,7 +2611,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                 emit sessionCleanupWaitChanged(
                             true,
                             tr("Waiting for previous workstation session to finish..."));
-                qInfo() << "StationConnect previous session is still active; "
+                qInfo() << "PLANK previous session is still active; "
                            "waiting up to" << MaximumWaitMs << "ms";
 
                 for (int elapsedMs = 0;
@@ -2653,7 +2653,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                 emit sessionCleanupWaitChanged(false, QString());
 
                 if (!started && m_ConnectionStartCancelled.load()) {
-                    qInfo() << "StationConnect connection cancelled while waiting for session cleanup";
+                    qInfo() << "PLANK connection cancelled while waiting for session cleanup";
                     return false;
                 }
                 if (!started) {
@@ -2664,34 +2664,34 @@ bool Session::startConnectionAsync(bool reconnecting)
                     return false;
                 }
 
-                qInfo() << "StationConnect previous session finished; launch retry succeeded";
+                qInfo() << "PLANK previous session finished; launch retry succeeded";
             }
-            else if (reconnecting && m_Computer->stationConnectAuthentication &&
+            else if (reconnecting && m_Computer->plankAuthentication &&
                     m_Computer->currentGameId == 0 &&
                     e.getStatusCode() == 400) {
                 {
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->currentGameId = m_App.id;
                 }
-                qInfo() << "StationConnect worker already has an active Desktop stream; resuming it";
+                qInfo() << "PLANK worker already has an active Desktop stream; resuming it";
                 startApp();
             }
-            else if (reconnecting && m_Computer->stationConnectAuthentication &&
+            else if (reconnecting && m_Computer->plankAuthentication &&
                     m_Computer->currentGameId != 0 &&
                     e.getStatusCode() == 503) {
                 {
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->currentGameId = 0;
                 }
-                qInfo() << "StationConnect replacement worker has no app to resume; "
+                qInfo() << "PLANK replacement worker has no app to resume; "
                            "launching a fresh Desktop stream";
                 startApp();
             }
             else {
                 const bool generationBinding =
-                        (m_Computer->stationConnectFeatureFlags &
+                        (m_Computer->plankFeatureFlags &
                          NvOutputTopology::TopologyGenerationFeature) != 0;
-                if (!m_Computer->stationConnectAuthentication || !generationBinding ||
+                if (!m_Computer->plankAuthentication || !generationBinding ||
                         e.getStatusCode() != 409) {
                     throw;
                 }
@@ -2704,7 +2704,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                 if (m_ComputerManager != nullptr) {
                     m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                 }
-                qInfo() << "StationConnect refreshed stale topology generation and will retry launch:"
+                qInfo() << "PLANK refreshed stale topology generation and will retry launch:"
                         << topology.generation;
                 startApp();
             }
@@ -2713,12 +2713,12 @@ bool Session::startConnectionAsync(bool reconnecting)
         // Record the successful launch immediately. If low-level transport
         // setup fails afterward, the next bounded attempt must resume this
         // app instead of issuing a second launch request.
-        if (m_Computer->stationConnectAuthentication) {
+        if (m_Computer->plankAuthentication) {
             QWriteLocker lock(&m_Computer->lock);
             m_Computer->currentGameId = m_App.id;
         }
 
-        if (m_Computer->stationConnectAuthentication) {
+        if (m_Computer->plankAuthentication) {
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken.fill(QChar('\0'));
@@ -2728,50 +2728,50 @@ bool Session::startConnectionAsync(bool reconnecting)
             if (m_ComputerManager != nullptr) {
                 m_ComputerManager->clientSideAttributeUpdated(m_Computer);
             }
-            qInfo() << "StationConnect authentication token consumed after launch";
+            qInfo() << "PLANK authentication token consumed after launch";
         }
     } catch (const GfeHttpResponseException& e) {
         if (!reconnecting) {
             emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
         } else {
-            qWarning() << "StationConnect reconnect launch failed:" << e.toQString();
+            qWarning() << "PLANK reconnect launch failed:" << e.toQString();
         }
         return false;
     } catch (const QtNetworkReplyException& e) {
         if (!reconnecting) {
             emit displayLaunchError(e.toQString());
         } else {
-            qWarning() << "StationConnect reconnect transport setup failed:"
+            qWarning() << "PLANK reconnect transport setup failed:"
                        << e.toQString();
         }
         return false;
     }
 
-#ifdef STATIONCONNECT_DATASMASH
-    LiSetStationConnectNativeControlSender(nullptr, nullptr);
-    LiSetStationConnectNativeInputSender(nullptr, nullptr);
+#ifdef PLANK_TRANSPORT
+    LiSetPlankNativeControlSender(nullptr, nullptr);
+    LiSetPlankNativeInputSender(nullptr, nullptr);
 #endif
-    if (!startDatasmashDataPlane(datasmashPort,
-                                 datasmashCertificateSha256,
-                                 datasmashToken,
+    if (!startPlankTransportDataPlane(plankTransportPort,
+                                 plankTransportCertificateSha256,
+                                 plankTransportToken,
                                  quicUdpPayloadMtu)) {
-        datasmashToken.fill(QChar('\0'));
+        plankTransportToken.fill(QChar('\0'));
         if (!reconnecting) {
             emit displayLaunchError(
-                        tr("The experimental StationConnect data plane could not be established."));
+                        tr("The experimental PLANK data plane could not be established."));
         }
         return false;
     }
-    datasmashToken.fill(QChar('\0'));
+    plankTransportToken.fill(QChar('\0'));
 
     QString nativeNegotiationError;
-    if (!negotiateDatasmashSession(datasmashPort, nativeNegotiationError)) {
-        stopDatasmashDataPlane();
+    if (!negotiatePlankTransportSession(plankTransportPort, nativeNegotiationError)) {
+        stopPlankTransportDataPlane();
         if (!reconnecting) {
             emit displayLaunchError(nativeNegotiationError);
         }
         else {
-            qWarning() << "StationConnect native session negotiation failed:"
+            qWarning() << "PLANK native session negotiation failed:"
                        << nativeNegotiationError;
         }
         return false;
@@ -2788,7 +2788,7 @@ bool Session::startConnectionAsync(bool reconnecting)
 
     // moonlight-common-c fills missing callbacks in the caller-owned table.
     // Restore the pull/push decoder contract before every reuse of this
-    // Session for a StationConnect desktop handoff.
+    // Session for a PLANK desktop handoff.
     m_VideoCallbacks.submitDecodeUnit =
             (m_VideoCallbacks.capabilities & CAPABILITY_PULL_RENDERER) ?
                 nullptr : drSubmitDecodeUnit;
@@ -2797,24 +2797,24 @@ bool Session::startConnectionAsync(bool reconnecting)
                                 &m_VideoCallbacks, &m_AudioCallbacks,
                                 NULL, 0, NULL, 0);
     if (err != 0) {
-        stopDatasmashDataPlane();
+        stopPlankTransportDataPlane();
         // We already displayed an error dialog in the stage failure
         // listener.
         return false;
     }
 
-#ifdef STATIONCONNECT_DATASMASH
-    startDatasmashMediaReceivers();
+#ifdef PLANK_TRANSPORT
+    startPlankTransportMediaReceivers();
 #endif
 
     if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Host does not advertise required StationConnect local cursor transport");
-        stopDatasmashMediaReceivers();
+                     "Host does not advertise required PLANK local cursor transport");
+        stopPlankTransportMediaReceivers();
         LiStopConnection();
-        stopDatasmashDataPlane();
+        stopPlankTransportDataPlane();
         emit displayLaunchError(
-                    tr("This workstation does not support the required StationConnect local cursor protocol."));
+                    tr("This workstation does not support the required PLANK local cursor protocol."));
         return false;
     }
 
@@ -2827,11 +2827,11 @@ void Session::cancelConnectionStart()
     m_ConnectionStartCancelled.store(true);
 }
 
-bool Session::beginStationConnectReconnect(
-        StationConnectReconnectState& state)
+bool Session::beginPlankReconnect(
+        PlankReconnectState& state)
 {
-    if (m_StationConnectUsername.isEmpty() ||
-            m_StationConnectPassword.isEmpty()) {
+    if (m_PlankUsername.isEmpty() ||
+            m_PlankPassword.isEmpty()) {
         return false;
     }
 
@@ -2857,21 +2857,21 @@ bool Session::beginStationConnectReconnect(
         }
     }
     SDL_UnlockSpinlock(&m_DecoderLock);
-#ifdef STATIONCONNECT_DATASMASH
-    stopDatasmashMediaReceivers();
+#ifdef PLANK_TRANSPORT
+    stopPlankTransportMediaReceivers();
 #endif
     LiStopConnection();
-    stopDatasmashDataPlane();
+    stopPlankTransportDataPlane();
     m_InputHandler->resetRemoteCursorPositionEpoch();
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
     return true;
 }
 
-bool Session::runStationConnectReconnect()
+bool Session::runPlankReconnect()
 {
-    if (m_StationConnectUsername.isEmpty() ||
-            m_StationConnectPassword.isEmpty()) {
+    if (m_PlankUsername.isEmpty() ||
+            m_PlankPassword.isEmpty()) {
         return false;
     }
 
@@ -2889,14 +2889,14 @@ bool Session::runStationConnectReconnect()
             }
             NvHTTP http(m_Computer);
             const QString token = http.authenticate(
-                        m_StationConnectUsername,
-                        m_StationConnectPassword);
+                        m_PlankUsername,
+                        m_PlankPassword);
 
             NvOutputTopology topology;
             const bool topologySupported =
-                    m_Computer->stationConnectTopologyVersion ==
+                    m_Computer->plankTopologyVersion ==
                         NvOutputTopology::ProtocolVersion &&
-                    (m_Computer->stationConnectFeatureFlags &
+                    (m_Computer->plankFeatureFlags &
                      (NvOutputTopology::OutputTopologyFeature |
                       NvOutputTopology::SelectedOutputFeature |
                       NvOutputTopology::UnifiedAbsoluteInputFeature)) ==
@@ -2920,23 +2920,23 @@ bool Session::runStationConnectReconnect()
             if (startConnectionAsync(true) &&
                     !m_ReconnectCancelled.load()) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect reconnect transport completed on attempt %d",
+                            "PLANK reconnect transport completed on attempt %d",
                             attempt);
                 return true;
             }
         } catch (const GfeHttpResponseException& error) {
-            qWarning() << "StationConnect reauthentication attempt" << attempt
+            qWarning() << "PLANK reauthentication attempt" << attempt
                        << "failed:" << error.toQString();
         } catch (const QtNetworkReplyException& error) {
-            qWarning() << "StationConnect reconnect attempt" << attempt
+            qWarning() << "PLANK reconnect attempt" << attempt
                        << "could not reach the host:" << error.toQString();
         }
 
-#ifdef STATIONCONNECT_DATASMASH
-        stopDatasmashMediaReceivers();
+#ifdef PLANK_TRANSPORT
+        stopPlankTransportMediaReceivers();
 #endif
         LiStopConnection();
-        stopDatasmashDataPlane();
+        stopPlankTransportDataPlane();
         {
             QWriteLocker lock(&m_Computer->lock);
             m_Computer->sessionToken.fill(QChar('\0'));
@@ -2957,9 +2957,9 @@ bool Session::runStationConnectReconnect()
     return false;
 }
 
-bool Session::finishStationConnectReconnect(
+bool Session::finishPlankReconnect(
         bool success,
-        const StationConnectReconnectState& state)
+        const PlankReconnectState& state)
 {
     bool resumedRenderer = false;
     if (success) {
@@ -2998,21 +2998,21 @@ bool Session::finishStationConnectReconnect(
         LiRequestIdrFrame();
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect reconnect completed (%s renderer)",
+                "PLANK reconnect completed (%s renderer)",
                 resumedRenderer ? "retained" : "recreated");
     return true;
 }
 
-class StationConnectReconnectThread : public QThread
+class PlankReconnectThread : public QThread
 {
 public:
-    explicit StationConnectReconnectThread(Session* session) :
+    explicit PlankReconnectThread(Session* session) :
         QThread(nullptr),
         m_Session(session),
         m_Success(false),
         m_CompletionPosted(false)
     {
-        setObjectName("StationConnect Reconnect");
+        setObjectName("PLANK Reconnect");
     }
 
     bool succeeded() const
@@ -3027,16 +3027,16 @@ public:
 
     void run() override
     {
-        m_Success = m_Session->runStationConnectReconnect();
+        m_Success = m_Session->runPlankReconnect();
 
         SDL_Event event = {};
         event.type = SDL_EVENT_USER;
-        event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
+        event.user.code = SDL_CODE_PLANK_REPLANK_COMPLETE;
         const bool posted = SDL_PushEvent(&event);
         m_CompletionPosted.store(posted);
         if (!posted) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Failed to post StationConnect reconnect completion: %s",
+                         "Failed to post PLANK reconnect completion: %s",
                          SDL_GetError());
         }
     }
@@ -3151,7 +3151,7 @@ void Session::execInternal()
     s_ActiveSession = this;
 
     // Initialize input before starting the connection.
-    // StationConnect is a remote-desktop product. Like RGS desktop mode, use
+    // PLANK is a remote-desktop product. Like RGS desktop mode, use
     // authoritative absolute coordinates and reserve relative capture for a
     // distinct game-mode path. This also gives receiver UI exact hit testing.
     m_InputHandler = new SdlInputHandler(*m_Preferences,
@@ -3248,7 +3248,7 @@ void Session::execInternal()
 #ifdef Q_OS_DARWIN
     std::string windowName = QString(m_Computer->name).toStdString();
 #else
-    std::string windowName = QString(m_Computer->name + " - StationConnect").toStdString();
+    std::string windowName = QString(m_Computer->name + " - PLANK").toStdString();
 #endif
 
     m_Window = SDL_CreateWindow(windowName.c_str(),
@@ -3313,7 +3313,7 @@ void Session::execInternal()
             SDL_DestroyProperties(properties);
             if (secondary == nullptr) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "Failed to create StationConnect fullscreen surface for client output %u: %s",
+                             "Failed to create PLANK fullscreen surface for client output %u: %s",
                              display.displayId, SDL_GetError());
                 emit displayLaunchError(
                     tr("Unable to create a fullscreen surface for the second client monitor."));
@@ -3352,7 +3352,7 @@ void Session::execInternal()
             }
             m_SecondaryWindows.append(secondary);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Created StationConnect Wayland fullscreen surface for output %u",
+                        "Created PLANK Wayland fullscreen surface for output %u",
                         display.displayId);
         }
     }
@@ -3402,7 +3402,7 @@ void Session::execInternal()
     m_InputHandler->setWindow(m_Window);
     rebuildPresentationLayout();
 
-    QImage iconImage(":/res/stationconnect-logo.png");
+    QImage iconImage(":/res/plank-logo.png");
     iconImage = iconImage.scaled(ICON_SIZE,
                                  ICON_SIZE,
                                  Qt::KeepAspectRatio,
@@ -3483,38 +3483,38 @@ void Session::execInternal()
     // Toggle the stats overlay if requested by the user
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
 
-    if (m_Computer->stationConnectAuthentication) {
-        m_StationConnectToolbar.reset(new StationConnectToolbar(
+    if (m_Computer->plankAuthentication) {
+        m_PlankToolbar.reset(new PlankToolbar(
                     m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences,
-                    m_StationConnectBitrateKbps));
+                    m_PlankBitrateKbps));
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
     // because we want to suspend all Qt processing until the stream is over.
-    StationConnectReconnectThread* reconnectThread = nullptr;
-    StationConnectReconnectState reconnectState;
+    PlankReconnectThread* reconnectThread = nullptr;
+    PlankReconnectState reconnectState;
     Uint64 reconnectDecisionDeadline = 0;
-    const auto handleStationConnectLocalUserEvent = [this](const SDL_UserEvent& userEvent) {
+    const auto handlePlankLocalUserEvent = [this](const SDL_UserEvent& userEvent) {
         switch (userEvent.code) {
-        case SDL_CODE_STATIONCONNECT_BITRATE_APPLIED:
-            if (m_StationConnectToolbar) {
-                m_StationConnectToolbar->setAppliedBitrate(
+        case SDL_CODE_PLANK_BITRATE_APPLIED:
+            if (m_PlankToolbar) {
+                m_PlankToolbar->setAppliedBitrate(
                             m_ConfirmedBitrateRequestKbps.load(std::memory_order_relaxed),
                             m_ConfirmedBitrateAppliedKbps.load(std::memory_order_relaxed),
                             m_ConfirmedBitratePeakKbps.load(std::memory_order_relaxed));
             }
             return true;
-        case SDL_CODE_STATIONCONNECT_CURSOR:
+        case SDL_CODE_PLANK_CURSOR:
             if (m_InputHandler != nullptr) {
                 m_InputHandler->applyPendingRemoteCursor();
             }
             return true;
-        case SDL_CODE_STATIONCONNECT_TABLET_CURSOR:
+        case SDL_CODE_PLANK_TABLET_CURSOR:
             if (m_InputHandler != nullptr) {
                 m_InputHandler->applyPendingTabletCursorActivation();
             }
             return true;
-        case SDL_CODE_STATIONCONNECT_CURSOR_POSITION:
+        case SDL_CODE_PLANK_CURSOR_POSITION:
             if (m_InputHandler != nullptr) {
                 m_InputHandler->applyPendingRemoteCursorPosition();
             }
@@ -3525,34 +3525,34 @@ void Session::execInternal()
     };
     SDL_Event event;
     for (;;) {
-        if (m_StationConnectToolbar) {
-            m_StationConnectToolbar->setRenderedStats(
+        if (m_PlankToolbar) {
+            m_PlankToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
                         m_CurrentVideoPacketLossPercent.load(
                             std::memory_order_relaxed));
-            const auto action = m_StationConnectToolbar->update(
+            const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
-            if (action == StationConnectToolbar::Action::Disconnect) {
+            if (action == PlankToolbar::Action::Disconnect) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect toolbar disconnect requested");
+                            "PLANK toolbar disconnect requested");
                 goto DispatchDeferredCleanup;
             }
-            if (action == StationConnectToolbar::Action::KeepWaiting) {
+            if (action == PlankToolbar::Action::KeepWaiting) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect unreachable-host prompt requested continued retries");
-                m_StationConnectToolbar->hideReconnectPrompt();
+                            "PLANK unreachable-host prompt requested continued retries");
+                m_PlankToolbar->hideReconnectPrompt();
                 reconnectDecisionDeadline = SDL_GetTicks() +
-                        static_cast<Uint64>(m_Preferences->stationConnectUnreachableTimeoutSeconds) * 1000;
+                        static_cast<Uint64>(m_Preferences->plankUnreachableTimeoutSeconds) * 1000;
             }
-            if (action == StationConnectToolbar::Action::ToggleFullscreen) {
+            if (action == PlankToolbar::Action::ToggleFullscreen) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect toolbar fullscreen toggle requested");
+                            "PLANK toolbar fullscreen toggle requested");
                 toggleFullscreen();
-                m_StationConnectToolbar->notifyWindowChanged();
-            } else if (action == StationConnectToolbar::Action::Minimize) {
+                m_PlankToolbar->notifyWindowChanged();
+            } else if (action == PlankToolbar::Action::Minimize) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect toolbar minimize requested");
+                            "PLANK toolbar minimize requested");
                 minimizePresentationWindows();
             }
         }
@@ -3560,28 +3560,28 @@ void Session::execInternal()
         if (m_Reconnecting.load() && reconnectDecisionDeadline != 0 &&
                 (reconnectThread == nullptr || !reconnectThread->isFinished()) &&
                 SDL_GetTicks() >= reconnectDecisionDeadline) {
-            if (m_Preferences->stationConnectUnreachableAction ==
-                    StreamingPreferences::SCUA_DISCONNECT) {
+            if (m_Preferences->plankUnreachableAction ==
+                    StreamingPreferences::PLANK_UNREACHABLE_DISCONNECT) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect host remained unreachable for %d seconds; disconnecting automatically",
-                            m_Preferences->stationConnectUnreachableTimeoutSeconds);
+                            "PLANK host remained unreachable for %d seconds; disconnecting automatically",
+                            m_Preferences->plankUnreachableTimeoutSeconds);
                 goto DispatchDeferredCleanup;
             }
 
-            m_StationConnectToolbar->showReconnectPrompt(
-                        m_Preferences->stationConnectUnreachableTimeoutSeconds);
+            m_PlankToolbar->showReconnectPrompt(
+                        m_Preferences->plankUnreachableTimeoutSeconds);
             reconnectDecisionDeadline = 0;
         }
         const int eventWaitTimeout = m_Reconnecting.load() ? 50 :
-                    (m_StationConnectToolbar ?
-                         m_StationConnectToolbar->eventWaitTimeout() : 1000);
+                    (m_PlankToolbar ?
+                         m_PlankToolbar->eventWaitTimeout() : 1000);
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
             if (reconnectThread != nullptr &&
                     reconnectThread->isFinished() &&
                     !reconnectThread->completionPosted()) {
                 event = {};
                 event.type = SDL_EVENT_USER;
-                event.user.code = SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
+                event.user.code = SDL_CODE_PLANK_REPLANK_COMPLETE;
             } else {
                 continue;
             }
@@ -3589,7 +3589,7 @@ void Session::execInternal()
 
         const bool reconnectCompletion =
                 event.type == SDL_EVENT_USER &&
-                event.user.code == SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE;
+                event.user.code == SDL_CODE_PLANK_REPLANK_COMPLETE;
         if (m_Reconnecting.load() &&
                 event.type != SDL_EVENT_QUIT && !reconnectCompletion) {
             // Cursor shapes, host-authoritative Wacom positions, and toolbar
@@ -3598,7 +3598,7 @@ void Session::execInternal()
             // completion. Apply them now so their one-shot pending latches do
             // not remain set after this event is consumed.
             if (event.type == SDL_EVENT_USER &&
-                    handleStationConnectLocalUserEvent(event.user)) {
+                    handlePlankLocalUserEvent(event.user)) {
                 continue;
             }
 
@@ -3607,39 +3607,39 @@ void Session::execInternal()
             // whose input connection has already stopped.
             switch (event.type) {
             case SDL_EVENT_MOUSE_MOTION:
-                if (m_StationConnectToolbar &&
+                if (m_PlankToolbar &&
                         event.motion.windowID == SDL_GetWindowID(m_Window)) {
-                    m_StationConnectToolbar->observeMouseMotion(event.motion);
+                    m_PlankToolbar->observeMouseMotion(event.motion);
                 }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                if (m_StationConnectToolbar &&
+                if (m_PlankToolbar &&
                         event.button.windowID == SDL_GetWindowID(m_Window)) {
                     const auto action =
-                            m_StationConnectToolbar->handleMouseButton(event.button);
-                    if (action == StationConnectToolbar::Action::Disconnect) {
+                            m_PlankToolbar->handleMouseButton(event.button);
+                    if (action == PlankToolbar::Action::Disconnect) {
                         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                                    "StationConnect toolbar disconnect requested during reconnect");
+                                    "PLANK toolbar disconnect requested during reconnect");
                         goto DispatchDeferredCleanup;
                     }
-                    if (action == StationConnectToolbar::Action::ToggleFullscreen) {
+                    if (action == PlankToolbar::Action::ToggleFullscreen) {
                         toggleFullscreen();
-                        m_StationConnectToolbar->notifyWindowChanged();
-                    } else if (action == StationConnectToolbar::Action::Minimize) {
+                        m_PlankToolbar->notifyWindowChanged();
+                    } else if (action == PlankToolbar::Action::Minimize) {
                         minimizePresentationWindows();
                     }
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
-                if (m_StationConnectToolbar &&
+                if (m_PlankToolbar &&
                         event.wheel.windowID == SDL_GetWindowID(m_Window)) {
-                    m_StationConnectToolbar->handleMouseWheel(event.wheel);
+                    m_PlankToolbar->handleMouseWheel(event.wheel);
                 }
                 break;
             case SDL_EVENT_KEY_DOWN:
             case SDL_EVENT_KEY_UP:
-                // Retain StationConnect's local Ctrl+Alt+Shift hotkeys. Any
+                // Retain PLANK's local Ctrl+Alt+Shift hotkeys. Any
                 // ordinary key events are harmless because LiStopConnection()
                 // has already closed the remote input channel.
                 m_InputHandler->handleKeyEvent(&event.key);
@@ -3647,14 +3647,14 @@ void Session::execInternal()
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-                if (m_StationConnectToolbar) {
-                    m_StationConnectToolbar->notifyWindowChanged();
+                if (m_PlankToolbar) {
+                    m_PlankToolbar->notifyWindowChanged();
                 }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (!anyPresentationWindowFocused()) {
-                    if (m_StationConnectToolbar) {
-                        m_StationConnectToolbar->notifyFocusLost();
+                    if (m_PlankToolbar) {
+                        m_PlankToolbar->notifyFocusLost();
                     }
                     m_InputHandler->notifyFocusLost();
                 }
@@ -3674,23 +3674,23 @@ void Session::execInternal()
             goto DispatchDeferredCleanup;
 
         case SDL_EVENT_USER:
-            if (handleStationConnectLocalUserEvent(event.user)) {
+            if (handlePlankLocalUserEvent(event.user)) {
                 break;
             }
             switch (event.user.code) {
-            case SDL_CODE_STATIONCONNECT_RECONNECT:
+            case SDL_CODE_PLANK_RECONNECT:
                 if (reconnectThread != nullptr ||
-                        !beginStationConnectReconnect(reconnectState)) {
+                        !beginPlankReconnect(reconnectState)) {
                     emit displayLaunchError(
                                 tr("The workstation desktop changed, but the client could not start reconnecting."));
                     goto DispatchDeferredCleanup;
                 }
-                reconnectThread = new StationConnectReconnectThread(this);
+                reconnectThread = new PlankReconnectThread(this);
                 reconnectThread->start();
                 reconnectDecisionDeadline = SDL_GetTicks() +
-                        static_cast<Uint64>(m_Preferences->stationConnectUnreachableTimeoutSeconds) * 1000;
+                        static_cast<Uint64>(m_Preferences->plankUnreachableTimeoutSeconds) * 1000;
                 break;
-            case SDL_CODE_STATIONCONNECT_RECONNECT_COMPLETE:
+            case SDL_CODE_PLANK_REPLANK_COMPLETE:
             {
                 if (reconnectThread == nullptr) {
                     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -3702,10 +3702,10 @@ void Session::execInternal()
                 delete reconnectThread;
                 reconnectThread = nullptr;
                 reconnectDecisionDeadline = 0;
-                if (m_StationConnectToolbar) {
-                    m_StationConnectToolbar->hideReconnectPrompt();
+                if (m_PlankToolbar) {
+                    m_PlankToolbar->hideReconnectPrompt();
                 }
-                if (!finishStationConnectReconnect(
+                if (!finishPlankReconnect(
                             reconnectSucceeded, reconnectState)) {
                     emit displayLaunchError(
                                 tr("The workstation desktop changed, but the client could not reconnect."));
@@ -3728,8 +3728,8 @@ void Session::execInternal()
 
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-            if (m_StationConnectToolbar) {
-                m_StationConnectToolbar->notifyWindowChanged();
+            if (m_PlankToolbar) {
+                m_PlankToolbar->notifyWindowChanged();
             }
             break;
 
@@ -3745,16 +3745,16 @@ void Session::execInternal()
             if (eventWindow == nullptr) {
                 break;
             }
-            if (m_StationConnectToolbar && eventWindow == m_Window &&
+            if (m_PlankToolbar && eventWindow == m_Window &&
                     event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-                m_StationConnectToolbar->notifyWindowChanged();
+                m_PlankToolbar->notifyWindowChanged();
             }
             // Early handling of some events
             switch (event.type) {
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (!anyPresentationWindowFocused()) {
-                    if (m_StationConnectToolbar) {
-                        m_StationConnectToolbar->notifyFocusLost();
+                    if (m_PlankToolbar) {
+                        m_PlankToolbar->notifyFocusLost();
                     }
                     if (m_Preferences->muteOnFocusLoss) {
                         m_AudioMuted = true;
@@ -3927,12 +3927,12 @@ void Session::execInternal()
                                    enableVsync, false,
                                    s_ActiveSession->m_VideoDecoder,
                                    isIdentityGbrEnabledForFormat(m_ActiveVideoFormat),
-                                   m_StationConnectCaptureSource ==
-                                           StreamingPreferences::SCCS_X11_NATIVE10 ?
+                                   m_PlankCaptureSource ==
+                                           StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
                                        DecoderCaptureSource::NativeX11_10Bit :
                                        DecoderCaptureSource::Nvfbc8Bit,
-                                   StreamingPreferences::isStationConnectNvencProfile(
-                                       m_StationConnectVideoProfile) ?
+                                   StreamingPreferences::isPlankNvencProfile(
+                                       m_PlankVideoProfile) ?
                                        DecoderEncoderBackend::NvencDirect :
                                        DecoderEncoderBackend::SoftwareCuda)) {
                     SDL_UnlockSpinlock(&m_DecoderLock);
@@ -3960,8 +3960,8 @@ void Session::execInternal()
 
             // The replacement renderer has no copy of the prior overlay
             // texture, so publish the toolbar surface again after recreation.
-            if (m_StationConnectToolbar) {
-                m_StationConnectToolbar->notifyWindowChanged();
+            if (m_PlankToolbar) {
+                m_PlankToolbar->notifyWindowChanged();
             }
 
             // After a window resize, we need to reset the pointer lock region
@@ -3976,28 +3976,28 @@ void Session::execInternal()
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            if (m_StationConnectToolbar &&
+            if (m_PlankToolbar &&
                     event.button.windowID == SDL_GetWindowID(m_Window)) {
-                const auto action = m_StationConnectToolbar->handleMouseButton(event.button);
-                if (action == StationConnectToolbar::Action::Disconnect) {
+                const auto action = m_PlankToolbar->handleMouseButton(event.button);
+                if (action == PlankToolbar::Action::Disconnect) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                                "StationConnect toolbar disconnect requested");
+                                "PLANK toolbar disconnect requested");
                     goto DispatchDeferredCleanup;
                 }
-                if (action == StationConnectToolbar::Action::ToggleFullscreen) {
+                if (action == PlankToolbar::Action::ToggleFullscreen) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                                "StationConnect toolbar fullscreen toggle requested");
+                                "PLANK toolbar fullscreen toggle requested");
                     toggleFullscreen();
-                    m_StationConnectToolbar->notifyWindowChanged();
+                    m_PlankToolbar->notifyWindowChanged();
                     break;
                 }
-                if (action == StationConnectToolbar::Action::Minimize) {
+                if (action == PlankToolbar::Action::Minimize) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                                "StationConnect toolbar minimize requested");
+                                "PLANK toolbar minimize requested");
                     minimizePresentationWindows();
                     break;
                 }
-                if (action == StationConnectToolbar::Action::Consumed) {
+                if (action == PlankToolbar::Action::Consumed) {
                     break;
                 }
             }
@@ -4006,7 +4006,7 @@ void Session::execInternal()
         case SDL_EVENT_MOUSE_MOTION:
         {
             bool toolbarConsumedMotion = false;
-            if (m_StationConnectToolbar &&
+            if (m_PlankToolbar &&
                     event.motion.windowID == SDL_GetWindowID(m_Window)) {
                 // The ordinary input path batches queued motion for efficient
                 // transport. Aggregate it here when the toolbar is present so
@@ -4036,18 +4036,18 @@ void Session::execInternal()
                 // Only toolbar button and wheel events have exclusive local
                 // ownership.
                 toolbarConsumedMotion =
-                        m_StationConnectToolbar->observeMouseMotion(event.motion);
+                        m_PlankToolbar->observeMouseMotion(event.motion);
             }
             if (!toolbarConsumedMotion) {
                 m_InputHandler->handleMouseMotionEvent(
-                            &event.motion, !m_StationConnectToolbar);
+                            &event.motion, !m_PlankToolbar);
             }
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL:
-            if (m_StationConnectToolbar &&
+            if (m_PlankToolbar &&
                     event.wheel.windowID == SDL_GetWindowID(m_Window) &&
-                    m_StationConnectToolbar->handleMouseWheel(event.wheel)) {
+                    m_PlankToolbar->handleMouseWheel(event.wheel)) {
                 break;
             }
             m_InputHandler->handleMouseWheelEvent(&event.wheel);
@@ -4083,18 +4083,18 @@ DispatchDeferredCleanup:
 
     // The toolbar owns a reference to the input handler, so destroy it before
     // releasing the handler itself.
-    m_StationConnectToolbar.reset();
+    m_PlankToolbar.reset();
 
     // Destroy the input handler now. This must be destroyed
     // before allowing the UI to continue execution.
     delete m_InputHandler;
     m_InputHandler = nullptr;
-    clearStationConnectReconnectCredentials();
+    clearPlankReconnectCredentials();
 
-#ifdef STATIONCONNECT_DATASMASH
+#ifdef PLANK_TRANSPORT
     // Native media threads call directly into the active decoder and audio
     // renderer. Quiesce them before either renderer can be destroyed.
-    stopDatasmashMediaReceivers();
+    stopPlankTransportMediaReceivers();
 #endif
 
     // Destroy the decoder, since this must be done on the main thread

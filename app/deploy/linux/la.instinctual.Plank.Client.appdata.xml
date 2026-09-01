@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>la.instinctual.Plank.Client</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>PLANK Client</name>
+  <summary>Connect to a PLANK workstation</summary>
+  <description>
+    <p>
+      PLANK provides a low-latency remote desktop connection to an
+      authorized PLANK workstation.
+    </p>
+  </description>
+  <categories>
+    <category>Network</category>
+    <category>RemoteAccess</category>
+  </categories>
+  <developer_name>Instinctual</developer_name>
+  <launchable type="desktop-id">la.instinctual.Plank.Client.desktop</launchable>
+  <provides>
+    <binary>plank-client</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-08-23" />
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

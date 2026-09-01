@@ -1,7 +1,7 @@
 #include "linuxrawwacom.h"
 
 #include <Limelight.h>
-#include <StationConnect.h>
+#include <plank.h>
 #include <SDL3/SDL.h>
 #include <QtEndian>
 #include <libudev.h>
@@ -59,10 +59,10 @@ bool isWacomUsbDevice(udev_device* device)
     return end != vendor && *end == '\0' && value == kWacomVendorId;
 }
 
-StationConnectWacomTransportDecision connectedWacomTransportDecision()
+PlankWacomTransportDecision connectedWacomTransportDecision()
 {
-    StationConnectWacomTransportDecision decision = {
-        StationConnectWacomTransport::ExactRawHid, 0, 0};
+    PlankWacomTransportDecision decision = {
+        PlankWacomTransport::ExactRawHid, 0, 0};
     udev* context = udev_new();
     if (context == nullptr) {
         return decision;
@@ -105,7 +105,7 @@ StationConnectWacomTransportDecision connectedWacomTransportDecision()
     std::sort(candidates.begin(), candidates.end());
     decision.vendor = kWacomVendorId;
     decision.product = candidates.front().second;
-    decision.transport = stationConnectWacomTransportForUsbDevice(
+    decision.transport = plankWacomTransportForUsbDevice(
         decision.vendor, decision.product);
     return decision;
 }
@@ -155,7 +155,7 @@ void writeLittle(T& destination, T value)
 
 } // namespace
 
-StationConnectWacomTransportDecision stationConnectWacomTransportForConnectedDevice()
+PlankWacomTransportDecision plankWacomTransportForConnectedDevice()
 {
     return connectedWacomTransportDecision();
 }
@@ -224,7 +224,7 @@ void LinuxRawWacomInput::finishReconnect()
 void LinuxRawWacomInput::run()
 {
     SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
-                "StationConnect exact raw Wacom capture initialized");
+                "PLANK exact raw Wacom capture initialized");
     while (!m_Stopping.load()) {
         if (!m_Active.load() || m_Reconnecting.load()) {
             {
@@ -314,7 +314,7 @@ bool LinuxRawWacomInput::discover()
         [&selectedParent](const std::pair<std::string, std::string>& candidate) {
             return candidate.first == selectedParent;
         }));
-    if (selectedCount == 0 || selectedCount > SC_RAW_HID_MAX_INTERFACES) {
+    if (selectedCount == 0 || selectedCount > PLANK_RAW_HID_MAX_INTERFACES) {
         udev_unref(context);
         return false;
     }
@@ -346,7 +346,7 @@ bool LinuxRawWacomInput::discover()
         int descriptorSize = 0;
         if (ioctl(fd, HIDIOCGRDESCSIZE, &descriptorSize) < 0 ||
                 descriptorSize <= 0 ||
-                descriptorSize > static_cast<int>(SC_RAW_HID_MAX_DESCRIPTOR_SIZE)) {
+                descriptorSize > static_cast<int>(PLANK_RAW_HID_MAX_DESCRIPTOR_SIZE)) {
             close(fd);
             udev_unref(context);
             return false;
@@ -393,7 +393,7 @@ bool LinuxRawWacomInput::discover()
 
 bool LinuxRawWacomInput::sendAttach()
 {
-    SC_RAW_HID_DEVICE_MESSAGE device = {};
+    PLANK_RAW_HID_DEVICE_MESSAGE device = {};
     device.interfaceCount = qToLittleEndian(
         static_cast<std::uint16_t>(m_Interfaces.size()));
 
@@ -424,14 +424,14 @@ bool LinuxRawWacomInput::sendAttach()
 
     m_Generation = nextGeneration();
     m_InputSequence = 0;
-    if (!sendFrame(SC_RAW_HID_DEVICE, 0, 0,
+    if (!sendFrame(PLANK_RAW_HID_DEVICE, 0, 0,
                    reinterpret_cast<const unsigned char*>(&device),
                    sizeof(device))) {
         return false;
     }
     for (std::size_t index = 0; index < m_Interfaces.size(); ++index) {
         const std::vector<unsigned char>& descriptor = m_Interfaces[index].descriptor;
-        if (!sendFrame(SC_RAW_HID_DESCRIPTOR,
+        if (!sendFrame(PLANK_RAW_HID_DESCRIPTOR,
                        static_cast<std::uint16_t>(index), 0,
                        descriptor.data(), descriptor.size())) {
             return false;
@@ -453,14 +453,14 @@ bool LinuxRawWacomInput::sendFrame(std::uint16_t type,
                                    const unsigned char* payload,
                                    std::size_t payloadLength)
 {
-    if (payloadLength > SC_RAW_HID_MAX_PAYLOAD_SIZE ||
+    if (payloadLength > PLANK_RAW_HID_MAX_PAYLOAD_SIZE ||
             (payloadLength != 0 && payload == nullptr)) {
         return false;
     }
-    std::vector<unsigned char> frame(sizeof(SC_RAW_HID_WIRE_HEADER) + payloadLength);
-    SC_RAW_HID_WIRE_HEADER header = {};
-    writeLittle(header.magic, static_cast<std::uint32_t>(SC_RAW_HID_WIRE_MAGIC));
-    writeLittle(header.version, static_cast<std::uint16_t>(SC_RAW_HID_WIRE_VERSION));
+    std::vector<unsigned char> frame(sizeof(PLANK_RAW_HID_WIRE_HEADER) + payloadLength);
+    PLANK_RAW_HID_WIRE_HEADER header = {};
+    writeLittle(header.magic, static_cast<std::uint32_t>(PLANK_RAW_HID_WIRE_MAGIC));
+    writeLittle(header.version, static_cast<std::uint16_t>(PLANK_RAW_HID_WIRE_VERSION));
     writeLittle(header.type, type);
     writeLittle(header.interfaceId, interfaceId);
     writeLittle(header.generation, m_Generation);
@@ -492,7 +492,7 @@ void LinuxRawWacomInput::handlePhysicalReports()
         return;
     }
 
-    std::array<unsigned char, SC_RAW_HID_MAX_REPORT_SIZE> report = {};
+    std::array<unsigned char, PLANK_RAW_HID_MAX_REPORT_SIZE> report = {};
     for (std::size_t index = 0; index < pollFds.size(); ++index) {
         if ((pollFds[index].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
             release(true);
@@ -504,7 +504,7 @@ void LinuxRawWacomInput::handlePhysicalReports()
         }
         const ssize_t bytes = read(pollFds[index].fd, report.data(), report.size());
         if (bytes > 0) {
-            if (sendFrame(SC_RAW_HID_INPUT, static_cast<std::uint16_t>(index),
+            if (sendFrame(PLANK_RAW_HID_INPUT, static_cast<std::uint16_t>(index),
                           ++m_InputSequence, report.data(),
                           static_cast<std::size_t>(bytes)) && m_TabletActivity) {
                 m_TabletActivity();
@@ -516,15 +516,15 @@ void LinuxRawWacomInput::handlePhysicalReports()
 void LinuxRawWacomInput::handleControl(const unsigned char* data,
                                        unsigned int length)
 {
-    if (data == nullptr || length < sizeof(SC_RAW_HID_WIRE_HEADER)) {
+    if (data == nullptr || length < sizeof(PLANK_RAW_HID_WIRE_HEADER)) {
         return;
     }
-    SC_RAW_HID_WIRE_HEADER header;
+    PLANK_RAW_HID_WIRE_HEADER header;
     std::memcpy(&header, data, sizeof(header));
     const std::uint32_t payloadLength = readLittle(header.payloadLength);
-    if (readLittle(header.magic) != SC_RAW_HID_WIRE_MAGIC ||
-            readLittle(header.version) != SC_RAW_HID_WIRE_VERSION ||
-            payloadLength > SC_RAW_HID_MAX_PAYLOAD_SIZE ||
+    if (readLittle(header.magic) != PLANK_RAW_HID_WIRE_MAGIC ||
+            readLittle(header.version) != PLANK_RAW_HID_WIRE_VERSION ||
+            payloadLength > PLANK_RAW_HID_MAX_PAYLOAD_SIZE ||
             length != sizeof(header) + payloadLength) {
         return;
     }
@@ -539,7 +539,7 @@ void LinuxRawWacomInput::handleControl(const unsigned char* data,
     if (generation != m_Generation || m_Interfaces.empty()) {
         return;
     }
-    if (type == SC_RAW_HID_ATTACH_RESULT && payloadLength == sizeof(std::int32_t)) {
+    if (type == PLANK_RAW_HID_ATTACH_RESULT && payloadLength == sizeof(std::int32_t)) {
         std::int32_t result;
         std::memcpy(&result, payload, sizeof(result));
         result = qFromLittleEndian(result);
@@ -558,10 +558,10 @@ void LinuxRawWacomInput::handleControl(const unsigned char* data,
             m_AttachFailed.store(true);
         }
     }
-    else if (type == SC_RAW_HID_GET_REPORT) {
+    else if (type == PLANK_RAW_HID_GET_REPORT) {
         handleGetReport(interfaceId, transactionId, payload, payloadLength);
     }
-    else if (type == SC_RAW_HID_SET_REPORT || type == SC_RAW_HID_OUTPUT) {
+    else if (type == PLANK_RAW_HID_SET_REPORT || type == PLANK_RAW_HID_OUTPUT) {
         handleSetReport(type, interfaceId, transactionId, payload, payloadLength);
     }
 }
@@ -574,7 +574,7 @@ void LinuxRawWacomInput::handleGetReport(std::uint16_t interfaceId,
     if (interfaceId >= m_Interfaces.size() || payloadLength != 2) {
         return;
     }
-    std::array<unsigned char, SC_RAW_HID_MAX_REPORT_SIZE> report = {};
+    std::array<unsigned char, PLANK_RAW_HID_MAX_REPORT_SIZE> report = {};
     report[0] = payload[0];
     const unsigned long request = getReportIoctl(payload[1], report.size());
     errno = 0;
@@ -587,7 +587,7 @@ void LinuxRawWacomInput::handleGetReport(std::uint16_t interfaceId,
     if (result > 0) {
         std::memcpy(reply.data() + sizeof(littleError), report.data(), result);
     }
-    sendFrame(SC_RAW_HID_GET_REPORT_REPLY, interfaceId, transactionId,
+    sendFrame(PLANK_RAW_HID_GET_REPORT_REPLY, interfaceId, transactionId,
               reply.data(), reply.size());
 }
 
@@ -605,11 +605,11 @@ void LinuxRawWacomInput::handleSetReport(std::uint16_t type,
     const int result = request != 0 ?
         ioctl(m_Interfaces[interfaceId].fd, request,
               const_cast<unsigned char*>(payload + 1)) : -1;
-    if (type == SC_RAW_HID_SET_REPORT) {
+    if (type == PLANK_RAW_HID_SET_REPORT) {
         const std::int32_t error = result < 0 ?
             (request == 0 ? EINVAL : errno) : 0;
         const std::int32_t littleError = qToLittleEndian(error);
-        sendFrame(SC_RAW_HID_SET_REPORT_REPLY, interfaceId, transactionId,
+        sendFrame(PLANK_RAW_HID_SET_REPORT_REPLY, interfaceId, transactionId,
                   reinterpret_cast<const unsigned char*>(&littleError),
                   sizeof(littleError));
     }
@@ -630,7 +630,7 @@ void LinuxRawWacomInput::setGrabbed(bool grabbed)
 void LinuxRawWacomInput::suspendForFocusLoss()
 {
     if (m_AttachPending || m_Attached) {
-        if (sendFrame(SC_RAW_HID_SUSPEND, 0, 0, nullptr, 0)) {
+        if (sendFrame(PLANK_RAW_HID_SUSPEND, 0, 0, nullptr, 0)) {
             SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                         "Suspended exact Wacom forwarding while preserving host endpoints");
         }
@@ -645,7 +645,7 @@ void LinuxRawWacomInput::suspendForFocusLoss()
 void LinuxRawWacomInput::release(bool notifyHost)
 {
     if (notifyHost && (m_AttachPending || m_Attached)) {
-        sendFrame(SC_RAW_HID_DETACH, 0, 0, nullptr, 0);
+        sendFrame(PLANK_RAW_HID_DETACH, 0, 0, nullptr, 0);
     }
     if (m_Attached) {
         setGrabbed(false);

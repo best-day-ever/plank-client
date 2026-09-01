@@ -37,7 +37,7 @@ private:
     QString& m_Value;
 };
 
-bool isStationConnectCertificate(const QSslCertificate& certificate)
+bool isPlankCertificate(const QSslCertificate& certificate)
 {
     const auto alternativeNames = certificate.subjectAlternativeNames();
     const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -49,7 +49,7 @@ bool isStationConnectCertificate(const QSslCertificate& certificate)
             certificate.effectiveDate() <= now && certificate.expiryDate() > now;
 }
 
-QSslConfiguration stationConnectSslConfiguration()
+QSslConfiguration plankSslConfiguration()
 {
     QSslConfiguration configuration = QSslConfiguration::defaultConfiguration();
     configuration.setProtocol(QSsl::TlsV1_3OrLater);
@@ -78,7 +78,7 @@ NvHTTP::NvHTTP(NvAddress address, QNetworkAccessManager* nam) :
 NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
     NvHTTP(computer->activeAddress, nam)
 {
-    setStationConnectSessionToken(computer->sessionToken);
+    setPlankSessionToken(computer->sessionToken);
 }
 
 void NvHTTP::setAddress(NvAddress address)
@@ -91,7 +91,7 @@ void NvHTTP::setAddress(NvAddress address)
     m_BaseUrlHttps.setPort(address.port());
 }
 
-void NvHTTP::setStationConnectSessionToken(QString sessionToken)
+void NvHTTP::setPlankSessionToken(QString sessionToken)
 {
     m_SessionToken = std::move(sessionToken);
 }
@@ -166,8 +166,8 @@ NvHTTP::startApp(QString verb,
                  bool persistGameControllersOnDisconnect,
                  QString captureDisplayMode,
                  QString topologyGeneration,
-                 int stationConnectProtocolVersion,
-                 int stationConnectFeatureFlags,
+                 int plankProtocolVersion,
+                 int plankFeatureFlags,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
@@ -175,57 +175,57 @@ NvHTTP::startApp(QString verb,
                  QString encoderBackend,
                  QString encodingMode,
                  quint16 quicUdpPayloadMtu,
-                 quint16& datasmashPort,
-                 QString& datasmashCertificateSha256,
-                 QString& datasmashToken,
+                 quint16& plankTransportPort,
+                 QString& plankTransportCertificateSha256,
+                 QString& plankTransportToken,
                  QString& acceptedCaptureSource,
                  QString& acceptedEncoderBackend,
                  QString& acceptedEncodingMode)
 {
-    QString stationConnectOutputArguments;
+    QString plankOutputArguments;
     if (!captureDisplayMode.isEmpty()) {
-        stationConnectOutputArguments =
-                "&scProtocolVersion=" + QString::number(stationConnectProtocolVersion) +
-                "&scFeatureFlags=" + QString::number(stationConnectFeatureFlags) +
-                "&scDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
-        stationConnectOutputArguments +=
-                "&scCaptureSource=" +
+        plankOutputArguments =
+                "&plankProtocolVersion=" + QString::number(plankProtocolVersion) +
+                "&plankFeatureFlags=" + QString::number(plankFeatureFlags) +
+                "&plankDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
+        plankOutputArguments +=
+                "&plankCaptureSource=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(captureSource));
-        stationConnectOutputArguments +=
-                "&scEncoderBackend=" +
+        plankOutputArguments +=
+                "&plankEncoderBackend=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(encoderBackend));
-        stationConnectOutputArguments +=
-                "&scEncodingMode=" +
+        plankOutputArguments +=
+                "&plankEncodingMode=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(encodingMode));
-        if ((stationConnectFeatureFlags &
+        if ((plankFeatureFlags &
              NvOutputTopology::FixedTransportMtuFeature) != 0) {
-            stationConnectOutputArguments +=
-                    "&scQuicUdpPayloadMtu=" +
+            plankOutputArguments +=
+                    "&plankQuicUdpPayloadMtu=" +
                     QString::number(quicUdpPayloadMtu);
         }
-        if ((stationConnectFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
+        if ((plankFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
-            stationConnectOutputArguments +=
-                    "&scHostLayout=" +
+            plankOutputArguments +=
+                    "&plankHostLayout=" +
                     QString::fromLatin1(QUrl::toPercentEncoding(hostLayout));
-            if ((stationConnectFeatureFlags &
+            if ((plankFeatureFlags &
                     NvOutputTopology::IndependentVirtualModesFeature) != 0) {
                 if (!virtualMode1.isEmpty()) {
-                    stationConnectOutputArguments +=
-                            "&scVirtualMode1=" +
+                    plankOutputArguments +=
+                            "&plankVirtualMode1=" +
                             QString::fromLatin1(QUrl::toPercentEncoding(virtualMode1));
                 }
                 if (!virtualMode2.isEmpty()) {
-                    stationConnectOutputArguments +=
-                            "&scVirtualMode2=" +
+                    plankOutputArguments +=
+                            "&plankVirtualMode2=" +
                             QString::fromLatin1(QUrl::toPercentEncoding(virtualMode2));
                 }
             }
         }
-        if ((stationConnectFeatureFlags & NvOutputTopology::TopologyGenerationFeature) != 0 &&
+        if ((plankFeatureFlags & NvOutputTopology::TopologyGenerationFeature) != 0 &&
                 !topologyGeneration.isEmpty()) {
-            stationConnectOutputArguments +=
-                    "&scTopologyGeneration=" +
+            plankOutputArguments +=
+                    "&plankTopologyGeneration=" +
                     QString::fromLatin1(QUrl::toPercentEncoding(topologyGeneration));
         }
     }
@@ -246,34 +246,34 @@ NvHTTP::startApp(QString verb,
                                    "&remoteControllersBitmap="+QString::number(gamepadMask)+
                                    "&gcmap="+QString::number(gamepadMask)+
                                    "&gcpersist="+QString::number(persistGameControllersOnDisconnect ? 1 : 0)+
-                                   stationConnectOutputArguments,
+                                   plankOutputArguments,
                                    LAUNCH_TIMEOUT_MS);
 
-    qInfo() << "StationConnect launch response received";
+    qInfo() << "PLANK launch response received";
 
     // Throws if the request failed
     verifyResponseStatus(response);
 
-    datasmashPort = getXmlString(response, "StationConnectDatasmashPort").toUShort();
-    datasmashCertificateSha256 =
-            getXmlString(response, "StationConnectDatasmashCertificateSha256");
-    datasmashToken = getXmlString(response, "StationConnectDatasmashToken");
+    plankTransportPort = getXmlString(response, "PlankTransportPort").toUShort();
+    plankTransportCertificateSha256 =
+            getXmlString(response, "PlankTransportCertificateSha256");
+    plankTransportToken = getXmlString(response, "PlankTransportToken");
     const quint16 acceptedQuicUdpPayloadMtu =
-            getXmlString(response, "StationConnectQuicUdpPayloadMtu").toUShort();
-    acceptedCaptureSource = getXmlString(response, "StationConnectCaptureSource");
-    acceptedEncoderBackend = getXmlString(response, "StationConnectEncoderBackend");
-    acceptedEncodingMode = getXmlString(response, "StationConnectEncodingMode");
+            getXmlString(response, "PlankQuicUdpPayloadMtu").toUShort();
+    acceptedCaptureSource = getXmlString(response, "PlankCaptureSource");
+    acceptedEncoderBackend = getXmlString(response, "PlankEncoderBackend");
+    acceptedEncodingMode = getXmlString(response, "PlankEncodingMode");
     const auto isCanonicalSha256Hex = [](const QString& value) {
         const QByteArray encoded = value.toLatin1();
         const QByteArray decoded = QByteArray::fromHex(encoded);
         return encoded.size() == 64 && decoded.size() == 32 &&
                 decoded.toHex() == encoded.toLower();
     };
-    if (datasmashPort == 0 ||
-            !isCanonicalSha256Hex(datasmashCertificateSha256) ||
-            !isCanonicalSha256Hex(datasmashToken)) {
+    if (plankTransportPort == 0 ||
+            !isCanonicalSha256Hex(plankTransportCertificateSha256) ||
+            !isCanonicalSha256Hex(plankTransportToken)) {
         throw GfeHttpResponseException(
-                    400, "Host returned invalid datasmash launch credentials");
+                    400, "Host returned invalid plank_transport launch credentials");
     }
     if (acceptedQuicUdpPayloadMtu != quicUdpPayloadMtu) {
         throw GfeHttpResponseException(
@@ -460,9 +460,9 @@ NvHTTP::getXmlString(QString xml,
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
     const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
-    if (!isStationConnectCertificate(certificate)) {
+    if (!isPlankCertificate(certificate)) {
         const auto alternativeNames = certificate.subjectAlternativeNames();
-        qWarning() << "Rejecting a TLS certificate outside the StationConnect profile"
+        qWarning() << "Rejecting a TLS certificate outside the PLANK profile"
                    << "null" << certificate.isNull()
                    << "selfSigned" << certificate.isSelfSigned()
                    << "keyAlgorithm" << certificate.publicKey().algorithm()
@@ -512,17 +512,17 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
     return ret;
 }
 
-QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& body)
+QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
 {
     if (!m_SessionToken.isEmpty()) {
-        throw GfeHttpResponseException(400, "Invalid StationConnect authentication state");
+        throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
     }
 
     QUrl url(m_BaseUrlHttps);
-    url.setPath("/stationconnect/auth/" + command);
+    url.setPath("/plank/auth/" + command);
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setSslConfiguration(stationConnectSslConfiguration());
+    request.setSslConfiguration(plankSslConfiguration());
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 #endif
@@ -549,16 +549,16 @@ QJsonObject NvHTTP::postStationConnectJson(QString command, const QJsonObject& b
         throw QtNetworkReplyException(QNetworkReply::UnknownNetworkError, message);
     }
     const QSslConfiguration negotiatedSsl = reply->sslConfiguration();
-    if (!isStationConnectCertificate(negotiatedSsl.peerCertificate()) ||
+    if (!isPlankCertificate(negotiatedSsl.peerCertificate()) ||
             negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
         delete reply;
         throw GfeHttpResponseException(401,
-                                       "StationConnect TLS validation failed");
+                                       "PLANK TLS validation failed");
     }
     const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
     delete reply;
     if (!document.isObject()) {
-        throw GfeHttpResponseException(400, "Malformed StationConnect authentication response");
+        throw GfeHttpResponseException(400, "Malformed PLANK authentication response");
     }
     return document.object();
 }
@@ -567,10 +567,10 @@ QString NvHTTP::authenticate(QString username, QString password)
 {
     SecureStringGuard passwordGuard(password);
     if (!m_SessionToken.isEmpty() || username.isEmpty()) {
-        throw GfeHttpResponseException(400, "Invalid StationConnect authentication state");
+        throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
     }
 
-    QJsonObject result = postStationConnectJson("start", {{"username", username}});
+    QJsonObject result = postPlankJson("start", {{"username", username}});
     for (int round = 0; round < 16; ++round) {
         const QString state = result.value("state").toString();
         if (state == "authenticated") {
@@ -606,7 +606,7 @@ QString NvHTTP::authenticate(QString username, QString password)
                 throw GfeHttpResponseException(400, "Unsupported PAM prompt style");
             }
         }
-        result = postStationConnectJson("respond", {
+        result = postPlankJson("respond", {
             {"conversation_id", result.value("conversation_id").toString()},
             {"responses", responses},
         });
@@ -618,15 +618,15 @@ QString NvHTTP::authenticate(QString username, QString password)
 NvOutputTopology NvHTTP::getOutputTopology()
 {
     if (m_SessionToken.isEmpty()) {
-        throw GfeHttpResponseException(400, "Invalid StationConnect topology state");
+        throw GfeHttpResponseException(400, "Invalid PLANK topology state");
     }
     const QString response = openConnectionToString(
-                m_BaseUrlHttps, "stationconnect/topology", nullptr,
+                m_BaseUrlHttps, "plank/topology", nullptr,
                 REQUEST_TIMEOUT_MS, NvLogLevel::NVLL_VERBOSE);
     const QJsonDocument document = QJsonDocument::fromJson(response.toUtf8());
     if (!document.isObject() && response.trimmed().startsWith(QLatin1Char('<'))) {
         // GameStream authorization failures use an XML status envelope even
-        // for this StationConnect JSON endpoint. This is expected after a
+        // for this PLANK JSON endpoint. This is expected after a
         // display transition replaces the media worker and its in-memory
         // bearer sessions. Preserve the 401 so the bounded transition loop
         // can authenticate once to the replacement worker.
@@ -638,7 +638,7 @@ NvOutputTopology NvHTTP::getOutputTopology()
             !NvOutputTopology::fromJson(document.object(), topology, &error)) {
         throw GfeHttpResponseException(400,
                                        error.isEmpty() ?
-                                           "Malformed StationConnect topology response" : error);
+                                           "Malformed PLANK topology response" : error);
     }
     return topology;
 }
@@ -665,7 +665,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     QNetworkRequest request(url);
 
     if (baseUrl.scheme() == "https") {
-        request.setSslConfiguration(stationConnectSslConfiguration());
+        request.setSslConfiguration(plankSslConfiguration());
         if (!m_SessionToken.isEmpty()) {
             request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toUtf8());
         }
@@ -721,7 +721,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         }
 
         if (reply->error() == QNetworkReply::SslHandshakeFailedError) {
-            GfeHttpResponseException exception(401, "StationConnect TLS validation failed");
+            GfeHttpResponseException exception(401, "PLANK TLS validation failed");
             delete reply;
             throw exception;
         }
@@ -737,16 +737,16 @@ NvHTTP::openConnection(QUrl baseUrl,
         }
     }
 
-    const bool stationConnectTls = baseUrl.scheme() == "https";
-    const bool approvedCertificate = !stationConnectTls ||
-            isStationConnectCertificate(reply->sslConfiguration().peerCertificate());
-    const bool approvedProtocol = !stationConnectTls ||
+    const bool plankTls = baseUrl.scheme() == "https";
+    const bool approvedCertificate = !plankTls ||
+            isPlankCertificate(reply->sslConfiguration().peerCertificate());
+    const bool approvedProtocol = !plankTls ||
             reply->sslConfiguration().sessionProtocol() == QSsl::TlsV1_3;
     if (!approvedCertificate || !approvedProtocol) {
-        qWarning() << "Rejecting StationConnect TLS session"
+        qWarning() << "Rejecting PLANK TLS session"
                    << "certificate" << approvedCertificate
                    << "tls13" << approvedProtocol;
-        GfeHttpResponseException exception(401, "Invalid StationConnect TLS session");
+        GfeHttpResponseException exception(401, "Invalid PLANK TLS session");
         delete reply;
         throw exception;
     }

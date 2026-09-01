@@ -14,28 +14,28 @@ private slots:
 
 void TestWacomTransportPolicy::usesNormalizedPenForFirstGenerationIntuosPro()
 {
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x056a, 0x0314),
-             StationConnectWacomTransport::NormalizedPen);
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x056a, 0x0315),
-             StationConnectWacomTransport::NormalizedPen);
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x056a, 0x0317),
-             StationConnectWacomTransport::NormalizedPen);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x056a, 0x0314),
+             PlankWacomTransport::NormalizedPen);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x056a, 0x0315),
+             PlankWacomTransport::NormalizedPen);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x056a, 0x0317),
+             PlankWacomTransport::NormalizedPen);
 }
 
 void TestWacomTransportPolicy::usesExactRawHidForNewerWacoms()
 {
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x056a, 0x0357),
-             StationConnectWacomTransport::ExactRawHid);
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x056a, 0x0358),
-             StationConnectWacomTransport::ExactRawHid);
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x056a, 0x0400),
-             StationConnectWacomTransport::ExactRawHid);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x056a, 0x0357),
+             PlankWacomTransport::ExactRawHid);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x056a, 0x0358),
+             PlankWacomTransport::ExactRawHid);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x056a, 0x0400),
+             PlankWacomTransport::ExactRawHid);
 }
 
 void TestWacomTransportPolicy::doesNotApplyWacomFallbackToAnotherVendor()
 {
-    QCOMPARE(stationConnectWacomTransportForUsbDevice(0x1234, 0x0315),
-             StationConnectWacomTransport::ExactRawHid);
+    QCOMPARE(plankWacomTransportForUsbDevice(0x1234, 0x0315),
+             PlankWacomTransport::ExactRawHid);
 }
 
 QTEST_APPLESS_MAIN(TestWacomTransportPolicy)

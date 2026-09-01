@@ -7,8 +7,8 @@
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
 
-#ifndef STATIONCONNECT_VERSION_STR
-#define STATIONCONNECT_VERSION_STR "development"
+#ifndef PLANK_VERSION_STR
+#define PLANK_VERSION_STR "development"
 #endif
 
 #ifdef Q_OS_WIN32
@@ -18,7 +18,7 @@
 
 SystemProperties::SystemProperties()
 {
-    stationConnectVersionString = QString::fromLatin1(STATIONCONNECT_VERSION_STR);
+    plankVersionString = QString::fromLatin1(PLANK_VERSION_STR);
     hasDesktopEnvironment = WMUtils::isRunningDesktopEnvironment();
     isRunningWayland = WMUtils::isRunningWayland();
     isRunningXWayland = isRunningWayland && QGuiApplication::platformName() == "xcb";

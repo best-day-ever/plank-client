@@ -227,8 +227,8 @@
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="66"/>
-        <source>This PC&apos;s Internet connection is blocking Moonlight. Streaming over the Internet may not work while connected to this network.</source>
-        <translation>A conexão à Internet deste PC está bloqueando o Moonlight. Streamando pela Internet provávelmente não funcionará enquanto conectado à esta Rede.</translation>
+        <source>This PC&apos;s Internet connection is blocking PLANK Client. Streaming over the Internet may not work while connected to this network.</source>
+        <translation>A conexão à Internet deste PC está bloqueando o PLANK Client. Streamando pela Internet provávelmente não funcionará enquanto conectado à esta Rede.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="69"/>
@@ -272,8 +272,8 @@
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="225"/>
-        <source>The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.</source>
-        <translation>A versão do GeForce Experience no %1 não é suportada por esta versão do Moonlight. Você deve atualizar o Moonlight para streamar do %1.</translation>
+        <source>The version of GeForce Experience on %1 is not supported by this build of PLANK Client. You must update PLANK Client to stream from %1.</source>
+        <translation>A versão do GeForce Experience no %1 não é suportada por esta versão do PLANK Client. Você deve atualizar o PLANK Client para streamar do %1.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="324"/>
@@ -282,18 +282,18 @@
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="335"/>
-        <source>This network does not appear to be blocking Moonlight. If you still have trouble connecting, check your PC&apos;s firewall settings.</source>
-        <translation>Esta rede não aparenta estar bloqueando o Moonlight. Se ainda tens problemas para conectar-se, verifique sua configuração do Firewall do PC.</translation>
+        <source>This network does not appear to be blocking PLANK Client. If you still have trouble connecting, check your PC&apos;s firewall settings.</source>
+        <translation>Esta rede não aparenta estar bloqueando o PLANK Client. Se ainda tens problemas para conectar-se, verifique sua configuração do Firewall do PC.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="335"/>
-        <source>If you are trying to stream over the Internet, install the Moonlight Internet Hosting Tool on your gaming PC and run the included Internet Streaming Tester to check your gaming PC&apos;s Internet connection.</source>
-        <translation>Se você está tentando streamar pela Internet, instale a Ferramenta de Internet Hosting do Moonlight no seu PC Gamer e execute o Testador de Internet Streaming para verificar a conexão à Internet do seu PC Gamer.</translation>
+        <source>If you are trying to stream over the Internet, install the PLANK Client Internet Hosting Tool on your gaming PC and run the included Internet Streaming Tester to check your gaming PC&apos;s Internet connection.</source>
+        <translation>Se você está tentando streamar pela Internet, instale a Ferramenta de Internet Hosting do PLANK Client no seu PC Gamer e execute o Testador de Internet Streaming para verificar a conexão à Internet do seu PC Gamer.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="339"/>
-        <source>Your PC&apos;s current network connection seems to be blocking Moonlight. Streaming over the Internet may not work while connected to this network.</source>
-        <translation>A conexão de Rede atual de seu PC aparenta estar bloqueando o Moonlight. Streamando pela Internet deve não funcionar enquando conectado à esta Rede.</translation>
+        <source>Your PC&apos;s current network connection seems to be blocking PLANK Client. Streaming over the Internet may not work while connected to this network.</source>
+        <translation>A conexão de Rede atual de seu PC aparenta estar bloqueando o PLANK Client. Streamando pela Internet deve não funcionar enquando conectado à esta Rede.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="339"/>
@@ -302,8 +302,8 @@
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="331"/>
-        <source>The network test could not be performed because none of Moonlight&apos;s connection testing servers were reachable from this PC. Check your Internet connection or try again later.</source>
-        <translation>O teste de rede não pôde ser executado pois nenhum servidor de teste de conexão do Moonlight foi accesável por este PC. Verifique sua conexão à Internet ou tente novamente mais tarde.</translation>
+        <source>The network test could not be performed because none of PLANK Client&apos;s connection testing servers were reachable from this PC. Check your Internet connection or try again later.</source>
+        <translation>O teste de rede não pôde ser executado pois nenhum servidor de teste de conexão do PLANK Client foi accesável por este PC. Verifique sua conexão à Internet ou tente novamente mais tarde.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="170"/>
@@ -342,8 +342,8 @@
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="324"/>
-        <source>Moonlight is testing your network connection to determine if any required ports are blocked.</source>
-        <translation>Moonlight está a testar a sua conexão para determinar se alguma das portas necessárias está bloqueada.</translation>
+        <source>PLANK Client is testing your network connection to determine if any required ports are blocked.</source>
+        <translation>PLANK Client está a testar a sua conexão para determinar se alguma das portas necessárias está bloqueada.</translation>
     </message>
     <message>
         <location filename="../gui/PcView.qml" line="351"/>
@@ -404,8 +404,8 @@
     <message>
         <location filename="../cli/quitstream.cpp" line="88"/>
         <location filename="../cli/startstream.cpp" line="89"/>
-        <source>Computer %1 has not been paired. Please open Moonlight to pair before streaming.</source>
-        <translation>O Computador %1 não foi conectado. Por favor abrir o Moonlight para conectar-se antes de streamar.</translation>
+        <source>Computer %1 has not been paired. Please open PLANK Client to pair before streaming.</source>
+        <translation>O Computador %1 não foi conectado. Por favor abrir o PLANK Client para conectar-se antes de streamar.</translation>
     </message>
     <message>
         <location filename="../cli/quitstream.cpp" line="102"/>
@@ -420,8 +420,8 @@
     </message>
     <message>
         <location filename="../cli/listapps.cpp" line="108"/>
-        <source>Computer %1 has not been paired. Please open Moonlight to pair before retrieving games list.</source>
-        <translation>Computador %1 ainda não foi pareado. Por favor abrir o Moonlight para parear antes de buscar lista de jogos.</translation>
+        <source>Computer %1 has not been paired. Please open PLANK Client to pair before retrieving games list.</source>
+        <translation>Computador %1 ainda não foi pareado. Por favor abrir o PLANK Client para parear antes de buscar lista de jogos.</translation>
     </message>
 </context>
 <context>
@@ -509,8 +509,8 @@
     </message>
     <message>
         <location filename="../streaming/session.cpp" line="958"/>
-        <source>The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.</source>
-        <translation>A versão do GeForce Experience no %1 não é suportada por esta versão do Moonlight. Você deve atualizar O Moonlight para streamar do %1.</translation>
+        <source>The version of GeForce Experience on %1 is not supported by this build of PLANK Client. You must update PLANK Client to stream from %1.</source>
+        <translation>A versão do GeForce Experience no %1 não é suportada por esta versão do PLANK Client. Você deve atualizar O PLANK Client para streamar do %1.</translation>
     </message>
     <message>
         <location filename="../streaming/session.cpp" line="963"/>
@@ -640,8 +640,8 @@
     </message>
     <message>
         <location filename="../streaming/session.cpp" line="1187"/>
-        <source>An attached gamepad has no mapping and won&apos;t be usable. Visit the Moonlight help to resolve this.</source>
-        <translation>Um controle conectado não tem mapeamento e não será usável. Visite a Ajuda do Moonlight para resolver isso.</translation>
+        <source>An attached gamepad has no mapping and won&apos;t be usable. Visit the PLANK Client help to resolve this.</source>
+        <translation>Um controle conectado não tem mapeamento e não será usável. Visite a Ajuda do PLANK Client para resolver isso.</translation>
     </message>
     <message>
         <location filename="../streaming/session.cpp" line="1205"/>
@@ -840,13 +840,13 @@
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="929"/>
-        <source>Mute audio stream when Moonlight is not the active window</source>
-        <translation>Silencie o áudio quando o Moonlight não é a janela ativa</translation>
+        <source>Mute audio stream when PLANK Client is not the active window</source>
+        <translation>Silencie o áudio quando o PLANK Client não é a janela ativa</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="940"/>
-        <source>Mutes Moonlight&apos;s audio when you Alt+Tab out of the stream or click on a different window.</source>
-        <translation>Silencia o áudio do Moonlight quando você Alt+Tab pra fora da stream ou clica numa janela diferente.</translation>
+        <source>Mutes PLANK Client&apos;s audio when you Alt+Tab out of the stream or click on a different window.</source>
+        <translation>Silencia o áudio do PLANK Client quando você Alt+Tab pra fora da stream ou clica numa janela diferente.</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="989"/>
@@ -865,8 +865,8 @@
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="1160"/>
-        <source>You must restart Moonlight for this change to take effect</source>
-        <translation>Você deve reiniciar o Moonlight para esta modificação fazer efeito</translation>
+        <source>You must restart PLANK Client for this change to take effect</source>
+        <translation>Você deve reiniciar o PLANK Client para esta modificação fazer efeito</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="1177"/>
@@ -945,8 +945,8 @@
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="1340"/>
-        <source>NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including Moonlight.</source>
-        <translation>AVISO: Alguns atalhos de teclado como Ctrl+Alt+Del no Windows não poderão ser interceptados por nenhuma aplicação, incuíndo o Moonlight.</translation>
+        <source>NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including PLANK Client.</source>
+        <translation>AVISO: Alguns atalhos de teclado como Ctrl+Alt+Del no Windows não poderão ser interceptados por nenhuma aplicação, incuíndo o PLANK Client.</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="1403"/>
@@ -1000,13 +1000,13 @@
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="1501"/>
-        <source>Process gamepad input when Moonlight is in the background</source>
-        <translation>Processe a entrada do controle quando o Moonlight estiver rodando no fundo</translation>
+        <source>Process gamepad input when PLANK Client is in the background</source>
+        <translation>Processe a entrada do controle quando o PLANK Client estiver rodando no fundo</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="1512"/>
-        <source>Allows Moonlight to capture gamepad inputs even if it&apos;s not the current window in focus</source>
-        <translation>Habilita o Moonlight para capturar entradas do controle mesmo se não for a janela em foco atual</translation>
+        <source>Allows PLANK Client to capture gamepad inputs even if it&apos;s not the current window in focus</source>
+        <translation>Habilita o PLANK Client para capturar entradas do controle mesmo se não for a janela em foco atual</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="949"/>
@@ -1218,8 +1218,8 @@
     </message>
     <message>
         <location filename="../gui/StreamSegue.qml" line="65"/>
-        <source>This PC&apos;s Internet connection is blocking Moonlight. Streaming over the Internet may not work while connected to this network.</source>
-        <translation>A conexão de internet deste PC está bloqueando o Moonlight. Streamando pela internet não deve funcionar enquanto conectado à esta rede.</translation>
+        <source>This PC&apos;s Internet connection is blocking PLANK Client. Streaming over the Internet may not work while connected to this network.</source>
+        <translation>A conexão de internet deste PC está bloqueando o PLANK Client. Streamando pela internet não deve funcionar enquanto conectado à esta rede.</translation>
     </message>
     <message>
         <location filename="../gui/StreamSegue.qml" line="168"/>
@@ -1266,8 +1266,8 @@
     </message>
     <message>
         <location filename="../gui/main.qml" line="366"/>
-        <source>Update available for Moonlight: Version %1</source>
-        <translation>Atualização disponível para o Moonlight: Versão %1</translation>
+        <source>Update available for PLANK Client: Version %1</source>
+        <translation>Atualização disponível para o PLANK Client: Versão %1</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="413"/>
@@ -1281,13 +1281,13 @@
     </message>
     <message>
         <location filename="../gui/main.qml" line="468"/>
-        <source>This version of Moonlight isn&apos;t optimized for your PC. Please download the &apos;%1&apos; version of Moonlight for the best streaming performance.</source>
-        <translation>Esta versão do Moonlight não é otimizada para seu PC. Por favor baixe a versão &apos;%1&apos; do Moonlight para a melhor performance de streaming.</translation>
+        <source>This version of PLANK Client isn&apos;t optimized for your PC. Please download the &apos;%1&apos; version of PLANK Client for the best streaming performance.</source>
+        <translation>Esta versão do PLANK Client não é otimizada para seu PC. Por favor baixe a versão &apos;%1&apos; do PLANK Client para a melhor performance de streaming.</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="477"/>
-        <source>Moonlight detected gamepads without a mapping:</source>
-        <translation>O Moonlight detectou controles sem mapeamento:</translation>
+        <source>PLANK Client detected gamepads without a mapping:</source>
+        <translation>O PLANK Client detectou controles sem mapeamento:</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="390"/>
@@ -1296,8 +1296,8 @@
     </message>
     <message>
         <location filename="../gui/main.qml" line="451"/>
-        <source>No functioning hardware accelerated video decoder was detected by Moonlight. Your streaming performance may be severely degraded in this configuration.</source>
-        <translation>Nenhum decodificador de vídeo acelerado por hardware foi detectado pelo Moonlight. Sua performance de streaming pode ser severamente degradada por esta configuração.</translation>
+        <source>No functioning hardware accelerated video decoder was detected by PLANK Client. Your streaming performance may be severely degraded in this configuration.</source>
+        <translation>Nenhum decodificador de vídeo acelerado por hardware foi detectado pelo PLANK Client. Sua performance de streaming pode ser severamente degradada por esta configuração.</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="453"/>

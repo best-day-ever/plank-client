@@ -511,7 +511,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
             // we flush window events just in case SDL re-created a window
             // before eventually failing.
             EGL_LOG(Error,
-                    "SDL_CreateRenderer() failed for StationConnect output: %s",
+                    "SDL_CreateRenderer() failed for PLANK output: %s",
                     SDL_GetError());
             s_LastFailedWindow = target.window;
             break;
@@ -557,7 +557,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     for (const auto& target : m_PresentationTargets) {
         if (!SDL_GL_MakeCurrent(target.window, m_Context)) {
             EGL_LOG(Error,
-                    "Cannot bind EGL context to StationConnect output: %s",
+                    "Cannot bind EGL context to PLANK output: %s",
                     SDL_GetError());
             return false;
         }
@@ -720,7 +720,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
 #endif
 
     EGL_LOG(Info,
-            "StationConnect presentation initialized with %zu output surface%s on a %dx%d canvas",
+            "PLANK presentation initialized with %zu output surface%s on a %dx%d canvas",
             m_PresentationTargets.size(),
             m_PresentationTargets.size() == 1 ? "" : "s",
             m_PresentationCanvasSize.width(),
@@ -929,7 +929,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
     for (const auto& target : m_PresentationTargets) {
         if (!SDL_GL_MakeCurrent(target.window, m_Context)) {
             EGL_LOG(Error,
-                    "Cannot bind EGL context to StationConnect output while rendering: %s",
+                    "Cannot bind EGL context to PLANK output while rendering: %s",
                     SDL_GetError());
             rendererResetRequired = true;
             continue;
@@ -942,7 +942,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const auto slice = StationConnectPresentation::sliceForOutput(
+        const auto slice = PlankPresentation::sliceForOutput(
                     streamSize, m_PresentationCanvasSize,
                     target.canvasRect);
         if (slice.visible) {
@@ -1010,7 +1010,7 @@ void EGLRenderer::renderFrame(AVFrame* frame)
 
         if (!SDL_GL_SwapWindow(target.window)) {
             EGL_LOG(Error,
-                    "Failed to swap StationConnect output: %s",
+                    "Failed to swap PLANK output: %s",
                     SDL_GetError());
             rendererResetRequired = true;
         }

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <deque>
 
-namespace StationConnectAvSync {
+namespace PlankAvSync {
 
 struct VideoClockSample
 {
@@ -86,4 +86,4 @@ private:
     bool m_Anchored = false;
 };
 
-} // namespace StationConnectAvSync
+} // namespace PlankAvSync

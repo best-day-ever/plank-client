@@ -54,13 +54,13 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->authorizationState == NvComputer::AS_AUTHORIZED;
     case StatusUnknownRole:
         return computer->state == NvComputer::CS_UNKNOWN;
-    case StationConnectHostVersionRole:
-        return computer->stationConnectHostMetadataVersion >= 1 ?
-                    computer->stationConnectHostVersion : QString();
+    case PlankHostVersionRole:
+        return computer->plankHostMetadataVersion >= 1 ?
+                    computer->plankHostVersion : QString();
     case ManualBookmarkRole:
         return computer->manualBookmark;
     case AddressRole:
-        // New StationConnect bookmarks have a durable manual address, but
+        // New PLANK bookmarks have a durable manual address, but
         // workstation records created before bookmarks do not. Never expose
         // NvAddress's diagnostic <NULL> sentinel in the main workstation row.
         if (!computer->manualAddress.isNull()) {
@@ -103,14 +103,14 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[OnlineRole] = "online";
     names[AuthorizedRole] = "authorized";
     names[StatusUnknownRole] = "statusUnknown";
-    names[StationConnectHostVersionRole] = "stationConnectHostVersion";
+    names[PlankHostVersionRole] = "plankHostVersion";
     names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
 
     return names;
 }
 
-Session* ComputerModel::createSessionForStationConnectDesktop(int computerIndex)
+Session* ComputerModel::createSessionForPlankDesktop(int computerIndex)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
 
@@ -125,58 +125,58 @@ Session* ComputerModel::createSessionForStationConnectDesktop(int computerIndex)
     return nullptr;
 }
 
-int ComputerModel::stationConnectScalingChoice(int computerIndex) const
+int ComputerModel::plankScalingChoice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    return computer->stationConnectScalingMode == NvOutputTopology::NativeScalingMode ? 0 : 1;
+    return computer->plankScalingMode == NvOutputTopology::NativeScalingMode ? 0 : 1;
 }
 
-int ComputerModel::stationConnectVideoProfile(int computerIndex) const
+int ComputerModel::plankVideoProfile(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    return computer->stationConnectVideoProfile;
+    return computer->plankVideoProfile;
 }
 
-int ComputerModel::stationConnectCaptureSource(int computerIndex) const
+int ComputerModel::plankCaptureSource(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    return computer->stationConnectCaptureSource;
+    return computer->plankCaptureSource;
 }
 
-QVariantList ComputerModel::stationConnectProfileBitratesKbps(
+QVariantList ComputerModel::plankProfileBitratesKbps(
         int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    return StreamingPreferences::stationConnectProfileBitratesToVariantList(
-                computer->stationConnectProfileBitratesKbps);
+    return StreamingPreferences::plankProfileBitratesToVariantList(
+                computer->plankProfileBitratesKbps);
 }
 
-int ComputerModel::stationConnectHostLayoutChoice(int computerIndex) const
+int ComputerModel::plankHostLayoutChoice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
-    if (computer->stationConnectHostLayout == NvOutputTopology::PhysicalHostLayout) {
+    if (computer->plankHostLayout == NvOutputTopology::PhysicalHostLayout) {
         return 1;
     }
-    if (computer->stationConnectHostLayout == NvOutputTopology::SingleHostLayout) {
+    if (computer->plankHostLayout == NvOutputTopology::SingleHostLayout) {
         return 2;
     }
-    if (computer->stationConnectHostLayout == NvOutputTopology::DualHorizontalHostLayout) {
+    if (computer->plankHostLayout == NvOutputTopology::DualHorizontalHostLayout) {
         return 3;
     }
     return 0;
 }
 
-int ComputerModel::stationConnectHostDisplayPolicy(int computerIndex) const
+int ComputerModel::plankHostDisplayPolicy(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
@@ -190,22 +190,22 @@ int ComputerModel::stationConnectHostDisplayPolicy(int computerIndex) const
                 NvOutputTopology::PhysicalHostLayout) ? 1 : 0;
 }
 
-int ComputerModel::stationConnectVirtualMode1Choice(int computerIndex) const
+int ComputerModel::plankVirtualMode1Choice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
     return NvOutputTopology::qualifiedVirtualModes().indexOf(
-                computer->stationConnectVirtualMode1);
+                computer->plankVirtualMode1);
 }
 
-int ComputerModel::stationConnectVirtualMode2Choice(int computerIndex) const
+int ComputerModel::plankVirtualMode2Choice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
     NvComputer* computer = m_Computers[computerIndex];
     QReadLocker lock(&computer->lock);
     return NvOutputTopology::qualifiedVirtualModes().indexOf(
-                computer->stationConnectVirtualMode2);
+                computer->plankVirtualMode2);
 }
 
 bool ComputerModel::editComputerBookmark(int computerIndex, QString address,

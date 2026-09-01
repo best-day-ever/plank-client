@@ -198,7 +198,7 @@ void LinuxWacomInput::run()
     libinput* input = libinput_udev_create_context(&interface, this, udevContext);
     if (input == nullptr || libinput_udev_assign_seat(input, "seat0") != 0) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Wacom input unavailable; check StationConnect input-device permissions");
+                    "Wacom input unavailable; check PLANK input-device permissions");
         if (input != nullptr) {
             libinput_unref(input);
         }

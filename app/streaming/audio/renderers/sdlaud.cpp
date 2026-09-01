@@ -34,7 +34,7 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
 
 #ifdef Q_OS_LINUX
-    // The qualified StationConnect Linux client talks to PipeWire directly.
+    // The qualified PLANK Linux client talks to PipeWire directly.
     SDL_SetHintWithPriority(SDL_HINT_AUDIO_DRIVER, "pipewire", SDL_HINT_OVERRIDE);
 #endif
 
@@ -108,14 +108,14 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
         if (allocationResult < 0 || m_SwrContext == nullptr ||
                 swr_init(m_SwrContext) < 0) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Unable to initialize StationConnect A/V audio correction");
+                        "Unable to initialize PLANK A/V audio correction");
             swr_free(&m_SwrContext);
             m_EnableAvSyncCorrection = false;
         }
         else {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "StationConnect video-master audio correction enabled (limit %d ppm)",
-                        StationConnectAvSync::AudioRateController::MaximumCorrectionPpm);
+                        "PLANK video-master audio correction enabled (limit %d ppm)",
+                        PlankAvSync::AudioRateController::MaximumCorrectionPpm);
         }
     }
 #else
@@ -191,12 +191,12 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
     const int pendingAudioMs = LiGetPendingAudioDuration();
 
     // Generic Moonlight drops decoded audio to recover latency when its input
-    // queue grows. StationConnect instead uses bounded resampling catch-up for
+    // queue grows. PLANK instead uses bounded resampling catch-up for
     // ordinary scheduling bursts and retains a hard emergency ceiling.
-    constexpr int MaximumStationConnectPendingAudioMs = 100;
+    constexpr int MaximumPlankPendingAudioMs = 100;
     if ((!m_EnableAvSyncCorrection && pendingAudioMs > 30) ||
             (m_EnableAvSyncCorrection &&
-             pendingAudioMs > MaximumStationConnectPendingAudioMs)) {
+             pendingAudioMs > MaximumPlankPendingAudioMs)) {
         m_RawAudioFrames += inputFrames;
         m_SkippedAudioBlocks++;
         return true;
@@ -232,7 +232,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
             m_SubmittedAudioFrames,
             m_SampleRate,
             now,
-            StationConnectAvSync::readVideoClock());
+            PlankAvSync::readVideoClock());
         const auto backlogCorrection = m_AudioBacklogController.update(
             backlogAudioMs,
             now);
@@ -248,12 +248,12 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
                                      sampleDelta,
                                      compensationDistance) < 0) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Unable to update StationConnect audio correction");
+                            "Unable to update PLANK audio correction");
             }
             else if (correction.updated &&
                      (m_RawAudioFrames / m_SampleRate) % 10 == 0) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio correction: ppm=%d catchup=%d applied=%d delta=%d distance=%d",
+                            "PLANK A/V audio correction: ppm=%d catchup=%d applied=%d delta=%d distance=%d",
                             correction.correctionPpm,
                             backlogCorrection.correctionPpm,
                             appliedCorrectionPpm,
@@ -278,7 +278,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
                                              inputFrames);
         if (outputFrames < 0) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "StationConnect audio correction failed");
+                         "PLANK audio correction failed");
             return false;
         }
         queuedBuffer = m_CorrectedAudioBuffer.data();

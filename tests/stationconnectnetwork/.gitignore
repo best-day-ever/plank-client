@@ -1,7 +1,0 @@
-.qmake.stash
-Makefile*
-*.moc
-*.o
-moc_predefs.h
-stationconnectnetwork
-target_wrapper.sh

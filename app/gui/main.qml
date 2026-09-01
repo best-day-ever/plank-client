@@ -12,12 +12,12 @@ ApplicationWindow {
     property bool pollingActive: false
 
     id: window
-    title: qsTr("StationConnect Client")
+    title: qsTr("PLANK Client")
     width: 1280
     height: 1200
     minimumHeight: 900
 
-    StationConnectTheme {
+    PlankTheme {
         id: theme
     }
 
@@ -28,7 +28,7 @@ ApplicationWindow {
     Material.accent: theme.accent
 
     Component.onCompleted: {
-        // The StationConnect launcher is always a normal desktop window.
+        // The PLANK launcher is always a normal desktop window.
         window.show()
 
         // Display any modal dialogs for configuration warnings
@@ -238,8 +238,8 @@ ApplicationWindow {
             }
 
             Label {
-                id: stationConnectVersionLabel
-                text: SystemProperties.stationConnectVersionString
+                id: plankVersionLabel
+                text: SystemProperties.plankVersionString
                 color: theme.textSecondary
                 font.pointSize: 9
                 font.weight: Font.Medium
@@ -316,7 +316,7 @@ ApplicationWindow {
 
     ErrorMessageDialog {
         id: noHwDecoderDialog
-        text: qsTr("No functioning hardware accelerated video decoder was detected by StationConnect. " +
+        text: qsTr("No functioning hardware accelerated video decoder was detected by PLANK. " +
                    "Your streaming performance may be severely degraded in this configuration.")
     }
 
@@ -329,7 +329,7 @@ ApplicationWindow {
     NavigableMessageDialog {
         id: wow64Dialog
         standardButtons: Dialog.Ok
-        text: qsTr("This StationConnect build isn't optimized for your PC. Please install the '%1' StationConnect package for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
+        text: qsTr("This PLANK build isn't optimized for your PC. Please install the '%1' PLANK package for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
     }
 
     // This dialog appears when quitting via keyboard.
@@ -367,7 +367,7 @@ ApplicationWindow {
     NavigableDialog {
         id: addPcDialog
         title: qsTr("Add workstation bookmark")
-        property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
+        property var virtualModeChoices: ComputerManager.plankVirtualModeChoices()
         property var profileBitratesKbps: []
 
         // Give both connection fields enough room for real hostnames while
@@ -390,7 +390,7 @@ ApplicationWindow {
                 return addEncodingProfile.model.get(
                             addEncodingProfile.currentIndex).val
             }
-            return StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
+            return StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
         }
 
         function applyProfileBitrate() {
@@ -412,7 +412,7 @@ ApplicationWindow {
             // Force keyboard focus on the textbox so keyboard navigation works
             addressText.forceActiveFocus()
             profileBitratesKbps =
-                    StreamingPreferences.stationConnectDefaultProfileBitratesKbps()
+                    StreamingPreferences.plankDefaultProfileBitratesKbps()
             applyProfileBitrate()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return addressText.text.trim() !== "" && nicknameText.text.trim() !== ""
@@ -456,7 +456,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            StationConnectTextField {
+            PlankTextField {
                 id: addressText
                 Layout.fillWidth: true
                 focus: true
@@ -476,7 +476,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            StationConnectTextField {
+            PlankTextField {
                 id: nicknameText
                 property bool manuallyEdited: false
 
@@ -502,7 +502,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            StationConnectComboBox {
+            PlankComboBox {
                 id: addCaptureSource
                 Layout.fillWidth: true
                 textRole: "text"
@@ -511,11 +511,11 @@ ApplicationWindow {
                     id: addCaptureSourceModel
                     ListElement {
                         text: qsTr("NvFBC — 8-bit source")
-                        val: StreamingPreferences.SCCS_NVFBC_8BIT
+                        val: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
                     }
                     ListElement {
                         text: qsTr("Native X11/XShm — 10-bit (Experimental)")
-                        val: StreamingPreferences.SCCS_X11_NATIVE10
+                        val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10
                     }
                 }
                 onCurrentIndexChanged: {
@@ -534,7 +534,7 @@ ApplicationWindow {
                 opacity: addCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
 
-            StationConnectComboBox {
+            PlankComboBox {
                 id: addEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
@@ -548,31 +548,31 @@ ApplicationWindow {
                 id: addNvfbcEncodingProfileModel
                 ListElement {
                     text: qsTr("H.264 8-bit 4:2:2")
-                    val: StreamingPreferences.SCVP_H264_8BIT_422
+                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_422
                 }
                 ListElement {
                     text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.SCVP_H264_8BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_444
                 }
                 ListElement {
                     text: qsTr("H.264 10-bit 4:2:2")
-                    val: StreamingPreferences.SCVP_H264_10BIT_422
+                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_422
                 }
                 ListElement {
                     text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
                 }
                 ListElement {
                     text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_H264_8BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_H264_8BIT_444
                 }
                 ListElement {
                     text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_8BIT_444
                 }
                 ListElement {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
                 }
             }
 
@@ -580,11 +580,11 @@ ApplicationWindow {
                 id: addNativeEncodingProfileModel
                 ListElement {
                     text: qsTr("H.264 10-bit 4:4:4 (identity GBR) — x264")
-                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
                 }
                 ListElement {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
                 }
             }
 
@@ -597,9 +597,9 @@ ApplicationWindow {
             Slider {
                 id: addBitrateSlider
                 Layout.fillWidth: true
-                from: StreamingPreferences.stationConnectBitrateMinimumKbps()
-                to: StreamingPreferences.stationConnectBitrateMaximumKbps()
-                stepSize: StreamingPreferences.stationConnectBitrateStepKbps()
+                from: StreamingPreferences.plankBitrateMinimumKbps()
+                to: StreamingPreferences.plankBitrateMaximumKbps()
+                stepSize: StreamingPreferences.plankBitrateStepKbps()
                 snapMode: Slider.SnapAlways
                 onMoved: addPcDialog.rememberProfileBitrate()
             }
@@ -616,7 +616,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            StationConnectComboBox {
+            PlankComboBox {
                 id: addHostLayout
                 Layout.fillWidth: true
                 model: [
@@ -633,7 +633,7 @@ ApplicationWindow {
                 opacity: addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
 
-            StationConnectComboBox {
+            PlankComboBox {
                 id: addVirtualMode1
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex >= 2
@@ -647,7 +647,7 @@ ApplicationWindow {
                 opacity: addHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
 
-            StationConnectComboBox {
+            PlankComboBox {
                 id: addVirtualMode2
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex === 3
@@ -660,7 +660,7 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            StationConnectComboBox {
+            PlankComboBox {
                 id: addScalingChoice
                 Layout.fillWidth: true
                 currentIndex: 1

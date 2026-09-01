@@ -13,7 +13,7 @@ class ComputerModel : public QAbstractListModel
         OnlineRole,
         AuthorizedRole,
         StatusUnknownRole,
-        StationConnectHostVersionRole,
+        PlankHostVersionRole,
         ManualBookmarkRole,
         AddressRole
     };
@@ -36,25 +36,25 @@ public:
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
-    Q_INVOKABLE Session* createSessionForStationConnectDesktop(int computerIndex);
+    Q_INVOKABLE Session* createSessionForPlankDesktop(int computerIndex);
 
-    Q_INVOKABLE int stationConnectScalingChoice(int computerIndex) const;
+    Q_INVOKABLE int plankScalingChoice(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectVideoProfile(int computerIndex) const;
+    Q_INVOKABLE int plankVideoProfile(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectCaptureSource(int computerIndex) const;
+    Q_INVOKABLE int plankCaptureSource(int computerIndex) const;
 
-    Q_INVOKABLE QVariantList stationConnectProfileBitratesKbps(
+    Q_INVOKABLE QVariantList plankProfileBitratesKbps(
             int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectHostLayoutChoice(int computerIndex) const;
+    Q_INVOKABLE int plankHostLayoutChoice(int computerIndex) const;
 
     // -1 is unknown/offline, 0 is physical, and 1 is virtual.
-    Q_INVOKABLE int stationConnectHostDisplayPolicy(int computerIndex) const;
+    Q_INVOKABLE int plankHostDisplayPolicy(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectVirtualMode1Choice(int computerIndex) const;
+    Q_INVOKABLE int plankVirtualMode1Choice(int computerIndex) const;
 
-    Q_INVOKABLE int stationConnectVirtualMode2Choice(int computerIndex) const;
+    Q_INVOKABLE int plankVirtualMode2Choice(int computerIndex) const;
 
     Q_INVOKABLE bool editComputerBookmark(int computerIndex, QString address,
                                           QString nickname, int scalingChoice,

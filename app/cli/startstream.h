@@ -22,8 +22,8 @@ class Launcher : public QObject
 public:
     explicit Launcher(QString computer, QString app,
                       StreamingPreferences* preferences,
-                      QString stationConnectUsername = QString(),
-                      QString stationConnectPassword = QString(),
+                      QString plankUsername = QString(),
+                      QString plankPassword = QString(),
                       QObject *parent = nullptr);
     ~Launcher() override;
     Q_INVOKABLE void execute(ComputerManager *manager);

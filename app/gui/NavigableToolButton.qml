@@ -6,7 +6,7 @@ ToolButton {
     id: control
     property string iconSource
 
-    StationConnectTheme {
+    PlankTheme {
         id: theme
     }
 

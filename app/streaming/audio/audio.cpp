@@ -23,7 +23,7 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     QString mlAudio = qgetenv("ML_AUDIO").toLower();
     if (mlAudio == "sdl") {
         TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
-                          m_Computer->stationConnectAuthentication)
+                          m_Computer->plankAuthentication)
         return nullptr;
     }
 #if defined(HAVE_SLAUDIO)
@@ -46,9 +46,9 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
 #endif
 
-    // StationConnect uses SDL as its sole audio renderer.
+    // PLANK uses SDL as its sole audio renderer.
     TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
-                      m_Computer->stationConnectAuthentication)
+                      m_Computer->plankAuthentication)
 
     return nullptr;
 }
@@ -251,7 +251,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
                     s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame * 1000 /
                     s_ActiveSession->m_ActiveAudioConfig.sampleRate;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "StationConnect A/V audio clock: media=%llu submit=%llu queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
+                            "PLANK A/V audio clock: media=%llu submit=%llu queue=%d device=%d pending=%d frame=%d correction=%d skipped=%llu raw=%llu catchup=%d",
                             static_cast<unsigned long long>(mediaTimeMs),
                             static_cast<unsigned long long>(now),
                             s_ActiveSession->m_AudioRenderer->getQueuedAudioDurationMs(),

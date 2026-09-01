@@ -1,9 +1,9 @@
 #include <Limelight.h>
-#include <StationConnect.h>
+#include <plank.h>
 #include <SDL3/SDL.h>
 #include "streaming/input/input.h"
 #include "streaming/session.h"
-#include "streaming/stationconnectwaylandcursor.h"
+#include "streaming/plankwaylandcursor.h"
 #include "streaming/streamutils.h"
 #include "utils.h"
 
@@ -135,13 +135,13 @@ void SdlInputHandler::setWindow(SDL_Window *window)
             (LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) != 0;
     if (m_LocalCursorSupported) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "StationConnect local cursor transport enabled");
+                    "PLANK local cursor transport enabled");
         setCursorVisible(true);
         ensureWaylandTabletCursorAttached(m_Window);
     }
     else {
         SDL_LogError(SDL_LOG_CATEGORY_INPUT,
-                     "Host does not support required StationConnect local cursor transport");
+                     "Host does not support required PLANK local cursor transport");
     }
 #ifdef HAVE_LIBINPUT_TABLET
     const auto requestTabletCursor = [this]() {
@@ -149,16 +149,16 @@ void SdlInputHandler::setWindow(SDL_Window *window)
             Session::postTabletCursorActivationEvent();
         }
     };
-    if (qEnvironmentVariableIntValue("STATIONCONNECT_EXTERNAL_WACOM_BRIDGE") != 0) {
+    if (qEnvironmentVariableIntValue("PLANK_EXTERNAL_WACOM_BRIDGE") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                     "Normalized Wacom capture disabled for external raw-HID qualification");
     }
     else if ((LiGetHostFeatureFlags() &
               (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
              (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
-        const StationConnectWacomTransportDecision decision =
-            stationConnectWacomTransportForConnectedDevice();
-        if (decision.transport == StationConnectWacomTransport::NormalizedPen) {
+        const PlankWacomTransportDecision decision =
+            plankWacomTransportForConnectedDevice();
+        if (decision.transport == PlankWacomTransport::NormalizedPen) {
             if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                             "Using normalized pen transport for first-generation Intuos Pro %04x:%04x",
@@ -190,7 +190,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 }
 
 void SdlInputHandler::setPresentationLayout(
-        const StationConnectPresentationLayout& layout)
+        const PlankPresentationLayout& layout)
 {
     m_PresentationLayout = layout;
     if (m_PresentationLayout.outputs.isEmpty() && m_Window != nullptr) {
@@ -225,7 +225,7 @@ void SdlInputHandler::refreshWaylandTabletCursorParents()
     reconcileWaylandTabletCursorOutputs();
     updateTabletCursorVisibility();
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Refreshed StationConnect Wacom cursor parents for %zu presentation output%s",
+                "Refreshed PLANK Wacom cursor parents for %zu presentation output%s",
                 m_WaylandTabletCursorOutputs.size(),
                 m_WaylandTabletCursorOutputs.size() == 1 ? "" : "s");
 }
@@ -233,12 +233,12 @@ void SdlInputHandler::refreshWaylandTabletCursorParents()
 bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
                                               unsigned int length)
 {
-    if (data == nullptr || length < sizeof(SC_CURSOR_WIRE_HEADER) ||
-            length > sizeof(SC_CURSOR_WIRE_HEADER) + SC_CURSOR_MAX_CHUNK_SIZE) {
+    if (data == nullptr || length < sizeof(PLANK_CURSOR_WIRE_HEADER) ||
+            length > sizeof(PLANK_CURSOR_WIRE_HEADER) + PLANK_CURSOR_MAX_CHUNK_SIZE) {
         return false;
     }
 
-    SC_CURSOR_WIRE_HEADER wire;
+    PLANK_CURSOR_WIRE_HEADER wire;
     std::memcpy(&wire, data, sizeof(wire));
     const std::uint32_t magic = qFromLittleEndian(wire.magic);
     const std::uint16_t version = qFromLittleEndian(wire.version);
@@ -252,26 +252,26 @@ bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
     const std::uint32_t imageSize = qFromLittleEndian(wire.imageSize);
     const std::uint32_t chunkOffset = qFromLittleEndian(wire.chunkOffset);
     const std::uint32_t chunkSize = qFromLittleEndian(wire.chunkSize);
-    constexpr std::uint32_t knownFlags = SC_CURSOR_FLAG_VISIBLE |
-                                          SC_CURSOR_FLAG_FIRST_CHUNK |
-                                          SC_CURSOR_FLAG_LAST_CHUNK;
+    constexpr std::uint32_t knownFlags = PLANK_CURSOR_FLAG_VISIBLE |
+                                          PLANK_CURSOR_FLAG_FIRST_CHUNK |
+                                          PLANK_CURSOR_FLAG_LAST_CHUNK;
 
-    if (magic != SC_CURSOR_WIRE_MAGIC || version != SC_CURSOR_WIRE_VERSION ||
-            pixelFormat != SC_CURSOR_PIXEL_FORMAT_ARGB8888 ||
+    if (magic != PLANK_CURSOR_WIRE_MAGIC || version != PLANK_CURSOR_WIRE_VERSION ||
+            pixelFormat != PLANK_CURSOR_PIXEL_FORMAT_ARGB8888 ||
             (flags & ~knownFlags) != 0 || width == 0 || height == 0 ||
-            width > SC_CURSOR_MAX_DIMENSION || height > SC_CURSOR_MAX_DIMENSION ||
-            imageSize != width * height * 4U || imageSize > SC_CURSOR_MAX_IMAGE_SIZE ||
+            width > PLANK_CURSOR_MAX_DIMENSION || height > PLANK_CURSOR_MAX_DIMENSION ||
+            imageSize != width * height * 4U || imageSize > PLANK_CURSOR_MAX_IMAGE_SIZE ||
             hotspotX >= width || hotspotY >= height ||
-            chunkSize > SC_CURSOR_MAX_CHUNK_SIZE ||
+            chunkSize > PLANK_CURSOR_MAX_CHUNK_SIZE ||
             sizeof(wire) + chunkSize != length ||
             chunkOffset > imageSize || chunkSize > imageSize - chunkOffset) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Rejected malformed StationConnect local cursor chunk");
+                    "Rejected malformed PLANK local cursor chunk");
         return false;
     }
 
     std::lock_guard<std::mutex> lock(m_RemoteCursorMutex);
-    if ((flags & SC_CURSOR_FLAG_FIRST_CHUNK) != 0) {
+    if ((flags & PLANK_CURSOR_FLAG_FIRST_CHUNK) != 0) {
         if (chunkOffset != 0) {
             return false;
         }
@@ -281,7 +281,7 @@ bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
         m_RemoteCursorAssembly.height = height;
         m_RemoteCursorAssembly.hotspotX = hotspotX;
         m_RemoteCursorAssembly.hotspotY = hotspotY;
-        m_RemoteCursorAssembly.flags = flags & SC_CURSOR_FLAG_VISIBLE;
+        m_RemoteCursorAssembly.flags = flags & PLANK_CURSOR_FLAG_VISIBLE;
         m_RemoteCursorAssembly.pixels.resize(imageSize);
         m_RemoteCursorAssemblyActive = true;
     }
@@ -292,7 +292,7 @@ bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
             height != m_RemoteCursorAssembly.height ||
             hotspotX != m_RemoteCursorAssembly.hotspotX ||
             hotspotY != m_RemoteCursorAssembly.hotspotY ||
-            (flags & SC_CURSOR_FLAG_VISIBLE) != m_RemoteCursorAssembly.flags ||
+            (flags & PLANK_CURSOR_FLAG_VISIBLE) != m_RemoteCursorAssembly.flags ||
             chunkOffset != m_RemoteCursorAssembly.nextOffset) {
         m_RemoteCursorAssemblyActive = false;
         return false;
@@ -302,7 +302,7 @@ bool SdlInputHandler::handleRemoteCursorChunk(const unsigned char* data,
                 data + sizeof(wire), chunkSize);
     m_RemoteCursorAssembly.nextOffset += chunkSize;
 
-    if ((flags & SC_CURSOR_FLAG_LAST_CHUNK) == 0) {
+    if ((flags & PLANK_CURSOR_FLAG_LAST_CHUNK) == 0) {
         return false;
     }
     if (m_RemoteCursorAssembly.nextOffset != imageSize) {
@@ -338,7 +338,7 @@ void SdlInputHandler::applyPendingRemoteCursor()
                 static_cast<int>(cursor.width * 4U));
     if (surface == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Failed to create StationConnect cursor surface: %s",
+                    "Failed to create PLANK cursor surface: %s",
                     SDL_GetError());
         return;
     }
@@ -350,7 +350,7 @@ void SdlInputHandler::applyPendingRemoteCursor()
     SDL_DestroySurface(surface);
     if (replacement == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Failed to create StationConnect compositor cursor: %s",
+                    "Failed to create PLANK compositor cursor: %s",
                     SDL_GetError());
         return;
     }
@@ -362,7 +362,7 @@ void SdlInputHandler::applyPendingRemoteCursor()
     }
     m_RemoteCursor = replacement;
     m_RemoteCursorVisible =
-            (cursor.flags & SC_CURSOR_FLAG_VISIBLE) != 0;
+            (cursor.flags & PLANK_CURSOR_FLAG_VISIBLE) != 0;
     m_AppliedRemoteCursor = cursor;
     m_AppliedRemoteCursorValid = true;
     reconcileWaylandTabletCursorOutputs();
@@ -386,13 +386,13 @@ void SdlInputHandler::applyPendingRemoteCursor()
 
     if (firstCursor) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Applied first StationConnect local cursor (%ux%u hotspot %u,%u visible=%d)",
+                    "Applied first PLANK local cursor (%ux%u hotspot %u,%u visible=%d)",
                     cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
                     m_RemoteCursorVisible ? 1 : 0);
     }
     else {
         SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
-                     "Applied StationConnect local cursor generation %llu (%ux%u hotspot %u,%u visible=%d)",
+                     "Applied PLANK local cursor generation %llu (%ux%u hotspot %u,%u visible=%d)",
                      static_cast<unsigned long long>(cursor.generation),
                      cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
                      m_RemoteCursorVisible ? 1 : 0);
@@ -402,11 +402,11 @@ void SdlInputHandler::applyPendingRemoteCursor()
 bool SdlInputHandler::handleRemoteCursorPosition(
         const unsigned char* data, unsigned int length)
 {
-    if (data == nullptr || length != sizeof(SC_CURSOR_POSITION_WIRE_MESSAGE)) {
+    if (data == nullptr || length != sizeof(PLANK_CURSOR_POSITION_WIRE_MESSAGE)) {
         return false;
     }
 
-    SC_CURSOR_POSITION_WIRE_MESSAGE wire;
+    PLANK_CURSOR_POSITION_WIRE_MESSAGE wire;
     std::memcpy(&wire, data, sizeof(wire));
     RemoteCursorPosition position;
     const std::uint32_t magic = qFromLittleEndian(wire.magic);
@@ -418,15 +418,15 @@ bool SdlInputHandler::handleRemoteCursorPosition(
     position.frameWidth = qFromLittleEndian(wire.frameWidth);
     position.frameHeight = qFromLittleEndian(wire.frameHeight);
 
-    if (magic != SC_CURSOR_POSITION_WIRE_MAGIC ||
-            version != SC_CURSOR_POSITION_WIRE_VERSION || reserved != 0 ||
+    if (magic != PLANK_CURSOR_POSITION_WIRE_MAGIC ||
+            version != PLANK_CURSOR_POSITION_WIRE_VERSION || reserved != 0 ||
             position.sequence == 0 || position.frameWidth == 0 ||
             position.frameHeight == 0 || position.x >= position.frameWidth ||
             position.y >= position.frameHeight ||
             position.frameWidth != static_cast<std::uint32_t>(m_StreamWidth) ||
             position.frameHeight != static_cast<std::uint32_t>(m_StreamHeight)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Rejected malformed StationConnect cursor position");
+                    "Rejected malformed PLANK cursor position");
         return false;
     }
 
@@ -463,7 +463,7 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     if (!mapRemoteCursorPositionToWindow(position, targetWindow, x, y)) {
         return;
     }
-    StationConnectWaylandCursor* cursor =
+    PlankWaylandCursor* cursor =
             ensureWaylandTabletCursorAttached(targetWindow);
     if (cursor == nullptr) {
         return;
@@ -621,7 +621,7 @@ void SdlInputHandler::resetRemoteCursorPositionEpoch()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
-                "Reset StationConnect remote cursor position epoch for desktop reconnect");
+                "Reset PLANK remote cursor position epoch for desktop reconnect");
 }
 
 bool SdlInputHandler::isCaptureActive()
@@ -799,7 +799,7 @@ bool SdlInputHandler::mapRemoteCursorPositionToWindow(
         int windowHeight = 0;
         SDL_GetWindowSize(output.window, &windowWidth, &windowHeight);
         QPointF windowPoint;
-        if (StationConnectPresentation::mapStreamPointToWindow(
+        if (PlankPresentation::mapStreamPointToWindow(
                     streamPoint,
                     QSize(position.frameWidth, position.frameHeight),
                     m_PresentationLayout.canvasSize,
@@ -815,7 +815,7 @@ bool SdlInputHandler::mapRemoteCursorPositionToWindow(
     return false;
 }
 
-StationConnectWaylandCursor*
+PlankWaylandCursor*
 SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
 {
     if (!m_LocalCursorSupported || targetWindow == nullptr) {
@@ -840,11 +840,11 @@ SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
         existing->cursor.reset();
     }
 
-    std::unique_ptr<StationConnectWaylandCursor> cursor =
-            StationConnectWaylandCursor::create(targetWindow);
+    std::unique_ptr<PlankWaylandCursor> cursor =
+            PlankWaylandCursor::create(targetWindow);
     if (!cursor) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Unable to attach StationConnect Wayland Wacom cursor surface");
+                    "Unable to attach PLANK Wayland Wacom cursor surface");
         if (replacing) {
             m_WaylandTabletCursorOutputs.erase(existing);
         }
@@ -881,7 +881,7 @@ SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
     cursor->setVisible(visible);
     cursor->dispatchPending();
 
-    StationConnectWaylandCursor* result = cursor.get();
+    PlankWaylandCursor* result = cursor.get();
     if (replacing) {
         existing->cursor = std::move(cursor);
     }
@@ -891,8 +891,8 @@ SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 replacing ?
-                    "Reattached StationConnect Wacom cursor to replacement Wayland parent surface for window %u" :
-                    "StationConnect Wayland Wacom cursor surface enabled for window %u",
+                    "Reattached PLANK Wacom cursor to replacement Wayland parent surface for window %u" :
+                    "PLANK Wayland Wacom cursor surface enabled for window %u",
                 SDL_GetWindowID(targetWindow));
     return result;
 }
@@ -910,7 +910,7 @@ void SdlInputHandler::reconcileWaylandTabletCursorOutputs()
         return std::any_of(
                 m_PresentationLayout.outputs.cbegin(),
                 m_PresentationLayout.outputs.cend(),
-                [window](const StationConnectPresentationOutput& output) {
+                [window](const PlankPresentationOutput& output) {
                     return output.window == window;
                 });
     };

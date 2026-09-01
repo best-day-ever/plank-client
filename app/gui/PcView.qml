@@ -13,7 +13,7 @@ CenteredGridView {
 
     id: pcGrid
 
-    StationConnectTheme {
+    PlankTheme {
         id: theme
     }
 
@@ -53,13 +53,13 @@ CenteredGridView {
             errorDialog.text = error
             errorDialog.open()
         } else {
-            launchStationConnectDesktop(pcIndex)
+            launchPlankDesktop(pcIndex)
         }
     }
 
-    function launchStationConnectDesktop(pcIndex)
+    function launchPlankDesktop(pcIndex)
     {
-        var session = computerModel.createSessionForStationConnectDesktop(pcIndex)
+        var session = computerModel.createSessionForPlankDesktop(pcIndex)
         if (session === null) {
             errorDialog.text = qsTr("The workstation did not provide its Desktop session.")
             errorDialog.open()
@@ -211,8 +211,8 @@ CenteredGridView {
 
             Label {
                 width: parent.width
-                text: model.stationConnectHostVersion ?
-                          model.stationConnectHostVersion : " "
+                text: model.plankHostVersion ?
+                          model.plankHostVersion : " "
                 color: theme.textSecondary
                 font.pointSize: 9
                 horizontalAlignment: Text.AlignRight
@@ -239,18 +239,18 @@ CenteredGridView {
                         editBookmarkDialog.originalAddress = model.address
                         editBookmarkDialog.originalNickname = model.name
                         editBookmarkDialog.scalingIndex =
-                                computerModel.stationConnectScalingChoice(index)
+                                computerModel.plankScalingChoice(index)
                         editBookmarkDialog.hostLayoutIndex =
-                                computerModel.stationConnectHostLayoutChoice(index)
+                                computerModel.plankHostLayoutChoice(index)
                         editBookmarkDialog.virtualMode1Index =
-                                computerModel.stationConnectVirtualMode1Choice(index)
+                                computerModel.plankVirtualMode1Choice(index)
                         editBookmarkDialog.virtualMode2Index =
-                                computerModel.stationConnectVirtualMode2Choice(index)
-                        editBookmarkDialog.originalProfile = computerModel.stationConnectVideoProfile(index)
+                                computerModel.plankVirtualMode2Choice(index)
+                        editBookmarkDialog.originalProfile = computerModel.plankVideoProfile(index)
                         editBookmarkDialog.originalCaptureSource =
-                                computerModel.stationConnectCaptureSource(index)
+                                computerModel.plankCaptureSource(index)
                         editBookmarkDialog.originalProfileBitratesKbps =
-                                computerModel.stationConnectProfileBitratesKbps(index)
+                                computerModel.plankProfileBitratesKbps(index)
                         editBookmarkDialog.open()
                     }
                 }
@@ -279,7 +279,7 @@ CenteredGridView {
         onClicked: {
             if (model.online) {
                 if (model.authorized) {
-                    launchStationConnectDesktop(index)
+                    launchPlankDesktop(index)
                 }
                 else {
                     loginDialog.pcIndex = index
@@ -353,13 +353,13 @@ CenteredGridView {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
-            StationConnectTextField {
+            PlankTextField {
                 id: usernameField
                 placeholderText: qsTr("Username")
                 Layout.fillWidth: true
                 focus: true
             }
-            StationConnectTextField {
+            PlankTextField {
                 id: passwordField
                 placeholderText: qsTr("Password")
                 echoMode: TextInput.Password
@@ -380,9 +380,9 @@ CenteredGridView {
         property int hostDisplayPolicy: -1
         property int virtualMode1Index: 9
         property int virtualMode2Index: 1
-        property var virtualModeChoices: ComputerManager.stationConnectVirtualModeChoices()
-        property int originalProfile: StreamingPreferences.SCVP_H264_10BIT_444
-        property int originalCaptureSource: StreamingPreferences.SCCS_NVFBC_8BIT
+        property var virtualModeChoices: ComputerManager.plankVirtualModeChoices()
+        property int originalProfile: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
+        property int originalCaptureSource: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
         property var originalProfileBitratesKbps: []
         property var profileBitratesKbps: []
         title: qsTr("Edit workstation bookmark")
@@ -398,7 +398,7 @@ CenteredGridView {
                 return editEncodingProfile.model.get(
                             editEncodingProfile.currentIndex).val
             }
-            return StreamingPreferences.SCVP_H264_10BIT_444
+            return StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
         }
 
         function applyProfileBitrate() {
@@ -418,7 +418,7 @@ CenteredGridView {
             editAddressText.text = originalAddress
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
-            hostDisplayPolicy = computerModel.stationConnectHostDisplayPolicy(pcIndex)
+            hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
@@ -476,7 +476,7 @@ CenteredGridView {
                 text: qsTr("Address or hostname")
                 font.bold: true
             }
-            StationConnectTextField {
+            PlankTextField {
                 id: editAddressText
                 Layout.fillWidth: true
             }
@@ -485,7 +485,7 @@ CenteredGridView {
                 text: qsTr("Nickname")
                 font.bold: true
             }
-            StationConnectTextField {
+            PlankTextField {
                 id: editNicknameText
                 Layout.fillWidth: true
             }
@@ -494,7 +494,7 @@ CenteredGridView {
                 text: qsTr("Capture source")
                 font.bold: true
             }
-            StationConnectComboBox {
+            PlankComboBox {
                 id: editCaptureSource
                 Layout.fillWidth: true
                 textRole: "text"
@@ -502,11 +502,11 @@ CenteredGridView {
                     id: editCaptureSourceModel
                     ListElement {
                         text: qsTr("NvFBC — 8-bit source")
-                        val: StreamingPreferences.SCCS_NVFBC_8BIT
+                        val: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
                     }
                     ListElement {
                         text: qsTr("Native X11/XShm — 10-bit (Experimental)")
-                        val: StreamingPreferences.SCCS_X11_NATIVE10
+                        val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10
                     }
                 }
                 onCurrentIndexChanged: {
@@ -524,7 +524,7 @@ CenteredGridView {
                 font.bold: true
                 opacity: editCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
-            StationConnectComboBox {
+            PlankComboBox {
                 id: editEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
@@ -537,31 +537,31 @@ CenteredGridView {
                 id: editNvfbcEncodingProfileModel
                 ListElement {
                     text: qsTr("H.264 8-bit 4:2:2")
-                    val: StreamingPreferences.SCVP_H264_8BIT_422
+                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_422
                 }
                 ListElement {
                     text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.SCVP_H264_8BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_444
                 }
                 ListElement {
                     text: qsTr("H.264 10-bit 4:2:2")
-                    val: StreamingPreferences.SCVP_H264_10BIT_422
+                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_422
                 }
                 ListElement {
                     text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
                 }
                 ListElement {
                     text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_H264_8BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_H264_8BIT_444
                 }
                 ListElement {
                     text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_HEVC_8BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_8BIT_444
                 }
                 ListElement {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
                 }
             }
 
@@ -569,11 +569,11 @@ CenteredGridView {
                 id: editNativeEncodingProfileModel
                 ListElement {
                     text: qsTr("H.264 10-bit 4:4:4 (identity GBR) — x264")
-                    val: StreamingPreferences.SCVP_H264_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
                 }
                 ListElement {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.SCVP_NVENC_HEVC_10BIT_444
+                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
                 }
             }
 
@@ -586,9 +586,9 @@ CenteredGridView {
             Slider {
                 id: editBitrateSlider
                 Layout.fillWidth: true
-                from: StreamingPreferences.stationConnectBitrateMinimumKbps()
-                to: StreamingPreferences.stationConnectBitrateMaximumKbps()
-                stepSize: StreamingPreferences.stationConnectBitrateStepKbps()
+                from: StreamingPreferences.plankBitrateMinimumKbps()
+                to: StreamingPreferences.plankBitrateMaximumKbps()
+                stepSize: StreamingPreferences.plankBitrateStepKbps()
                 snapMode: Slider.SnapAlways
                 onMoved: editBookmarkDialog.rememberProfileBitrate()
             }
@@ -604,7 +604,7 @@ CenteredGridView {
                 text: qsTr("Host display layout")
                 font.bold: true
             }
-            StationConnectComboBox {
+            PlankComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
                 model: [
@@ -628,7 +628,7 @@ CenteredGridView {
                 font.bold: true
                 opacity: editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
-            StationConnectComboBox {
+            PlankComboBox {
                 id: editVirtualMode1
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex >= 2
@@ -640,7 +640,7 @@ CenteredGridView {
                 font.bold: true
                 opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
-            StationConnectComboBox {
+            PlankComboBox {
                 id: editVirtualMode2
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
@@ -651,7 +651,7 @@ CenteredGridView {
                 text: qsTr("Scaling")
                 font.bold: true
             }
-            StationConnectComboBox {
+            PlankComboBox {
                 id: editScalingChoice
                 Layout.fillWidth: true
                 model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
@@ -708,7 +708,7 @@ CenteredGridView {
                 font.bold: true
             }
 
-            StationConnectTextField {
+            PlankTextField {
                 id: editText
                 placeholderText: renamePcDialog.originalName
                 Layout.fillWidth: true

@@ -15,18 +15,18 @@ CONFIG += staticlib
 # Include global qmake defs
 include(../globaldefs.pri)
 
-unix:!macx:contains(CONFIG, stationconnect-datasmash) {
-    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
-        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$(STATIONCONNECT_DATASMASH_TRANSPORT_DIR)
+unix:!macx:contains(CONFIG, plank-transport) {
+    isEmpty(PLANK_TRANSPORT_DIR) {
+        PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
     }
-    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
-        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/datasmash-transport)
+    isEmpty(PLANK_TRANSPORT_DIR) {
+        PLANK_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/plank-transport)
     }
-    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash_input.h) {
-        error("StationConnect datasmash input header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport_input.h) {
+        error("PLANK transport input header is missing: $$PLANK_TRANSPORT_DIR")
     }
-    INCLUDEPATH += $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include
-    DEFINES += STATIONCONNECT_DATASMASH=1
+    INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
+    DEFINES += PLANK_TRANSPORT=1
 }
 
 win32 {

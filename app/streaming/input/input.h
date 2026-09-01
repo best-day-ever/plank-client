@@ -2,7 +2,7 @@
 
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
-#include "streaming/stationconnectpresentation.h"
+#include "streaming/plankpresentation.h"
 
 #include <SDL3/SDL.h>
 
@@ -16,7 +16,7 @@
 class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
-class StationConnectWaylandCursor;
+class PlankWaylandCursor;
 
 class SdlInputHandler
 {
@@ -29,7 +29,7 @@ public:
 
     void setWindow(SDL_Window* window);
 
-    void setPresentationLayout(const StationConnectPresentationLayout& layout);
+    void setPresentationLayout(const PlankPresentationLayout& layout);
 
     void refreshWaylandTabletCursorParents();
 
@@ -104,7 +104,7 @@ private:
     void performSpecialKeyCombo(KeyCombo combo);
 
     SDL_Window* m_Window;
-    StationConnectPresentationLayout m_PresentationLayout;
+    PlankPresentationLayout m_PresentationLayout;
     bool m_NeedsManualCaptureOnLeave;
     bool m_MouseWasInVideoRegion;
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
@@ -163,13 +163,13 @@ private:
     std::atomic_bool m_TabletCursorActivationPending {false};
     struct WaylandTabletCursorOutput {
         SDL_Window* window = nullptr;
-        std::unique_ptr<StationConnectWaylandCursor> cursor;
+        std::unique_ptr<PlankWaylandCursor> cursor;
     };
     std::vector<WaylandTabletCursorOutput> m_WaylandTabletCursorOutputs;
 
     void setCursorVisible(bool visible);
     void activateCompositorCursor();
-    StationConnectWaylandCursor* ensureWaylandTabletCursorAttached(
+    PlankWaylandCursor* ensureWaylandTabletCursorAttached(
         SDL_Window* targetWindow);
     void reconcileWaylandTabletCursorOutputs();
     bool mapRemoteCursorPositionToWindow(const RemoteCursorPosition& position,
@@ -181,7 +181,7 @@ private:
                                    bool allowClampedPosition);
 
     SDL_Window* presentationWindow(Uint32 windowId) const;
-    const StationConnectPresentationOutput* presentationOutput(
+    const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
 
     struct {

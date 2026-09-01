@@ -4,7 +4,7 @@
 #include <cmath>
 #include <mutex>
 
-namespace StationConnectAvSync {
+namespace PlankAvSync {
 namespace {
 constexpr std::int32_t MinimumUpdateIntervalMs = 1000;
 constexpr double MinimumFitDurationMs = 120000.0;
@@ -242,4 +242,4 @@ int AudioBacklogController::correctionPpm() const
     return m_CorrectionPpm;
 }
 
-} // namespace StationConnectAvSync
+} // namespace PlankAvSync

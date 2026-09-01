@@ -1,0 +1,7 @@
+.qmake.stash
+Makefile*
+*.moc
+*.o
+moc_predefs.h
+plankdisplaymode
+target_wrapper.sh

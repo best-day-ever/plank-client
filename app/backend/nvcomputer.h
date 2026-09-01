@@ -112,12 +112,12 @@ public:
     QString appVersion;
     QVector<NvDisplayMode> displayModes;
     int serverCodecModeSupport;
-    bool stationConnectAuthentication = false;
-    int stationConnectHostMetadataVersion = 0;
-    QString stationConnectHostVersion;
+    bool plankAuthentication = false;
+    int plankHostMetadataVersion = 0;
+    QString plankHostVersion;
     QString sessionToken;
-    int stationConnectTopologyVersion = 0;
-    int stationConnectFeatureFlags = 0;
+    int plankTopologyVersion = 0;
+    int plankFeatureFlags = 0;
     NvOutputTopology outputTopology;
 
     // Persisted traits
@@ -129,14 +129,14 @@ public:
     bool hasCustomName;
     QString uuid;
     QVector<NvApp> appList;
-    QString stationConnectScalingMode;
-    QString stationConnectHostLayout;
-    QString stationConnectVirtualMode1;
-    QString stationConnectVirtualMode2;
-    int stationConnectVideoProfile = 0;
-    int stationConnectCaptureSource = 0;
-    QVector<int> stationConnectProfileBitratesKbps =
-            StreamingPreferences::stationConnectDefaultProfileBitrates();
+    QString plankScalingMode;
+    QString plankHostLayout;
+    QString plankVirtualMode1;
+    QString plankVirtualMode2;
+    int plankVideoProfile = 0;
+    int plankCaptureSource = 0;
+    QVector<int> plankProfileBitratesKbps =
+            StreamingPreferences::plankDefaultProfileBitrates();
     bool manualBookmark = false;
     QString serverUuid;
     // Remember to update isEqualSerialized() when adding fields here!

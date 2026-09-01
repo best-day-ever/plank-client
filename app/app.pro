@@ -1,55 +1,50 @@
 QT += core quick network quickcontrols2 svg
 CONFIG += c++17
 
-unix:!macx:contains(CONFIG, stationconnect-datasmash) {
-    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
-        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$(STATIONCONNECT_DATASMASH_TRANSPORT_DIR)
+unix:!macx:contains(CONFIG, plank-transport) {
+    isEmpty(PLANK_TRANSPORT_DIR) {
+        PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
     }
-    isEmpty(STATIONCONNECT_DATASMASH_TRANSPORT_DIR) {
-        STATIONCONNECT_DATASMASH_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/datasmash-transport)
+    isEmpty(PLANK_TRANSPORT_DIR) {
+        PLANK_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/plank-transport)
     }
-    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/Cargo.toml) {
-        error("StationConnect datasmash transport Cargo.toml is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    !exists($$PLANK_TRANSPORT_DIR/Cargo.toml) {
+        error("PLANK native transport Cargo.toml is missing: $$PLANK_TRANSPORT_DIR")
     }
-    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash.h) {
-        error("StationConnect datasmash transport header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport.h) {
+        error("PLANK native transport header is missing: $$PLANK_TRANSPORT_DIR")
     }
-    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash_control.h) {
-        error("StationConnect datasmash control header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport_control.h) {
+        error("PLANK transport control header is missing: $$PLANK_TRANSPORT_DIR")
     }
-    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash_input.h) {
-        error("StationConnect datasmash input header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport_input.h) {
+        error("PLANK transport input header is missing: $$PLANK_TRANSPORT_DIR")
     }
-    !exists($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include/stationconnect_datasmash_event.h) {
-        error("StationConnect datasmash event header is missing: $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR")
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport_event.h) {
+        error("PLANK transport event header is missing: $$PLANK_TRANSPORT_DIR")
     }
 
-    STATIONCONNECT_CARGO = $$(CARGO)
-    isEmpty(STATIONCONNECT_CARGO): STATIONCONNECT_CARGO = cargo
-    STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR = $$OUT_PWD/stationconnect-datasmash-cargo
-    STATIONCONNECT_DATASMASH_LIBRARY = $$STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR/release/libstationconnect_datasmash_transport.a
+    PLANK_CARGO = $$(CARGO)
+    isEmpty(PLANK_CARGO): PLANK_CARGO = cargo
+    PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+    PLANK_TRANSPORT_LIBRARY = $$PLANK_TRANSPORT_CARGO_TARGET_DIR/release/libplank_transport.a
 
-    stationconnect_datasmash_transport.target = $$STATIONCONNECT_DATASMASH_LIBRARY
-    stationconnect_datasmash_transport.depends = FORCE
-    stationconnect_datasmash_transport.commands = \
-        CARGO_TARGET_DIR=$$shell_quote($$STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR) \
-        $$shell_quote($$STATIONCONNECT_CARGO) build --locked --offline --release \
-        --manifest-path $$shell_quote($$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/Cargo.toml)
-    QMAKE_EXTRA_TARGETS += stationconnect_datasmash_transport
-    PRE_TARGETDEPS += $$STATIONCONNECT_DATASMASH_LIBRARY
-    QMAKE_CLEAN += $$STATIONCONNECT_DATASMASH_CARGO_TARGET_DIR
+    plank_transport.target = $$PLANK_TRANSPORT_LIBRARY
+    plank_transport.depends = FORCE
+    plank_transport.commands = \
+        CARGO_TARGET_DIR=$$shell_quote($$PLANK_TRANSPORT_CARGO_TARGET_DIR) \
+        $$shell_quote($$PLANK_CARGO) build --locked --offline --release \
+        --manifest-path $$shell_quote($$PLANK_TRANSPORT_DIR/Cargo.toml)
+    QMAKE_EXTRA_TARGETS += plank_transport
+    PRE_TARGETDEPS += $$PLANK_TRANSPORT_LIBRARY
+    QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
 
-    INCLUDEPATH += $$STATIONCONNECT_DATASMASH_TRANSPORT_DIR/include
-    LIBS += $$STATIONCONNECT_DATASMASH_LIBRARY -ldl -lpthread -lm -lrt
-    DEFINES += STATIONCONNECT_DATASMASH=1
+    INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
+    LIBS += $$PLANK_TRANSPORT_LIBRARY -ldl -lpthread -lm -lrt
+    DEFINES += PLANK_TRANSPORT=1
 }
 
-unix:!macx {
-    TARGET = stationconnect-client
-} else {
-    # On macOS, this is the name displayed in the global menu bar
-    TARGET = Moonlight
-}
+TARGET = plank-client
 
 include(../globaldefs.pri)
 
@@ -224,18 +219,18 @@ SOURCES += \
     backend/computermanager.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
-    settings/stationconnectclientpolicy.cpp \
+    settings/plankclientpolicy.cpp \
     settings/streamingpreferences.cpp \
     streaming/input/input.cpp \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
     streaming/session.cpp \
     streaming/avsynccontroller.cpp \
-    streaming/stationconnectdisplaymode.cpp \
-    streaming/stationconnectpresentation.cpp \
-    streaming/stationconnecttoolbar.cpp \
-    streaming/stationconnectwaylandcursor.cpp \
-    streaming/stationconnectwaylandtoolbar.cpp \
+    streaming/plankdisplaymode.cpp \
+    streaming/plankpresentation.cpp \
+    streaming/planktoolbar.cpp \
+    streaming/plankwaylandcursor.cpp \
+    streaming/plankwaylandtoolbar.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
@@ -253,21 +248,21 @@ HEADERS += \
     utils.h \
     backend/computerseeker.h \
     backend/nvcomputer.h \
-    backend/stationconnectnetwork.h \
+    backend/planknetwork.h \
     backend/nvhttp.h \
     backend/computermanager.h \
     cli/commandlineparser.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
-    settings/stationconnectclientpolicy.h \
+    settings/plankclientpolicy.h \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
-    streaming/input/stationconnectpointerlogic.h \
+    streaming/input/plankpointerlogic.h \
     streaming/session.h \
-    streaming/stationconnectdisplaymode.h \
-    streaming/stationconnectpresentation.h \
-    streaming/stationconnecttoolbar.h \
-    streaming/stationconnecttoolbarlogic.h \
+    streaming/plankdisplaymode.h \
+    streaming/plankpresentation.h \
+    streaming/planktoolbar.h \
+    streaming/planktoolbarlogic.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
@@ -483,8 +478,8 @@ wayland {
     DEFINES += HAS_WAYLAND
     SOURCES += streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.cpp
     HEADERS += \
-        streaming/stationconnectwaylandcursor.h \
-        streaming/stationconnectwaylandtoolbar.h \
+        streaming/plankwaylandcursor.h \
+        streaming/plankwaylandtoolbar.h \
         streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.h
 }
 
@@ -572,25 +567,25 @@ unix:!macx: {
 
     target.path = $$PREFIX/$$BINDIR/
 
-    desktop.files = deploy/linux/la.instinctual.StationConnect.Client.desktop
+    desktop.files = deploy/linux/la.instinctual.Plank.Client.desktop
     desktop.path = $$PREFIX/$$DATADIR/applications/
 
-    icons.files = res/stationconnect-logo.png
+    icons.files = res/plank-logo.png
     icons.path = $$PREFIX/$$DATADIR/icons/hicolor/512x512/apps/
 
-    appstream.files = deploy/linux/la.instinctual.StationConnect.Client.appdata.xml
+    appstream.files = deploy/linux/la.instinctual.Plank.Client.appdata.xml
     appstream.path = $$PREFIX/$$DATADIR/metainfo/
 
     INSTALLS += target desktop icons appstream
 }
 win32 {
     RC_ICONS = moonlight.ico
-    QMAKE_TARGET_COMPANY = Moonlight Game Streaming Project
-    QMAKE_TARGET_DESCRIPTION = Moonlight Game Streaming Client
-    QMAKE_TARGET_PRODUCT = Moonlight
+    QMAKE_TARGET_COMPANY = Instinctual
+    QMAKE_TARGET_DESCRIPTION = PLANK Client
+    QMAKE_TARGET_PRODUCT = PLANK
 
     CONFIG -= embed_manifest_exe
-    QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/Moonlight.exe.manifest
+    QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest
 }
 macx {
     # Create Info.plist in object dir with the correct version string
@@ -617,8 +612,8 @@ macx {
     }
 }
 
-isEmpty(STATIONCONNECT_VERSION) {
-    STATIONCONNECT_VERSION = development
+isEmpty(PLANK_VERSION) {
+    PLANK_VERSION = development
 }
-VERSION = "$$section(STATIONCONNECT_VERSION, -, 0, 0)"
-DEFINES += STATIONCONNECT_VERSION_STR=\\\"$$STATIONCONNECT_VERSION\\\"
+VERSION = "$$section(PLANK_VERSION, -, 0, 0)"
+DEFINES += PLANK_VERSION_STR=\\\"$$PLANK_VERSION\\\"

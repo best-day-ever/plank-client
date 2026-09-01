@@ -6,7 +6,7 @@
 #include <Limelight.h>
 #include <SDL3/SDL.h>
 
-#include "../stationconnectpresentation.h"
+#include "../plankpresentation.h"
 
 #define SDL_CODE_FRAME_READY 0
 
@@ -72,7 +72,7 @@ typedef struct _DECODER_PARAMETERS {
     bool enableFramePacing;
     bool enableIdentityGbr;
     bool testOnly;
-    const StationConnectPresentationLayout* presentationLayout;
+    const PlankPresentationLayout* presentationLayout;
 } DECODER_PARAMETERS, *PDECODER_PARAMETERS;
 
 #define WINDOW_STATE_CHANGE_SIZE 0x01
@@ -106,7 +106,7 @@ public:
     virtual void setHdrMode(bool enabled) = 0;
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) = 0;
 
-    // StationConnect may replace the host media worker when GDM hands the
+    // PLANK may replace the host media worker when GDM hands the
     // display to an authenticated desktop. Decoders that support it can pause
     // their transport-facing thread while retaining the renderer and its last
     // presented frame, keeping the native stream window continuously mapped.

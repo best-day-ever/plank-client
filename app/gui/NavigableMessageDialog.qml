@@ -5,7 +5,7 @@ import QtQuick.Layouts 1.2
 NavigableDialog {
     id: dialog
 
-    StationConnectTheme {
+    PlankTheme {
         id: messageTheme
     }
 

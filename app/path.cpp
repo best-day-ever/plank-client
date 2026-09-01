@@ -123,7 +123,7 @@ void Path::initialize(bool portable)
         if (stateHome.isEmpty() || !QDir::isAbsolutePath(stateHome)) {
             stateHome = QDir::homePath() + "/.local/state";
         }
-        s_LogDir = QDir(stateHome).filePath("stationconnect/logs");
+        s_LogDir = QDir(stateHome).filePath("plank/logs");
 #else
         s_LogDir = QDir::tempPath();
 #endif

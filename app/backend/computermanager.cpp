@@ -1,6 +1,6 @@
 #include "computermanager.h"
 #include "nvhttp.h"
-#include "settings/stationconnectclientpolicy.h"
+#include "settings/plankclientpolicy.h"
 
 #include <Limelight.h>
 #include <QtEndian>
@@ -17,12 +17,12 @@
 namespace {
 bool parseManualAddress(const QString& address, NvAddress& manualAddress)
 {
-    const QUrl url = QUrl::fromUserInput("moonlight://" + address.trimmed());
-    if (!url.isValid() || url.host().isEmpty() || url.scheme() != "moonlight") {
+    const QUrl url = QUrl::fromUserInput("plank://" + address.trimmed());
+    if (!url.isValid() || url.host().isEmpty() || url.scheme() != "plank") {
         return false;
     }
 
-    const StationConnectClientPolicy policy;
+    const PlankClientPolicy policy;
     manualAddress = NvAddress(url.host(), url.port(policy.networkPort()));
     return true;
 }
@@ -58,10 +58,10 @@ bool parseProfileBitrates(const QVariantList& values,
 {
     if (values.isEmpty() && allowDefaultValues) {
         profileBitratesKbps =
-                StreamingPreferences::stationConnectDefaultProfileBitrates();
+                StreamingPreferences::plankDefaultProfileBitrates();
         return true;
     }
-    return StreamingPreferences::stationConnectProfileBitratesFromVariantList(
+    return StreamingPreferences::plankProfileBitratesFromVariantList(
                 values, profileBitratesKbps);
 }
 }
@@ -89,7 +89,7 @@ private:
             sessionToken = m_Computer->sessionToken;
         }
         NvHTTP http(address, nam);
-        http.setStationConnectSessionToken(sessionToken);
+        http.setPlankSessionToken(sessionToken);
 
         QString serverInfo;
         try {
@@ -100,7 +100,7 @@ private:
 
         NvComputer newState(http, serverInfo);
 
-        if (!newState.stationConnectAuthentication) {
+        if (!newState.plankAuthentication) {
             return false;
         }
 
@@ -679,8 +679,8 @@ private:
             const QString token = http.authenticate(m_Username, m_Password);
             NvOutputTopology topology;
             const bool topologySupported =
-                    m_Computer->stationConnectTopologyVersion == NvOutputTopology::ProtocolVersion &&
-                    (m_Computer->stationConnectFeatureFlags &
+                    m_Computer->plankTopologyVersion == NvOutputTopology::ProtocolVersion &&
+                    (m_Computer->plankFeatureFlags &
                      (NvOutputTopology::OutputTopologyFeature |
                       NvOutputTopology::SelectedOutputFeature |
                       NvOutputTopology::UnifiedAbsoluteInputFeature)) ==
@@ -691,7 +691,7 @@ private:
                 topology = http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
-            m_ComputerManager->rememberStationConnectReconnectCredentials(
+            m_ComputerManager->rememberPlankReconnectCredentials(
                         m_Computer, m_Username, std::move(m_Password));
             m_Password.fill(QChar('\0'));
             m_Password.clear();
@@ -701,8 +701,8 @@ private:
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
-                    qInfo() << "StationConnect retained scaling mode"
-                            << m_Computer->stationConnectScalingMode
+                    qInfo() << "PLANK retained scaling mode"
+                            << m_Computer->plankScalingMode
                             << "for topology generation" << topology.generation;
                 }
                 m_Computer->updateAppList(apps);
@@ -734,7 +734,7 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
     QThreadPool::globalInstance()->start(authentication);
 }
 
-void ComputerManager::rememberStationConnectReconnectCredentials(
+void ComputerManager::rememberPlankReconnectCredentials(
         NvComputer* computer, QString username, QString password)
 {
     QMutexLocker lock(&m_ReconnectCredentialLock);
@@ -746,7 +746,7 @@ void ComputerManager::rememberStationConnectReconnectCredentials(
                                   qMakePair(std::move(username), std::move(password)));
 }
 
-bool ComputerManager::takeStationConnectReconnectCredentials(
+bool ComputerManager::takePlankReconnectCredentials(
         NvComputer* computer, QString& username, QString& password)
 {
     QMutexLocker lock(&m_ReconnectCredentialLock);
@@ -787,7 +787,7 @@ void ComputerManager::stopPollingAsync()
     }
 }
 
-QStringList ComputerManager::stationConnectVirtualModeChoices() const
+QStringList ComputerManager::plankVirtualModeChoices() const
 {
     QStringList choices = NvOutputTopology::qualifiedVirtualModes();
     for (QString& choice : choices) {
@@ -813,7 +813,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             !hostLayout.isEmpty() && !virtualMode1.isEmpty() &&
             !virtualMode2.isEmpty() &&
             !scalingMode.isEmpty() &&
-            StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+            StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) &&
             parseProfileBitrates(profileBitrates, true,
                                  profileBitratesKbps)) {
@@ -836,10 +836,10 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                 bookmark = new NvComputer(manualAddress, nickname.trimmed(), videoProfile,
                                           captureSource,
                                           profileBitratesKbps);
-                bookmark->stationConnectScalingMode = scalingMode;
-                bookmark->stationConnectHostLayout = hostLayout;
-                bookmark->stationConnectVirtualMode1 = virtualMode1;
-                bookmark->stationConnectVirtualMode2 = virtualMode2;
+                bookmark->plankScalingMode = scalingMode;
+                bookmark->plankHostLayout = hostLayout;
+                bookmark->plankVirtualMode1 = virtualMode1;
+                bookmark->plankVirtualMode2 = virtualMode2;
                 m_KnownHosts[bookmark->uuid] = bookmark;
                 startPollingComputer(bookmark);
             }
@@ -847,13 +847,13 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
 
         {
             QWriteLocker bookmarkLock(&bookmark->lock);
-            bookmark->stationConnectScalingMode = scalingMode;
-            bookmark->stationConnectHostLayout = hostLayout;
-            bookmark->stationConnectVirtualMode1 = virtualMode1;
-            bookmark->stationConnectVirtualMode2 = virtualMode2;
-            bookmark->stationConnectVideoProfile = videoProfile;
-            bookmark->stationConnectCaptureSource = captureSource;
-            bookmark->stationConnectProfileBitratesKbps = profileBitratesKbps;
+            bookmark->plankScalingMode = scalingMode;
+            bookmark->plankHostLayout = hostLayout;
+            bookmark->plankVirtualMode1 = virtualMode1;
+            bookmark->plankVirtualMode2 = virtualMode2;
+            bookmark->plankVideoProfile = videoProfile;
+            bookmark->plankCaptureSource = captureSource;
+            bookmark->plankProfileBitratesKbps = profileBitratesKbps;
         }
 
         bool nicknameChanged;
@@ -872,7 +872,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
     }
     else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
         // The user specified an IPv6 literal without URL escaping, so use the default port
-        addNewHost(NvAddress(address, StationConnectClientPolicy().networkPort()), false);
+        addNewHost(NvAddress(address, PlankClientPolicy().networkPort()), false);
     }
     else {
         emit computerAddCompleted(false);
@@ -890,7 +890,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     QVector<int> profileBitratesKbps;
     nickname = nickname.trimmed();
     if (computer == nullptr || nickname.isEmpty() ||
-            !StreamingPreferences::isStationConnectProfileValidForCaptureSource(
+            !StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
             !parseProfileBitrates(profileBitrates, false,
                                   profileBitratesKbps) ||
@@ -1053,7 +1053,7 @@ private:
             qInfo() << "Processing new PC at" << m_Address.toString() << "from user";
         }
 
-        // Certificate-profile-validated HTTPS discovers the StationConnect identity.
+        // Certificate-profile-validated HTTPS discovers the PLANK identity.
         QString serverInfo = fetchServerInfo(http);
         if (serverInfo.isEmpty() && !m_MdnsIpv6Address.isNull()) {
             // Retry using the global IPv6 address if the IPv4 or link-local IPv6 address fails
@@ -1067,8 +1067,8 @@ private:
         // Create the initial host state from discovery data.
         NvComputer* newComputer = new NvComputer(http, serverInfo);
 
-        if (!newComputer->stationConnectAuthentication) {
-            qWarning() << "Rejecting a host outside the StationConnect protocol";
+        if (!newComputer->plankAuthentication) {
+            qWarning() << "Rejecting a host outside the PLANK protocol";
             delete newComputer;
             if (!m_Mdns) {
                 emit computerAddCompleted(false);
@@ -1101,7 +1101,7 @@ private:
             if (!token.isEmpty()) {
                 newComputer->authorizationState = NvComputer::AS_AUTHORIZED;
             }
-            http.setStationConnectSessionToken(token);
+            http.setPlankSessionToken(token);
         }
 
         if (!newComputer->sessionToken.isEmpty()) {

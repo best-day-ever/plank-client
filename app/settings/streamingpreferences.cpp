@@ -1,6 +1,6 @@
 #include "streamingpreferences.h"
-#include "backend/stationconnectnetwork.h"
-#include "stationconnectclientpolicy.h"
+#include "backend/planknetwork.h"
+#include "plankclientpolicy.h"
 #include <QSettings>
 #include <QTranslator>
 #include <QCoreApplication>
@@ -13,13 +13,13 @@
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
-#define SER_STATIONCONNECT_TOOLBAR_PINNED "stationconnecttoolbarpinned"
+#define SER_PLANK_TOOLBAR_PINNED "planktoolbarpinned"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
 #define SER_CONNWARNINGS "connwarnings"
-#define SER_QUIC_UDP_PAYLOAD_MTU "stationconnect-quic-udp-payload-mtu"
-#define SER_STATIONCONNECT_UNREACHABLE_TIMEOUT "stationconnect-unreachable-timeout-seconds"
-#define SER_STATIONCONNECT_UNREACHABLE_ACTION "stationconnect-unreachable-action"
+#define SER_QUIC_UDP_PAYLOAD_MTU "plank-quic-udp-payload-mtu"
+#define SER_PLANK_UNREACHABLE_TIMEOUT "plank-unreachable-timeout-seconds"
+#define SER_PLANK_UNREACHABLE_ACTION "plank-unreachable-action"
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_CAPTURESYSKEYS "capturesyskeys"
@@ -80,36 +80,36 @@ void StreamingPreferences::reload()
 
     fps = settings.value(SER_FPS, 60).toInt();
     identityGbrBitDepth = 10;
-    stationConnectToolbarPinned = settings.value(SER_STATIONCONNECT_TOOLBAR_PINNED, false).toBool();
+    plankToolbarPinned = settings.value(SER_PLANK_TOOLBAR_PINNED, false).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
     enableMdns = settings.value(SER_MDNS, false).toBool();
-    const StationConnectClientPolicy systemPolicy;
+    const PlankClientPolicy systemPolicy;
     mdnsDiscoveryManaged = systemPolicy.managedBoolean(
                 QStringLiteral("network/mdns_discovery"), &enableMdns);
     if (mdnsDiscoveryManaged) {
         qInfo() << "mDNS discovery is managed by"
-                << StationConnectClientPolicy::defaultConfigPath();
+                << PlankClientPolicy::defaultConfigPath();
     }
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
     showPerformanceOverlay = settings.value(SER_SHOWPERFOVERLAY, false).toBool();
     quicUdpPayloadMtu = settings.value(SER_QUIC_UDP_PAYLOAD_MTU, 0).toInt();
     if (quicUdpPayloadMtu != 0 &&
-            (quicUdpPayloadMtu < StationConnectNetwork::MinimumQuicUdpPayloadMtu ||
-             quicUdpPayloadMtu > StationConnectNetwork::MaximumQuicUdpPayloadMtu)) {
+            (quicUdpPayloadMtu < PlankNetwork::MinimumQuicUdpPayloadMtu ||
+             quicUdpPayloadMtu > PlankNetwork::MaximumQuicUdpPayloadMtu)) {
         quicUdpPayloadMtu = 0;
     }
-    stationConnectUnreachableTimeoutSeconds = qBound(
+    plankUnreachableTimeoutSeconds = qBound(
                 5,
-                settings.value(SER_STATIONCONNECT_UNREACHABLE_TIMEOUT, 15).toInt(),
+                settings.value(SER_PLANK_UNREACHABLE_TIMEOUT, 15).toInt(),
                 300);
     const int unreachableAction = settings.value(
-                SER_STATIONCONNECT_UNREACHABLE_ACTION,
-                static_cast<int>(StationConnectUnreachableAction::SCUA_ASK)).toInt();
-    stationConnectUnreachableAction =
-            unreachableAction == StationConnectUnreachableAction::SCUA_DISCONNECT ?
-                StationConnectUnreachableAction::SCUA_DISCONNECT :
-                StationConnectUnreachableAction::SCUA_ASK;
+                SER_PLANK_UNREACHABLE_ACTION,
+                static_cast<int>(PlankUnreachableAction::PLANK_UNREACHABLE_ASK)).toInt();
+    plankUnreachableAction =
+            unreachableAction == PlankUnreachableAction::PLANK_UNREACHABLE_DISCONNECT ?
+                PlankUnreachableAction::PLANK_UNREACHABLE_DISCONNECT :
+                PlankUnreachableAction::PLANK_UNREACHABLE_ASK;
     muteOnFocusLoss = settings.value(SER_MUTEONFOCUSLOSS, false).toBool();
     keepAwake = settings.value(SER_KEEPAWAKE, true).toBool();
     captureSysKeysMode = static_cast<CaptureSysKeysMode>(settings.value(SER_CAPTURESYSKEYS,
@@ -253,13 +253,13 @@ void StreamingPreferences::save()
     }
     settings.setValue(SER_CONNWARNINGS, connectionWarnings);
     settings.setValue(SER_QUIC_UDP_PAYLOAD_MTU, quicUdpPayloadMtu);
-    settings.setValue(SER_STATIONCONNECT_UNREACHABLE_TIMEOUT,
-                      stationConnectUnreachableTimeoutSeconds);
-    settings.setValue(SER_STATIONCONNECT_UNREACHABLE_ACTION,
-                      static_cast<int>(stationConnectUnreachableAction));
+    settings.setValue(SER_PLANK_UNREACHABLE_TIMEOUT,
+                      plankUnreachableTimeoutSeconds);
+    settings.setValue(SER_PLANK_UNREACHABLE_ACTION,
+                      static_cast<int>(plankUnreachableAction));
     settings.setValue(SER_SHOWPERFOVERLAY, showPerformanceOverlay);
     settings.setValue(SER_AUDIOCFG, static_cast<int>(audioConfig));
-    settings.setValue(SER_STATIONCONNECT_TOOLBAR_PINNED, stationConnectToolbarPinned);
+    settings.setValue(SER_PLANK_TOOLBAR_PINNED, plankToolbarPinned);
     settings.setValue(SER_WINDOWMODE, static_cast<int>(windowMode));
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);

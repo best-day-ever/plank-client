@@ -22,9 +22,9 @@
 #include "videopacketlosswindow.h"
 
 class ComputerManager;
-class StationConnectToolbar;
-#ifdef STATIONCONNECT_DATASMASH
-struct ScDatasmashNativeEndpoint;
+class PlankToolbar;
+#ifdef PLANK_TRANSPORT
+struct PlankTransportNativeEndpoint;
 #endif
 
 class SupportedVideoFormatList : public QList<int>
@@ -119,7 +119,7 @@ class Session : public QObject
     friend class DeferredSessionCleanupTask;
     friend class AsyncConnectionStartThread;
     friend class ExecThread;
-    friend class StationConnectReconnectThread;
+    friend class PlankReconnectThread;
 
 public:
     explicit Session(NvComputer* computer, NvApp& app,
@@ -195,7 +195,7 @@ private:
 
     bool startConnectionAsync(bool reconnecting = false);
 
-    struct StationConnectReconnectState {
+    struct PlankReconnectState {
         bool retainedRenderer = false;
         int videoFormat = 0;
         int videoWidth = 0;
@@ -203,33 +203,33 @@ private:
         int videoFrameRate = 0;
     };
 
-    bool beginStationConnectReconnect(StationConnectReconnectState& state);
+    bool beginPlankReconnect(PlankReconnectState& state);
 
-    bool runStationConnectReconnect();
+    bool runPlankReconnect();
 
-    bool finishStationConnectReconnect(bool success,
-                                       const StationConnectReconnectState& state);
+    bool finishPlankReconnect(bool success,
+                                       const PlankReconnectState& state);
 
-    void clearStationConnectReconnectCredentials();
+    void clearPlankReconnectCredentials();
 
-    bool startDatasmashDataPlane(quint16 port,
+    bool startPlankTransportDataPlane(quint16 port,
                                  const QString& certificateSha256,
                                  const QString& token,
                                  quint16 quicUdpPayloadMtu);
 
-    bool negotiateDatasmashSession(quint16 sessionPort, QString& errorMessage);
+    bool negotiatePlankTransportSession(quint16 sessionPort, QString& errorMessage);
 
-    void stopDatasmashDataPlane();
+    void stopPlankTransportDataPlane();
 
-#ifdef STATIONCONNECT_DATASMASH
-    void startDatasmashMediaReceivers();
-    void stopDatasmashMediaReceivers();
-    void datasmashVideoReceiveLoop();
-    void datasmashAudioReceiveLoop();
-    void datasmashDataReceiveLoop();
-    static int datasmashNativeControlSender(void* context, uint32_t type,
+#ifdef PLANK_TRANSPORT
+    void startPlankTransportMediaReceivers();
+    void stopPlankTransportMediaReceivers();
+    void plankTransportVideoReceiveLoop();
+    void plankTransportAudioReceiveLoop();
+    void plankTransportDataReceiveLoop();
+    static int plankTransportNativeControlSender(void* context, uint32_t type,
                                             uint32_t value1, uint32_t value2);
-    static int datasmashNativeInputSender(void* context, uint8_t type,
+    static int plankTransportNativeInputSender(void* context, uint8_t type,
                                           const unsigned char* payload,
                                           size_t payloadLength);
 #endif
@@ -268,9 +268,9 @@ private:
 
     void minimizePresentationWindows();
 
-    bool configureStationConnectHostLayout();
+    bool configurePlankHostLayout();
 
-    QSize configureStationConnectDisplayMode();
+    QSize configurePlankDisplayMode();
 
     void toggleFullscreen();
 
@@ -360,16 +360,16 @@ private:
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
-    StreamingPreferences::StationConnectVideoProfile m_StationConnectVideoProfile;
-    StreamingPreferences::StationConnectCaptureSource m_StationConnectCaptureSource;
-#ifdef STATIONCONNECT_DATASMASH
-    ScDatasmashNativeEndpoint* m_DatasmashEndpoint = nullptr;
-    std::atomic_bool m_DatasmashReceiversStopping {false};
-    std::thread m_DatasmashVideoThread;
-    std::thread m_DatasmashAudioThread;
-    std::thread m_DatasmashDataThread;
+    StreamingPreferences::PlankVideoProfile m_PlankVideoProfile;
+    StreamingPreferences::PlankCaptureSource m_PlankCaptureSource;
+#ifdef PLANK_TRANSPORT
+    PlankTransportNativeEndpoint* m_PlankTransportEndpoint = nullptr;
+    std::atomic_bool m_PlankTransportReceiversStopping {false};
+    std::thread m_PlankTransportVideoThread;
+    std::thread m_PlankTransportAudioThread;
+    std::thread m_PlankTransportDataThread;
 #endif
-    int m_StationConnectBitrateKbps;
+    int m_PlankBitrateKbps;
     ComputerManager* m_ComputerManager;
     NvApp m_App;
     SDL_Window* m_Window;
@@ -387,8 +387,8 @@ private:
     std::atomic_bool m_CanReconnect;
     std::atomic_bool m_ConnectionStartCancelled;
     std::atomic_bool m_WaitingForSessionCleanup;
-    QString m_StationConnectUsername;
-    QString m_StationConnectPassword;
+    QString m_PlankUsername;
+    QString m_PlankPassword;
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
@@ -404,7 +404,7 @@ private:
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;
     QVector<SDL_Window*> m_SecondaryWindows;
-    StationConnectPresentationLayout m_PresentationLayout;
+    PlankPresentationLayout m_PresentationLayout;
     SdlInputHandler* m_InputHandler;
     int m_FlushingWindowEventsRef;
 
@@ -425,7 +425,7 @@ private:
     Uint64 m_LastAudioTelemetryTime;
 
     Overlay::OverlayManager m_OverlayManager;
-    std::unique_ptr<StationConnectToolbar> m_StationConnectToolbar;
+    std::unique_ptr<PlankToolbar> m_PlankToolbar;
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
     std::atomic<float> m_CurrentVideoPacketLossPercent;

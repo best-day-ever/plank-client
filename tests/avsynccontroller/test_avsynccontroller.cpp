@@ -23,7 +23,7 @@ private slots:
 namespace {
 int runClockModel(double audioPpm, int durationSeconds)
 {
-    StationConnectAvSync::AudioRateController controller;
+    PlankAvSync::AudioRateController controller;
     double submittedFrames = 0.0;
     std::uint64_t previousRawFrames = 0;
     for (int second = 0; second <= durationSeconds; second++) {
@@ -34,7 +34,7 @@ int runClockModel(double audioPpm, int durationSeconds)
                 (1.0 - controller.correctionPpm() / 1000000.0);
         }
         previousRawFrames = audioFrames;
-        const StationConnectAvSync::VideoClockSample video {
+        const PlankAvSync::VideoClockSample video {
             second * 1000LL,
             static_cast<std::uint32_t>(second * 1000),
             true
@@ -71,19 +71,19 @@ void TestAvSyncController::correctsSlowAudioClock()
 void TestAvSyncController::boundsExtremeCorrection()
 {
     QCOMPARE(runClockModel(1000.0, 300),
-             StationConnectAvSync::AudioRateController::MaximumCorrectionPpm);
+             PlankAvSync::AudioRateController::MaximumCorrectionPpm);
     QCOMPARE(runClockModel(-1000.0, 300),
-             -StationConnectAvSync::AudioRateController::MaximumCorrectionPpm);
+             -PlankAvSync::AudioRateController::MaximumCorrectionPpm);
 }
 
 void TestAvSyncController::ignoresStaleVideoClock()
 {
-    StationConnectAvSync::AudioRateController controller;
-    const StationConnectAvSync::VideoClockSample current {0, 1000, true};
+    PlankAvSync::AudioRateController controller;
+    const PlankAvSync::VideoClockSample current {0, 1000, true};
     const auto initial = controller.update(0, 0, 48000, 1020, current);
     QVERIFY(!initial.updated);
 
-    const StationConnectAvSync::VideoClockSample stale {1000, 2000, true};
+    const PlankAvSync::VideoClockSample stale {1000, 2000, true};
     const auto ignored = controller.update(48000, 48000, 48000, 5001, stale);
     QVERIFY(!ignored.updated);
     QCOMPARE(ignored.correctionPpm, 0);
@@ -91,7 +91,7 @@ void TestAvSyncController::ignoresStaleVideoClock()
 
 void TestAvSyncController::boundsLongRunPhaseError()
 {
-    StationConnectAvSync::AudioRateController controller;
+    PlankAvSync::AudioRateController controller;
     constexpr double AudioPpm = 80.0;
     constexpr double VideoPpm = 3.0;
     double submittedFrames = 0.0;
@@ -125,7 +125,7 @@ void TestAvSyncController::boundsLongRunPhaseError()
 
 void TestAvSyncController::leavesSmallAudioBacklogUnchanged()
 {
-    StationConnectAvSync::AudioBacklogController controller;
+    PlankAvSync::AudioBacklogController controller;
     for (std::uint32_t ticks = 0; ticks <= 1000; ticks += 100) {
         controller.update(15, ticks);
     }
@@ -134,7 +134,7 @@ void TestAvSyncController::leavesSmallAudioBacklogUnchanged()
 
 void TestAvSyncController::catchesUpBoundedAudioBacklog()
 {
-    StationConnectAvSync::AudioBacklogController controller;
+    PlankAvSync::AudioBacklogController controller;
     for (std::uint32_t ticks = 0; ticks <= 1000; ticks += 100) {
         controller.update(35, ticks);
     }
@@ -143,7 +143,7 @@ void TestAvSyncController::catchesUpBoundedAudioBacklog()
 
 void TestAvSyncController::removesCatchUpAfterBacklogDrains()
 {
-    StationConnectAvSync::AudioBacklogController controller;
+    PlankAvSync::AudioBacklogController controller;
     for (std::uint32_t ticks = 0; ticks <= 1000; ticks += 100) {
         controller.update(35, ticks);
     }

@@ -510,7 +510,7 @@ bool PlVkRenderer::tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDevice
         if (!isSurfacePresentationSupportedByPhysicalDevice(device,
                                                              target.surface)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Vulkan device '%s' does not support presenting on a StationConnect output surface",
+                        "Vulkan device '%s' does not support presenting on a PLANK output surface",
                         deviceProps->deviceName);
             return false;
         }
@@ -519,7 +519,7 @@ bool PlVkRenderer::tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDevice
                     device, target.surface,
                     VK_COLOR_SPACE_HDR10_ST2084_EXT)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Vulkan device '%s' does not support HDR10 (ST.2084 PQ) on every StationConnect output",
+                        "Vulkan device '%s' does not support HDR10 (ST.2084 PQ) on every PLANK output",
                         deviceProps->deviceName);
             return false;
         }
@@ -650,7 +650,7 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
                                      m_PlVkInstance->instance, nullptr,
                                      &target.surface)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_Vulkan_CreateSurface() failed for StationConnect output: %s",
+                         "SDL_Vulkan_CreateSurface() failed for PLANK output: %s",
                          SDL_GetError());
             return false;
         }
@@ -696,13 +696,13 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
                     m_Vulkan, &vkSwapchainParams);
         if (target.swapchain == nullptr) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "pl_vulkan_create_swapchain() failed for StationConnect output");
+                         "pl_vulkan_create_swapchain() failed for PLANK output");
             return false;
         }
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "StationConnect Vulkan presentation initialized with %zu output surface%s on a %dx%d canvas",
+                "PLANK Vulkan presentation initialized with %zu output surface%s on a %dx%d canvas",
                 m_PresentationTargets.size(),
                 m_PresentationTargets.size() == 1 ? "" : "s",
                 m_PresentationCanvasSize.width(),
@@ -833,7 +833,7 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
                     limits.align_host_ptr);
 
         const QByteArray requestedAllocator =
-            qgetenv("STATIONCONNECT_VULKAN_FRAME_ALLOCATOR").trimmed().toLower();
+            qgetenv("PLANK_VULKAN_FRAME_ALLOCATOR").trimmed().toLower();
         if (requestedAllocator.isEmpty()) {
             if (canImportHostMemory && !limits.host_ptr_slow) {
                 m_SoftwareFrameAllocator = SoftwareFrameAllocator::ImportedHost;
@@ -890,7 +890,7 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
         else {
             m_SoftwareFrameAllocator = SoftwareFrameAllocator::System;
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Unknown STATIONCONNECT_VULKAN_FRAME_ALLOCATOR value '%s'; "
+                        "Unknown PLANK_VULKAN_FRAME_ALLOCATOR value '%s'; "
                         "using system-memory frames",
                         requestedAllocator.constData());
         }
@@ -1254,7 +1254,7 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
 
         pl_frame targetFrame;
         pl_frame_from_swapchain(&targetFrame, &target.swapchainFrame);
-        const auto slice = StationConnectPresentation::sliceForOutput(
+        const auto slice = PlankPresentation::sliceForOutput(
                     streamSize, m_PresentationCanvasSize,
                     target.canvasRect);
         if (slice.visible) {
@@ -1290,14 +1290,14 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
             if (!pl_render_image(m_Renderer, &sourceFrame, &targetFrame,
                                  &pl_render_fast_params)) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "pl_render_image() failed for StationConnect output");
+                             "pl_render_image() failed for PLANK output");
             }
         }
 
         target.hasPendingSwapchainFrame = false;
         if (!pl_swapchain_submit_frame(target.swapchain)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "pl_swapchain_submit_frame() failed for StationConnect output");
+                         "pl_swapchain_submit_frame() failed for PLANK output");
             rendererResetRequired = true;
         }
 

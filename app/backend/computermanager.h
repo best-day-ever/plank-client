@@ -224,13 +224,13 @@ public:
 
     Q_INVOKABLE void stopPollingAsync();
 
-    Q_INVOKABLE QStringList stationConnectVirtualModeChoices() const;
+    Q_INVOKABLE QStringList plankVirtualModeChoices() const;
 
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
                                         int hostLayout = 0, int virtualMode1 = 9,
                                         int virtualMode2 = 1,
                                         int scaling = 1,
-                                        int videoProfile = StreamingPreferences::SCVP_NVENC_HEVC_10BIT_444,
+                                        int videoProfile = StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444,
                                         int captureSource = 0,
                                         QVariantList profileBitratesKbps = QVariantList());
 
@@ -245,7 +245,7 @@ public:
 
     void authenticateHost(NvComputer* computer, QString username, QString password);
 
-    bool takeStationConnectReconnectCredentials(NvComputer* computer,
+    bool takePlankReconnectCredentials(NvComputer* computer,
                                                 QString& username,
                                                 QString& password);
 
@@ -281,7 +281,7 @@ private:
 
     void startPollingComputer(NvComputer* computer);
 
-    void rememberStationConnectReconnectCredentials(NvComputer* computer,
+    void rememberPlankReconnectCredentials(NvComputer* computer,
                                                      QString username,
                                                      QString password);
 

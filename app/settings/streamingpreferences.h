@@ -25,114 +25,114 @@ public:
     };
     Q_ENUM(AudioConfig)
 
-    enum StationConnectVideoProfile
+    enum PlankVideoProfile
     {
-        SCVP_H264_10BIT_444,
-        SCVP_H264_8BIT_422,
-        SCVP_H264_8BIT_444,
-        SCVP_H264_10BIT_422,
-        SCVP_NVENC_H264_8BIT_444,
-        SCVP_NVENC_HEVC_8BIT_444,
-        SCVP_NVENC_HEVC_10BIT_444,
-        SCVP_COUNT,
+        PLANK_PROFILE_H264_10BIT_444,
+        PLANK_PROFILE_H264_8BIT_422,
+        PLANK_PROFILE_H264_8BIT_444,
+        PLANK_PROFILE_H264_10BIT_422,
+        PLANK_PROFILE_NVENC_H264_8BIT_444,
+        PLANK_PROFILE_NVENC_HEVC_8BIT_444,
+        PLANK_PROFILE_NVENC_HEVC_10BIT_444,
+        PLANK_PROFILE_COUNT,
     };
-    Q_ENUM(StationConnectVideoProfile)
+    Q_ENUM(PlankVideoProfile)
 
-    enum StationConnectCaptureSource
+    enum PlankCaptureSource
     {
-        SCCS_NVFBC_8BIT,
-        SCCS_X11_NATIVE10,
+        PLANK_CAPTURE_NVFBC_8BIT,
+        PLANK_CAPTURE_X11_NATIVE10,
     };
-    Q_ENUM(StationConnectCaptureSource)
+    Q_ENUM(PlankCaptureSource)
 
-    static bool isStationConnectVideoProfileValid(int profile)
+    static bool isPlankVideoProfileValid(int profile)
     {
-        return profile >= SCVP_H264_10BIT_444 &&
-               profile < SCVP_COUNT;
+        return profile >= PLANK_PROFILE_H264_10BIT_444 &&
+               profile < PLANK_PROFILE_COUNT;
     }
 
-    static bool isStationConnectProfileValidForCaptureSource(
+    static bool isPlankProfileValidForCaptureSource(
             int profile, int captureSource)
     {
-        if (!isStationConnectVideoProfileValid(profile) ||
-                captureSource < SCCS_NVFBC_8BIT ||
-                captureSource > SCCS_X11_NATIVE10) {
+        if (!isPlankVideoProfileValid(profile) ||
+                captureSource < PLANK_CAPTURE_NVFBC_8BIT ||
+                captureSource > PLANK_CAPTURE_X11_NATIVE10) {
             return false;
         }
 
-        if (captureSource == SCCS_X11_NATIVE10) {
-            return profile == SCVP_H264_10BIT_444 ||
-                   profile == SCVP_NVENC_HEVC_10BIT_444;
+        if (captureSource == PLANK_CAPTURE_X11_NATIVE10) {
+            return profile == PLANK_PROFILE_H264_10BIT_444 ||
+                   profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444;
         }
 
         return true;
     }
 
-    static bool isStationConnectNvencProfile(int profile)
+    static bool isPlankNvencProfile(int profile)
     {
-        return profile >= SCVP_NVENC_H264_8BIT_444 &&
-               profile <= SCVP_NVENC_HEVC_10BIT_444;
+        return profile >= PLANK_PROFILE_NVENC_H264_8BIT_444 &&
+               profile <= PLANK_PROFILE_NVENC_HEVC_10BIT_444;
     }
 
-    static constexpr int StationConnectBitrateMinimumKbps = 10000;
-    static constexpr int StationConnectBitrateMaximumKbps = 150000;
-    static constexpr int StationConnectBitrateStepKbps = 500;
-    static constexpr int StationConnectH264DefaultBitrateKbps = 80000;
-    static constexpr int StationConnectHevcDefaultBitrateKbps = 50000;
+    static constexpr int PlankBitrateMinimumKbps = 10000;
+    static constexpr int PlankBitrateMaximumKbps = 150000;
+    static constexpr int PlankBitrateStepKbps = 500;
+    static constexpr int PlankH264DefaultBitrateKbps = 80000;
+    static constexpr int PlankHevcDefaultBitrateKbps = 50000;
 
-    static int stationConnectDefaultBitrateForProfile(int profile)
+    static int plankDefaultBitrateForProfile(int profile)
     {
-        return profile == SCVP_NVENC_HEVC_8BIT_444 ||
-               profile == SCVP_NVENC_HEVC_10BIT_444 ?
-                   StationConnectHevcDefaultBitrateKbps :
-                   StationConnectH264DefaultBitrateKbps;
+        return profile == PLANK_PROFILE_NVENC_HEVC_8BIT_444 ||
+               profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444 ?
+                   PlankHevcDefaultBitrateKbps :
+                   PlankH264DefaultBitrateKbps;
     }
 
-    static int clampStationConnectBitrate(int bitrateKbps)
+    static int clampPlankBitrate(int bitrateKbps)
     {
-        return qBound(StationConnectBitrateMinimumKbps,
+        return qBound(PlankBitrateMinimumKbps,
                       bitrateKbps,
-                      StationConnectBitrateMaximumKbps);
+                      PlankBitrateMaximumKbps);
     }
 
-    static QVector<int> stationConnectDefaultProfileBitrates()
+    static QVector<int> plankDefaultProfileBitrates()
     {
         QVector<int> bitrates;
-        bitrates.reserve(SCVP_COUNT);
-        for (int profile = SCVP_H264_10BIT_444;
-             profile < SCVP_COUNT;
+        bitrates.reserve(PLANK_PROFILE_COUNT);
+        for (int profile = PLANK_PROFILE_H264_10BIT_444;
+             profile < PLANK_PROFILE_COUNT;
              ++profile) {
-            bitrates.append(stationConnectDefaultBitrateForProfile(profile));
+            bitrates.append(plankDefaultBitrateForProfile(profile));
         }
         return bitrates;
     }
 
-    static QVariantList stationConnectProfileBitratesToVariantList(
+    static QVariantList plankProfileBitratesToVariantList(
             const QVector<int>& bitrates)
     {
         QVariantList values;
-        values.reserve(SCVP_COUNT);
-        for (int profile = SCVP_H264_10BIT_444;
-             profile < SCVP_COUNT;
+        values.reserve(PLANK_PROFILE_COUNT);
+        for (int profile = PLANK_PROFILE_H264_10BIT_444;
+             profile < PLANK_PROFILE_COUNT;
              ++profile) {
-            values.append(stationConnectBitrateForProfile(bitrates, profile));
+            values.append(plankBitrateForProfile(bitrates, profile));
         }
         return values;
     }
 
-    static bool stationConnectProfileBitratesFromVariantList(
+    static bool plankProfileBitratesFromVariantList(
             const QVariantList& values, QVector<int>& bitrates)
     {
-        if (values.size() != SCVP_COUNT) {
+        if (values.size() != PLANK_PROFILE_COUNT) {
             return false;
         }
 
         QVector<int> parsed;
-        parsed.reserve(SCVP_COUNT);
+        parsed.reserve(PLANK_PROFILE_COUNT);
         for (const QVariant& value : values) {
             bool ok = false;
             const int bitrateKbps = value.toInt(&ok);
-            if (!ok || bitrateKbps != clampStationConnectBitrate(bitrateKbps)) {
+            if (!ok || bitrateKbps != clampPlankBitrate(bitrateKbps)) {
                 return false;
             }
             parsed.append(bitrateKbps);
@@ -141,14 +141,14 @@ public:
         return true;
     }
 
-    static int stationConnectBitrateForProfile(
+    static int plankBitrateForProfile(
             const QVector<int>& bitrates, int profile)
     {
-        if (isStationConnectVideoProfileValid(profile) &&
-                bitrates.size() == SCVP_COUNT) {
-            return clampStationConnectBitrate(bitrates.at(profile));
+        if (isPlankVideoProfileValid(profile) &&
+                bitrates.size() == PLANK_PROFILE_COUNT) {
+            return clampPlankBitrate(bitrates.at(profile));
         }
-        return stationConnectDefaultBitrateForProfile(profile);
+        return plankDefaultBitrateForProfile(profile);
     }
 
     enum WindowMode
@@ -204,12 +204,12 @@ public:
     };
     Q_ENUM(CaptureSysKeysMode);
 
-    enum StationConnectUnreachableAction
+    enum PlankUnreachableAction
     {
-        SCUA_ASK,
-        SCUA_DISCONNECT,
+        PLANK_UNREACHABLE_ASK,
+        PLANK_UNREACHABLE_DISCONNECT,
     };
-    Q_ENUM(StationConnectUnreachableAction);
+    Q_ENUM(PlankUnreachableAction);
 
     Q_PROPERTY(int fps MEMBER fps NOTIFY displayModeChanged)
     Q_PROPERTY(bool enableVsync MEMBER enableVsync NOTIFY enableVsyncChanged)
@@ -218,11 +218,11 @@ public:
     Q_PROPERTY(bool mdnsDiscoveryManaged MEMBER mdnsDiscoveryManaged CONSTANT)
     Q_PROPERTY(bool connectionWarnings MEMBER connectionWarnings NOTIFY connectionWarningsChanged)
     Q_PROPERTY(int quicUdpPayloadMtu MEMBER quicUdpPayloadMtu NOTIFY quicUdpPayloadMtuChanged)
-    Q_PROPERTY(int stationConnectUnreachableTimeoutSeconds MEMBER stationConnectUnreachableTimeoutSeconds NOTIFY stationConnectUnreachableTimeoutChanged)
-    Q_PROPERTY(StationConnectUnreachableAction stationConnectUnreachableAction MEMBER stationConnectUnreachableAction NOTIFY stationConnectUnreachableActionChanged)
+    Q_PROPERTY(int plankUnreachableTimeoutSeconds MEMBER plankUnreachableTimeoutSeconds NOTIFY plankUnreachableTimeoutChanged)
+    Q_PROPERTY(PlankUnreachableAction plankUnreachableAction MEMBER plankUnreachableAction NOTIFY plankUnreachableActionChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
-    Q_PROPERTY(bool stationConnectToolbarPinned MEMBER stationConnectToolbarPinned NOTIFY stationConnectToolbarPinnedChanged)
+    Q_PROPERTY(bool plankToolbarPinned MEMBER plankToolbarPinned NOTIFY plankToolbarPinnedChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
@@ -231,26 +231,26 @@ public:
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
 
     Q_INVOKABLE bool retranslate();
-    Q_INVOKABLE int stationConnectDefaultBitrateKbps(int profile) const
+    Q_INVOKABLE int plankDefaultBitrateKbps(int profile) const
     {
-        return stationConnectDefaultBitrateForProfile(profile);
+        return plankDefaultBitrateForProfile(profile);
     }
-    Q_INVOKABLE QVariantList stationConnectDefaultProfileBitratesKbps() const
+    Q_INVOKABLE QVariantList plankDefaultProfileBitratesKbps() const
     {
-        return stationConnectProfileBitratesToVariantList(
-                    stationConnectDefaultProfileBitrates());
+        return plankProfileBitratesToVariantList(
+                    plankDefaultProfileBitrates());
     }
-    Q_INVOKABLE int stationConnectBitrateMinimumKbps() const
+    Q_INVOKABLE int plankBitrateMinimumKbps() const
     {
-        return StationConnectBitrateMinimumKbps;
+        return PlankBitrateMinimumKbps;
     }
-    Q_INVOKABLE int stationConnectBitrateMaximumKbps() const
+    Q_INVOKABLE int plankBitrateMaximumKbps() const
     {
-        return StationConnectBitrateMaximumKbps;
+        return PlankBitrateMaximumKbps;
     }
-    Q_INVOKABLE int stationConnectBitrateStepKbps() const
+    Q_INVOKABLE int plankBitrateStepKbps() const
     {
-        return StationConnectBitrateStepKbps;
+        return PlankBitrateStepKbps;
     }
 
     // Directly accessible members for preferences
@@ -264,11 +264,11 @@ public:
     bool muteOnFocusLoss;
     bool keepAwake;
     int quicUdpPayloadMtu;
-    int stationConnectUnreachableTimeoutSeconds;
-    StationConnectUnreachableAction stationConnectUnreachableAction;
+    int plankUnreachableTimeoutSeconds;
+    PlankUnreachableAction plankUnreachableAction;
     AudioConfig audioConfig;
     int identityGbrBitDepth;
-    bool stationConnectToolbarPinned;
+    bool plankToolbarPinned;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
     Language language;
@@ -281,12 +281,12 @@ signals:
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void audioConfigChanged();
-    void stationConnectToolbarPinnedChanged();
+    void plankToolbarPinnedChanged();
     void windowModeChanged();
     void connectionWarningsChanged();
     void quicUdpPayloadMtuChanged();
-    void stationConnectUnreachableTimeoutChanged();
-    void stationConnectUnreachableActionChanged();
+    void plankUnreachableTimeoutChanged();
+    void plankUnreachableActionChanged();
     void showPerformanceOverlayChanged();
     void muteOnFocusLossChanged();
     void captureSysKeysModeChanged();

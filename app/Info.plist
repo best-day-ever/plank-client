@@ -2,18 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>GCSupportsGameMode</key>
-	<true/>
 	<key>CFBundleExecutable</key>
-	<string>Moonlight</string>
-	<key>LSSupportsGameMode</key>
-	<true/>
+	<string>plank-client</string>
 	<key>CFBundleGetInfoString</key>
-	<string>Stream games and other applications from another PC</string>
+	<string>Connect to a PLANK workstation</string>
 	<key>CFBundleIconFile</key>
 	<string>moonlight</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.moonlight-stream.Moonlight</string>
+	<string>la.instinctual.Plank.Client</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>CFBundlePackageType</key>
@@ -26,22 +22,13 @@
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
-	<key>GCSupportedGameControllers</key>
-	<array>
-		<dict>
-			<key>ProfileName</key>
-			<string>ExtendedGamepad</string>
-		</dict>
-	</array>
-	<key>GCSupportsControllerUserInteraction</key>
-	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Moonlight uses the local network to connect to your gaming PC for streaming.</string>
+	<string>PLANK uses the local network to connect to a workstation.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_nvstream._tcp</string>
@@ -51,8 +38,8 @@
 	<key>CFBundleShortVersionString</key>
 	<string>VERSION</string>
 	<key>CFBundleDisplayName</key>
-	<string>Moonlight</string>
-    <key>LSApplicationCategoryType</key>
-	<string>public.app-category.games</string>
+	<string>PLANK Client</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 </dict>
 </plist>

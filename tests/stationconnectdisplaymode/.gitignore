@@ -1,7 +1,0 @@
-.qmake.stash
-Makefile*
-*.moc
-*.o
-moc_predefs.h
-stationconnectdisplaymode
-target_wrapper.sh

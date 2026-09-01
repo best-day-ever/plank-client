@@ -1,5 +1,5 @@
 #include "input.h"
-#include "stationconnectpointerlogic.h"
+#include "plankpointerlogic.h"
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -173,7 +173,7 @@ bool SdlInputHandler::sendAbsoluteMousePosition(
     }
 
     QPointF streamPoint;
-    if (!StationConnectPresentation::mapWindowPointToStream(
+    if (!PlankPresentation::mapWindowPointToStream(
                 QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
                 QSize(m_StreamWidth, m_StreamHeight),
                 m_PresentationLayout.canvasSize, output->canvasRect,
@@ -248,7 +248,7 @@ bool SdlInputHandler::isMouseInVideoRegion(int mouseX, int mouseY,
         SDL_GetWindowSize(window, &windowWidth, &windowHeight);
     }
     QPointF streamPoint;
-    return StationConnectPresentation::mapWindowPointToStream(
+    return PlankPresentation::mapWindowPointToStream(
                 QPointF(mouseX, mouseY), QSize(windowWidth, windowHeight),
                 QSize(m_StreamWidth, m_StreamHeight),
                 m_PresentationLayout.canvasSize, output->canvasRect,
@@ -264,7 +264,7 @@ SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
     return presentationOutput(window) != nullptr ? window : nullptr;
 }
 
-const StationConnectPresentationOutput* SdlInputHandler::presentationOutput(
+const PlankPresentationOutput* SdlInputHandler::presentationOutput(
         SDL_Window* window) const
 {
     for (const auto& output : m_PresentationLayout.outputs) {
@@ -300,19 +300,19 @@ void SdlInputHandler::updatePointerRegionLock()
 
         videoRect.x = videoRect.y = 0;
         SDL_GetWindowSize(m_Window, &videoRect.w, &videoRect.h);
-        const StationConnectPointerLogic::Rect windowRect = {
+        const PlankPointerLogic::Rect windowRect = {
             0, 0, videoRect.w, videoRect.h
         };
 
         // Use the stream and window sizes to determine the video region.
         StreamUtils::scaleSourceToDestinationSurface(&src, &videoRect);
-        // A StationConnect toolbar is anchored to the window's top edge, not
+        // A PLANK toolbar is anchored to the window's top edge, not
         // the scaled video's top edge. Keep the pointer inside the window while
         // allowing it to cross letterbox/pillarbox regions and reach the reveal
         // strip. Mouse motion outside the video rectangle remains local and is
         // not forwarded to the host by handleMouseMotionEvent().
         const auto confinementRect =
-                StationConnectPointerLogic::pointerConfinementRect(
+                PlankPointerLogic::pointerConfinementRect(
                     windowRect,
                     {videoRect.x, videoRect.y, videoRect.w, videoRect.h},
                     m_LocalToolbarAvailable);

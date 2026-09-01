@@ -52,8 +52,8 @@
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
 
-#ifdef STATIONCONNECT_DATASMASH
-#include <stationconnect_datasmash.h>
+#ifdef PLANK_TRANSPORT
+#include <plank_transport.h>
 #endif
 
 #if defined(Q_OS_WIN32)
@@ -273,7 +273,7 @@ LONG WINAPI UnhandledExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
     }
 
     WCHAR dmpFileName[MAX_PATH];
-    swprintf_s(dmpFileName, L"%ls\\StationConnect-%I64u.dmp",
+    swprintf_s(dmpFileName, L"%ls\\PLANK-%I64u.dmp",
                (PWCHAR)QDir::toNativeSeparators(Path::getLogDir()).utf16(), QDateTime::currentSecsSinceEpoch());
     QString qDmpFileName = QString::fromUtf16((const char16_t*)dmpFileName);
     HANDLE dumpHandle = CreateFileW(dmpFileName, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -394,19 +394,19 @@ int main(int argc, char *argv[])
     // Set the SDL3 application identity before any subsystem can initialize.
     // On Wayland, GNOME uses this ID to match the stream window to our desktop
     // entry and persist the user's keyboard-shortcut inhibitor decision.
-    SDL_SetAppMetadata("StationConnect Client",
-                       STATIONCONNECT_VERSION_STR,
-                       "la.instinctual.StationConnect.Client");
+    SDL_SetAppMetadata("PLANK Client",
+                       PLANK_VERSION_STR,
+                       "la.instinctual.Plank.Client");
 
     // Set the app version for the QCommandLineParser's showVersion() command
-    QCoreApplication::setApplicationVersion(STATIONCONNECT_VERSION_STR);
+    QCoreApplication::setApplicationVersion(PLANK_VERSION_STR);
 
     // Set these here to allow us to use the default QSettings constructor and
-    // establish the StationConnect settings/cache namespace before paths are
+    // establish the PLANK settings/cache namespace before paths are
     // initialized. There are no deployed legacy clients requiring migration.
     QCoreApplication::setOrganizationName("Instinctual");
     QCoreApplication::setOrganizationDomain("instinctual.la");
-    QCoreApplication::setApplicationName("StationConnect");
+    QCoreApplication::setApplicationName("PLANK");
 
     if (QFile(QDir::currentPath() + "/portable.dat").exists()) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -446,13 +446,13 @@ int main(int argc, char *argv[])
     if (!logDirectoryReady) {
         QTextStream(stderr) << "Unable to create private log directory: " << logDir.absolutePath() << Qt::endl;
     }
-    logNamePattern = "stationconnect-client-*.log";
-    const QString logFileName = QString("stationconnect-client-%1-%2.log")
+    logNamePattern = "plank-client-*.log";
+    const QString logFileName = QString("plank-client-%1-%2.log")
                                     .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz"))
                                     .arg(QCoreApplication::applicationPid());
 #else
-    logNamePattern = "StationConnect-*.log";
-    const QString logFileName = QString("StationConnect-%1.log").arg(QDateTime::currentSecsSinceEpoch());
+    logNamePattern = "PLANK-*.log";
+    const QString logFileName = QString("PLANK-%1.log").arg(QDateTime::currentSecsSinceEpoch());
 #endif
 
 #ifdef Q_OS_WIN32
@@ -492,13 +492,13 @@ int main(int argc, char *argv[])
     }
 #endif
 
-#ifdef STATIONCONNECT_DATASMASH
-    if (sc_datasmash_abi_version() != SC_DATASMASH_ABI_VERSION) {
-        qCritical() << "StationConnect datasmash transport ABI mismatch";
+#ifdef PLANK_TRANSPORT
+    if (plank_transport_abi_version() != PLANK_TRANSPORT_ABI_VERSION) {
+        qCritical() << "PLANK native transport ABI mismatch";
         return 9;
     }
-    qInfo() << "StationConnect datasmash transport ABI"
-            << sc_datasmash_abi_version() << "is available";
+    qInfo() << "PLANK native transport ABI"
+            << plank_transport_abi_version() << "is available";
 #endif
 
 #ifdef Q_OS_WIN32
@@ -562,7 +562,7 @@ int main(int argc, char *argv[])
 
             if (!QFile("/dev/dri").exists()) {
                 qWarning() << "Unable to find a KMSDRM display device!";
-                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use Moonlight outside of the GUI environment.";
+                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use PLANK Client outside of the GUI environment.";
             }
             else if (!qEnvironmentVariableIsSet("QT_QPA_EGLFS_KMS_CONFIG")) {
                 // HACK: Remove this when Qt is fixed to properly check for display support before picking a card
@@ -715,7 +715,7 @@ int main(int argc, char *argv[])
     // SDL doing it for us behind our backs.
     SDL_SetHint("SDL_MOUSE_AUTO_CAPTURE", "0");
 
-    // StationConnect is a Wayland desktop client. Prefer libdecor so windowed
+    // PLANK is a Wayland desktop client. Prefer libdecor so windowed
     // streams consistently receive a title bar and resize borders on GNOME.
     SDL_SetHintWithPriority(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR,
                             "1", SDL_HINT_OVERRIDE);
@@ -751,7 +751,7 @@ int main(int argc, char *argv[])
     }
 
     QGuiApplication app(argc, argv);
-    QGuiApplication::setApplicationDisplayName("StationConnect Client");
+    QGuiApplication::setApplicationDisplayName("PLANK Client");
 
 #ifdef Q_OS_DARWIN
     // macOS defaults "Keyboard navigation" to text fields and lists only, which
@@ -881,12 +881,12 @@ int main(int argc, char *argv[])
 #ifndef Q_OS_DARWIN
     // Set the window icon except on macOS where we want to keep the
     // modified macOS 11 style rounded corner icon.
-    app.setWindowIcon(QIcon(":/res/stationconnect-logo.png"));
+    app.setWindowIcon(QIcon(":/res/plank-logo.png"));
 #endif
 
-    // Match the StationConnect desktop entry so Wayland and X11 shells group
+    // Match the PLANK desktop entry so Wayland and X11 shells group
     // both the Qt launcher and SDL stream window under the packaged identity.
-    app.setDesktopFileName("la.instinctual.StationConnect.Client");
+    app.setDesktopFileName("la.instinctual.Plank.Client");
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
@@ -938,12 +938,12 @@ int main(int argc, char *argv[])
             streamParser.parse(app.arguments(), preferences);
             QString host    = streamParser.getHost();
             QString appName = streamParser.getAppName();
-            QString stationConnectUsername = streamParser.getStationConnectUsername();
-            QString stationConnectPassword = streamParser.takeStationConnectPassword();
+            QString plankUsername = streamParser.getPlankUsername();
+            QString plankPassword = streamParser.takePlankPassword();
             auto launcher = new CliStartStream::Launcher(
                     host, appName, preferences,
-                    std::move(stationConnectUsername),
-                    std::move(stationConnectPassword), &app);
+                    std::move(plankUsername),
+                    std::move(plankPassword), &app);
             engine.rootContext()->setContextProperty("launcher", launcher);
             break;
         }

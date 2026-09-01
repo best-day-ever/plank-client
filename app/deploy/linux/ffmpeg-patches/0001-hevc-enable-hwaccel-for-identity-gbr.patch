@@ -1,4 +1,4 @@
-From: StationConnect Engineering <engineering@stationconnect.invalid>
+From: PLANK Engineering <engineering@instinctual.la>
 Subject: [PATCH] avcodec/hevc: enable hardware formats for identity GBR
 
 HEVC matrix_coeffs=0 changes the software pixel format for 8-bit and 10-bit

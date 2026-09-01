@@ -58,7 +58,7 @@ private:
         bool enabled;
         int fontSize;
         SDL_Color color;
-        // Debug statistics include StationConnect precision metadata in
+        // Debug statistics include PLANK precision metadata in
         // addition to the upstream metrics. Keep enough room for every line.
         char text[1280];
 

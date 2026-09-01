@@ -30,14 +30,14 @@ public:
 
     QString getHost() const;
     QString getAppName() const;
-    QString getStationConnectUsername() const;
-    QString takeStationConnectPassword();
+    QString getPlankUsername() const;
+    QString takePlankPassword();
 
 private:
     QString m_Host;
     QString m_AppName;
-    QString m_StationConnectUsername;
-    QString m_StationConnectPassword;
+    QString m_PlankUsername;
+    QString m_PlankPassword;
     QMap<QString, StreamingPreferences::WindowMode> m_WindowModeMap;
     QMap<QString, StreamingPreferences::AudioConfig> m_AudioConfigMap;
     QMap<QString, StreamingPreferences::CaptureSysKeysMode> m_CaptureSysKeysModeMap;

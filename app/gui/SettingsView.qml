@@ -11,7 +11,7 @@ Flickable {
     id: settingsPage
     objectName: qsTr("Settings")
 
-    StationConnectTheme {
+    PlankTheme {
         id: theme
     }
 
@@ -90,14 +90,14 @@ Flickable {
         width: settingsPage.width / 2
         spacing: theme.spaceMedium
 
-        StationConnectSection {
+        PlankSection {
             id: basicSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Basic Settings")
 
-            StationConnectSettingsGrid {
+            PlankSettingsGrid {
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     id: frameRateTitle
                     text: qsTr("Frame rate")
                 }
@@ -184,7 +184,7 @@ Flickable {
                                 }
 
                                 RowLayout {
-                                    StationConnectTextField {
+                                    PlankTextField {
                                         id: fpsField
                                         maximumLength: 4
                                         inputMethodHints: Qt.ImhDigitsOnly
@@ -319,7 +319,7 @@ Flickable {
                         }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     id: windowModeTitle
                     text: qsTr("Window Mode")
                     visible: SystemProperties.hasDesktopEnvironment
@@ -399,11 +399,11 @@ Flickable {
                     ToolTip.text: qsTr("Borderless fills the display. Windowed provides a movable, resizable stream window with desktop decorations.")
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("V-Sync")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: vsyncCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     hoverEnabled: true
@@ -423,15 +423,15 @@ Flickable {
             }
         }
 
-        StationConnectSection {
+        PlankSection {
 
             id: audioSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Audio Settings")
 
-            StationConnectSettingsGrid {
+            PlankSettingsGrid {
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     id: resAudioTitle
                     text: qsTr("Audio configuration")
                 }
@@ -476,11 +476,11 @@ Flickable {
                     }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Mute host PC speakers while streaming")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: audioPcCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
@@ -496,12 +496,12 @@ Flickable {
                     ToolTip.text: qsTr("You must restart any game currently in progress for this setting to take effect")
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Mute audio when the client is inactive")
                     visible: SystemProperties.hasDesktopEnvironment
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: muteOnFocusLossCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
@@ -520,14 +520,14 @@ Flickable {
             }
         }
 
-        StationConnectSection {
+        PlankSection {
             id: uiSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("UI Settings")
 
-            StationConnectSettingsGrid {
+            PlankSettingsGrid {
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     id: languageTitle
                     text: qsTr("Language")
                 }
@@ -678,7 +678,7 @@ Flickable {
                         if (StreamingPreferences.language !== new_language) {
                             StreamingPreferences.language = languageListModel.get(currentIndex).val
                             if (!StreamingPreferences.retranslate()) {
-                                ToolTip.show(qsTr("You must restart Moonlight for this change to take effect"), 5000)
+                                ToolTip.show(qsTr("You must restart PLANK Client for this change to take effect"), 5000)
                             }
                             else {
                                 // Signal other controls to adjust their text
@@ -688,11 +688,11 @@ Flickable {
                     }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Connection quality warnings")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: connectionWarningsCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
@@ -703,11 +703,11 @@ Flickable {
                     }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Keep display awake while streaming")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: keepAwakeCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
@@ -734,14 +734,14 @@ Flickable {
         width: settingsPage.width / 2
         spacing: theme.spaceMedium
 
-        StationConnectSection {
+        PlankSection {
             id: inputSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Input Settings")
 
-            StationConnectSettingsGrid {
+            PlankSettingsGrid {
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Capture system keyboard shortcuts")
                 }
 
@@ -750,7 +750,7 @@ Flickable {
                     Layout.minimumWidth: 0
                     spacing: theme.spaceMedium
 
-                    StationConnectCheckBox {
+                    PlankCheckBox {
                         id: captureSysKeysCheck
                         Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                         hoverEnabled: true
@@ -763,7 +763,7 @@ Flickable {
                         ToolTip.timeout: 10000
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("This enables the capture of system-wide keyboard shortcuts like Alt+Tab that would normally be handled by the client OS while streaming.") + "\n\n" +
-                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including Moonlight.")
+                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including PLANK Client.")
                     }
 
                     AutoResizingComboBox {
@@ -827,18 +827,18 @@ Flickable {
             }
         }
 
-        StationConnectSection {
+        PlankSection {
             id: networkSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Network Settings")
 
-            StationConnectSettingsGrid {
+            PlankSettingsGrid {
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Determine QUIC MTU automatically")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: automaticQuicMtuCheckBox
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
@@ -849,7 +849,7 @@ Flickable {
                     }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Maximum QUIC UDP payload")
                 }
 
@@ -876,13 +876,13 @@ Flickable {
                     Layout.preferredHeight: 1
                 }
 
-                StationConnectSettingHelp {
+                PlankSettingHelp {
                     text: automaticQuicMtuCheckBox.checked ?
                               qsTr("Automatic uses 1344 bytes on detected ZeroTier routes and Quinn path discovery elsewhere.") :
                               qsTr("The manual value is the complete QUIC UDP payload, excluding outer IP and UDP headers.")
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Unreachable host timeout")
                 }
 
@@ -899,9 +899,9 @@ Flickable {
                         to: 300
                         stepSize: 5
                         editable: true
-                        value: StreamingPreferences.stationConnectUnreachableTimeoutSeconds
+                        value: StreamingPreferences.plankUnreachableTimeoutSeconds
                         onValueModified: {
-                            StreamingPreferences.stationConnectUnreachableTimeoutSeconds = value
+                            StreamingPreferences.plankUnreachableTimeoutSeconds = value
                         }
                     }
 
@@ -913,7 +913,7 @@ Flickable {
                     }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("When the host remains unreachable")
                 }
 
@@ -926,18 +926,18 @@ Flickable {
                         id: unreachableActionListModel
                         ListElement {
                             text: qsTr("Ask whether to disconnect or keep waiting")
-                            val: StreamingPreferences.SCUA_ASK
+                            val: StreamingPreferences.PLANK_UNREACHABLE_ASK
                         }
                         ListElement {
                             text: qsTr("Disconnect automatically")
-                            val: StreamingPreferences.SCUA_DISCONNECT
+                            val: StreamingPreferences.PLANK_UNREACHABLE_DISCONNECT
                         }
                     }
                     Component.onCompleted: {
-                        currentIndex = StreamingPreferences.stationConnectUnreachableAction === StreamingPreferences.SCUA_DISCONNECT ? 1 : 0
+                        currentIndex = StreamingPreferences.plankUnreachableAction === StreamingPreferences.PLANK_UNREACHABLE_DISCONNECT ? 1 : 0
                     }
                     onActivated: {
-                        StreamingPreferences.stationConnectUnreachableAction = model.get(currentIndex).val
+                        StreamingPreferences.plankUnreachableAction = model.get(currentIndex).val
                     }
                 }
 
@@ -946,24 +946,24 @@ Flickable {
                     Layout.preferredHeight: 1
                 }
 
-                StationConnectSettingHelp {
-                    text: qsTr("The stream window and toolbar remain responsive while StationConnect retries the host.")
+                PlankSettingHelp {
+                    text: qsTr("The stream window and toolbar remain responsive while PLANK retries the host.")
                 }
             }
         }
 
-        StationConnectSection {
+        PlankSection {
             id: advancedSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Advanced Settings")
 
-            StationConnectSettingsGrid {
+            PlankSettingsGrid {
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Automatically find PCs on the local network")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: enableMdns
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
@@ -971,7 +971,7 @@ Flickable {
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged
                     ToolTip.visible: hovered && StreamingPreferences.mdnsDiscoveryManaged
-                    ToolTip.text: qsTr("Managed by /etc/stationconnect/stationconnect-client.conf")
+                    ToolTip.text: qsTr("Managed by /etc/plank/client.conf")
                     onCheckedChanged: {
                         // This is called on init, so only do the work if we've
                         // actually changed the value.
@@ -987,11 +987,11 @@ Flickable {
                     }
                 }
 
-                StationConnectSettingLabel {
+                PlankSettingLabel {
                     text: qsTr("Show performance stats while streaming")
                 }
 
-                StationConnectCheckBox {
+                PlankCheckBox {
                     id: showPerformanceOverlay
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""

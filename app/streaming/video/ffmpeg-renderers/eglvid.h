@@ -1,7 +1,7 @@
 #pragma once
 
 #include "renderer.h"
-#include "streaming/stationconnectpresentation.h"
+#include "streaming/plankpresentation.h"
 
 #define SDL_USE_BUILTIN_OPENGL_DEFINITIONS 1
 #include <SDL3/SDL_egl.h>
@@ -48,7 +48,7 @@ private:
     SDL_GLContext m_Context;
     SDL_Window *m_Window;
     QSize m_PresentationCanvasSize;
-    std::vector<StationConnectPresentationOutput> m_PresentationTargets;
+    std::vector<PlankPresentationOutput> m_PresentationTargets;
     IFFmpegRenderer *m_Backend;
     unsigned int m_VAO;
     unsigned int m_VideoVbo;

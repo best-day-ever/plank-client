@@ -52,8 +52,8 @@ private:
     quint64 m_SubmittedAudioFrames;
     qint64 m_LastSubmittedAudioMediaTimeMs;
     quint64 m_SkippedAudioBlocks;
-    StationConnectAvSync::AudioRateController m_AudioRateController;
-    StationConnectAvSync::AudioBacklogController m_AudioBacklogController;
+    PlankAvSync::AudioRateController m_AudioRateController;
+    PlankAvSync::AudioBacklogController m_AudioBacklogController;
 
 #if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
     SwrContext* m_SwrContext;

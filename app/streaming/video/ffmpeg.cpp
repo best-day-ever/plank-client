@@ -725,7 +725,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
 
         // Do not trust a codec-family capability claim by itself. Some hardware
         // paths accept H.264 configuration but substitute an 8-bit or 4:2:0
-        // surface for a StationConnect High 10 or 4:4:4 profile. Validate the
+        // surface for a PLANK High 10 or 4:4:4 profile. Validate the
         // decoded test frame before allowing the renderer to accept the path.
         if (!validateDecodedProfileFrame(frame, params)) {
             av_frame_free(&frame);
@@ -1757,7 +1757,7 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     void* codecIterator;
 
     // Hardware is always attempted first. Each candidate must successfully
-    // decode and exactly validate the selected StationConnect profile before
+    // decode and exactly validate the selected PLANK profile before
     // it can be accepted.
     {
         QSet<const AVCodec*> terminallyFailedHardwareDecoders;

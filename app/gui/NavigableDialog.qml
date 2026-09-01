@@ -4,7 +4,7 @@ import QtQuick.Controls 2.2
 Dialog {
     id: control
 
-    StationConnectTheme {
+    PlankTheme {
         id: theme
     }
 

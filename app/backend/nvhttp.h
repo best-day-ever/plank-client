@@ -144,7 +144,7 @@ public:
 
     void setAddress(NvAddress address);
 
-    void setStationConnectSessionToken(QString sessionToken);
+    void setPlankSessionToken(QString sessionToken);
 
     QString authenticate(QString username, QString password);
     NvOutputTopology getOutputTopology();
@@ -166,8 +166,8 @@ public:
              bool persistGameControllersOnDisconnect,
              QString captureDisplayMode,
              QString topologyGeneration,
-             int stationConnectProtocolVersion,
-             int stationConnectFeatureFlags,
+             int plankProtocolVersion,
+             int plankFeatureFlags,
              QString hostLayout,
              QString virtualMode1,
              QString virtualMode2,
@@ -175,9 +175,9 @@ public:
              QString encoderBackend,
              QString encodingMode,
              quint16 quicUdpPayloadMtu,
-             quint16& datasmashPort,
-             QString& datasmashCertificateSha256,
-             QString& datasmashToken,
+             quint16& plankTransportPort,
+             QString& plankTransportCertificateSha256,
+             QString& plankTransportToken,
              QString& acceptedCaptureSource,
              QString& acceptedEncoderBackend,
              QString& acceptedEncodingMode);
@@ -204,7 +204,7 @@ private:
                    int timeoutMs,
                    NvLogLevel logLevel);
 
-    QJsonObject postStationConnectJson(QString command, const QJsonObject& body);
+    QJsonObject postPlankJson(QString command, const QJsonObject& body);
 
     NvAddress m_Address;
     QNetworkAccessManager* m_Nam;
