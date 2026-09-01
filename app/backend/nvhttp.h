@@ -168,6 +168,7 @@ public:
              QString topologyGeneration,
              int plankProtocolVersion,
              int plankFeatureFlags,
+             bool takeOverActiveSession,
              QString hostLayout,
              QString virtualMode1,
              QString virtualMode2,

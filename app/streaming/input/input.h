@@ -29,6 +29,8 @@ public:
 
     void setWindow(SDL_Window* window);
 
+    void setStreamDimensions(int streamWidth, int streamHeight);
+
     void setPresentationLayout(const PlankPresentationLayout& layout);
 
     void refreshWaylandTabletCursorParents();
@@ -176,6 +178,7 @@ private:
                                          SDL_Window*& window,
                                          int& x, int& y) const;
     void updateTabletCursorVisibility();
+    QSize streamDimensions() const;
     bool sendAbsoluteMousePosition(SDL_Window* window,
                                    int windowX, int windowY,
                                    bool allowClampedPosition);
@@ -191,8 +194,7 @@ private:
         bool enabled;
     } m_SpecialKeyCombos[KeyComboMax];
 
-    int m_StreamWidth;
-    int m_StreamHeight;
+    std::atomic_uint64_t m_StreamDimensions;
 
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;

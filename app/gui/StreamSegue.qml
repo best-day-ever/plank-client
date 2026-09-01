@@ -48,6 +48,12 @@ Item {
         cancelWaitButton.visible = waiting
     }
 
+    function activeSessionTakeoverRequested(text)
+    {
+        activeSessionTakeoverDialog.text = text
+        activeSessionTakeoverDialog.open()
+    }
+
     function displayLaunchError(text)
     {
         // Display the error dialog after Session::exec() returns
@@ -69,6 +75,7 @@ Item {
 
     function sessionFinished()
     {
+        activeSessionTakeoverDialog.close()
         if (quitAfter) {
             if (streamSegueErrorDialog.text) {
                 // Quit when the error dialog is acknowledged
@@ -118,6 +125,7 @@ Item {
         session.stageFailed.connect(stageFailed)
         session.connectionStarted.connect(connectionStarted)
         session.sessionCleanupWaitChanged.connect(sessionCleanupWaitChanged)
+        session.activeSessionTakeoverRequested.connect(activeSessionTakeoverRequested)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
         session.sessionFinished.connect(sessionFinished)
@@ -126,6 +134,17 @@ Item {
         // Kick off the stream
         spinnerTimer.start()
         streamLoader.active = true
+    }
+
+    NavigableMessageDialog {
+        id: activeSessionTakeoverDialog
+        title: qsTr("Active PLANK session")
+        standardButtons: Dialog.Yes | Dialog.No
+        acceptButtonText: qsTr("Take Over")
+        rejectButtonText: qsTr("Cancel")
+
+        onAccepted: session.respondToActiveSessionTakeover(true)
+        onRejected: session.respondToActiveSessionTakeover(false)
     }
 
     Timer {

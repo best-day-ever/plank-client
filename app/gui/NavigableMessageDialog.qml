@@ -12,8 +12,18 @@ NavigableDialog {
     property alias text: dialogLabel.dialogText
     property alias showSpinner: dialogSpinner.visible
     property alias imageSrc: dialogImage.source
+    property string acceptButtonText
+    property string rejectButtonText
 
     onOpened: {
+        var acceptButton = standardButton(Dialog.Yes)
+        var rejectButton = standardButton(Dialog.No)
+        if (acceptButton && acceptButtonText !== "") {
+            acceptButton.text = acceptButtonText
+        }
+        if (rejectButton && rejectButtonText !== "") {
+            rejectButton.text = rejectButtonText
+        }
         // Force keyboard focus on the label so keyboard navigation works
         if (dialogButtonBox.count > 0) {
             dialogButtonBox.itemAt(dialogButtonBox.count - 1).forceActiveFocus(Qt.TabFocus)

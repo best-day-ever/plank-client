@@ -168,6 +168,7 @@ NvHTTP::startApp(QString verb,
                  QString topologyGeneration,
                  int plankProtocolVersion,
                  int plankFeatureFlags,
+                 bool takeOverActiveSession,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
@@ -188,6 +189,10 @@ NvHTTP::startApp(QString verb,
                 "&plankProtocolVersion=" + QString::number(plankProtocolVersion) +
                 "&plankFeatureFlags=" + QString::number(plankFeatureFlags) +
                 "&plankDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
+        if (takeOverActiveSession &&
+                (plankFeatureFlags & NvOutputTopology::SessionTakeoverFeature) != 0) {
+            plankOutputArguments += "&plankTakeover=1";
+        }
         plankOutputArguments +=
                 "&plankCaptureSource=" +
                 QString::fromLatin1(QUrl::toPercentEncoding(captureSource));
