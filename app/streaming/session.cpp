@@ -1478,21 +1478,11 @@ bool Session::initialize()
         return false;
     }
 
-    if (m_Computer->plankAuthentication &&
-            !configurePlankHostLayout()) {
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        return false;
-    }
-
-    const QSize plankResolution = configurePlankDisplayMode();
-    if (!plankResolution.isValid()) {
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        return false;
-    }
-
     LiInitializeStreamConfiguration(&m_StreamConfig);
-    m_StreamConfig.width = plankResolution.width();
-    m_StreamConfig.height = plankResolution.height();
+    if (!configurePlankLaunchGeometry()) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
+    }
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
@@ -2173,6 +2163,34 @@ QSize Session::configurePlankDisplayMode()
     return selectedResolution;
 }
 
+bool Session::configurePlankLaunchGeometry()
+{
+    if (m_Computer->plankAuthentication &&
+            !configurePlankHostLayout()) {
+        return false;
+    }
+
+    const QSize resolution = configurePlankDisplayMode();
+    if (!resolution.isValid()) {
+        return false;
+    }
+
+    const QSize previousResolution(m_StreamConfig.width,
+                                   m_StreamConfig.height);
+    m_StreamConfig.width = resolution.width();
+    m_StreamConfig.height = resolution.height();
+    if (m_InputHandler != nullptr) {
+        m_InputHandler->setStreamDimensions(resolution.width(),
+                                            resolution.height());
+    }
+
+    if (previousResolution.isValid() && previousResolution != resolution) {
+        qInfo() << "PLANK launch geometry changed from"
+                << previousResolution << "to" << resolution;
+    }
+    return true;
+}
+
 void Session::getWindowDimensions(int& x, int& y,
                                   int& width, int& height)
 {
@@ -2433,8 +2451,6 @@ bool Session::startConnectionAsync(bool reconnecting,
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
-        const QString hostLayout = m_ResolvedHostLayout;
-        const QStringList virtualModes = m_ResolvedVirtualModes;
         const QString captureSource =
                 m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
@@ -2478,9 +2494,9 @@ bool Session::startConnectionAsync(bool reconnecting,
                           m_Computer->plankFeatureFlags &
                               NvOutputTopology::SupportedFeatureFlags,
                           takeOverActiveSession,
-                          hostLayout,
-                          virtualModes.value(0),
-                          virtualModes.value(1),
+                          m_ResolvedHostLayout,
+                          m_ResolvedVirtualModes.value(0),
+                          m_ResolvedVirtualModes.value(1),
                           captureSource,
                           encoderBackend,
                           encodingMode,
@@ -2570,8 +2586,9 @@ bool Session::startConnectionAsync(bool reconnecting,
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                         }
-                        if (!topology.matchesRequestedHostLayout(hostLayout,
-                                                                 virtualModes)) {
+                        if (!topology.matchesRequestedHostLayout(
+                                    m_ResolvedHostLayout,
+                                    m_ResolvedVirtualModes)) {
                             qInfo() << "PLANK display transition is still pending:"
                                     << topology.layoutKind << topology.virtualModes;
                             continue;
@@ -2697,8 +2714,12 @@ bool Session::startConnectionAsync(bool reconnecting,
                 if (m_ComputerManager != nullptr) {
                     m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                 }
-                qInfo() << "PLANK refreshed stale topology generation and will retry launch:"
-                        << topology.generation;
+                if (!configurePlankLaunchGeometry()) {
+                    return false;
+                }
+                qInfo() << "PLANK refreshed stale topology and launch geometry; retrying launch:"
+                        << topology.generation << m_StreamConfig.width
+                        << m_StreamConfig.height;
                 startApp();
             }
         }

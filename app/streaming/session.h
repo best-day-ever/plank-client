@@ -277,6 +277,8 @@ private:
 
     QSize configurePlankDisplayMode();
 
+    bool configurePlankLaunchGeometry();
+
     void toggleFullscreen();
 
     void updateOptimalWindowDisplayMode();

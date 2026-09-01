@@ -101,6 +101,14 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
             WMUtils::isRunningDesktopEnvironment();
 }
 
+void SdlInputHandler::setStreamDimensions(int streamWidth, int streamHeight)
+{
+    SDL_assert(streamWidth > 0);
+    SDL_assert(streamHeight > 0);
+    m_StreamWidth = streamWidth;
+    m_StreamHeight = streamHeight;
+}
+
 SdlInputHandler::~SdlInputHandler()
 {
 #ifdef HAVE_LIBINPUT_TABLET
