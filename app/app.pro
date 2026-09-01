@@ -559,7 +559,7 @@ unix:!macx: {
     # FFmpeg runtime remains private to PLANK under /usr/lib/plank. Resolve
     # those libraries relative to the executable instead of relying on a
     # launcher-provided LD_LIBRARY_PATH.
-    QMAKE_LFLAGS += "-Wl,-rpath,'\\$$ORIGIN/../lib/plank'"
+    QMAKE_LFLAGS += "-Wl,-rpath,'\$$ORIGIN/../lib/plank'"
 
     isEmpty(PREFIX) {
         PREFIX = /usr/local
