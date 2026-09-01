@@ -2511,11 +2511,16 @@ bool Session::startConnectionAsync(bool reconnecting,
         try {
             startApp();
         } catch (const GfeHttpResponseException& e) {
+            const QString statusMessage = QString::fromUtf8(e.getStatusMessage());
             const bool displayTransitionStarted =
                     m_Computer->plankAuthentication &&
-                    e.getStatusCode() == 425 &&
-                    QString::fromUtf8(e.getStatusMessage()) ==
-                        QStringLiteral("PLANK host display transition started");
+                    ((e.getStatusCode() == 425 &&
+                      statusMessage ==
+                          QStringLiteral("PLANK host display transition started")) ||
+                     (takeOverActiveSession &&
+                      e.getStatusCode() == 503 &&
+                      statusMessage ==
+                          QStringLiteral("Host display layout transition is currently unavailable")));
             const bool activeSessionConflict =
                     m_Computer->plankAuthentication &&
                     e.getStatusCode() == 409 &&
@@ -2586,6 +2591,11 @@ bool Session::startConnectionAsync(bool reconnecting,
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                         }
+                        if (!configurePlankLaunchGeometry()) {
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            return false;
+                        }
                         if (!topology.matchesRequestedHostLayout(
                                     m_ResolvedHostLayout,
                                     m_ResolvedVirtualModes)) {
@@ -2606,7 +2616,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                             qInfo() << "PLANK display worker changed; authentication will be refreshed once";
                             continue;
                         }
-                        if (retryError.getStatusCode() != 425 &&
+                        if (retryError.getStatusCode() != 409 &&
+                                retryError.getStatusCode() != 425 &&
                                 retryError.getStatusCode() != 503) {
                             m_WaitingForSessionCleanup.store(false);
                             emit sessionCleanupWaitChanged(false, QString());
