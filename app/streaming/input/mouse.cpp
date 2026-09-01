@@ -172,21 +172,22 @@ bool SdlInputHandler::sendAbsoluteMousePosition(
         return false;
     }
 
+    const QSize streamSize = streamDimensions();
     QPointF streamPoint;
     if (!PlankPresentation::mapWindowPointToStream(
                 QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
-                QSize(m_StreamWidth, m_StreamHeight),
+                streamSize,
                 m_PresentationLayout.canvasSize, output->canvasRect,
                 streamPoint, allowClampedPosition)) {
         return false;
     }
     return LiSendMousePositionEvent(
                 static_cast<short>(qBound(0, qRound(streamPoint.x()),
-                                          m_StreamWidth)),
+                                          streamSize.width())),
                 static_cast<short>(qBound(0, qRound(streamPoint.y()),
-                                          m_StreamHeight)),
-                static_cast<short>(m_StreamWidth),
-                static_cast<short>(m_StreamHeight)) == 0;
+                                          streamSize.height())),
+                static_cast<short>(streamSize.width()),
+                static_cast<short>(streamSize.height())) == 0;
 }
 
 void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
@@ -247,10 +248,11 @@ bool SdlInputHandler::isMouseInVideoRegion(int mouseX, int mouseY,
     if (windowWidth < 0 || windowHeight < 0) {
         SDL_GetWindowSize(window, &windowWidth, &windowHeight);
     }
+    const QSize streamSize = streamDimensions();
     QPointF streamPoint;
     return PlankPresentation::mapWindowPointToStream(
                 QPointF(mouseX, mouseY), QSize(windowWidth, windowHeight),
-                QSize(m_StreamWidth, m_StreamHeight),
+                streamSize,
                 m_PresentationLayout.canvasSize, output->canvasRect,
                 streamPoint, false);
 }
@@ -293,10 +295,11 @@ void SdlInputHandler::updatePointerRegionLock()
     // If region lock is enabled, grab the cursor so it can't accidentally leave our window.
     if (isCaptureActive() && m_PointerRegionLockActive) {
         SDL_Rect src, videoRect;
+        const QSize streamSize = streamDimensions();
 
         src.x = src.y = 0;
-        src.w = m_StreamWidth;
-        src.h = m_StreamHeight;
+        src.w = streamSize.width();
+        src.h = streamSize.height();
 
         videoRect.x = videoRect.y = 0;
         SDL_GetWindowSize(m_Window, &videoRect.w, &videoRect.h);

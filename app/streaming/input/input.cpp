@@ -38,8 +38,9 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
       m_MouseCursorCapturedVisibilityState(false),
-      m_StreamWidth(streamWidth),
-      m_StreamHeight(streamHeight)
+      m_StreamDimensions(
+          (static_cast<std::uint64_t>(streamWidth) << 32) |
+          static_cast<std::uint32_t>(streamHeight))
 {
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
@@ -105,8 +106,18 @@ void SdlInputHandler::setStreamDimensions(int streamWidth, int streamHeight)
 {
     SDL_assert(streamWidth > 0);
     SDL_assert(streamHeight > 0);
-    m_StreamWidth = streamWidth;
-    m_StreamHeight = streamHeight;
+    m_StreamDimensions.store(
+                (static_cast<std::uint64_t>(streamWidth) << 32) |
+                static_cast<std::uint32_t>(streamHeight),
+                std::memory_order_relaxed);
+}
+
+QSize SdlInputHandler::streamDimensions() const
+{
+    const std::uint64_t dimensions =
+            m_StreamDimensions.load(std::memory_order_relaxed);
+    return QSize(static_cast<int>(dimensions >> 32),
+                 static_cast<int>(dimensions & 0xffffffffu));
 }
 
 SdlInputHandler::~SdlInputHandler()
@@ -426,13 +437,14 @@ bool SdlInputHandler::handleRemoteCursorPosition(
     position.frameWidth = qFromLittleEndian(wire.frameWidth);
     position.frameHeight = qFromLittleEndian(wire.frameHeight);
 
+    const QSize streamSize = streamDimensions();
     if (magic != PLANK_CURSOR_POSITION_WIRE_MAGIC ||
             version != PLANK_CURSOR_POSITION_WIRE_VERSION || reserved != 0 ||
             position.sequence == 0 || position.frameWidth == 0 ||
             position.frameHeight == 0 || position.x >= position.frameWidth ||
             position.y >= position.frameHeight ||
-            position.frameWidth != static_cast<std::uint32_t>(m_StreamWidth) ||
-            position.frameHeight != static_cast<std::uint32_t>(m_StreamHeight)) {
+            position.frameWidth != static_cast<std::uint32_t>(streamSize.width()) ||
+            position.frameHeight != static_cast<std::uint32_t>(streamSize.height())) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
                     "Rejected malformed PLANK cursor position");
         return false;
