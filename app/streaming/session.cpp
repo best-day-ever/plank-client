@@ -2878,8 +2878,15 @@ bool Session::beginPlankReconnect(
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
 
     m_InputHandler->raiseAllKeys();
-    m_InputHandler->beginRawHidReconnect();
     state = {};
+    state.inputCaptureWasActive = m_InputHandler->isCaptureActive();
+    // The remote cursor transport stops with the host connection. Return
+    // pointer ownership to the local compositor immediately so the user can
+    // still see and navigate the whole client window while reconnecting. The
+    // native reconnect prompt has its own Wayland surface, but cursor
+    // visibility must not depend on entering that surface first.
+    m_InputHandler->setCaptureActive(false);
+    m_InputHandler->beginRawHidReconnect();
     state.videoFormat = m_ActiveVideoFormat;
     state.videoWidth = m_ActiveVideoWidth;
     state.videoHeight = m_ActiveVideoHeight;
@@ -3032,6 +3039,9 @@ bool Session::finishPlankReconnect(
         SDL_PushEvent(&resetEvent);
     } else {
         LiRequestIdrFrame();
+    }
+    if (state.inputCaptureWasActive) {
+        m_InputHandler->setCaptureActive(true);
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "PLANK reconnect completed (%s renderer)",

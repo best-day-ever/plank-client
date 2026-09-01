@@ -202,6 +202,7 @@ private:
 
     struct PlankReconnectState {
         bool retainedRenderer = false;
+        bool inputCaptureWasActive = false;
         int videoFormat = 0;
         int videoWidth = 0;
         int videoHeight = 0;
