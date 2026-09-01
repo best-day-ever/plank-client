@@ -134,6 +134,8 @@ public:
 
     Q_INVOKABLE void cancelConnectionStart();
 
+    Q_INVOKABLE void respondToActiveSessionTakeover(bool takeOver);
+
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
@@ -178,6 +180,8 @@ signals:
 
     void sessionCleanupWaitChanged(bool waiting, QString text);
 
+    void activeSessionTakeoverRequested(QString text);
+
     void displayLaunchError(QString text);
 
     void displayLaunchWarning(QString text);
@@ -193,7 +197,8 @@ private:
 
     bool initialize();
 
-    bool startConnectionAsync(bool reconnecting = false);
+    bool startConnectionAsync(bool reconnecting = false,
+                              bool takeOverActiveSession = false);
 
     struct PlankReconnectState {
         bool retainedRenderer = false;
@@ -387,6 +392,7 @@ private:
     std::atomic_bool m_CanReconnect;
     std::atomic_bool m_ConnectionStartCancelled;
     std::atomic_bool m_WaitingForSessionCleanup;
+    std::atomic_int m_ActiveSessionTakeoverDecision {0};
     QString m_PlankUsername;
     QString m_PlankPassword;
     QString m_ResolvedScalingMode;

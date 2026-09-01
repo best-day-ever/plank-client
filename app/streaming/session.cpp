@@ -129,6 +129,21 @@ void Session::clStageFailed(int stage, int errorCode)
 
 void Session::clConnectionTerminated(int errorCode)
 {
+    if (static_cast<std::uint32_t>(errorCode) ==
+            PLANK_TRANSPORT_TERMINATION_SESSION_TAKEN_OVER) {
+        s_ActiveSession->m_CanReconnect.store(false);
+        s_ActiveSession->m_ReconnectCancelled.store(true);
+        s_ActiveSession->m_UnexpectedTermination = false;
+        emit s_ActiveSession->displayLaunchError(
+                    tr("This PLANK session was transferred to another client."));
+
+        SDL_Event event = {};
+        event.type = SDL_EVENT_QUIT;
+        event.quit.timestamp = SDL_GetTicks();
+        SDL_PushEvent(&event);
+        return;
+    }
+
     if (s_ActiveSession->m_Computer->plankAuthentication &&
             s_ActiveSession->m_CanReconnect.load() &&
             !s_ActiveSession->m_Reconnecting.load() &&
@@ -2373,11 +2388,12 @@ public:
 };
 
 // Called in a non-main thread
-bool Session::startConnectionAsync(bool reconnecting)
+bool Session::startConnectionAsync(bool reconnecting,
+                                   bool takeOverActiveSession)
 {
     // Wait 1.5 seconds before connecting to let the user
     // have time to read any messages present on the segue
-    if (!reconnecting) {
+    if (!reconnecting && !takeOverActiveSession) {
         SDL_Delay(1500);
     }
 
@@ -2461,6 +2477,7 @@ bool Session::startConnectionAsync(bool reconnecting)
                           m_Computer->plankTopologyVersion,
                           m_Computer->plankFeatureFlags &
                               NvOutputTopology::SupportedFeatureFlags,
+                          takeOverActiveSession,
                           hostLayout,
                           virtualModes.value(0),
                           virtualModes.value(1),
@@ -2483,11 +2500,11 @@ bool Session::startConnectionAsync(bool reconnecting)
                     e.getStatusCode() == 425 &&
                     QString::fromUtf8(e.getStatusMessage()) ==
                         QStringLiteral("PLANK host display transition started");
-            const bool previousSessionStillActive =
+            const bool activeSessionConflict =
                     m_Computer->plankAuthentication &&
-                    e.getStatusCode() == 400 &&
+                    e.getStatusCode() == 409 &&
                     QString::fromUtf8(e.getStatusMessage()) ==
-                        QStringLiteral("An app is already running on this host");
+                        QStringLiteral("PLANK workstation session is active");
             if (displayTransitionStarted) {
                 constexpr int RetryIntervalMs = 500;
                 constexpr int MaximumWaitMs = 45000;
@@ -2601,70 +2618,44 @@ bool Session::startConnectionAsync(bool reconnecting)
                 }
                 qInfo() << "PLANK display transition completed; launch succeeded";
             }
-            else if (previousSessionStillActive) {
-                constexpr int RetryIntervalMs = 500;
-                constexpr int MaximumWaitMs = 30000;
-                constexpr int CancellationPollMs = 50;
-                bool started = false;
+            else if (activeSessionConflict) {
+                if (reconnecting) {
+                    m_CanReconnect.store(false);
+                    m_ReconnectCancelled.store(true);
+                    emit displayLaunchError(
+                                tr("This PLANK session was transferred to another client."));
+                    qInfo() << "PLANK reconnect stopped because another client owns the active session";
+                    return false;
+                }
+                if (takeOverActiveSession ||
+                        (m_Computer->plankFeatureFlags &
+                         NvOutputTopology::SessionTakeoverFeature) == 0) {
+                    emit displayLaunchError(
+                                tr("The workstation has an active PLANK session that cannot be transferred."));
+                    return false;
+                }
+
+                constexpr int DecisionPollMs = 50;
+                m_ActiveSessionTakeoverDecision.store(0);
+                emit activeSessionTakeoverRequested(
+                            tr("This workstation already has an active PLANK session. Disconnect the existing client and continue?"));
+                while (m_ActiveSessionTakeoverDecision.load() == 0 &&
+                       !m_ConnectionStartCancelled.load()) {
+                    SDL_Delay(DecisionPollMs);
+                }
+                if (m_ActiveSessionTakeoverDecision.exchange(0) != 1 ||
+                        m_ConnectionStartCancelled.load()) {
+                    qInfo() << "PLANK active-session takeover was cancelled";
+                    return false;
+                }
 
                 m_WaitingForSessionCleanup.store(true);
                 emit sessionCleanupWaitChanged(
-                            true,
-                            tr("Waiting for previous workstation session to finish..."));
-                qInfo() << "PLANK previous session is still active; "
-                           "waiting up to" << MaximumWaitMs << "ms";
-
-                for (int elapsedMs = 0;
-                     elapsedMs < MaximumWaitMs && !started;
-                     elapsedMs += RetryIntervalMs) {
-                    for (int delayMs = 0;
-                         delayMs < RetryIntervalMs;
-                         delayMs += CancellationPollMs) {
-                        if (m_ConnectionStartCancelled.load()) {
-                            break;
-                        }
-                        SDL_Delay(CancellationPollMs);
-                    }
-                    if (m_ConnectionStartCancelled.load()) {
-                        break;
-                    }
-
-                    try {
-                        {
-                            QWriteLocker lock(&m_Computer->lock);
-                            m_Computer->currentGameId = 0;
-                        }
-                        startApp();
-                        started = true;
-                    } catch (const GfeHttpResponseException& retryError) {
-                        const bool stillActive =
-                                retryError.getStatusCode() == 400 &&
-                                QString::fromUtf8(retryError.getStatusMessage()) ==
-                                    QStringLiteral("An app is already running on this host");
-                        if (!stillActive) {
-                            m_WaitingForSessionCleanup.store(false);
-                            emit sessionCleanupWaitChanged(false, QString());
-                            throw;
-                        }
-                    }
-                }
-
+                            true, tr("Transferring workstation session..."));
+                const bool transferred = startConnectionAsync(false, true);
                 m_WaitingForSessionCleanup.store(false);
                 emit sessionCleanupWaitChanged(false, QString());
-
-                if (!started && m_ConnectionStartCancelled.load()) {
-                    qInfo() << "PLANK connection cancelled while waiting for session cleanup";
-                    return false;
-                }
-                if (!started) {
-                    if (!reconnecting) {
-                        emit displayLaunchError(
-                                    tr("The previous workstation session did not finish within 30 seconds."));
-                    }
-                    return false;
-                }
-
-                qInfo() << "PLANK previous session finished; launch retry succeeded";
+                return transferred;
             }
             else if (reconnecting && m_Computer->plankAuthentication &&
                     m_Computer->currentGameId == 0 &&
@@ -2825,6 +2816,14 @@ bool Session::startConnectionAsync(bool reconnecting)
 void Session::cancelConnectionStart()
 {
     m_ConnectionStartCancelled.store(true);
+    m_ActiveSessionTakeoverDecision.store(-1);
+}
+
+void Session::respondToActiveSessionTakeover(bool takeOver)
+{
+    int expected = 0;
+    m_ActiveSessionTakeoverDecision.compare_exchange_strong(
+                expected, takeOver ? 1 : -1);
 }
 
 bool Session::beginPlankReconnect(

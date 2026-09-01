@@ -90,7 +90,8 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
                                     IndependentVirtualModesFeature |
                                     DynamicHostLayoutFeature |
                                     TemporaryPhysicalLayoutFeature |
-                                    FixedTransportMtuFeature)) !=
+                                    FixedTransportMtuFeature |
+                                    SessionTakeoverFeature)) !=
                 (OutputTopologyFeature | SelectedOutputFeature |
                  UnifiedAbsoluteInputFeature |
                  HostLayoutMetadataFeature |
@@ -99,7 +100,8 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
                  IndependentVirtualModesFeature |
                  DynamicHostLayoutFeature |
                  TemporaryPhysicalLayoutFeature |
-                 FixedTransportMtuFeature) ||
+                 FixedTransportMtuFeature |
+                 SessionTakeoverFeature) ||
             !object.value("generation").isString() ||
             !object.value("layout").isObject() ||
             !object.value("desktop").isObject() ||
