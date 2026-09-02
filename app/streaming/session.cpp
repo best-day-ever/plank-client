@@ -1125,14 +1125,9 @@ void Session::plankTransportVideoReceiveLoop()
 {
     constexpr size_t InitialFrameCapacity = 1024 * 1024;
     constexpr size_t MaximumFrameCapacity = 64 * 1024 * 1024;
-    constexpr Uint64 VideoStallRecoveryDelayMs = 750;
-    constexpr Uint64 VideoStallRecoveryIntervalMs = 1000;
     std::vector<unsigned char> frame(InitialFrameCapacity);
     VideoPacketLossInterval packetLossInterval;
     Uint64 nextPacketLossSample = SDL_GetTicks();
-    Uint64 lastCompleteFrameTick = SDL_GetTicks();
-    Uint64 nextStallRecoveryTick =
-            lastCompleteFrameTick + VideoStallRecoveryDelayMs;
 
     const auto sampleTransportTelemetry = [this, &packetLossInterval,
                                            &nextPacketLossSample]() {
@@ -1174,29 +1169,6 @@ void Session::plankTransportVideoReceiveLoop()
                     m_PlankTransportEndpoint, &info, frame.data(), frame.size(),
                     &frameSize, 50);
         if (result == PLANK_TRANSPORT_TIMEOUT) {
-            const Uint64 now = SDL_GetTicks();
-            if (now >= nextStallRecoveryTick &&
-                    now - lastCompleteFrameTick >= VideoStallRecoveryDelayMs) {
-                PlankTransportNativeStats stats {};
-                stats.struct_size = sizeof(stats);
-                if (plank_transport_native_endpoint_stats(
-                            m_PlankTransportEndpoint, &stats) ==
-                        PLANK_TRANSPORT_OK) {
-                    qWarning() << "Native video receive stalled; requesting a clean IDR boundary:"
-                               << "idle-ms=" << now - lastCompleteFrameTick
-                               << "video-frames=" << stats.video_frames_received
-                               << "audio-packets=" << stats.audio_packets_received
-                               << "QUIC-lost=" << stats.quic_packets_lost
-                               << "KyProto-drops=" << stats.kyproto_packets_dropped
-                               << "FEC-source-symbols="
-                               << stats.video_fec_source_symbols
-                               << "FEC-source-symbols-missing="
-                               << stats.video_fec_source_symbols_missing;
-                }
-                LiRequestIdrFrame();
-                nextStallRecoveryTick =
-                        now + VideoStallRecoveryIntervalMs;
-            }
             continue;
         }
         if (result == PLANK_TRANSPORT_ERROR_BUFFER_TOO_SMALL &&
@@ -1217,10 +1189,6 @@ void Session::plankTransportVideoReceiveLoop()
             LiRequestIdrFrame();
             continue;
         }
-
-        lastCompleteFrameTick = SDL_GetTicks();
-        nextStallRecoveryTick =
-                lastCompleteFrameTick + VideoStallRecoveryDelayMs;
 
         const uint32_t flags =
                 (info.flags & PLANK_TRANSPORT_NATIVE_VIDEO_FLAG_KEY) != 0 ?
