@@ -413,6 +413,7 @@ private:
     SDL_DisplayID m_TargetDisplayId = 0;
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;
+    bool m_HasWindowedPresentationGeometry = false;
     QVector<SDL_Window*> m_SecondaryWindows;
     PlankPresentationLayout m_PresentationLayout;
     SdlInputHandler* m_InputHandler;

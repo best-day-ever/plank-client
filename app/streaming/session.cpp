@@ -2007,6 +2007,32 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
                     "Timed out synchronizing presentation fullscreen state: %s",
                     SDL_GetError());
     }
+    if (!fullscreen && !m_HasWindowedPresentationGeometry) {
+        int x, y, width, height;
+        getWindowDimensions(x, y, width, height);
+        Q_UNUSED(x);
+        Q_UNUSED(y);
+
+        // The initial Wayland toplevel uses the complete output dimensions so
+        // fullscreen absolute-pointer coordinates are correct from its first
+        // configure. SDL also caches that size as the window's initial
+        // floating geometry. Replace it on the first fullscreen exit so
+        // libdecor can commit a complete, usable decoration frame immediately.
+        if (!SDL_SetWindowSize(m_Window, width, height)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to establish initial windowed presentation geometry: %s",
+                        SDL_GetError());
+        }
+        else {
+            m_HasWindowedPresentationGeometry = true;
+            if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+                    !SDL_SyncWindow(m_Window)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Timed out synchronizing initial windowed presentation geometry: %s",
+                            SDL_GetError());
+            }
+        }
+    }
     for (SDL_Window* window : m_SecondaryWindows) {
         if (fullscreen) {
             SDL_ShowWindow(window);
@@ -3445,6 +3471,7 @@ void Session::execInternal()
         SDL_RestoreWindow(m_Window);
         SDL_SetWindowBordered(m_Window, true);
         SDL_SetWindowResizable(m_Window, true);
+        m_HasWindowedPresentationGeometry = true;
     }
 
     // HACK: Remove once proper Dark Mode support lands in SDL
