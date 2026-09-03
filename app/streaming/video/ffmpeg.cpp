@@ -918,19 +918,19 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         break;
 
     case VIDEO_FORMAT_H264_HIGH8_422:
-        codecString = "H.264 8-bit SDR 4:2:2";
+        codecString = "H.264 8-bit 4:2:2";
         break;
 
     case VIDEO_FORMAT_H264_HIGH8_444:
-        codecString = "H.264 8-bit SDR 4:4:4";
+        codecString = "H.264 8-bit 4:4:4";
         break;
 
     case VIDEO_FORMAT_H264_HIGH10_444:
-        codecString = "H.264 10-bit SDR 4:4:4";
+        codecString = "H.264 10-bit 4:4:4";
         break;
 
     case VIDEO_FORMAT_H264_HIGH10_422:
-        codecString = "H.264 10-bit SDR 4:2:2";
+        codecString = "H.264 10-bit 4:2:2";
         break;
 
     case VIDEO_FORMAT_H265:
@@ -938,25 +938,15 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         break;
 
     case VIDEO_FORMAT_H265_REXT8_444:
-        codecString = "HEVC 8-bit SDR 4:4:4";
+        codecString = "HEVC 8-bit 4:4:4";
         break;
 
     case VIDEO_FORMAT_H265_MAIN10:
-        if (LiGetCurrentHostDisplayHdrMode()) {
-            codecString = "HEVC 10-bit HDR";
-        }
-        else {
-            codecString = "HEVC 10-bit SDR";
-        }
+        codecString = "HEVC 10-bit";
         break;
 
     case VIDEO_FORMAT_H265_REXT10_444:
-        if (LiGetCurrentHostDisplayHdrMode()) {
-            codecString = "HEVC 10-bit HDR 4:4:4";
-        }
-        else {
-            codecString = "HEVC 10-bit SDR 4:4:4";
-        }
+        codecString = "HEVC 10-bit 4:4:4";
         break;
 
     case VIDEO_FORMAT_AV1_MAIN8:
@@ -968,21 +958,11 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         break;
 
     case VIDEO_FORMAT_AV1_MAIN10:
-        if (LiGetCurrentHostDisplayHdrMode()) {
-            codecString = "AV1 10-bit HDR";
-        }
-        else {
-            codecString = "AV1 10-bit SDR";
-        }
+        codecString = "AV1 10-bit";
         break;
 
     case VIDEO_FORMAT_AV1_HIGH10_444:
-        if (LiGetCurrentHostDisplayHdrMode()) {
-            codecString = "AV1 10-bit HDR 4:4:4";
-        }
-        else {
-            codecString = "AV1 10-bit SDR 4:4:4";
-        }
+        codecString = "AV1 10-bit 4:4:4";
         break;
 
     default:
