@@ -95,7 +95,8 @@ extern "C" bool g_DisableDrmHooks;
 
 static QString currentLogTimestamp()
 {
-    return QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    const QDateTime localTime = QDateTime::currentDateTime();
+    return localTime.toOffsetFromUtc(localTime.offsetFromUtc()).toString(Qt::ISODateWithMs);
 }
 
 class LoggerTask : public QRunnable
