@@ -425,6 +425,30 @@ CenteredGridView {
             profileBitratesKbps = values
         }
 
+        function virtualModeSupported(mode) {
+            return StreamingPreferences.plankVirtualModeSupportedForProfile(
+                        mode, currentVideoProfile())
+        }
+
+        function ensureVirtualModesCompatible() {
+            var fallback = -1
+            for (var i = 0; i < virtualModeChoices.length; ++i) {
+                if (virtualModeChoices[i] === "4096\u00d72160") {
+                    fallback = i
+                    break
+                }
+            }
+            if (fallback < 0) {
+                return
+            }
+            if (!virtualModeSupported(virtualModeChoices[editVirtualMode1.currentIndex])) {
+                editVirtualMode1.currentIndex = fallback
+            }
+            if (!virtualModeSupported(virtualModeChoices[editVirtualMode2.currentIndex])) {
+                editVirtualMode2.currentIndex = fallback
+            }
+        }
+
         onOpened: {
             editAddressText.text = originalAddress
             editNicknameText.text = originalNickname
@@ -448,6 +472,7 @@ CenteredGridView {
             }
             profileBitratesKbps = loadedBitrates
             applyProfileBitrate()
+            ensureVirtualModesCompatible()
             editAddressText.forceActiveFocus()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
@@ -541,7 +566,10 @@ CenteredGridView {
                 textRole: "text"
                 model: editCaptureSource.currentIndex === 0 ?
                            editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
-                onActivated: editBookmarkDialog.applyProfileBitrate()
+                onActivated: {
+                    editBookmarkDialog.applyProfileBitrate()
+                    editBookmarkDialog.ensureVirtualModesCompatible()
+                }
             }
 
             ListModel {
@@ -644,6 +672,12 @@ CenteredGridView {
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex >= 2
                 model: editBookmarkDialog.virtualModeChoices
+                delegate: ItemDelegate {
+                    width: editVirtualMode1.width
+                    text: modelData
+                    enabled: editBookmarkDialog.virtualModeSupported(modelData)
+                    highlighted: editVirtualMode1.highlightedIndex === index
+                }
             }
 
             Label {
@@ -656,6 +690,12 @@ CenteredGridView {
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
                 model: editBookmarkDialog.virtualModeChoices
+                delegate: ItemDelegate {
+                    width: editVirtualMode2.width
+                    text: modelData
+                    enabled: editBookmarkDialog.virtualModeSupported(modelData)
+                    highlighted: editVirtualMode2.highlightedIndex === index
+                }
             }
 
             Label {

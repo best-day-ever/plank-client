@@ -406,6 +406,30 @@ ApplicationWindow {
             profileBitratesKbps = values
         }
 
+        function virtualModeSupported(mode) {
+            return StreamingPreferences.plankVirtualModeSupportedForProfile(
+                        mode, currentVideoProfile())
+        }
+
+        function ensureVirtualModesCompatible() {
+            var fallback = -1
+            for (var i = 0; i < virtualModeChoices.length; ++i) {
+                if (virtualModeChoices[i] === "4096\u00d72160") {
+                    fallback = i
+                    break
+                }
+            }
+            if (fallback < 0) {
+                return
+            }
+            if (!virtualModeSupported(virtualModeChoices[addVirtualMode1.currentIndex])) {
+                addVirtualMode1.currentIndex = fallback
+            }
+            if (!virtualModeSupported(virtualModeChoices[addVirtualMode2.currentIndex])) {
+                addVirtualMode2.currentIndex = fallback
+            }
+        }
+
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         onOpened: {
@@ -541,7 +565,10 @@ ApplicationWindow {
                 currentIndex: 6
                 model: addCaptureSource.currentIndex === 0 ?
                            addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
-                onActivated: addPcDialog.applyProfileBitrate()
+                onActivated: {
+                    addPcDialog.applyProfileBitrate()
+                    addPcDialog.ensureVirtualModesCompatible()
+                }
             }
 
             ListModel {
@@ -639,6 +666,12 @@ ApplicationWindow {
                 enabled: addHostLayout.currentIndex >= 2
                 currentIndex: 9
                 model: addPcDialog.virtualModeChoices
+                delegate: ItemDelegate {
+                    width: addVirtualMode1.width
+                    text: modelData
+                    enabled: addPcDialog.virtualModeSupported(modelData)
+                    highlighted: addVirtualMode1.highlightedIndex === index
+                }
             }
 
             Label {
@@ -653,6 +686,12 @@ ApplicationWindow {
                 enabled: addHostLayout.currentIndex === 3
                 currentIndex: 1
                 model: addPcDialog.virtualModeChoices
+                delegate: ItemDelegate {
+                    width: addVirtualMode2.width
+                    text: modelData
+                    enabled: addPcDialog.virtualModeSupported(modelData)
+                    highlighted: addVirtualMode2.highlightedIndex === index
+                }
             }
 
             Label {

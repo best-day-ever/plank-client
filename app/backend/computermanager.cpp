@@ -52,6 +52,24 @@ QString scalingFromChoice(int choice)
     }
 }
 
+bool virtualModesValidForProfile(const QString& hostLayout,
+                                 const QString& virtualMode1,
+                                 const QString& virtualMode2,
+                                 int videoProfile)
+{
+    if (hostLayout == NvOutputTopology::SingleHostLayout ||
+            hostLayout == NvOutputTopology::DualHorizontalHostLayout) {
+        if (!StreamingPreferences::isPlankVirtualModeValidForProfile(
+                    virtualMode1, videoProfile)) {
+            return false;
+        }
+    }
+
+    return hostLayout != NvOutputTopology::DualHorizontalHostLayout ||
+            StreamingPreferences::isPlankVirtualModeValidForProfile(
+                virtualMode2, videoProfile);
+}
+
 bool parseProfileBitrates(const QVariantList& values,
                           bool allowDefaultValues,
                           QVector<int>& profileBitratesKbps)
@@ -815,6 +833,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
             !scalingMode.isEmpty() &&
             StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) &&
+            virtualModesValidForProfile(hostLayout, virtualMode1,
+                                        virtualMode2, videoProfile) &&
             parseProfileBitrates(profileBitrates, true,
                                  profileBitratesKbps)) {
         if (nickname.trimmed().isEmpty()) {
@@ -902,6 +922,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
              hostLayout != NvOutputTopology::DualHorizontalHostLayout) ||
             !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode1) ||
             !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode2) ||
+            !virtualModesValidForProfile(hostLayout, virtualMode1,
+                                         virtualMode2, videoProfile) ||
             !parseManualAddress(address, manualAddress)) {
         return false;
     }

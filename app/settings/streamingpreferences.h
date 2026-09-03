@@ -74,6 +74,28 @@ public:
                profile <= PLANK_PROFILE_NVENC_HEVC_10BIT_444;
     }
 
+    static bool isPlankH264NvencProfile(int profile)
+    {
+        return profile == PLANK_PROFILE_NVENC_H264_8BIT_444;
+    }
+
+    static bool isPlankVirtualModeValidForProfile(const QString& mode,
+                                                   int profile)
+    {
+        const QStringList dimensions = mode.split(QLatin1Char('x'));
+        bool widthValid = false;
+        bool heightValid = false;
+        const int width = dimensions.value(0).toInt(&widthValid);
+        const int height = dimensions.value(1).toInt(&heightValid);
+        if (!isPlankVideoProfileValid(profile) || dimensions.size() != 2 ||
+                !widthValid || !heightValid || width <= 0 || height <= 0) {
+            return false;
+        }
+
+        return !isPlankH264NvencProfile(profile) ||
+               (width <= 4096 && height <= 2160);
+    }
+
     static constexpr int PlankBitrateMinimumKbps = 10000;
     static constexpr int PlankBitrateMaximumKbps = 150000;
     static constexpr int PlankBitrateStepKbps = 500;
@@ -251,6 +273,12 @@ public:
     Q_INVOKABLE int plankBitrateStepKbps() const
     {
         return PlankBitrateStepKbps;
+    }
+    Q_INVOKABLE bool plankVirtualModeSupportedForProfile(
+            QString mode, int profile) const
+    {
+        mode.replace(QChar(0x00D7), QLatin1Char('x'));
+        return isPlankVirtualModeValidForProfile(mode, profile);
     }
 
     // Directly accessible members for preferences

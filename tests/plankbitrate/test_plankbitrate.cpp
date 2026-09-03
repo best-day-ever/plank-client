@@ -9,6 +9,7 @@ class TestPlankBitrate : public QObject
 private slots:
     void selectsCodecFamilyDefaults();
     void validatesCaptureProfileTuples();
+    void validatesNvencH264VirtualModes();
     void retainsIndependentProfileValues();
     void clampsProtocolRange();
 };
@@ -36,6 +37,31 @@ void TestPlankBitrate::selectsCodecFamilyDefaults()
         StreamingPreferences::plankDefaultBitrateForProfile(
             StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444),
         StreamingPreferences::PlankHevcDefaultBitrateKbps);
+}
+
+void TestPlankBitrate::validatesNvencH264VirtualModes()
+{
+    QVERIFY(!StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("5120x2160"),
+                StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444));
+    QVERIFY(StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("4096x2160"),
+                StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444));
+    QVERIFY(!StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("4096x2161"),
+                StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444));
+    QVERIFY(StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("5120x2160"),
+                StreamingPreferences::PLANK_PROFILE_H264_10BIT_444));
+    QVERIFY(StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("5120x2160"),
+                StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444));
+    QVERIFY(StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("5120x2160"),
+                StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444));
+    QVERIFY(!StreamingPreferences::isPlankVirtualModeValidForProfile(
+                QStringLiteral("not-a-mode"),
+                StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444));
 }
 
 void TestPlankBitrate::validatesCaptureProfileTuples()
