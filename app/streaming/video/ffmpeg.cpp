@@ -993,13 +993,19 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 
     if (stats.receivedFps > 0) {
         if (m_VideoDecoderCtx != nullptr) {
+            const char* identityMapping = m_IdentityGbrEnabled ? " RGB identity" : "";
+            const char* encoderBackend =
+                    m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
+                        "NVENC" : "x264";
             ret = snprintf(&output[offset],
                            length - offset,
-                           "Video stream: %dx%d %.2f FPS (Codec: %s)\n",
+                           "Video stream: %dx%d %.2f FPS (Codec: %s%s, %s)\n",
                            m_VideoDecoderCtx->width,
                            m_VideoDecoderCtx->height,
                            stats.totalFps,
-                           codecString);
+                           codecString,
+                           identityMapping,
+                           encoderBackend);
             if (ret < 0 || ret >= length - offset) {
                 SDL_assert(false);
                 return;
@@ -1023,16 +1029,9 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         if (m_IdentityGbrEnabled) {
             const int identityBitDepth =
                     (m_VideoFormat & VIDEO_FORMAT_MASK_10BIT) ? 10 : 8;
-            const char* identityCodec =
-                    (m_VideoFormat & VIDEO_FORMAT_MASK_H264) ? "H.264" : "HEVC";
             ret = snprintf(&output[offset],
                            length - offset,
-                           "Codec precision: %d-bit %s 4:4:4%s\n"
                            "Presentation precision: %d-bit RGB identity\n",
-                           identityBitDepth,
-                           identityCodec,
-                           m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
-                               " (NVENC)" : " (x264)",
                            identityBitDepth);
             if (ret < 0 || ret >= length - offset) {
                 SDL_assert(false);
