@@ -62,7 +62,7 @@
 // Log to file or console dynamically for Windows builds
 #define LOG_TO_FILE
 #elif defined(Q_OS_LINUX)
-// Retain a private per-user log while preserving stderr for journald
+// Retain a private per-user log without duplicating routine output to journald
 #define LOG_TO_FILE
 #elif !defined(QT_DEBUG) && defined(Q_OS_DARWIN)
 // Log to file for release Mac builds
@@ -154,7 +154,7 @@ void logToLoggerStream(QString& message)
     }
 #endif
 
-#if defined(Q_OS_LINUX) || !defined(LOG_TO_FILE)
+#if !defined(LOG_TO_FILE)
     s_LoggerStream << message;
     s_LoggerStream.flush();
 #elif defined(LOG_TO_FILE)
@@ -469,7 +469,6 @@ int main(int argc, char *argv[])
         const bool opened = s_LoggerFile->open(QIODevice::WriteOnly | QIODevice::Text);
 #endif
         if (opened) {
-            QTextStream(stderr) << "Redirecting log output to " << s_LoggerFile->fileName() << Qt::endl;
             s_LoggerFileStream.setDevice(s_LoggerFile);
         }
     }
