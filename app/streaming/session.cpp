@@ -1995,11 +1995,26 @@ bool Session::anyPresentationWindowFocused() const
 void Session::setPresentationWindowsFullscreen(bool fullscreen)
 {
     m_PresentationFullscreen = fullscreen;
-    SDL_SetWindowFullscreen(m_Window, fullscreen ? m_FullScreenFlag : 0);
+    if (!SDL_SetWindowFullscreen(m_Window,
+                                 fullscreen ? m_FullScreenFlag : 0)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to set presentation fullscreen state: %s",
+                    SDL_GetError());
+    }
+    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+            !SDL_SyncWindow(m_Window)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Timed out synchronizing presentation fullscreen state: %s",
+                    SDL_GetError());
+    }
     for (SDL_Window* window : m_SecondaryWindows) {
         if (fullscreen) {
             SDL_ShowWindow(window);
-            SDL_SetWindowFullscreen(window, m_FullScreenFlag);
+            if (!SDL_SetWindowFullscreen(window, m_FullScreenFlag)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Failed to set secondary presentation fullscreen state: %s",
+                            SDL_GetError());
+            }
         }
         else {
             SDL_HideWindow(window);
