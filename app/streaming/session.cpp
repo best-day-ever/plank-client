@@ -1995,11 +1995,52 @@ bool Session::anyPresentationWindowFocused() const
 void Session::setPresentationWindowsFullscreen(bool fullscreen)
 {
     m_PresentationFullscreen = fullscreen;
-    SDL_SetWindowFullscreen(m_Window, fullscreen ? m_FullScreenFlag : 0);
+    if (!SDL_SetWindowFullscreen(m_Window,
+                                 fullscreen ? m_FullScreenFlag : 0)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to set presentation fullscreen state: %s",
+                    SDL_GetError());
+    }
+    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+            !SDL_SyncWindow(m_Window)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Timed out synchronizing presentation fullscreen state: %s",
+                    SDL_GetError());
+    }
+    if (!fullscreen && !m_HasWindowedPresentationGeometry) {
+        int x, y, width, height;
+        getWindowDimensions(x, y, width, height);
+        Q_UNUSED(x);
+        Q_UNUSED(y);
+
+        // The initial Wayland toplevel uses the complete output dimensions so
+        // fullscreen absolute-pointer coordinates are correct from its first
+        // configure. SDL also caches that size as the window's initial
+        // floating geometry. Replace it on the first fullscreen exit so
+        // libdecor can commit a complete, usable decoration frame immediately.
+        if (!SDL_SetWindowSize(m_Window, width, height)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to establish initial windowed presentation geometry: %s",
+                        SDL_GetError());
+        }
+        else {
+            m_HasWindowedPresentationGeometry = true;
+            if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+                    !SDL_SyncWindow(m_Window)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Timed out synchronizing initial windowed presentation geometry: %s",
+                            SDL_GetError());
+            }
+        }
+    }
     for (SDL_Window* window : m_SecondaryWindows) {
         if (fullscreen) {
             SDL_ShowWindow(window);
-            SDL_SetWindowFullscreen(window, m_FullScreenFlag);
+            if (!SDL_SetWindowFullscreen(window, m_FullScreenFlag)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Failed to set secondary presentation fullscreen state: %s",
+                            SDL_GetError());
+            }
         }
         else {
             SDL_HideWindow(window);
@@ -3253,6 +3294,8 @@ void Session::execInternal()
     const bool createWaylandFullscreen =
             m_IsFullScreen &&
             strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
+    bool presentationMappingDeferred =
+            createWaylandFullscreen && !m_UseMultiDisplayPresentation;
     if (createWaylandFullscreen) {
         SDL_Rect displayBounds;
         const SDL_DisplayID display = StreamUtils::getDisplayId(
@@ -3291,11 +3334,19 @@ void Session::execInternal()
 
     // We always want a resizable window with High DPI enabled
     Uint32 defaultWindowFlags = SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE;
-    if (createWaylandFullscreen) {
+    if (createWaylandFullscreen && !presentationMappingDeferred) {
         // Enter compositor-native fullscreen on the initial configure. This
         // prevents SDL from binding pointer input to an intermediate windowed
         // viewport before the fullscreen surface exists.
         defaultWindowFlags |= m_FullScreenFlag;
+    }
+    if (presentationMappingDeferred) {
+        // Decoder selection can switch the SDL window between OpenGL and
+        // Vulkan. SDL implements that switch by recreating the native Wayland
+        // toplevel. Keep those intermediate surfaces unmapped so GNOME sees
+        // one stable PLANK window instead of a sequence of short-lived
+        // fullscreen windows.
+        defaultWindowFlags |= SDL_WINDOW_HIDDEN;
     }
 
     // We use only the computer name on macOS to match Apple conventions where the
@@ -3420,6 +3471,7 @@ void Session::execInternal()
         SDL_RestoreWindow(m_Window);
         SDL_SetWindowBordered(m_Window, true);
         SDL_SetWindowResizable(m_Window, true);
+        m_HasWindowedPresentationGeometry = true;
     }
 
     // HACK: Remove once proper Dark Mode support lands in SDL
@@ -3486,7 +3538,19 @@ void Session::execInternal()
 
     // Enter full screen if requested
     if (m_IsFullScreen) {
-        setPresentationWindowsFullscreen(true);
+        if (presentationMappingDeferred) {
+            // Keep the initial window normally sized and hidden through all
+            // graphics-backend probes. Fullscreen is queued immediately before
+            // the first map, after the final native surface exists. This avoids
+            // SDL 3.4.2 sending zero-sized xdg_surface geometry while recreating
+            // a hidden fullscreen Wayland window.
+            m_PresentationFullscreen = true;
+            rebuildPresentationLayout();
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Deferring initial Wayland presentation map until decoder selection completes");
+        } else {
+            setPresentationWindowsFullscreen(true);
+        }
     }
 
     bool needsFirstEnterCapture = false;
@@ -3538,10 +3602,15 @@ void Session::execInternal()
     // Toggle the stats overlay if requested by the user
     m_OverlayManager.setOverlayState(Overlay::OverlayDebug, m_Preferences->showPerformanceOverlay);
 
-    if (m_Computer->plankAuthentication) {
-        m_PlankToolbar.reset(new PlankToolbar(
-                    m_Window, m_OverlayManager, *m_InputHandler, *m_Preferences,
-                    m_PlankBitrateKbps));
+    const auto initializePlankToolbar = [this]() {
+        if (m_Computer->plankAuthentication && !m_PlankToolbar) {
+            m_PlankToolbar.reset(new PlankToolbar(
+                        m_Window, m_OverlayManager, *m_InputHandler,
+                        *m_Preferences, m_PlankBitrateKbps));
+        }
+    };
+    if (!presentationMappingDeferred) {
+        initializePlankToolbar();
     }
 
     // Hijack this thread to be the SDL main thread. We have to do this
@@ -3578,6 +3647,18 @@ void Session::execInternal()
             return false;
         }
     };
+    if (presentationMappingDeferred) {
+        SDL_Event initializeRendererEvent = {};
+        initializeRendererEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+        if (!SDL_PushEvent(&initializeRendererEvent)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Unable to queue deferred Wayland renderer initialization: %s",
+                        SDL_GetError());
+            SDL_ShowWindow(m_Window);
+            presentationMappingDeferred = false;
+            initializePlankToolbar();
+        }
+    }
     SDL_Event event;
     for (;;) {
         if (m_PlankToolbar) {
@@ -3932,7 +4013,10 @@ void Session::execInternal()
         }
 
         case SDL_EVENT_RENDER_DEVICE_RESET:
-            if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
+            if (presentationMappingDeferred && m_VideoDecoder == nullptr) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Initializing renderer before first Wayland presentation map");
+            } else if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Recreating renderer by internal request: %d",
                             event.type);
@@ -4004,6 +4088,52 @@ void Session::execInternal()
                     m_InputHandler->setCaptureActive(true);
                     needsPostDecoderCreationCapture = false;
                 }
+            }
+
+            if (presentationMappingDeferred) {
+                int logicalWidth = 0;
+                int logicalHeight = 0;
+                SDL_GetWindowSize(m_Window, &logicalWidth, &logicalHeight);
+                if (logicalWidth <= 0 || logicalHeight <= 0) {
+                    SDL_UnlockSpinlock(&m_DecoderLock);
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                 "Refusing to map invalid Wayland presentation geometry: %dx%d",
+                                 logicalWidth, logicalHeight);
+                    emit displayLaunchError(
+                                tr("Unable to display the streaming window with valid dimensions."));
+                    goto DispatchDeferredCleanup;
+                }
+                if (!SDL_SetWindowFullscreenMode(m_Window, nullptr) ||
+                        !SDL_SetWindowFullscreen(m_Window, true)) {
+                    SDL_UnlockSpinlock(&m_DecoderLock);
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                 "Failed to queue initial Wayland fullscreen state: %s",
+                                 SDL_GetError());
+                    emit displayLaunchError(
+                                tr("Unable to enter fullscreen mode for the streaming window."));
+                    goto DispatchDeferredCleanup;
+                }
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Mapping initialized Wayland presentation at %dx%d with fullscreen pending",
+                            logicalWidth, logicalHeight);
+                if (!SDL_ShowWindow(m_Window)) {
+                    SDL_UnlockSpinlock(&m_DecoderLock);
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                 "Failed to map initialized Wayland presentation: %s",
+                                 SDL_GetError());
+                    emit displayLaunchError(
+                                tr("Unable to display the initialized streaming window."));
+                    goto DispatchDeferredCleanup;
+                }
+                if (!SDL_SyncWindow(m_Window)) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Timed out synchronizing initial Wayland presentation map: %s",
+                                SDL_GetError());
+                }
+                presentationMappingDeferred = false;
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "Mapped initialized Wayland presentation surface");
+                initializePlankToolbar();
             }
 
             // Request an IDR frame to complete the reset
