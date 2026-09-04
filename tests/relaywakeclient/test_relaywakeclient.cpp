@@ -66,5 +66,5 @@ void TestRelayWakeClient::relayErrorIsReported()
         QStringLiteral("wake MAC is not configured for this forwarding row"));
 }
 
-QTEST_APPLESS_MAIN(TestRelayWakeClient)
+QTEST_GUILESS_MAIN(TestRelayWakeClient)
 #include "test_relaywakeclient.moc"
