@@ -16,6 +16,8 @@ private slots:
     void omittedPortUsesBuiltInDefault();
     void configuredPortIsReturned();
     void invalidPortUsesBuiltInDefault();
+    void configuredRelayWakePortIsReturned();
+    void invalidRelayWakePortUsesBuiltInDefault();
 };
 
 void TestPlankClientPolicy::omittedValueIsNotManaged()
@@ -114,6 +116,34 @@ void TestPlankClientPolicy::invalidPortUsesBuiltInDefault()
 
     const PlankClientPolicy policy(path);
     QCOMPARE(policy.networkPort(), PlankClientPolicy::BuiltInNetworkPort);
+}
+
+void TestPlankClientPolicy::configuredRelayWakePortIsReturned()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("client.conf"));
+    {
+        QSettings settings(path, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("network/relay_wake_port"), 30123);
+    }
+
+    const PlankClientPolicy policy(path);
+    QCOMPARE(policy.relayWakePort(), quint16(30123));
+}
+
+void TestPlankClientPolicy::invalidRelayWakePortUsesBuiltInDefault()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("client.conf"));
+    {
+        QSettings settings(path, QSettings::IniFormat);
+        settings.setValue(QStringLiteral("network/relay_wake_port"), 22);
+    }
+
+    const PlankClientPolicy policy(path);
+    QCOMPARE(policy.relayWakePort(), PlankClientPolicy::BuiltInRelayWakePort);
 }
 
 QTEST_APPLESS_MAIN(TestPlankClientPolicy)

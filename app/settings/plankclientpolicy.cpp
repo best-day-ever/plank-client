@@ -41,15 +41,28 @@ bool PlankClientPolicy::managedBoolean(const QString& key, bool* value) const
 
 quint16 PlankClientPolicy::networkPort() const
 {
+    return configuredPort(QStringLiteral("network/port"), BuiltInNetworkPort,
+                          QStringLiteral("PLANK network"));
+}
+
+quint16 PlankClientPolicy::relayWakePort() const
+{
+    return configuredPort(QStringLiteral("network/relay_wake_port"),
+                          BuiltInRelayWakePort,
+                          QStringLiteral("PLANK Relay wake"));
+}
+
+quint16 PlankClientPolicy::configuredPort(const QString& key, quint16 fallback,
+                                          const QString& description) const
+{
     QSettings policy(m_ConfigPath, QSettings::IniFormat);
     bool valid = false;
-    const int configuredPort = policy.value(
-                QStringLiteral("network/port"), BuiltInNetworkPort).toInt(&valid);
+    const int configuredPort = policy.value(key, fallback).toInt(&valid);
     if (!valid || configuredPort < 1024 || configuredPort > 65535) {
-        qWarning() << "Invalid PLANK network port" << configuredPort
+        qWarning() << "Invalid" << description << "port" << configuredPort
                    << "in" << m_ConfigPath << "- using"
-                   << BuiltInNetworkPort;
-        return BuiltInNetworkPort;
+                   << fallback;
+        return fallback;
     }
 
     return static_cast<quint16>(configuredPort);

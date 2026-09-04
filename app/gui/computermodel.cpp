@@ -1,4 +1,6 @@
 #include "computermodel.h"
+#include "backend/relaywakeclient.h"
+#include "settings/plankclientpolicy.h"
 
 #include <utility>
 
@@ -262,6 +264,31 @@ void ComputerModel::renameComputer(int computerIndex, QString name)
     Q_ASSERT(computerIndex < m_Computers.count());
 
     m_ComputerManager->renameHost(m_Computers[computerIndex], name);
+}
+
+void ComputerModel::requestRelayWake(int computerIndex)
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
+        emit relayWakeCompleted(tr("The selected workstation bookmark is unavailable."));
+        return;
+    }
+
+    NvComputer* computer = m_Computers[computerIndex];
+    QString address;
+    {
+        QReadLocker lock(&computer->lock);
+        if (!computer->manualBookmark || computer->manualAddress.isNull()) {
+            emit relayWakeCompleted(tr("Wake PC requires a manually configured bookmark."));
+            return;
+        }
+        address = computer->manualAddress.address();
+    }
+
+    auto* request = new RelayWakeClient(
+                address, PlankClientPolicy().relayWakePort(), this);
+    connect(request, &RelayWakeClient::completed,
+            this, &ComputerModel::relayWakeCompleted);
+    request->start();
 }
 
 void ComputerModel::authenticateComputer(int computerIndex, QString username,

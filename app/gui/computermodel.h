@@ -36,6 +36,8 @@ public:
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
+    Q_INVOKABLE void requestRelayWake(int computerIndex);
+
     Q_INVOKABLE Session* createSessionForPlankDesktop(int computerIndex);
 
     Q_INVOKABLE int plankScalingChoice(int computerIndex) const;
@@ -66,6 +68,8 @@ public:
 
 signals:
     void authenticationCompleted(QVariant error);
+
+    void relayWakeCompleted(QVariant error);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);

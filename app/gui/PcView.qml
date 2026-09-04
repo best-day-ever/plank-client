@@ -89,6 +89,12 @@ CenteredGridView {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
         model.authenticationCompleted.connect(authenticationComplete)
+        model.relayWakeCompleted.connect(function(error) {
+            if (error !== undefined) {
+                errorDialog.text = error
+                errorDialog.open()
+            }
+        })
         return model
     }
 
@@ -229,6 +235,13 @@ CenteredGridView {
                     text: qsTr("PC Status: %1").arg(model.online ? qsTr("Online") : qsTr("Offline"))
                     font.bold: true
                     enabled: false
+                }
+                NavigableMenuItem {
+                    parentMenu: pcContextMenu
+                    text: qsTr("Wake PC")
+                    visible: model.manualBookmark &&
+                             !model.statusUnknown && !model.online
+                    onTriggered: computerModel.requestRelayWake(index)
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
