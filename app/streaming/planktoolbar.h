@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <memory>
+#include <QString>
 
 #include "planktoolbarlogic.h"
 
@@ -38,6 +39,8 @@ public:
     Action update(Uint64 now, bool transportAvailable = true);
     void showReconnectPrompt(int unreachableSeconds);
     void hideReconnectPrompt();
+    // Returns true when status is presented independently of video frames.
+    bool setReconnectStatus(const QString& text, bool warning);
     void notifyWindowChanged();
     void notifyFocusLost();
 
@@ -99,6 +102,8 @@ private:
     StreamingPreferences& m_Preferences;
     std::unique_ptr<PlankWaylandToolbar> m_WaylandToolbar;
     std::unique_ptr<PlankWaylandToolbar> m_WaylandReconnectPrompt;
+    QString m_ReconnectStatus;
+    bool m_ReconnectStatusWarning = false;
     Action m_PendingAction;
     bool m_Visible;
     bool m_Pinned;

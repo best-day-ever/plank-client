@@ -2916,6 +2916,26 @@ void Session::respondToActiveSessionTakeover(bool takeOver)
     }
 }
 
+void Session::setPlankReconnectStatus(const char* text, bool warning)
+{
+    const bool nativeStatus = m_PlankToolbar &&
+            m_PlankToolbar->setReconnectStatus(QString::fromUtf8(text), warning);
+    // Reconnect pauses video, so an overlay alone cannot reliably repaint.
+    // Use the native local surface on Wayland; keep the existing fallback for
+    // other presentation platforms without duplicating the message.
+    m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
+    if (!nativeStatus && text[0] != '\0') {
+        m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate,
+                    warning ? SDL_Color{0xCC, 0x00, 0x00, 0xFF} : SDL_Color{0xE0, 0xE0, 0xE0, 0xFF});
+        m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate, text);
+        m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
+    }
+    if (text[0] != '\0') {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK reconnect status (%s): %s",
+                    nativeStatus ? "native local surface" : "video overlay fallback", text);
+    }
+}
+
 bool Session::beginPlankReconnect(
         PlankReconnectState& state)
 {
@@ -2927,12 +2947,9 @@ bool Session::beginPlankReconnect(
     m_Reconnecting.store(true);
     m_ReconnectGreeterConfirmed.store(false);
     const bool openingDesktop = m_DesktopHandoffNoticeDeadline.exchange(0) > SDL_GetTicks();
-    m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate,
-                openingDesktop ? SDL_Color{0xE0, 0xE0, 0xE0, 0xFF} : SDL_Color{0xCC, 0x00, 0x00, 0xFF});
-    m_OverlayManager.updateOverlayText(
-                Overlay::OverlayStatusUpdate,
-                openingDesktop ? "Opening your desktop..." : "Connection interrupted - reconnecting...");
-    m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
+    setPlankReconnectStatus(
+                openingDesktop ? "Opening your desktop..." : "Connection interrupted - reconnecting...",
+                !openingDesktop);
 
     m_InputHandler->raiseAllKeys();
     state = {};
@@ -3088,6 +3105,7 @@ bool Session::finishPlankReconnect(
     m_Reconnecting.store(false);
     m_ReconnectGreeterConfirmed.store(false);
     m_DesktopHandoffNoticeDeadline.store(0);
+    setPlankReconnectStatus("", false);
     m_ReconnectRequested = false;
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
@@ -3723,9 +3741,7 @@ void Session::execInternal()
         // Apply only on the SDL thread and never override an expired timeout.
         if (m_ReconnectGreeterConfirmed.exchange(false) && m_Reconnecting.load() &&
                 reconnectDecisionDeadline != 0 && SDL_GetTicks() < reconnectDecisionDeadline) {
-            m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate, {0xE0, 0xE0, 0xE0, 0xFF});
-            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate,
-                        "Returning to the sign-in screen...");
+            setPlankReconnectStatus("Returning to the sign-in screen...", false);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Authenticated Host confirmed return to the sign-in screen");
         }
@@ -3733,9 +3749,7 @@ void Session::execInternal()
         if (m_Reconnecting.load() && reconnectDecisionDeadline != 0 &&
                 (reconnectThread == nullptr || !reconnectThread->isFinished()) &&
                 SDL_GetTicks() >= reconnectDecisionDeadline) {
-            m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate, {0xCC, 0x00, 0x00, 0xFF});
-            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate,
-                        "Workstation is taking longer to respond...");
+            setPlankReconnectStatus("Workstation is taking longer to respond...", true);
             if (m_Preferences->plankUnreachableAction ==
                     StreamingPreferences::PLANK_UNREACHABLE_DISCONNECT) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,

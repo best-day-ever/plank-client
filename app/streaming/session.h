@@ -210,6 +210,7 @@ private:
     };
 
     bool beginPlankReconnect(PlankReconnectState& state);
+    void setPlankReconnectStatus(const char* text, bool warning);
 
     bool runPlankReconnect();
 

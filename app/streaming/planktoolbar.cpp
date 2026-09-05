@@ -273,6 +273,20 @@ PlankToolbar::Action PlankToolbar::update(
     return action;
 }
 
+bool PlankToolbar::setReconnectStatus(const QString& text, bool warning)
+{
+    m_ReconnectStatus = text;
+    m_ReconnectStatusWarning = warning;
+    if (!m_WaylandReconnectPrompt) return false;
+    if (m_ReconnectPromptVisible || !m_ReconnectStatus.isEmpty()) {
+        redrawReconnectPrompt();
+        m_WaylandReconnectPrompt->setVisible(true);
+    } else {
+        m_WaylandReconnectPrompt->setVisible(false);
+    }
+    return true;
+}
+
 void PlankToolbar::showReconnectPrompt(int unreachableSeconds)
 {
     m_ReconnectPromptSeconds = std::max(1, unreachableSeconds);
@@ -302,7 +316,8 @@ void PlankToolbar::hideReconnectPrompt()
     m_ReconnectPromptButtonDown = false;
     m_ReconnectPromptPressedButton = ReconnectPromptNoButton;
     if (m_WaylandReconnectPrompt) {
-        m_WaylandReconnectPrompt->setVisible(false);
+        if (!m_ReconnectStatus.isEmpty()) redrawReconnectPrompt();
+        m_WaylandReconnectPrompt->setVisible(!m_ReconnectStatus.isEmpty());
     }
 }
 
@@ -361,7 +376,7 @@ void PlankToolbar::notifyWindowChanged()
                     m_WindowWidth, reconnectPromptTop(), reconnectPromptLeft(),
                     std::min(ReconnectPromptWidth, m_WindowWidth),
                     ReconnectPromptHeight);
-        if (m_ReconnectPromptVisible) {
+        if (m_ReconnectPromptVisible || !m_ReconnectStatus.isEmpty()) {
             redrawReconnectPrompt();
             m_WaylandReconnectPrompt->setVisible(true);
         }
@@ -997,6 +1012,22 @@ void PlankToolbar::redrawReconnectPrompt()
     painter.setBrush(Qt::NoBrush);
     painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1.0,
                                    ReconnectPromptHeight - 1.0), 8, 8);
+
+    if (!m_ReconnectPromptVisible) {
+        // This desynchronized local surface commits without a video frame.
+        // Keep the established prompt geometry so a stopped parent does not
+        // need to commit a new subsurface position during the transition.
+        QFont statusFont;
+        statusFont.setPixelSize(18);
+        statusFont.setWeight(QFont::DemiBold);
+        painter.setFont(statusFont);
+        painter.setPen(m_ReconnectStatusWarning ? QColor(239, 88, 88) : QColor(224, 224, 224));
+        painter.drawText(QRect(22, 18, width - 44, ReconnectPromptHeight - 36),
+                         Qt::AlignCenter | Qt::TextWordWrap, m_ReconnectStatus);
+        painter.end();
+        m_WaylandReconnectPrompt->present(image);
+        return;
+    }
 
     QFont titleFont;
     titleFont.setPixelSize(18);
