@@ -147,6 +147,8 @@ public:
     void setPlankSessionToken(QString sessionToken);
 
     QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
+    bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
+    QString workerInstance() const { return m_WorkerInstance; }
     NvOutputTopology getOutputTopology();
 
     NvAddress address();
@@ -210,4 +212,5 @@ private:
     NvAddress m_Address;
     QNetworkAccessManager* m_Nam;
     QString m_SessionToken;
+    QString m_WorkerInstance;
 };

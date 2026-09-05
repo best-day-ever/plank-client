@@ -53,6 +53,7 @@ struct NvOutputTopology
     static const int SessionTakeoverFeature = 0x8000;
     static const int DesktopHandoffNoticeFeature = 0x10000;
     static const int AuthenticatedDesktopStageFeature = 0x20000;
+    static const int WorkerInstanceFeature = 0x40000;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -71,7 +72,8 @@ struct NvOutputTopology
                                              FixedTransportMtuFeature |
                                              SessionTakeoverFeature |
                                              DesktopHandoffNoticeFeature |
-                                             AuthenticatedDesktopStageFeature;
+                                             AuthenticatedDesktopStageFeature |
+                                             WorkerInstanceFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;

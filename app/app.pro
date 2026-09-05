@@ -252,6 +252,7 @@ HEADERS += \
     backend/planknetwork.h \
     backend/nvhttp.h \
     backend/desktopstage.h \
+    backend/hostrecovery.h \
     backend/computermanager.h \
     backend/relaywakeclient.h \
     cli/commandlineparser.h \
