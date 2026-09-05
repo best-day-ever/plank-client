@@ -146,7 +146,7 @@ public:
 
     void setPlankSessionToken(QString sessionToken);
 
-    QString authenticate(QString username, QString password);
+    QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
     NvOutputTopology getOutputTopology();
 
     NvAddress address();

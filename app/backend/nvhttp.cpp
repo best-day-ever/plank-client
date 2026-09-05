@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "desktopstage.h"
 #include <Limelight.h>
 
 #include <utility>
@@ -568,8 +569,9 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
     return document.object();
 }
 
-QString NvHTTP::authenticate(QString username, QString password)
+QString NvHTTP::authenticate(QString username, QString password, bool* greeterConfirmed)
 {
+    if (greeterConfirmed != nullptr) *greeterConfirmed = false;
     SecureStringGuard passwordGuard(password);
     if (!m_SessionToken.isEmpty() || username.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
@@ -582,6 +584,9 @@ QString NvHTTP::authenticate(QString username, QString password)
             m_SessionToken = result.value("session_token").toString();
             if (m_SessionToken.isEmpty()) {
                 throw GfeHttpResponseException(401, "Authentication returned no session token");
+            }
+            if (greeterConfirmed != nullptr) {
+                *greeterConfirmed = plankAuthenticatedGreeter(result);
             }
             return m_SessionToken;
         }

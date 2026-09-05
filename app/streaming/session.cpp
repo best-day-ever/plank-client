@@ -2925,6 +2925,7 @@ bool Session::beginPlankReconnect(
     }
 
     m_Reconnecting.store(true);
+    m_ReconnectGreeterConfirmed.store(false);
     const bool openingDesktop = m_DesktopHandoffNoticeDeadline.exchange(0) > SDL_GetTicks();
     m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate,
                 openingDesktop ? SDL_Color{0xE0, 0xE0, 0xE0, 0xFF} : SDL_Color{0xCC, 0x00, 0x00, 0xFF});
@@ -2987,9 +2988,14 @@ bool Session::runPlankReconnect()
                 m_Computer->currentGameId = 0;
             }
             NvHTTP http(m_Computer);
+            bool greeterConfirmed = false;
             const QString token = http.authenticate(
                         m_PlankUsername,
-                        m_PlankPassword);
+                        m_PlankPassword, &greeterConfirmed);
+            if (greeterConfirmed &&
+                    (m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature)) {
+                m_ReconnectGreeterConfirmed.store(true);
+            }
 
             NvOutputTopology topology;
             const bool topologySupported =
@@ -3080,6 +3086,7 @@ bool Session::finishPlankReconnect(
     }
 
     m_Reconnecting.store(false);
+    m_ReconnectGreeterConfirmed.store(false);
     m_DesktopHandoffNoticeDeadline.store(0);
     m_ReconnectRequested = false;
     m_ReconnectCancelled.store(false);
@@ -3709,6 +3716,18 @@ void Session::execInternal()
                             "PLANK toolbar minimize requested");
                 minimizePresentationWindows();
             }
+        }
+
+        // The old desktop worker may lose Xorg before it can send a logout
+        // notice. Use the replacement worker's authenticated stage instead.
+        // Apply only on the SDL thread and never override an expired timeout.
+        if (m_ReconnectGreeterConfirmed.exchange(false) && m_Reconnecting.load() &&
+                reconnectDecisionDeadline != 0 && SDL_GetTicks() < reconnectDecisionDeadline) {
+            m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate, {0xE0, 0xE0, 0xE0, 0xFF});
+            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate,
+                        "Returning to the sign-in screen...");
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Authenticated Host confirmed return to the sign-in screen");
         }
 
         if (m_Reconnecting.load() && reconnectDecisionDeadline != 0 &&
