@@ -230,6 +230,7 @@ void Session::clLogMessage(const char* format, ...)
 
 void Session::clConnectionStatusUpdate(int connectionStatus)
 {
+    if (s_ActiveSession->m_Reconnecting.load()) return;
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Connection status update: %d",
                 connectionStatus);
@@ -1272,6 +1273,17 @@ void Session::plankTransportDataReceiveLoop()
                 return;
             }
             switch (control.type) {
+            case PLANK_TRANSPORT_CONTROL_HOST_DESKTOP_HANDOFF:
+                if (control.payload_size != 0 ||
+                        !(m_Computer->plankFeatureFlags & NvOutputTopology::DesktopHandoffNoticeFeature)) {
+                    LiNotifyPlankHostTermination(-1);
+                    return;
+                }
+                // Advisory only. Do not reconnect until the transport actually
+                // closes; a stale notice must not relabel an unrelated outage.
+                m_DesktopHandoffNoticeDeadline.store(SDL_GetTicks() + 5000);
+                qInfo() << "Host announced GDM-to-desktop handoff";
+                break;
             case PLANK_TRANSPORT_CONTROL_VIDEO_BITRATE_APPLIED:
                 if (control.payload_size != 3 * sizeof(uint32_t)) {
                     LiNotifyPlankHostTermination(-1);
@@ -2913,9 +2925,12 @@ bool Session::beginPlankReconnect(
     }
 
     m_Reconnecting.store(true);
+    const bool openingDesktop = m_DesktopHandoffNoticeDeadline.exchange(0) > SDL_GetTicks();
+    m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate,
+                openingDesktop ? SDL_Color{0xE0, 0xE0, 0xE0, 0xFF} : SDL_Color{0xCC, 0x00, 0x00, 0xFF});
     m_OverlayManager.updateOverlayText(
                 Overlay::OverlayStatusUpdate,
-                "Reconnecting to workstation...");
+                openingDesktop ? "Opening your desktop..." : "Connection interrupted - reconnecting...");
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, true);
 
     m_InputHandler->raiseAllKeys();
@@ -3065,10 +3080,13 @@ bool Session::finishPlankReconnect(
     }
 
     m_Reconnecting.store(false);
+    m_DesktopHandoffNoticeDeadline.store(0);
     m_ReconnectRequested = false;
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
     m_OverlayManager.setOverlayState(Overlay::OverlayStatusUpdate, false);
+
+    m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate, {0xCC, 0x00, 0x00, 0xFF});
 
     if (!success) {
         return false;
@@ -3696,6 +3714,9 @@ void Session::execInternal()
         if (m_Reconnecting.load() && reconnectDecisionDeadline != 0 &&
                 (reconnectThread == nullptr || !reconnectThread->isFinished()) &&
                 SDL_GetTicks() >= reconnectDecisionDeadline) {
+            m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate, {0xCC, 0x00, 0x00, 0xFF});
+            m_OverlayManager.updateOverlayText(Overlay::OverlayStatusUpdate,
+                        "Workstation is taking longer to respond...");
             if (m_Preferences->plankUnreachableAction ==
                     StreamingPreferences::PLANK_UNREACHABLE_DISCONNECT) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,

@@ -138,6 +138,11 @@ SDL_Color OverlayManager::getOverlayColor(OverlayType type)
     return m_Overlays[type].color;
 }
 
+void OverlayManager::setOverlayColor(OverlayType type, SDL_Color color)
+{
+    m_Overlays[type].color = color;
+}
+
 void OverlayManager::setOverlayRenderer(IOverlayRenderer* renderer)
 {
     m_Renderer = renderer;
