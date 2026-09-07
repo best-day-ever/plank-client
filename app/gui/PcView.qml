@@ -444,6 +444,7 @@ CenteredGridView {
         }
 
         function ensureVirtualModesCompatible() {
+            if (editCaptureSource.currentIndex === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -557,9 +558,13 @@ CenteredGridView {
                         text: qsTr("Native X11/XShm — 10-bit (Experimental)")
                         val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10
                     }
+                    ListElement {
+                        text: qsTr("ScreenCaptureKit — macOS (Experimental)")
+                        val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT
+                    }
                 }
                 onCurrentIndexChanged: {
-                    if (currentIndex === 1) {
+                    if (currentIndex === 1 || currentIndex === 2) {
                         editEncodingProfile.currentIndex = 0
                     } else {
                         editEncodingProfile.currentIndex = 3
@@ -577,7 +582,8 @@ CenteredGridView {
                 id: editEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
-                model: editCaptureSource.currentIndex === 0 ?
+                model: editCaptureSource.currentIndex === 2 ? editAppleEncodingProfileModel :
+                       editCaptureSource.currentIndex === 0 ?
                            editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
                 onActivated: {
                     editBookmarkDialog.applyProfileBitrate()
@@ -614,6 +620,14 @@ CenteredGridView {
                 ListElement {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
+                }
+            }
+
+            ListModel {
+                id: editAppleEncodingProfileModel
+                ListElement {
+                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox (Preview)")
+                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_420
                 }
             }
 
@@ -659,7 +673,8 @@ CenteredGridView {
             PlankComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
-                model: [
+                enabled: editCaptureSource.currentIndex !== 2
+                model: editCaptureSource.currentIndex === 2 ? [qsTr("Current Mac display (Preview)")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),

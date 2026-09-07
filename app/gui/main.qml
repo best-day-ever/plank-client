@@ -412,6 +412,7 @@ ApplicationWindow {
         }
 
         function ensureVirtualModesCompatible() {
+            if (addCaptureSource.currentIndex === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -541,9 +542,13 @@ ApplicationWindow {
                         text: qsTr("Native X11/XShm — 10-bit (Experimental)")
                         val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10
                     }
+                    ListElement {
+                        text: qsTr("ScreenCaptureKit — macOS (Experimental)")
+                        val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT
+                    }
                 }
                 onCurrentIndexChanged: {
-                    if (currentIndex === 1) {
+                    if (currentIndex === 1 || currentIndex === 2) {
                         addEncodingProfile.currentIndex = 0
                     } else {
                         addEncodingProfile.currentIndex = 6
@@ -563,7 +568,8 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 textRole: "text"
                 currentIndex: 6
-                model: addCaptureSource.currentIndex === 0 ?
+                model: addCaptureSource.currentIndex === 2 ? addAppleEncodingProfileModel :
+                       addCaptureSource.currentIndex === 0 ?
                            addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
                 onActivated: {
                     addPcDialog.applyProfileBitrate()
@@ -600,6 +606,14 @@ ApplicationWindow {
                 ListElement {
                     text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
                     val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
+                }
+            }
+
+            ListModel {
+                id: addAppleEncodingProfileModel
+                ListElement {
+                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox (Preview)")
+                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_420
                 }
             }
 
@@ -646,7 +660,8 @@ ApplicationWindow {
             PlankComboBox {
                 id: addHostLayout
                 Layout.fillWidth: true
-                model: [
+                enabled: addCaptureSource.currentIndex !== 2
+                model: addCaptureSource.currentIndex === 2 ? [qsTr("Current Mac display (Preview)")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),

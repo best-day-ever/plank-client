@@ -34,6 +34,7 @@ public:
         PLANK_PROFILE_NVENC_H264_8BIT_444,
         PLANK_PROFILE_NVENC_HEVC_8BIT_444,
         PLANK_PROFILE_NVENC_HEVC_10BIT_444,
+        PLANK_PROFILE_APPLE_HEVC_10BIT_420,
         PLANK_PROFILE_COUNT,
     };
     Q_ENUM(PlankVideoProfile)
@@ -42,6 +43,7 @@ public:
     {
         PLANK_CAPTURE_NVFBC_8BIT,
         PLANK_CAPTURE_X11_NATIVE10,
+        PLANK_CAPTURE_SCREENCAPTUREKIT,
     };
     Q_ENUM(PlankCaptureSource)
 
@@ -56,8 +58,14 @@ public:
     {
         if (!isPlankVideoProfileValid(profile) ||
                 captureSource < PLANK_CAPTURE_NVFBC_8BIT ||
-                captureSource > PLANK_CAPTURE_X11_NATIVE10) {
+                captureSource > PLANK_CAPTURE_SCREENCAPTUREKIT) {
             return false;
+        }
+
+        if (captureSource == PLANK_CAPTURE_SCREENCAPTUREKIT ||
+                profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+            return captureSource == PLANK_CAPTURE_SCREENCAPTUREKIT &&
+                   profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420;
         }
 
         if (captureSource == PLANK_CAPTURE_X11_NATIVE10) {
@@ -92,6 +100,9 @@ public:
             return false;
         }
 
+        if (profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+            return false;
+        }
         return !isPlankH264NvencProfile(profile) ||
                (width <= 4096 && height <= 2160);
     }
@@ -105,7 +116,8 @@ public:
     static int plankDefaultBitrateForProfile(int profile)
     {
         return profile == PLANK_PROFILE_NVENC_HEVC_8BIT_444 ||
-               profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444 ?
+               profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444 ||
+               profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420 ?
                    PlankHevcDefaultBitrateKbps :
                    PlankH264DefaultBitrateKbps;
     }
@@ -145,7 +157,9 @@ public:
     static bool plankProfileBitratesFromVariantList(
             const QVariantList& values, QVector<int>& bitrates)
     {
-        if (values.size() != PLANK_PROFILE_COUNT) {
+        // Profile IDs are append-only. Preserve every existing bookmark value
+        // when a newly introduced profile has no saved value yet.
+        if (values.isEmpty() || values.size() > PLANK_PROFILE_COUNT) {
             return false;
         }
 
@@ -159,6 +173,9 @@ public:
             }
             parsed.append(bitrateKbps);
         }
+        while (parsed.size() < PLANK_PROFILE_COUNT) {
+            parsed.append(plankDefaultBitrateForProfile(parsed.size()));
+        }
         bitrates = parsed;
         return true;
     }
@@ -167,7 +184,7 @@ public:
             const QVector<int>& bitrates, int profile)
     {
         if (isPlankVideoProfileValid(profile) &&
-                bitrates.size() == PLANK_PROFILE_COUNT) {
+                profile < bitrates.size()) {
             return clampPlankBitrate(bitrates.at(profile));
         }
         return plankDefaultBitrateForProfile(profile);

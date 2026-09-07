@@ -575,7 +575,8 @@ Session::getDecoderAvailability(SDL_Window* window,
 
     if (!chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
                        window, videoFormat, width, height, frameRate,
-                       false, true, decoder, enableIdentityGbr)) {
+                       false, true, decoder, enableIdentityGbr,
+                       decoderCaptureSource(), decoderEncoderBackend())) {
         return DecoderAvailability::None;
     }
 
@@ -584,6 +585,24 @@ Session::getDecoderAvailability(SDL_Window* window,
     delete decoder;
 
     return hw ? DecoderAvailability::Hardware : DecoderAvailability::Software;
+}
+
+DecoderCaptureSource Session::decoderCaptureSource() const
+{
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        return DecoderCaptureSource::ScreenCaptureKit;
+    }
+    return m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
+                DecoderCaptureSource::NativeX11_10Bit : DecoderCaptureSource::Nvfbc8Bit;
+}
+
+DecoderEncoderBackend Session::decoderEncoderBackend() const
+{
+    if (m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+        return DecoderEncoderBackend::VideoToolbox;
+    }
+    return StreamingPreferences::isPlankNvencProfile(m_PlankVideoProfile) ?
+                DecoderEncoderBackend::NvencDirect : DecoderEncoderBackend::SoftwareCuda;
 }
 
 bool Session::populateDecoderProperties(SDL_Window* window)
@@ -598,13 +617,7 @@ bool Session::populateDecoderProperties(SDL_Window* window)
                        m_StreamConfig.fps,
                        false, true, decoder,
                        isIdentityGbrEnabledForFormat(m_SupportedVideoFormats.first()),
-                       m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
-                           DecoderCaptureSource::NativeX11_10Bit :
-                           DecoderCaptureSource::Nvfbc8Bit,
-                       StreamingPreferences::isPlankNvencProfile(
-                           m_PlankVideoProfile) ?
-                           DecoderEncoderBackend::NvencDirect :
-                           DecoderEncoderBackend::SoftwareCuda)) {
+                       decoderCaptureSource(), decoderEncoderBackend())) {
         return false;
     }
 
@@ -617,7 +630,13 @@ bool Session::populateDecoderProperties(SDL_Window* window)
         m_VideoCallbacks.submitDecodeUnit = drSubmitDecodeUnit;
     }
 
-    {
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        // This profile has an exact, negotiated color contract. An environment
+        // override must not reinterpret its YCbCr samples as full-range or RGB.
+        m_StreamConfig.colorSpace = COLORSPACE_REC_709;
+        m_StreamConfig.colorRange = COLOR_RANGE_LIMITED;
+    }
+    else {
         bool ok;
 
         m_StreamConfig.colorSpace = qEnvironmentVariableIntValue("COLOR_SPACE_OVERRIDE", &ok);
@@ -659,11 +678,11 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_PlankVideoProfile(static_cast<StreamingPreferences::PlankVideoProfile>(
               qBound(static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444),
                      computer->plankVideoProfile,
-                     static_cast<int>(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444)))),
+                     static_cast<int>(StreamingPreferences::PLANK_PROFILE_COUNT) - 1))),
       m_PlankCaptureSource(static_cast<StreamingPreferences::PlankCaptureSource>(
               qBound(static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT),
                      computer->plankCaptureSource,
-                     static_cast<int>(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10)))),
+                     static_cast<int>(StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT)))),
       m_PlankBitrateKbps(
               StreamingPreferences::plankBitrateForProfile(
                   computer->plankProfileBitratesKbps,
@@ -858,6 +877,11 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
         break;
     case VIDEO_FORMAT_H265_REXT10_444:
         codec = 1;
+        tenBit = true;
+        break;
+    case VIDEO_FORMAT_H265_MAIN10:
+        codec = 1;
+        chroma = 0;
         tenBit = true;
         break;
     default:
@@ -1473,6 +1497,13 @@ bool Session::initialize()
         emit displayLaunchError(error);
         return false;
     }
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        // Remove this gate only with the authenticated Mac media launch and
+        // explicit optional-service negotiation. Never use the Linux launch
+        // path or claim audio/cursor services merely to activate a preview.
+        emit displayLaunchError(tr("The macOS preview profile is saved, but Mac streaming is not available in this build yet."));
+        return false;
+    }
     if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT &&
             m_PlankVideoProfile ==
                 StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444 &&
@@ -1585,6 +1616,9 @@ bool Session::initialize()
         break;
     case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444:
         selectedVideoFormat = VIDEO_FORMAT_H265_REXT10_444;
+        break;
+    case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
+        selectedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
         break;
     }
     if (!(selectedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ||
@@ -2511,9 +2545,13 @@ bool Session::startConnectionAsync(bool reconnecting,
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
         const QString captureSource =
+                m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
+                    QStringLiteral("screencapturekit") :
                 m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
         const QString encoderBackend =
+                m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420 ?
+                    QStringLiteral("videotoolbox") :
                 StreamingPreferences::isPlankNvencProfile(
                     m_PlankVideoProfile) ?
                     QStringLiteral("nvenc-direct") : QStringLiteral("software-cuda");
@@ -2539,6 +2577,9 @@ bool Session::startConnectionAsync(bool reconnecting,
             break;
         case StreamingPreferences::PLANK_PROFILE_H264_10BIT_444:
             encodingMode = QStringLiteral("h264-10-444-software");
+            break;
+        case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
+            encodingMode = QStringLiteral("hevc-10-420-videotoolbox");
             break;
         }
         const auto startApp = [&]() {
@@ -4192,14 +4233,7 @@ void Session::execInternal()
                                    enableVsync, false,
                                    s_ActiveSession->m_VideoDecoder,
                                    isIdentityGbrEnabledForFormat(m_ActiveVideoFormat),
-                                   m_PlankCaptureSource ==
-                                           StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
-                                       DecoderCaptureSource::NativeX11_10Bit :
-                                       DecoderCaptureSource::Nvfbc8Bit,
-                                   StreamingPreferences::isPlankNvencProfile(
-                                       m_PlankVideoProfile) ?
-                                       DecoderEncoderBackend::NvencDirect :
-                                       DecoderEncoderBackend::SoftwareCuda)) {
+                                   decoderCaptureSource(), decoderEncoderBackend())) {
                     SDL_UnlockSpinlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");

@@ -822,7 +822,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          QVariantList profileBitrates)
 {
     NvAddress manualAddress;
-    const QString hostLayout = hostLayoutFromChoice(hostLayoutChoice);
+    const QString hostLayout = captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
+                QStringLiteral("fixed") : hostLayoutFromChoice(hostLayoutChoice);
     const QString virtualMode1 = virtualModeFromChoice(virtualMode1Choice);
     const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
     const QString scalingMode = scalingFromChoice(scalingChoice);
@@ -909,6 +910,9 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     NvAddress manualAddress;
     QVector<int> profileBitratesKbps;
     nickname = nickname.trimmed();
+    if (captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        hostLayout = QStringLiteral("fixed");
+    }
     if (computer == nullptr || nickname.isEmpty() ||
             !StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
@@ -919,7 +923,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
             (hostLayout != NvOutputTopology::MatchClientHostLayout &&
              hostLayout != NvOutputTopology::PhysicalHostLayout &&
              hostLayout != NvOutputTopology::SingleHostLayout &&
-             hostLayout != NvOutputTopology::DualHorizontalHostLayout) ||
+             hostLayout != NvOutputTopology::DualHorizontalHostLayout &&
+             !(hostLayout == QStringLiteral("fixed") && captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT)) ||
             !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode1) ||
             !NvOutputTopology::qualifiedVirtualModes().contains(virtualMode2) ||
             !virtualModesValidForProfile(hostLayout, virtualMode1,

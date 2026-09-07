@@ -1,5 +1,7 @@
 #include <Limelight.h>
 #include "ffmpeg.h"
+#include "applevideoprofile.h"
+#include "applevideo-test-frame.h"
 #include "streaming/session.h"
 
 #include <h264_stream.h>
@@ -620,8 +622,14 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             m_Pkt->size = sizeof(k_HEVCMainTestFrame);
             break;
         case VIDEO_FORMAT_H265_MAIN10:
-            m_Pkt->data = (uint8_t*)k_HEVCMain10TestFrame;
-            m_Pkt->size = sizeof(k_HEVCMain10TestFrame);
+            if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit) {
+                m_Pkt->data = (uint8_t*)k_AppleHEVCMain10TestFrame;
+                m_Pkt->size = k_AppleHEVCMain10TestFrameSize;
+            }
+            else {
+                m_Pkt->data = (uint8_t*)k_HEVCMain10TestFrame;
+                m_Pkt->size = sizeof(k_HEVCMain10TestFrame);
+            }
             break;
         case VIDEO_FORMAT_AV1_MAIN8:
             m_Pkt->data = (uint8_t*)k_AV1Main8TestFrame;
@@ -775,6 +783,16 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
 bool FFmpegVideoDecoder::validateDecodedProfileFrame(const AVFrame* frame,
                                                       PDECODER_PARAMETERS params)
 {
+    if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit &&
+            (params->encoderBackend != DecoderEncoderBackend::VideoToolbox ||
+             params->videoFormat != VIDEO_FORMAT_H265_MAIN10 ||
+             params->enableIdentityGbr ||
+             !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile))) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Exact Apple profile validation failed: requires Main10 4:2:0, "
+                    "limited BT.709 matrix/primaries and sRGB transfer");
+        return false;
+    }
     AVPixelFormat storageFormat = static_cast<AVPixelFormat>(frame->format);
     if (frame->hw_frames_ctx != nullptr) {
         const auto* framesContext = reinterpret_cast<const AVHWFramesContext*>(
@@ -942,7 +960,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         break;
 
     case VIDEO_FORMAT_H265_MAIN10:
-        codecString = "HEVC 10-bit";
+        codecString = "HEVC 10-bit 4:2:0";
         break;
 
     case VIDEO_FORMAT_H265_REXT10_444:
@@ -975,6 +993,8 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         if (m_VideoDecoderCtx != nullptr) {
             const char* identityMapping = m_IdentityGbrEnabled ? " RGB identity" : "";
             const char* encoderBackend =
+                    m_EncoderBackend == DecoderEncoderBackend::VideoToolbox ?
+                        "Apple VideoToolbox, limited BT.709/sRGB" :
                     m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
                         "NVENC" : "x264";
             ret = snprintf(&output[offset],
@@ -997,6 +1017,8 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         ret = snprintf(&output[offset],
                        length - offset,
                        "Capture source: %s\n",
+                       m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit ?
+                           "ScreenCaptureKit (Experimental)" :
                        m_CaptureSource == DecoderCaptureSource::NativeX11_10Bit ?
                            "Native X11/XShm (10-bit)" :
                            "NvFBC (8-bit)");
@@ -1332,6 +1354,10 @@ bool FFmpegVideoDecoder::tryInitializeRenderer(const AVCodec* decoder,
     // For wave5 (VisionFive), it leads to an invalid pitch error when calling drmModeAddFB2().
     testFrameDecoderParams.width = 1280;
     testFrameDecoderParams.height = 720;
+    if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit) {
+        testFrameDecoderParams.width = 3840;
+        testFrameDecoderParams.height = 2160;
+    }
 
     m_HwDecodeCfg = hwConfig;
 
@@ -1884,6 +1910,17 @@ void FFmpegVideoDecoder::decoderThreadProc()
             do {
                 err = avcodec_receive_frame(m_VideoDecoderCtx, frame);
                 if (err == 0) {
+                    if (m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit &&
+                            !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile)) {
+                        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                     "Mac stream changed its negotiated Main10/color format; disconnecting");
+                        SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
+                        SDL_Event event{};
+                        event.type = SDL_EVENT_QUIT;
+                        SDL_PushEvent(&event);
+                        av_frame_free(&frame);
+                        return;
+                    }
                     SDL_assert(m_FrameInfoQueue.size() == m_FramesIn - m_FramesOut);
                     m_FramesOut++;
 

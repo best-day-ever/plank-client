@@ -17,7 +17,83 @@ private slots:
     void matchesOneClientDisplay();
     void matchesTwoClientDisplaysLeftToRight();
     void rejectsUnsupportedClientLayouts();
+    void parsesFixedCapture();
+    void rejectsInvalidFixedCapture();
 };
+
+static QJsonObject fixedCaptureFixture()
+{
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/fixed-capture-v13.json");
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+void TestOutputTopology::parsesFixedCapture()
+{
+    const auto fixture = fixedCaptureFixture();
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(fixture, topology));
+    QCOMPARE(topology.featureFlags, NvOutputTopology::FixedCaptureFlags);
+    QCOMPARE(topology.desktopWidth, 3840);
+    QCOMPARE(topology.desktopHeight, 2160);
+    QCOMPARE(topology.captureLogicalBounds, QRectF(-1920, 0, 1920, 1080));
+    QCOMPARE(topology.outputs.size(), 1);
+    QCOMPARE(topology.toJson(), fixture);
+    QVERIFY(!(topology.featureFlags & NvOutputTopology::UnifiedAbsoluteInputFeature));
+    QVERIFY(!(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature));
+    QVERIFY(!(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::FixedCaptureFeature));
+    // Reuse is atomic, including failures; never retain stale logical bounds.
+    QVERIFY(!NvOutputTopology::fromJson({}, topology));
+    QCOMPARE(topology.toJson(), fixture);
+    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
+    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
+    for (QSize points : {QSize(3840, 2160), QSize(2560, 1440)}) {
+        auto varied = fixture;
+        auto capture = varied["capture"].toObject();
+        capture["logical_bounds"] = QJsonObject {{"x", 100}, {"y", -500},
+            {"width", points.width()}, {"height", points.height()}};
+        varied["capture"] = capture;
+        QVERIFY(NvOutputTopology::fromJson(varied, topology));
+        QCOMPARE(topology.captureLogicalBounds, QRectF(QPointF(100, -500), points));
+        QCOMPARE(topology.desktopWidth, 3840);
+        QCOMPARE(topology.toJson(), varied);
+    }
+}
+
+void TestOutputTopology::rejectsInvalidFixedCapture()
+{
+    const auto fixture = fixedCaptureFixture();
+    QVERIFY(!fixture.isEmpty());
+    NvOutputTopology topology;
+    for (QJsonValue bad : {QJsonValue(-1), QJsonValue(0), QJsonValue(3), QJsonValue(8194),
+                          QJsonValue(1e99), QJsonValue(3840.5), QJsonValue("3840")}) {
+        auto object = fixture;
+        auto capture = object["capture"].toObject();
+        capture["width"] = bad; object["capture"] = capture;
+        QVERIFY(!NvOutputTopology::fromJson(object, topology));
+    }
+    for (const char* field : {"rgb_identity", "chroma", "range", "encoding_mode", "transfer"}) {
+        auto object = fixture;
+        auto capture = object["capture"].toObject();
+        auto profile = capture["encoding_profile"].toObject();
+        profile[field] = "incorrect"; capture["encoding_profile"] = profile; object["capture"] = capture;
+        QVERIFY(!NvOutputTopology::fromJson(object, topology));
+    }
+    auto object = fixture;
+    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::SessionTakeoverFeature;
+    QVERIFY(!NvOutputTopology::fromJson(object, topology));
+    object = fixture; object["generation"] = "not-a-generation";
+    QVERIFY(!NvOutputTopology::fromJson(object, topology));
+    object = fixture; object["layout"] = QJsonObject();
+    QVERIFY(!NvOutputTopology::fromJson(object, topology));
+    for (QJsonValue bad : {QJsonValue(0), QJsonValue(-1), QJsonValue(1e99), QJsonValue("1920")}) {
+        object = fixture;
+        auto capture = object["capture"].toObject();
+        auto logical = capture["logical_bounds"].toObject();
+        logical["width"] = bad; capture["logical_bounds"] = logical; object["capture"] = capture;
+        QVERIFY(!NvOutputTopology::fromJson(object, topology));
+    }
+}
 
 void TestOutputTopology::parsesQualificationVector()
 {

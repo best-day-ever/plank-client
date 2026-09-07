@@ -54,6 +54,11 @@ struct NvOutputTopology
     static const int DesktopHandoffNoticeFeature = 0x10000;
     static const int AuthenticatedDesktopStageFeature = 0x20000;
     static const int WorkerInstanceFeature = 0x40000;
+    // Fixed capture description only. Not part of the Linux launch feature
+    // mask: parsing this does not grant input, layout changes or media launch.
+    static const int FixedCaptureFeature = 0x80000;
+    static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
+            TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -112,4 +117,5 @@ struct NvOutputTopology
     bool virtualLayout = false;
     QStringList virtualModes;
     QVector<NvOutput> outputs;
+    QRectF captureLogicalBounds;
 };

@@ -4,6 +4,8 @@
 #include <tuple>
 
 #include <QJsonArray>
+#include <QUuid>
+#include <cmath>
 
 const char* NvOutputTopology::NativeScalingMode = "native";
 const char* NvOutputTopology::ScaledSpanMode = "scaled-span";
@@ -13,6 +15,65 @@ const char* NvOutputTopology::SingleHostLayout = "single";
 const char* NvOutputTopology::DualHorizontalHostLayout = "dual-horizontal";
 
 namespace {
+QJsonObject applePreviewProfile()
+{
+    return {{"capture_source", "screencapturekit"}, {"encoder_backend", "videotoolbox"},
+            {"encoding_mode", "hevc-10-420-videotoolbox"}, {"codec", "hevc"},
+            {"profile", "main10"}, {"bit_depth", 10}, {"chroma", "4:2:0"},
+            {"range", "limited"}, {"matrix", "bt709"}, {"primaries", "bt709"},
+            {"transfer", "srgb"}, {"rgb_identity", false}};
+}
+
+bool parseFixedCapture(const QJsonObject& object, NvOutputTopology& result)
+{
+    if (object.size() != 4 || object.value("schema_version") != QJsonValue(NvOutputTopology::ProtocolVersion) ||
+            object.value("feature_flags") != QJsonValue(NvOutputTopology::FixedCaptureFlags) ||
+            !object.value("capture").isObject()) return false;
+    const QString generation = object.value("generation").toString();
+    if (QUuid(generation).isNull() || QUuid(generation).toString(QUuid::WithoutBraces) != generation) return false;
+    const auto capture = object.value("capture").toObject();
+    const QString id = capture.value("id").toString();
+    if (capture.size() != 5 || id.isEmpty() || id.size() > 128 || !capture.value("logical_bounds").isObject() ||
+            capture.value("encoding_profile") != QJsonValue(applePreviewProfile())) return false;
+    auto dimension = [&capture](const char* key) {
+        const QJsonValue value = capture.value(key);
+        if (!value.isDouble()) return 0;
+        const double number = value.toDouble();
+        if (!std::isfinite(number) || number < 2 || number > 8192 || std::floor(number) != number) return 0;
+        const int integer = static_cast<int>(number);
+        return integer % 2 == 0 ? integer : 0;
+    };
+    const int width = dimension("width"), height = dimension("height");
+    if (!width || !height) return false;
+    const auto bounds = capture.value("logical_bounds").toObject();
+    if (bounds.size() != 4) return false;
+    for (const char* key : {"x", "y", "width", "height"}) {
+        const auto value = bounds.value(key);
+        if (!value.isDouble() || !std::isfinite(value.toDouble()) || std::abs(value.toDouble()) > 65536) return false;
+    }
+    const QRectF logical(bounds.value("x").toDouble(), bounds.value("y").toDouble(),
+                         bounds.value("width").toDouble(), bounds.value("height").toDouble());
+    if (logical.width() <= 0 || logical.height() <= 0) return false;
+    NvOutputTopology parsed;
+    parsed.schemaVersion = NvOutputTopology::ProtocolVersion;
+    parsed.featureFlags = NvOutputTopology::FixedCaptureFlags;
+    parsed.generation = generation;
+    parsed.desktopWidth = width;
+    parsed.desktopHeight = height;
+    parsed.layoutKind = parsed.startupLayoutKind = QStringLiteral("fixed");
+    parsed.allowedLayoutKinds = {QStringLiteral("fixed")};
+    parsed.captureLogicalBounds = logical;
+    NvOutput output;
+    output.id = id;
+    output.name = QStringLiteral("Current capture display");
+    output.primary = true;
+    output.width = output.sourceWidth = width;
+    output.height = output.sourceHeight = height;
+    parsed.outputs.append(output);
+    result = parsed;
+    return true;
+}
+
 bool requireInteger(const QJsonObject& object, const char* name, int& value)
 {
     const QJsonValue field = object.value(name);
@@ -78,6 +139,12 @@ QSize NvOutputTopology::virtualCanvasSize(const QString& hostLayout,
 bool NvOutputTopology::fromJson(const QJsonObject& object,
                                 NvOutputTopology& topology, QString* error)
 {
+    if (object.contains("capture") ||
+            (object.value("feature_flags").toInt() & FixedCaptureFeature)) {
+        const bool valid = parseFixedCapture(object, topology);
+        if (!valid && error) *error = QStringLiteral("Unsupported or malformed fixed capture description");
+        return valid;
+    }
     NvOutputTopology parsed;
     if (!requireInteger(object, "schema_version", parsed.schemaVersion) ||
             parsed.schemaVersion != ProtocolVersion ||
@@ -255,6 +322,14 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
 
 QJsonObject NvOutputTopology::toJson() const
 {
+    if (featureFlags == FixedCaptureFlags && outputs.size() == 1) {
+        return {{"schema_version", schemaVersion}, {"feature_flags", featureFlags},
+                {"generation", generation}, {"capture", QJsonObject {
+                    {"id", outputs.first().id}, {"width", desktopWidth}, {"height", desktopHeight},
+                    {"logical_bounds", QJsonObject {{"x", captureLogicalBounds.x()}, {"y", captureLogicalBounds.y()},
+                        {"width", captureLogicalBounds.width()}, {"height", captureLogicalBounds.height()}}},
+                    {"encoding_profile", applePreviewProfile()}}}};
+    }
     QJsonArray serializedOutputs;
     for (const NvOutput& output : outputs) {
         serializedOutputs.append(QJsonObject {
@@ -303,6 +378,7 @@ bool NvOutputTopology::contains(QString outputId) const
 
 bool NvOutputTopology::displayPolicyKnown() const
 {
+    if (schemaVersion == ProtocolVersion && featureFlags == FixedCaptureFlags) return true;
     return schemaVersion == ProtocolVersion &&
             validLayoutKind(layoutKind) && validLayoutKind(startupLayoutKind) &&
             !allowedLayoutKinds.isEmpty();
@@ -310,6 +386,7 @@ bool NvOutputTopology::displayPolicyKnown() const
 
 bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
 {
+    if (featureFlags == FixedCaptureFlags) return layout == QStringLiteral("fixed");
     if (!displayPolicyKnown()) {
         return true;
     }

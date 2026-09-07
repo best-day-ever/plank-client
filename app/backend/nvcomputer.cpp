@@ -139,7 +139,8 @@ NvComputer::NvComputer(QSettings& settings)
     if (this->plankHostLayout != NvOutputTopology::MatchClientHostLayout &&
             this->plankHostLayout != NvOutputTopology::PhysicalHostLayout &&
             this->plankHostLayout != NvOutputTopology::SingleHostLayout &&
-            this->plankHostLayout != NvOutputTopology::DualHorizontalHostLayout) {
+            this->plankHostLayout != NvOutputTopology::DualHorizontalHostLayout &&
+            this->plankHostLayout != QStringLiteral("fixed")) {
         this->plankHostLayout = NvOutputTopology::MatchClientHostLayout;
     }
     this->plankVirtualMode1 =
@@ -156,16 +157,25 @@ NvComputer::NvComputer(QSettings& settings)
             static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444),
             settings.value(SER_VIDEOPROFILE,
                            static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444)).toInt(),
-            static_cast<int>(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444));
+            static_cast<int>(StreamingPreferences::PLANK_PROFILE_COUNT) - 1);
     this->plankCaptureSource = qBound(
             static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT),
             settings.value(SER_CAPTURESOURCE,
                            static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT)).toInt(),
-            static_cast<int>(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10));
+            static_cast<int>(StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT));
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
                 this->plankVideoProfile,
                 this->plankCaptureSource)) {
-        this->plankVideoProfile = StreamingPreferences::PLANK_PROFILE_H264_10BIT_444;
+        if (this->plankCaptureSource != StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+                this->plankVideoProfile != StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+            this->plankVideoProfile = StreamingPreferences::PLANK_PROFILE_H264_10BIT_444;
+        }
+    }
+    if (this->plankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        this->plankHostLayout = QStringLiteral("fixed");
+    }
+    else if (this->plankHostLayout == QStringLiteral("fixed")) {
+        this->plankHostLayout = NvOutputTopology::MatchClientHostLayout;
     }
     if (!StreamingPreferences::plankProfileBitratesFromVariantList(
                 settings.value(SER_PLANK_PROFILE_BITRATES).toList(),

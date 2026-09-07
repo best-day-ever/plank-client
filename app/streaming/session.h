@@ -291,7 +291,6 @@ private:
         Hardware
     };
 
-    static
     DecoderAvailability getDecoderAvailability(SDL_Window* window,
                                                int videoFormat, int width, int height, int frameRate,
                                                bool enableIdentityGbr = false);
@@ -308,6 +307,8 @@ private:
                            DecoderEncoderBackend::SoftwareCuda);
 
     bool isIdentityGbrEnabledForFormat(int videoFormat) const;
+    DecoderCaptureSource decoderCaptureSource() const;
+    DecoderEncoderBackend decoderEncoderBackend() const;
 
     static
     void clStageStarting(int stage);
