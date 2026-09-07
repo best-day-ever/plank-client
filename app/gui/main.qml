@@ -386,7 +386,8 @@ ApplicationWindow {
         }
 
         function currentVideoProfile() {
-            if (addEncodingProfile.currentIndex >= 0) {
+            if (addEncodingProfile.currentIndex >= 0 &&
+                    addEncodingProfile.currentIndex < addEncodingProfile.model.count) {
                 return addEncodingProfile.model.get(
                             addEncodingProfile.currentIndex).val
             }
@@ -394,7 +395,10 @@ ApplicationWindow {
         }
 
         function applyProfileBitrate() {
-            addBitrateSlider.value = profileBitratesKbps[currentVideoProfile()]
+            var profile = currentVideoProfile()
+            var saved = profileBitratesKbps[profile]
+            addBitrateSlider.value = saved === undefined ?
+                        StreamingPreferences.plankDefaultBitrateKbps(profile) : saved
         }
 
         function rememberProfileBitrate() {
@@ -548,6 +552,7 @@ ApplicationWindow {
                     }
                 }
                 onCurrentIndexChanged: {
+                    if (currentIndex === 2) addHostLayout.currentIndex = 0
                     if (currentIndex === 1 || currentIndex === 2) {
                         addEncodingProfile.currentIndex = 0
                     } else {

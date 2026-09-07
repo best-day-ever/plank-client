@@ -1620,6 +1620,11 @@ bool Session::initialize()
     case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
         selectedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
         break;
+    default:
+        emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));
+        SDL_DestroyWindow(testWindow);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        return false;
     }
     if (!(selectedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ||
             isIdentityGbrEnabledForFormat(selectedVideoFormat)) {
@@ -2581,6 +2586,9 @@ bool Session::startConnectionAsync(bool reconnecting,
         case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
             encodingMode = QStringLiteral("hevc-10-420-videotoolbox");
             break;
+        default:
+            emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));
+            return false;
         }
         const auto startApp = [&]() {
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",

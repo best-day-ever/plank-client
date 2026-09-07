@@ -418,7 +418,8 @@ CenteredGridView {
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         function currentVideoProfile() {
-            if (editEncodingProfile.currentIndex >= 0) {
+            if (editEncodingProfile.currentIndex >= 0 &&
+                    editEncodingProfile.currentIndex < editEncodingProfile.model.count) {
                 return editEncodingProfile.model.get(
                             editEncodingProfile.currentIndex).val
             }
@@ -426,7 +427,10 @@ CenteredGridView {
         }
 
         function applyProfileBitrate() {
-            editBitrateSlider.value = profileBitratesKbps[currentVideoProfile()]
+            var profile = currentVideoProfile()
+            var saved = profileBitratesKbps[profile]
+            editBitrateSlider.value = saved === undefined ?
+                        StreamingPreferences.plankDefaultBitrateKbps(profile) : saved
         }
 
         function rememberProfileBitrate() {
@@ -564,6 +568,7 @@ CenteredGridView {
                     }
                 }
                 onCurrentIndexChanged: {
+                    if (currentIndex === 2) editHostLayout.currentIndex = 0
                     if (currentIndex === 1 || currentIndex === 2) {
                         editEncodingProfile.currentIndex = 0
                     } else {
