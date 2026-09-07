@@ -1022,6 +1022,8 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
 
     PLANK_NATIVE_SESSION_CONFIGURATION nativeConfiguration {};
     nativeConfiguration.structSize = sizeof(nativeConfiguration);
+    nativeConfiguration.serviceFlags = PLANK_NATIVE_SERVICE_AUDIO |
+            PLANK_NATIVE_SERVICE_INPUT | PLANK_NATIVE_SERVICE_LOCAL_CURSOR;
     nativeConfiguration.negotiatedVideoFormat = responseVideoFormat;
     nativeConfiguration.hostFeatureFlags =
             static_cast<unsigned int>(hostFeatureFlags);
