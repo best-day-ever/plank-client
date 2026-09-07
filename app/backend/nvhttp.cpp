@@ -647,14 +647,16 @@ QString NvHTTP::authenticate(QString username, QString password, bool* greeterCo
     throw GfeHttpResponseException(400, "PAM conversation exceeded the round limit");
 }
 
-NvOutputTopology NvHTTP::getOutputTopology()
+NvOutputTopology NvHTTP::getOutputTopology(QString* certificateSha256)
 {
+    if (certificateSha256 != nullptr) certificateSha256->clear();
     if (m_SessionToken.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK topology state");
     }
-    const QString response = openConnectionToString(
+    QScopedPointer<QNetworkReply> reply(openConnection(
                 m_BaseUrlHttps, "plank/topology", nullptr,
-                REQUEST_TIMEOUT_MS, NvLogLevel::NVLL_VERBOSE);
+                REQUEST_TIMEOUT_MS, NvLogLevel::NVLL_VERBOSE));
+    const QString response = QString::fromUtf8(reply->readAll());
     const QJsonDocument document = QJsonDocument::fromJson(response.toUtf8());
     if (!document.isObject() && response.trimmed().startsWith(QLatin1Char('<'))) {
         // GameStream authorization failures use an XML status envelope even
@@ -672,7 +674,109 @@ NvOutputTopology NvHTTP::getOutputTopology()
                                        error.isEmpty() ?
                                            "Malformed PLANK topology response" : error);
     }
+    if (certificateSha256 != nullptr) {
+        *certificateSha256 = QString::fromLatin1(reply->sslConfiguration()
+                .peerCertificate().digest(QCryptographicHash::Sha256).toHex());
+    }
     return topology;
+}
+
+MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology,
+                                              const QString& certificateSha256,
+                                              int bitrateKbps, int udpPayloadSize)
+{
+    const auto body = MacPreviewLaunch::request(topology, bitrateKbps, udpPayloadSize);
+    const QByteArray pin = QByteArray::fromHex(certificateSha256.toLatin1());
+    if (body.isEmpty() || pin.size() != 32 ||
+            QString::fromLatin1(pin.toHex()) != certificateSha256 ||
+            m_SessionToken.isEmpty() || m_SessionToken.size() > 512 ||
+            m_BaseUrlHttps.scheme() != QLatin1String("https") ||
+            !m_BaseUrlHttps.userInfo().isEmpty() || m_BaseUrlHttps.port(0) == 0) {
+        throw GfeHttpResponseException(400, "Invalid Mac preview launch state");
+    }
+    for (const QChar character : m_SessionToken) {
+        if (character.unicode() < 33 || character.unicode() > 126) {
+            throw GfeHttpResponseException(400, "Invalid Mac preview authorization");
+        }
+    }
+
+    // One-shot launch: even an ambiguous timeout must require fresh auth.
+    SecureStringGuard tokenGuard(m_SessionToken);
+    QUrl url(m_BaseUrlHttps);
+    url.setPath(QStringLiteral("/plank/launch"));
+    url.setQuery(QString());
+    url.setFragment(QString());
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toLatin1());
+    request.setSslConfiguration(plankSslConfiguration());
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+
+    // A fresh manager guarantees the TLS encrypted signal before sending data;
+    // reused connections are not guaranteed to emit it. Never send the bearer
+    // token to a replacement certificate merely because it has PLANK's shape.
+    QNetworkAccessManager manager;
+    manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    bool certificateChecked = false;
+    auto matchesPin = [&pin](QNetworkReply* reply) {
+        const auto ssl = reply->sslConfiguration();
+        return isPlankCertificate(ssl.peerCertificate()) &&
+                ssl.sessionProtocol() == QSsl::TlsV1_3 &&
+                ssl.peerCertificate().digest(QCryptographicHash::Sha256) == pin;
+    };
+    connect(&manager, &QNetworkAccessManager::sslErrors, &manager,
+            [this, &pin](QNetworkReply* reply, const QList<QSslError>& errors) {
+        if (reply->sslConfiguration().peerCertificate().digest(QCryptographicHash::Sha256) == pin) {
+            handleSslErrors(reply, errors);
+        }
+    });
+    connect(&manager, &QNetworkAccessManager::encrypted, &manager, [&](QNetworkReply* reply) {
+        certificateChecked = matchesPin(reply);
+        if (!certificateChecked) reply->abort();
+    });
+    QScopedPointer<QNetworkReply> reply(manager.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
+    constexpr qint64 MaximumReplyBytes = 32768;
+    reply->setReadBufferSize(MaximumReplyBytes + 1);
+    QByteArray response;
+    bool oversized = false;
+    auto drain = [&]() {
+        response += reply->read(MaximumReplyBytes + 1 - response.size());
+        if (response.size() > MaximumReplyBytes) {
+            oversized = true;
+            reply->abort();
+        }
+    };
+    QEventLoop loop;
+    connect(reply.data(), &QNetworkReply::readyRead, &loop, drain);
+    connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
+    QTimer::singleShot(REQUEST_TIMEOUT_MS, &loop, &QEventLoop::quit);
+    if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!reply->isFinished()) reply->abort();
+    if (!oversized) drain();
+    if (!certificateChecked || !matchesPin(reply.data())) {
+        throw GfeHttpResponseException(401, "Mac preview TLS certificate changed or was rejected");
+    }
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (oversized) throw GfeHttpResponseException(400, "Mac preview response exceeded its size limit");
+    if (status != 200 && status != 0) {
+        // Do not expose arbitrary server text, redirect URLs, or response tokens.
+        throw GfeHttpResponseException(status, "Mac preview launch was not accepted");
+    }
+    if (reply->error() != QNetworkReply::NoError) {
+        throw QtNetworkReplyException(reply->error(), "Mac preview launch failed or timed out");
+    }
+    QJsonParseError parseError {};
+    const auto document = QJsonDocument::fromJson(response, &parseError);
+    response.fill('\0');
+    MacPreviewLaunch::Reply parsed;
+    if (parseError.error != QJsonParseError::NoError || !document.isObject() ||
+            !MacPreviewLaunch::parseReply(document.object(), topology,
+                                          controlPort(), udpPayloadSize, parsed)) {
+        throw GfeHttpResponseException(400, "Invalid Mac preview launch response");
+    }
+    return parsed;
 }
 
 QNetworkReply*

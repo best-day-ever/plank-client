@@ -3,6 +3,7 @@
 #include "nvapp.h"
 #include "nvaddress.h"
 #include "outputtopology.h"
+#include "macpreviewlaunch.h"
 
 #include <Limelight.h>
 
@@ -149,7 +150,10 @@ public:
     QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
-    NvOutputTopology getOutputTopology();
+    NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
+    MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
+                                           const QString& certificateSha256,
+                                           int bitrateKbps, int udpPayloadSize);
 
     NvAddress address();
 
