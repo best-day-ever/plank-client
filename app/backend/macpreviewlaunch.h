@@ -52,6 +52,8 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     reply.transportToken = encoded;
     reply.configuration.structSize = sizeof(reply.configuration);
     reply.configuration.negotiatedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
+    // Schema 1 explicitly supports PLD1 bitrate updates/acknowledgements.
+    reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
     // Audio/input/local-cursor remain explicitly absent. No fake Opus values.
     return true;
