@@ -1131,9 +1131,11 @@ void Session::startPlankTransportMediaReceivers()
     m_PlankTransportVideoThread = std::thread([this]() {
         plankTransportVideoReceiveLoop();
     });
-    m_PlankTransportAudioThread = std::thread([this]() {
-        plankTransportAudioReceiveLoop();
-    });
+    if (LiGetPlankNativeServiceFlags() & PLANK_NATIVE_SERVICE_AUDIO) {
+        m_PlankTransportAudioThread = std::thread([this]() {
+            plankTransportAudioReceiveLoop();
+        });
+    }
     m_PlankTransportDataThread = std::thread([this]() {
         plankTransportDataReceiveLoop();
     });
