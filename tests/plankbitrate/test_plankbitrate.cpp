@@ -133,7 +133,12 @@ void TestPlankBitrate::isolatesAppleProfile()
     QVERIFY(!P::isPlankProfileValidForCaptureSource(P::PLANK_PROFILE_APPLE_HEVC_10BIT_420, P::PLANK_CAPTURE_X11_NATIVE10));
     QVERIFY(!P::isPlankProfileValidForCaptureSource(P::PLANK_PROFILE_COUNT, P::PLANK_CAPTURE_SCREENCAPTUREKIT));
     QVERIFY(!P::isPlankProfileValidForCaptureSource(-1, P::PLANK_CAPTURE_SCREENCAPTUREKIT));
-    QVERIFY(!P::isPlankVirtualModeValidForProfile(QStringLiteral("3840x2160"), P::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+    for (const auto& mode : {"1920x1080", "2560x1600", "3840x2160", "4096x2160", "5120x2160"}) {
+        QVERIFY(P::isPlankVirtualModeValidForProfile(QString::fromLatin1(mode), P::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+    }
+    for (const auto& mode : {"5121x2160", "5120x2161", "7680x4320", "invalid"}) {
+        QVERIFY(!P::isPlankVirtualModeValidForProfile(QString::fromLatin1(mode), P::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+    }
     QCOMPARE(P::plankDefaultBitrateForProfile(P::PLANK_PROFILE_APPLE_HEVC_10BIT_420), P::PlankHevcDefaultBitrateKbps);
 }
 

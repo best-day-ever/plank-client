@@ -472,10 +472,10 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
             hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
+            editCaptureSource.currentIndex = originalCaptureSource
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
-            editCaptureSource.currentIndex = originalCaptureSource
             for (var i = 0; i < editEncodingProfile.model.count; i++) {
                 if (editEncodingProfile.model.get(i).val === originalProfile) {
                     editEncodingProfile.currentIndex = i

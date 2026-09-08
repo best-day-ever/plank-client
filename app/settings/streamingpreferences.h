@@ -101,7 +101,7 @@ public:
         }
 
         if (profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
-            return false;
+            return width <= 5120 && height <= 2160 && width % 2 == 0 && height % 2 == 0;
         }
         return !isPlankH264NvencProfile(profile) ||
                (width <= 4096 && height <= 2160);
