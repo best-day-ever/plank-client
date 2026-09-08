@@ -60,6 +60,23 @@ QSslConfiguration plankSslConfiguration()
     configuration.setProtocol(QSsl::TlsV1_3OrLater);
     return configuration;
 }
+
+// Qt can clear the live socket's negotiated TLS details when a close-delimited
+// HTTP response finishes. Preserve the completed handshake on that reply, not
+// globally on the manager (which may connect to another certificate later).
+QMetaObject::Connection rememberPlankTls(QNetworkAccessManager* manager, QObject* context)
+{
+    return QObject::connect(manager, &QNetworkAccessManager::encrypted, context,
+                            [](QNetworkReply* reply) {
+        reply->setProperty("plankNegotiatedTls", QVariant::fromValue(reply->sslConfiguration()));
+    });
+}
+
+QSslConfiguration negotiatedPlankTls(QNetworkReply* reply)
+{
+    const QVariant saved = reply->property("plankNegotiatedTls");
+    return saved.isValid() ? saved.value<QSslConfiguration>() : reply->sslConfiguration();
+}
 }
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -545,6 +562,7 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
     const auto sslErrorsConnection = connect(
         m_Nam, &QNetworkAccessManager::sslErrors,
         this, &NvHTTP::handleSslErrors);
+    const auto encryptedConnection = rememberPlankTls(m_Nam, this);
     QNetworkReply* reply = m_Nam->post(
         request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     QEventLoop loop;
@@ -558,12 +576,13 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
     }
     m_Nam->clearAccessCache();
     disconnect(sslErrorsConnection);
+    disconnect(encryptedConnection);
     if (reply->error() != QNetworkReply::NoError) {
         const QString message = reply->errorString();
         delete reply;
         throw QtNetworkReplyException(QNetworkReply::UnknownNetworkError, message);
     }
-    const QSslConfiguration negotiatedSsl = reply->sslConfiguration();
+    const QSslConfiguration negotiatedSsl = negotiatedPlankTls(reply);
     if (!isPlankCertificate(negotiatedSsl.peerCertificate()) ||
             negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
         delete reply;
@@ -676,7 +695,7 @@ NvOutputTopology NvHTTP::getOutputTopology(QString* certificateSha256)
                                            "Malformed PLANK topology response" : error);
     }
     if (certificateSha256 != nullptr) {
-        *certificateSha256 = QString::fromLatin1(reply->sslConfiguration()
+        *certificateSha256 = QString::fromLatin1(negotiatedPlankTls(reply.data())
                 .peerCertificate().digest(QCryptographicHash::Sha256).toHex());
     }
     return topology;
@@ -719,9 +738,10 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
     // token to a replacement certificate merely because it has PLANK's shape.
     QNetworkAccessManager manager;
     manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    rememberPlankTls(&manager, &manager);
     bool certificateChecked = false;
     auto matchesPin = [&pin](QNetworkReply* reply) {
-        const auto ssl = reply->sslConfiguration();
+        const auto ssl = negotiatedPlankTls(reply);
         return isPlankCertificate(ssl.peerCertificate()) &&
                 ssl.sessionProtocol() == QSsl::TlsV1_3 &&
                 ssl.peerCertificate().digest(QCryptographicHash::Sha256) == pin;
@@ -821,6 +841,7 @@ NvHTTP::openConnection(QUrl baseUrl,
 #endif
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
+    const auto encryptedConnection = rememberPlankTls(m_Nam, this);
     QNetworkReply* reply = m_Nam->get(request);
 
     // Run the request with a timeout if requested
@@ -850,6 +871,8 @@ NvHTTP::openConnection(QUrl baseUrl,
 #endif
     disconnect(sslErrorsConnection);
 
+    disconnect(encryptedConnection);
+
     // Handle error
     if (reply->error() != QNetworkReply::NoError)
     {
@@ -876,9 +899,9 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     const bool plankTls = baseUrl.scheme() == "https";
     const bool approvedCertificate = !plankTls ||
-            isPlankCertificate(reply->sslConfiguration().peerCertificate());
+            isPlankCertificate(negotiatedPlankTls(reply).peerCertificate());
     const bool approvedProtocol = !plankTls ||
-            reply->sslConfiguration().sessionProtocol() == QSsl::TlsV1_3;
+            negotiatedPlankTls(reply).sessionProtocol() == QSsl::TlsV1_3;
     if (!approvedCertificate || !approvedProtocol) {
         qWarning() << "Rejecting PLANK TLS session"
                    << "certificate" << approvedCertificate
