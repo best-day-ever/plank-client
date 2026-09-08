@@ -30,9 +30,9 @@ int main()
     CHECK(!plankAppleVideoFrameMatches(nullptr, context->profile));
     CHECK(!plankAppleVideoFrameMatches(frame, AV_PROFILE_HEVC_MAIN));
     CHECK(!plankAppleVideoFrameMatches(frame, AV_PROFILE_HEVC_REXT));
-    frame->color_range = AVCOL_RANGE_JPEG;
-    CHECK(!plankAppleVideoFrameMatches(frame, context->profile));
     frame->color_range = AVCOL_RANGE_MPEG;
+    CHECK(!plankAppleVideoFrameMatches(frame, context->profile));
+    frame->color_range = AVCOL_RANGE_JPEG;
     frame->colorspace = AVCOL_SPC_SMPTE170M;
     CHECK(!plankAppleVideoFrameMatches(frame, context->profile));
     frame->colorspace = AVCOL_SPC_BT709;

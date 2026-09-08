@@ -790,7 +790,7 @@ bool FFmpegVideoDecoder::validateDecodedProfileFrame(const AVFrame* frame,
              !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile))) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Exact Apple profile validation failed: requires Main10 4:2:0, "
-                    "limited BT.709 matrix/primaries and sRGB transfer");
+                    "full-range BT.709 matrix/primaries and sRGB transfer");
         return false;
     }
     AVPixelFormat storageFormat = static_cast<AVPixelFormat>(frame->format);
@@ -994,7 +994,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
             const char* identityMapping = m_IdentityGbrEnabled ? " RGB identity" : "";
             const char* encoderBackend =
                     m_EncoderBackend == DecoderEncoderBackend::VideoToolbox ?
-                        "Apple VideoToolbox, limited BT.709/sRGB" :
+                        "Apple VideoToolbox, full-range BT.709/sRGB" :
                     m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
                         "NVENC" : "x264";
             ret = snprintf(&output[offset],

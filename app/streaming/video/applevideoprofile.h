@@ -14,7 +14,7 @@ inline bool plankAppleVideoFrameMatches(const AVFrame* frame, int codecProfile)
             frame->width <= 0 || frame->height <= 0 ||
             frame->width > 8192 || frame->height > 8192 ||
             (frame->width & 1) || (frame->height & 1) ||
-            frame->color_range != AVCOL_RANGE_MPEG ||
+            frame->color_range != AVCOL_RANGE_JPEG ||
             frame->colorspace != AVCOL_SPC_BT709 ||
             frame->color_primaries != AVCOL_PRI_BT709 ||
             frame->color_trc != AVCOL_TRC_IEC61966_2_1) {

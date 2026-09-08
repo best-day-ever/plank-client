@@ -29,7 +29,7 @@ QJsonObject applePreviewProfile()
     return {{"capture_source", "screencapturekit"}, {"encoder_backend", "videotoolbox"},
             {"encoding_mode", "hevc-10-420-videotoolbox"}, {"codec", "hevc"},
             {"profile", "main10"}, {"bit_depth", 10}, {"chroma", "4:2:0"},
-            {"range", "limited"}, {"matrix", "bt709"}, {"primaries", "bt709"},
+            {"range", "full"}, {"matrix", "bt709"}, {"primaries", "bt709"},
             {"transfer", "srgb"}, {"rgb_identity", false}};
 }
 
