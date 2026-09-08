@@ -659,7 +659,11 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             }
             break;
         case VIDEO_FORMAT_H265_REXT10_444:
-            if (params->enableIdentityGbr) {
+            if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit) {
+                m_Pkt->data = (uint8_t*)k_AppleHEVCRext10TestFrame;
+                m_Pkt->size = k_AppleHEVCRext10TestFrameSize;
+            }
+            else if (params->enableIdentityGbr) {
                 m_Pkt->data = (uint8_t*)k_HEVCRExt10_444IdentityGbrTestFrame;
                 m_Pkt->size = sizeof(k_HEVCRExt10_444IdentityGbrTestFrame);
             }
@@ -786,11 +790,11 @@ bool FFmpegVideoDecoder::validateDecodedProfileFrame(const AVFrame* frame,
 {
     if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit &&
             (params->encoderBackend != DecoderEncoderBackend::VideoToolbox ||
-             params->videoFormat != VIDEO_FORMAT_H265_MAIN10 ||
+             (params->videoFormat != VIDEO_FORMAT_H265_MAIN10 && params->videoFormat != VIDEO_FORMAT_H265_REXT10_444) ||
              params->enableIdentityGbr ||
-             !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile))) {
+             !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile, params->videoFormat == VIDEO_FORMAT_H265_REXT10_444))) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Exact Apple profile validation failed: requires Main10 4:2:0, "
+                    "Exact Apple profile validation failed: requires selected 10-bit chroma/profile, "
                     "full-range BT.709 matrix/primaries and sRGB transfer");
         return false;
     }
@@ -1911,9 +1915,9 @@ void FFmpegVideoDecoder::decoderThreadProc()
                 err = avcodec_receive_frame(m_VideoDecoderCtx, frame);
                 if (err == 0) {
                     if (m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit &&
-                            !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile)) {
+                            !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile, m_VideoFormat == VIDEO_FORMAT_H265_REXT10_444)) {
                         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                                     "Mac stream changed its negotiated Main10/color format; disconnecting");
+                                     "Mac stream changed its negotiated profile/chroma/color format; disconnecting");
                         SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
                         SDL_Event event{};
                         event.type = SDL_EVENT_QUIT;

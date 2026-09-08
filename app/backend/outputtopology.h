@@ -58,9 +58,10 @@ struct NvOutputTopology
     // mask: parsing this does not grant input, layout changes or media launch.
     static const int FixedCaptureFeature = 0x80000;
     static const int MacDesktopPreparationFeature = 0x100000;
+    static const int MacEncodingProfileFeature = 0x200000;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
-            MacDesktopPreparationFeature;
+            MacDesktopPreparationFeature | MacEncodingProfileFeature;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -123,4 +124,5 @@ struct NvOutputTopology
     QStringList virtualModes;
     QVector<NvOutput> outputs;
     QRectF captureLogicalBounds;
+    QString appleEncodingMode = QStringLiteral("hevc-10-420-videotoolbox");
 };

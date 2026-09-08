@@ -707,15 +707,17 @@ private:
             bool topologySupported;
             bool macDesktop;
             QString desktopMode;
+            QString appleEncodingMode;
             {
                 QReadLocker lock(&m_Computer->lock);
                 topologySupported = NvOutputTopology::supportsDescription(
                             m_Computer->plankTopologyVersion, m_Computer->plankFeatureFlags);
                 macDesktop = m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags;
                 desktopMode = m_Computer->plankVirtualMode1;
+                appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(m_Computer->plankVideoProfile);
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode) : http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(

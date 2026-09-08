@@ -426,6 +426,7 @@ bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
 
 bool Session::isIdentityGbrEnabledForFormat(int videoFormat) const
 {
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) return false;
     return (videoFormat == VIDEO_FORMAT_H264_HIGH8_444 ||
             videoFormat == VIDEO_FORMAT_H264_HIGH10_444 ||
             videoFormat == VIDEO_FORMAT_H265_REXT8_444 ||
@@ -593,7 +594,7 @@ DecoderCaptureSource Session::decoderCaptureSource() const
 
 DecoderEncoderBackend Session::decoderEncoderBackend() const
 {
-    if (m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+    if (StreamingPreferences::isPlankAppleProfile(m_PlankVideoProfile)) {
         return DecoderEncoderBackend::VideoToolbox;
     }
     return StreamingPreferences::isPlankNvencProfile(m_PlankVideoProfile) ?
@@ -1631,6 +1632,9 @@ bool Session::initialize()
     case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
         selectedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
         break;
+    case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444:
+        selectedVideoFormat = VIDEO_FORMAT_H265_REXT10_444;
+        break;
     default:
         emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));
         SDL_DestroyWindow(testWindow);
@@ -1638,7 +1642,8 @@ bool Session::initialize()
         return false;
     }
     if (!(selectedVideoFormat & VIDEO_FORMAT_MASK_YUV444) ||
-            isIdentityGbrEnabledForFormat(selectedVideoFormat)) {
+            isIdentityGbrEnabledForFormat(selectedVideoFormat) ||
+            StreamingPreferences::isPlankAppleProfile(m_PlankVideoProfile)) {
         m_SupportedVideoFormats.append(selectedVideoFormat);
     }
 
@@ -2576,7 +2581,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
                     QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
         const QString encoderBackend =
-                m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420 ?
+                StreamingPreferences::isPlankAppleProfile(m_PlankVideoProfile) ?
                     QStringLiteral("videotoolbox") :
                 StreamingPreferences::isPlankNvencProfile(
                     m_PlankVideoProfile) ?
@@ -2606,6 +2611,9 @@ bool Session::startConnectionAsync(bool reconnecting,
             break;
         case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
             encodingMode = QStringLiteral("hevc-10-420-videotoolbox");
+            break;
+        case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444:
+            encodingMode = QStringLiteral("hevc-10-444-videotoolbox");
             break;
         default:
             emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));
@@ -3128,7 +3136,8 @@ bool Session::runPlankReconnect()
                 desktopMode = m_Computer->plankVirtualMode1;
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode) : http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode,
+                    StreamingPreferences::plankAppleEncodingMode(m_PlankVideoProfile)) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             {

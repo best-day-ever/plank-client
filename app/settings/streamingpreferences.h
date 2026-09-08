@@ -35,6 +35,7 @@ public:
         PLANK_PROFILE_NVENC_HEVC_8BIT_444,
         PLANK_PROFILE_NVENC_HEVC_10BIT_444,
         PLANK_PROFILE_APPLE_HEVC_10BIT_420,
+        PLANK_PROFILE_APPLE_HEVC_10BIT_444,
         PLANK_PROFILE_COUNT,
     };
     Q_ENUM(PlankVideoProfile)
@@ -46,6 +47,19 @@ public:
         PLANK_CAPTURE_SCREENCAPTUREKIT,
     };
     Q_ENUM(PlankCaptureSource)
+
+    static bool isPlankAppleProfile(int profile)
+    {
+        return profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420 ||
+               profile == PLANK_PROFILE_APPLE_HEVC_10BIT_444;
+    }
+
+    static QString plankAppleEncodingMode(int profile)
+    {
+        if (profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420) return QStringLiteral("hevc-10-420-videotoolbox");
+        if (profile == PLANK_PROFILE_APPLE_HEVC_10BIT_444) return QStringLiteral("hevc-10-444-videotoolbox");
+        return {};
+    }
 
     static bool isPlankVideoProfileValid(int profile)
     {
@@ -63,9 +77,9 @@ public:
         }
 
         if (captureSource == PLANK_CAPTURE_SCREENCAPTUREKIT ||
-                profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+                isPlankAppleProfile(profile)) {
             return captureSource == PLANK_CAPTURE_SCREENCAPTUREKIT &&
-                   profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420;
+                   isPlankAppleProfile(profile);
         }
 
         if (captureSource == PLANK_CAPTURE_X11_NATIVE10) {
@@ -100,7 +114,7 @@ public:
             return false;
         }
 
-        if (profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+        if (isPlankAppleProfile(profile)) {
             return width <= 5120 && height <= 2160 && width % 2 == 0 && height % 2 == 0;
         }
         return !isPlankH264NvencProfile(profile) ||
@@ -117,7 +131,7 @@ public:
     {
         return profile == PLANK_PROFILE_NVENC_HEVC_8BIT_444 ||
                profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444 ||
-               profile == PLANK_PROFILE_APPLE_HEVC_10BIT_420 ?
+               isPlankAppleProfile(profile) ?
                    PlankHevcDefaultBitrateKbps :
                    PlankH264DefaultBitrateKbps;
     }

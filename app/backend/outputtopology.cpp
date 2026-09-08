@@ -24,11 +24,13 @@ bool NvOutputTopology::supportsDescription(int version, int featureFlags)
 }
 
 namespace {
-QJsonObject applePreviewProfile()
+QJsonObject applePreviewProfile(const QString& mode)
 {
+    const bool fullChroma = mode == QLatin1String("hevc-10-444-videotoolbox");
+    if (!fullChroma && mode != QLatin1String("hevc-10-420-videotoolbox")) return {};
     return {{"capture_source", "screencapturekit"}, {"encoder_backend", "videotoolbox"},
-            {"encoding_mode", "hevc-10-420-videotoolbox"}, {"codec", "hevc"},
-            {"profile", "main10"}, {"bit_depth", 10}, {"chroma", "4:2:0"},
+            {"encoding_mode", mode}, {"codec", "hevc"},
+            {"profile", fullChroma ? "rext" : "main10"}, {"bit_depth", 10}, {"chroma", fullChroma ? "4:4:4" : "4:2:0"},
             {"range", "full"}, {"matrix", "bt709"}, {"primaries", "bt709"},
             {"transfer", "srgb"}, {"rgb_identity", false}};
 }
@@ -42,8 +44,10 @@ bool parseFixedCapture(const QJsonObject& object, NvOutputTopology& result)
     if (QUuid(generation).isNull() || QUuid(generation).toString(QUuid::WithoutBraces) != generation) return false;
     const auto capture = object.value("capture").toObject();
     const QString id = capture.value("id").toString();
+    const QString encodingMode = capture.value("encoding_profile").toObject().value("encoding_mode").toString();
+    const auto profile = applePreviewProfile(encodingMode);
     if (capture.size() != 5 || id.isEmpty() || id.size() > 128 || !capture.value("logical_bounds").isObject() ||
-            capture.value("encoding_profile") != QJsonValue(applePreviewProfile())) return false;
+            profile.isEmpty() || capture.value("encoding_profile") != QJsonValue(profile)) return false;
     auto dimension = [&capture](const char* key) {
         const QJsonValue value = capture.value(key);
         if (!value.isDouble()) return 0;
@@ -72,6 +76,7 @@ bool parseFixedCapture(const QJsonObject& object, NvOutputTopology& result)
     parsed.layoutKind = parsed.startupLayoutKind = QStringLiteral("fixed");
     parsed.allowedLayoutKinds = {QStringLiteral("fixed")};
     parsed.captureLogicalBounds = logical;
+    parsed.appleEncodingMode = encodingMode;
     NvOutput output;
     output.id = id;
     output.name = QStringLiteral("Current capture display");
@@ -337,7 +342,7 @@ QJsonObject NvOutputTopology::toJson() const
                     {"id", outputs.first().id}, {"width", desktopWidth}, {"height", desktopHeight},
                     {"logical_bounds", QJsonObject {{"x", captureLogicalBounds.x()}, {"y", captureLogicalBounds.y()},
                         {"width", captureLogicalBounds.width()}, {"height", captureLogicalBounds.height()}}},
-                    {"encoding_profile", applePreviewProfile()}}}};
+                    {"encoding_profile", applePreviewProfile(appleEncodingMode)}}}};
     }
     QJsonArray serializedOutputs;
     for (const NvOutput& output : outputs) {

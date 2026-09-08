@@ -123,9 +123,10 @@ void TestPlankBitrate::isolatesAppleProfile()
     using P = StreamingPreferences;
     QCOMPARE(int(P::PLANK_PROFILE_NVENC_HEVC_10BIT_444), 6);
     QCOMPARE(int(P::PLANK_PROFILE_APPLE_HEVC_10BIT_420), 7);
+    QCOMPARE(int(P::PLANK_PROFILE_APPLE_HEVC_10BIT_444), 8);
     QCOMPARE(int(P::PLANK_CAPTURE_SCREENCAPTUREKIT), 2);
     for (int profile = 0; profile < P::PLANK_PROFILE_COUNT; ++profile) {
-        const bool apple = profile == P::PLANK_PROFILE_APPLE_HEVC_10BIT_420;
+        const bool apple = P::isPlankAppleProfile(profile);
         QCOMPARE(P::isPlankProfileValidForCaptureSource(profile, P::PLANK_CAPTURE_SCREENCAPTUREKIT), apple);
         QCOMPARE(P::isPlankProfileValidForCaptureSource(profile, P::PLANK_CAPTURE_NVFBC_8BIT), !apple);
     }
@@ -135,11 +136,16 @@ void TestPlankBitrate::isolatesAppleProfile()
     QVERIFY(!P::isPlankProfileValidForCaptureSource(-1, P::PLANK_CAPTURE_SCREENCAPTUREKIT));
     for (const auto& mode : {"1920x1080", "2560x1600", "3840x2160", "4096x2160", "5120x2160"}) {
         QVERIFY(P::isPlankVirtualModeValidForProfile(QString::fromLatin1(mode), P::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+        QVERIFY(P::isPlankVirtualModeValidForProfile(QString::fromLatin1(mode), P::PLANK_PROFILE_APPLE_HEVC_10BIT_444));
     }
     for (const auto& mode : {"5121x2160", "5120x2161", "7680x4320", "invalid"}) {
         QVERIFY(!P::isPlankVirtualModeValidForProfile(QString::fromLatin1(mode), P::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+        QVERIFY(!P::isPlankVirtualModeValidForProfile(QString::fromLatin1(mode), P::PLANK_PROFILE_APPLE_HEVC_10BIT_444));
     }
     QCOMPARE(P::plankDefaultBitrateForProfile(P::PLANK_PROFILE_APPLE_HEVC_10BIT_420), P::PlankHevcDefaultBitrateKbps);
+    QCOMPARE(P::plankDefaultBitrateForProfile(P::PLANK_PROFILE_APPLE_HEVC_10BIT_444), P::PlankHevcDefaultBitrateKbps);
+    QVERIFY(!P::isPlankNvencProfile(P::PLANK_PROFILE_APPLE_HEVC_10BIT_444));
+    QVERIFY(P::plankAppleEncodingMode(P::PLANK_PROFILE_H264_10BIT_444).isEmpty());
 }
 
 void TestPlankBitrate::retainsValuesWhenAProfileIsAdded()

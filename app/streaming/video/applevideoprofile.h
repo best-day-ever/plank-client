@@ -6,11 +6,11 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 }
 
-// The explicit Apple preview contract is Main10 YCbCr, not RGB identity or HDR.
+// Explicit Apple Main10/RExt10 YCbCr contracts, not RGB identity or HDR.
 // Inspect hardware storage without transferring its pixels back to the CPU.
-inline bool plankAppleVideoFrameMatches(const AVFrame* frame, int codecProfile)
+inline bool plankAppleVideoFrameMatches(const AVFrame* frame, int codecProfile, bool fullChroma)
 {
-    if (!frame || codecProfile != AV_PROFILE_HEVC_MAIN_10 ||
+    if (!frame || codecProfile != (fullChroma ? AV_PROFILE_HEVC_REXT : AV_PROFILE_HEVC_MAIN_10) ||
             frame->width <= 0 || frame->height <= 0 ||
             frame->width > 8192 || frame->height > 8192 ||
             (frame->width & 1) || (frame->height & 1) ||
@@ -31,7 +31,7 @@ inline bool plankAppleVideoFrameMatches(const AVFrame* frame, int codecProfile)
     }
     const auto* descriptor = av_pix_fmt_desc_get(format);
     if (!descriptor || descriptor->nb_components != 3 ||
-            descriptor->log2_chroma_w != 1 || descriptor->log2_chroma_h != 1 ||
+            descriptor->log2_chroma_w != (fullChroma ? 0 : 1) || descriptor->log2_chroma_h != (fullChroma ? 0 : 1) ||
             (descriptor->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_HWACCEL))) {
         return false;
     }

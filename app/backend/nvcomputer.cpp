@@ -167,7 +167,7 @@ NvComputer::NvComputer(QSettings& settings)
                 this->plankVideoProfile,
                 this->plankCaptureSource)) {
         if (this->plankCaptureSource != StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
-                this->plankVideoProfile != StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420) {
+                !StreamingPreferences::isPlankAppleProfile(this->plankVideoProfile)) {
             this->plankVideoProfile = StreamingPreferences::PLANK_PROFILE_H264_10BIT_444;
         }
     }

@@ -19,7 +19,7 @@ inline QJsonObject request(const NvOutputTopology& topology, int bitrateKbps,
     return {{"schema_version", 1}, {"capture_generation", checked.generation},
             {"capture_id", checked.outputs.first().id},
             {"width", checked.desktopWidth}, {"height", checked.desktopHeight},
-            {"encoding_mode", "hevc-10-420-videotoolbox"}, {"frame_rate", 60},
+            {"encoding_mode", checked.appleEncodingMode}, {"frame_rate", 60},
             {"bitrate_kbps", bitrateKbps}, {"max_udp_payload_size", udpPayloadSize}};
 }
 
@@ -51,7 +51,8 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     if (!decoded || decoded.decoded.size() != 32 || decoded.decoded.toBase64() != encoded) return false;
     reply.transportToken = encoded;
     reply.configuration.structSize = sizeof(reply.configuration);
-    reply.configuration.negotiatedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
+    reply.configuration.negotiatedVideoFormat = topology.appleEncodingMode == QLatin1String("hevc-10-444-videotoolbox") ?
+                VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_MAIN10;
     // Schema 1 explicitly supports PLD1 bitrate updates/acknowledgements.
     reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
