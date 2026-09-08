@@ -3106,7 +3106,8 @@ bool Session::runPlankReconnect()
                         m_PlankUsername,
                         m_PlankPassword, &greeterConfirmed);
             if (greeterConfirmed &&
-                    (m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature)) {
+                    ((m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature) ||
+                     m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags)) {
                 m_ReconnectGreeterConfirmed.store(true);
             }
 
@@ -3122,7 +3123,7 @@ bool Session::runPlankReconnect()
                 desktopMode = m_Computer->plankVirtualMode1;
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode) : http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode, greeterConfirmed) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             {

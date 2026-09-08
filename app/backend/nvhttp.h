@@ -151,7 +151,7 @@ public:
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
-    NvOutputTopology prepareMacDisplay(const QString& mode);
+    NvOutputTopology prepareMacDisplay(const QString& mode, bool greeter = false);
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
                                            const QString& certificateSha256,
                                            int bitrateKbps, int udpPayloadSize);

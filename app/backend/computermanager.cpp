@@ -701,7 +701,8 @@ private:
                 address = m_Computer->activeAddress;
             }
             NvHTTP http(address);
-            const QString token = http.authenticate(m_Username, m_Password);
+            bool greeter = false;
+            const QString token = http.authenticate(m_Username, m_Password, &greeter);
             NvOutputTopology topology;
             bool topologySupported;
             bool macDesktop;
@@ -714,7 +715,7 @@ private:
                 desktopMode = m_Computer->plankVirtualMode1;
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode) : http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode, greeter) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(

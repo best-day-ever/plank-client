@@ -3,10 +3,16 @@
 #include <QJsonObject>
 #include <QString>
 
-// UI-only evidence from a successful PAM response, not launch authority.
+// Evidence from successful OS authentication, not independent launch authority.
 inline bool plankAuthenticatedGreeter(const QJsonObject& response)
 {
     return response.value(QStringLiteral("state")).toString() == QStringLiteral("authenticated") &&
             !response.value(QStringLiteral("session_token")).toString().isEmpty() &&
             response.value(QStringLiteral("desktop_stage")).toString() == QStringLiteral("greeter");
+}
+
+// The sign-in canvas is temporary. Never rewrite the saved desktop resolution.
+inline QString plankMacSessionMode(const QString& bookmarkMode, bool greeter)
+{
+    return greeter ? QStringLiteral("1920x1080") : bookmarkMode;
 }
