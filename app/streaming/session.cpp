@@ -1,4 +1,5 @@
 #include "session.h"
+#include "streaming/clientframeflowtrace.h"
 #include "backend/hostrecovery.h"
 #include "backend/planknetwork.h"
 #include "settings/streamingpreferences.h"
@@ -1157,6 +1158,7 @@ void Session::stopPlankTransportMediaReceivers()
 
 void Session::plankTransportVideoReceiveLoop()
 {
+    ClientFrameFlowTrace frameFlow("receive");
     constexpr size_t InitialFrameCapacity = 1024 * 1024;
     constexpr size_t MaximumFrameCapacity = 64 * 1024 * 1024;
     std::vector<unsigned char> frame(InitialFrameCapacity);
@@ -1225,6 +1227,11 @@ void Session::plankTransportVideoReceiveLoop()
         }
 
         m_LastPlankVideoReceived.store(SDL_GetTicks());
+        frameFlow.record(ClientFrameFlowTrace::Receive,
+                         (info.pts / 90000) * 1000000 + (info.pts % 90000) * 1000000 / 90000,
+                         info.frame_number,
+                         (info.flags & PLANK_TRANSPORT_NATIVE_VIDEO_FLAG_KEY) != 0,
+                         frameSize);
         const uint32_t flags =
                 (info.flags & PLANK_TRANSPORT_NATIVE_VIDEO_FLAG_KEY) != 0 ?
                     PLANK_VIDEO_FRAME_FLAG_KEY : 0;

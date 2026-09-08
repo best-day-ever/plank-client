@@ -36,6 +36,7 @@ public:
     virtual IFFmpegRenderer* getBackendRenderer();
 
 private:
+    ClientFrameFlowTrace m_FrameFlowTrace {"decode"};
     bool completeInitialization(const AVCodec* decoder,
                                 enum AVPixelFormat requiredFormat,
                                 PDECODER_PARAMETERS params,

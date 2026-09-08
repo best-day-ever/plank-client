@@ -31,6 +31,10 @@
 #define TIMER_SLACK_MS 3
 
 namespace {
+int64_t frameFlowPtsUs(const AVFrame* frame)
+{
+    return frame->pts >= 0 && frame->pts <= INT64_MAX / 1000 ? frame->pts * 1000 : -1;
+}
 uint32_t histogramPercentile(const std::array<uint32_t, 1001>& histogram,
                              unsigned int percentile)
 {
@@ -209,7 +213,10 @@ int Pacer::renderThread(void* context)
 
     while (!me->m_Stopping) {
         // Wait for the renderer to be ready for the next frame
+        const uint64_t waitStarted = ClientFrameFlowTrace::nowNs();
         me->m_VsyncRenderer->waitToRender();
+        me->m_FrameFlowTrace.record(ClientFrameFlowTrace::GpuWait, -1, -1, -1, 0, -1,
+                                   ClientFrameFlowTrace::nowNs() - waitStarted);
 
         // Acquire the frame queue lock to protect the queue and
         // the not empty condition
@@ -243,6 +250,8 @@ void Pacer::enqueueFrameForRenderingAndUnlock(AVFrame *frame)
 {
     dropFrameForEnqueue(m_RenderQueue);
     m_RenderQueue.enqueue(frame);
+    m_FrameFlowTrace.record(ClientFrameFlowTrace::Enqueue, frameFlowPtsUs(frame),
+                           -1, -1, 0, m_RenderQueue.count());
 
     m_FrameQueueLock.unlock();
 
@@ -400,7 +409,11 @@ void Pacer::renderFrame(AVFrame* frame)
     m_MaxQueueLatencyMs = std::max(m_MaxQueueLatencyMs, queueLatencyMs);
 
     // Render it
+    const uint64_t renderStarted = ClientFrameFlowTrace::nowNs();
+    m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderBegin, frameFlowPtsUs(frame));
     m_VsyncRenderer->renderFrame(frame);
+    m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderEnd, frameFlowPtsUs(frame),
+                           -1, -1, 0, -1, ClientFrameFlowTrace::nowNs() - renderStarted);
     Uint32 afterRender = SDL_GetTicks();
 
     const uint32_t rendererCallLatencyMs = afterRender - beforeRender;
@@ -473,6 +486,9 @@ void Pacer::renderFrame(AVFrame* frame)
 
 void Pacer::recordFrameDrop(DropReason reason, AVFrame* frame, int queueDepth, int targetDepth)
 {
+    m_FrameFlowTrace.record(ClientFrameFlowTrace::Drop, frameFlowPtsUs(frame),
+                           -1, static_cast<int>(reason), 0, queueDepth,
+                           uint64_t(SDL_GetTicks() - (Uint32)frame->pkt_dts) * 1000000);
     const char* reasonName = "unknown";
 
     m_VideoStats->pacerDroppedFrames++;

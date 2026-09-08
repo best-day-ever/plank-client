@@ -339,6 +339,7 @@ void FFmpegVideoDecoder::reset()
 
     delete m_Pacer;
     m_Pacer = nullptr;
+    m_FrameFlowTrace.flush();
 
     // This must be called after deleting Pacer because it
     // may be holding AVFrames to free in its destructor.
@@ -1984,6 +1985,11 @@ void FFmpegVideoDecoder::decoderThreadProc()
 
                         // Store the presentation time
                         frame->pts = du.presentationTimeUs / 1000;
+                        m_FrameFlowTrace.record(ClientFrameFlowTrace::Decode,
+                                               du.presentationTimeUs, du.frameNumber,
+                                               du.frameType == FRAME_TYPE_IDR, du.fullLength,
+                                               m_FrameInfoQueue.count(),
+                                               uint64_t(decodeLatencyMs) * 1000000);
                     }
 
                     m_ActiveWndVideoStats.decodedFrames++;

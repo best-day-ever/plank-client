@@ -2,6 +2,7 @@
 
 #include "../../decoder.h"
 #include "../renderer.h"
+#include "streaming/clientframeflowtrace.h"
 
 #include <array>
 #include <QQueue>
@@ -41,6 +42,7 @@ public:
     void discardQueuedFrames();
 
 private:
+    ClientFrameFlowTrace m_FrameFlowTrace {"render"};
     static int vsyncThread(void* context);
 
     static int renderThread(void* context);
