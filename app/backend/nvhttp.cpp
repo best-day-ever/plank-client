@@ -706,8 +706,44 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
                                               int bitrateKbps, int udpPayloadSize)
 {
     const auto body = MacPreviewLaunch::request(topology, bitrateKbps, udpPayloadSize);
+    // One-shot launch: even an ambiguous timeout must require fresh auth.
+    SecureStringGuard tokenGuard(m_SessionToken);
+    const auto object = postPinnedMacJson(QStringLiteral("/plank/launch"), body, certificateSha256);
+    MacPreviewLaunch::Reply parsed;
+    if (!MacPreviewLaunch::parseReply(object, topology, controlPort(), udpPayloadSize, parsed)) {
+        throw GfeHttpResponseException(400, "Invalid Mac preview launch response");
+    }
+    return parsed;
+}
+
+NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode)
+{
+    const QSize size = NvOutputTopology::virtualModeSize(mode);
+    if (!NvOutputTopology::qualifiedVirtualModes().contains(mode) || !size.isValid()) {
+        throw GfeHttpResponseException(400, "Unsupported Mac desktop resolution");
+    }
+    QString pin;
+    const auto current = getOutputTopology(&pin);
+    if (current.featureFlags != NvOutputTopology::FixedCaptureFlags) {
+        throw GfeHttpResponseException(400, "Host does not support Mac desktop preparation");
+    }
+    const auto object = postPinnedMacJson(QStringLiteral("/plank/display"),
+        {{"schema_version", 1}, {"width", size.width()}, {"height", size.height()}}, pin);
+    NvOutputTopology result;
+    if (!NvOutputTopology::fromJson(object, result) ||
+            result.featureFlags != NvOutputTopology::FixedCaptureFlags ||
+            result.desktopWidth != size.width() || result.desktopHeight != size.height()) {
+        throw GfeHttpResponseException(400, "Mac desktop did not reach the requested resolution");
+    }
+    return result;
+}
+
+QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& body,
+                                    const QString& certificateSha256)
+{
     const QByteArray pin = QByteArray::fromHex(certificateSha256.toLatin1());
-    if (body.isEmpty() || pin.size() != 32 ||
+    if ((path != QLatin1String("/plank/launch") && path != QLatin1String("/plank/display")) ||
+            body.isEmpty() || pin.size() != 32 ||
             QString::fromLatin1(pin.toHex()) != certificateSha256 ||
             m_SessionToken.isEmpty() || m_SessionToken.size() > 512 ||
             m_BaseUrlHttps.scheme() != QLatin1String("https") ||
@@ -720,10 +756,8 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
         }
     }
 
-    // One-shot launch: even an ambiguous timeout must require fresh auth.
-    SecureStringGuard tokenGuard(m_SessionToken);
     QUrl url(m_BaseUrlHttps);
-    url.setPath(QStringLiteral("/plank/launch"));
+    url.setPath(path);
     url.setQuery(QString());
     url.setFragment(QString());
     QNetworkRequest request(url);
@@ -783,7 +817,8 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
     if (oversized) throw GfeHttpResponseException(400, "Mac preview response exceeded its size limit");
     if (status != 200 && status != 0) {
         // Do not expose arbitrary server text, redirect URLs, or response tokens.
-        throw GfeHttpResponseException(status, "Mac preview launch was not accepted");
+        throw GfeHttpResponseException(status, path == QLatin1String("/plank/display") ?
+            "Mac desktop resolution change was not accepted" : "Mac stream launch was not accepted");
     }
     if (reply->error() != QNetworkReply::NoError) {
         throw QtNetworkReplyException(reply->error(), "Mac preview launch failed or timed out");
@@ -791,13 +826,10 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
     QJsonParseError parseError {};
     const auto document = QJsonDocument::fromJson(response, &parseError);
     response.fill('\0');
-    MacPreviewLaunch::Reply parsed;
-    if (parseError.error != QJsonParseError::NoError || !document.isObject() ||
-            !MacPreviewLaunch::parseReply(document.object(), topology,
-                                          controlPort(), udpPayloadSize, parsed)) {
-        throw GfeHttpResponseException(400, "Invalid Mac preview launch response");
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        throw GfeHttpResponseException(400, "Invalid Mac control response");
     }
-    return parsed;
+    return document.object();
 }
 
 QNetworkReply*

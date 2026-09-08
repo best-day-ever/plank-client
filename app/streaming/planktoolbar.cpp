@@ -956,11 +956,12 @@ void PlankToolbar::redraw()
 
     if (!m_BitrateSupported) {
         QFont hintFont = labelFont;
-        hintFont.setPixelSize(7);
+        hintFont.setPixelSize(10);
         painter.setFont(hintFont);
         painter.setPen(QColor(183, 151, 92));
-        painter.drawText(QRect(229, 28, 187, 9), Qt::AlignLeft | Qt::AlignVCenter,
-                         "Host update required for live control");
+        painter.fillRect(QRect(225, 21, 198, 17), QColor(22, 27, 34));
+        painter.drawText(QRect(229, 22, 190, 15), Qt::AlignLeft | Qt::AlignVCenter,
+                         "Live bitrate control unavailable");
     }
 
     painter.end();

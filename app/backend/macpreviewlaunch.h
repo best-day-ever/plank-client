@@ -53,7 +53,7 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     reply.configuration.structSize = sizeof(reply.configuration);
     reply.configuration.negotiatedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
     // Schema 1 explicitly supports PLD1 bitrate updates/acknowledgements.
-    reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE;
+    reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
     reply.configuration.serviceFlags = PLANK_NATIVE_SERVICE_AUDIO | PLANK_NATIVE_SERVICE_INPUT;
     reply.configuration.audioPacketDurationMs = 5;

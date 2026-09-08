@@ -666,7 +666,7 @@ ApplicationWindow {
                 id: addHostLayout
                 Layout.fillWidth: true
                 enabled: addCaptureSource.currentIndex !== 2
-                model: addCaptureSource.currentIndex === 2 ? [qsTr("Current Mac display (Preview)")] : [
+                model: addCaptureSource.currentIndex === 2 ? [qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
@@ -675,15 +675,15 @@ ApplicationWindow {
             }
 
             Label {
-                text: qsTr("Virtual display 1 resolution")
+                text: addCaptureSource.currentIndex === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
+                opacity: addCaptureSource.currentIndex === 2 || addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
 
             PlankComboBox {
                 id: addVirtualMode1
                 Layout.fillWidth: true
-                enabled: addHostLayout.currentIndex >= 2
+                enabled: addCaptureSource.currentIndex === 2 || addHostLayout.currentIndex >= 2
                 currentIndex: 9
                 model: addPcDialog.virtualModeChoices
                 delegate: ItemDelegate {

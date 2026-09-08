@@ -151,6 +151,7 @@ public:
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
+    NvOutputTopology prepareMacDisplay(const QString& mode);
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
                                            const QString& certificateSha256,
                                            int bitrateKbps, int udpPayloadSize);
@@ -212,6 +213,8 @@ private:
                    NvLogLevel logLevel);
 
     QJsonObject postPlankJson(QString command, const QJsonObject& body);
+    QJsonObject postPinnedMacJson(const QString& path, const QJsonObject& body,
+                                 const QString& certificateSha256);
 
     NvAddress m_Address;
     QNetworkAccessManager* m_Nam;

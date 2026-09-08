@@ -704,13 +704,17 @@ private:
             const QString token = http.authenticate(m_Username, m_Password);
             NvOutputTopology topology;
             bool topologySupported;
+            bool macDesktop;
+            QString desktopMode;
             {
                 QReadLocker lock(&m_Computer->lock);
                 topologySupported = NvOutputTopology::supportsDescription(
                             m_Computer->plankTopologyVersion, m_Computer->plankFeatureFlags);
+                macDesktop = m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags;
+                desktopMode = m_Computer->plankVirtualMode1;
             }
             if (topologySupported) {
-                topology = http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(

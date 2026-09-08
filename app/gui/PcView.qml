@@ -679,7 +679,7 @@ CenteredGridView {
                 id: editHostLayout
                 Layout.fillWidth: true
                 enabled: editCaptureSource.currentIndex !== 2
-                model: editCaptureSource.currentIndex === 2 ? [qsTr("Current Mac display (Preview)")] : [
+                model: editCaptureSource.currentIndex === 2 ? [qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
@@ -696,14 +696,14 @@ CenteredGridView {
             }
 
             Label {
-                text: qsTr("Virtual display 1 resolution")
+                text: editCaptureSource.currentIndex === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
+                opacity: editCaptureSource.currentIndex === 2 || editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode1
                 Layout.fillWidth: true
-                enabled: editHostLayout.currentIndex >= 2
+                enabled: editCaptureSource.currentIndex === 2 || editHostLayout.currentIndex >= 2
                 model: editBookmarkDialog.virtualModeChoices
                 delegate: ItemDelegate {
                     width: editVirtualMode1.width
