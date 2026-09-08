@@ -24,6 +24,7 @@ private slots:
     void reachesWindowEdgeWithToolbar();
     void calculatesOnePreFecLossInterval();
     void resetsPreFecLossAfterCounterRestart();
+    void rejectsInconsistentFecCounters();
     void retainsTenSecondPeakForBothStatsViews();
     void sharesPacketLossDisplayPrecision();
 };
@@ -170,28 +171,51 @@ void TestPlankToolbarLogic::reachesWindowEdgeWithToolbar()
 void TestPlankToolbarLogic::calculatesOnePreFecLossInterval()
 {
     VideoPacketLossInterval interval;
-    QVERIFY(!interval.addCumulative(1000, 10).has_value());
+    QVERIFY(!interval.addCumulative(1000, 10, 2).has_value());
 
-    const auto clean = interval.addCumulative(2000, 10);
+    const auto clean = interval.addCumulative(2000, 10, 2);
     QVERIFY(clean.has_value());
-    QCOMPARE(*clean, 0.0f);
+    QCOMPARE(clean->before, 0.0f);
+    QCOMPARE(clean->after, 0.0f);
 
-    const auto loss = interval.addCumulative(3000, 35);
+    const auto loss = interval.addCumulative(3000, 35, 2);
     QVERIFY(loss.has_value());
-    QCOMPARE(*loss, 2.5f);
+    QCOMPARE(loss->before, 2.5f);
+    QCOMPARE(loss->after, 0.0f); // All missing originals reconstructed.
+    const auto residual = interval.addCumulative(4000, 75, 12);
+    QVERIFY(residual.has_value());
+    QCOMPARE(residual->before, 4.0f);
+    QCOMPARE(residual->after, 1.0f);
 }
 
 void TestPlankToolbarLogic::resetsPreFecLossAfterCounterRestart()
 {
     VideoPacketLossInterval interval;
-    QVERIFY(!interval.addCumulative(1000, 10).has_value());
-    QVERIFY(interval.addCumulative(2000, 20).has_value());
-    QVERIFY(!interval.addCumulative(50, 1).has_value());
+    QVERIFY(!interval.addCumulative(1000, 10, 2).has_value());
+    QVERIFY(interval.addCumulative(2000, 20, 3).has_value());
+    QVERIFY(!interval.addCumulative(50, 1, 0).has_value());
 
-    const auto restarted = interval.addCumulative(150, 3);
+    const auto restarted = interval.addCumulative(150, 3, 1);
     QVERIFY(restarted.has_value());
-    QCOMPARE(*restarted, 2.0f);
-    QVERIFY(!interval.addCumulative(100, 101).has_value());
+    QCOMPARE(restarted->before, 2.0f);
+    QCOMPARE(restarted->after, 1.0f);
+    QVERIFY(!interval.addCumulative(100, 101, 0).has_value());
+}
+
+void TestPlankToolbarLogic::rejectsInconsistentFecCounters()
+{
+    VideoPacketLossInterval interval;
+    QVERIFY(!interval.addCumulative(100, 10, 11).has_value());
+    QVERIFY(!interval.addCumulative(100, 10, 2).has_value());
+    QVERIFY(!interval.addCumulative(100, 10, 2).has_value());
+    // Cumulative values look valid, but the interval is not coherent.
+    QVERIFY(!interval.addCumulative(200, 11, 4).has_value());
+    const auto valid = interval.addCumulative(300, 21, 6);
+    QVERIFY(valid.has_value());
+    QCOMPARE(valid->before, 10.0f);
+    QCOMPARE(valid->after, 2.0f);
+    // A reset in only one component establishes a fresh baseline.
+    QVERIFY(!interval.addCumulative(400, 22, 0).has_value());
 }
 
 void TestPlankToolbarLogic::retainsTenSecondPeakForBothStatsViews()

@@ -161,9 +161,10 @@ public:
         m_CurrentVideoMbps.store(videoMbps, std::memory_order_relaxed);
     }
 
-    float currentVideoPacketLossPercent() const
+    VideoFecLossPercent currentVideoFecLoss() const
     {
-        return m_CurrentVideoPacketLossPercent.load(std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(m_VideoPacketLossSamplesLock);
+        return m_CurrentVideoFecLoss;
     }
 
     std::uint32_t currentNetworkRttMs() const
@@ -341,7 +342,7 @@ private:
     void clCursorPosition(const unsigned char* data, unsigned int length);
 
     static
-    void clVideoPacketLossUpdate(float packetLossPercent);
+    void updateVideoFecLoss(VideoFecLossPercent loss);
 
     static
     int arInit(int audioConfiguration,
@@ -446,10 +447,11 @@ private:
     std::unique_ptr<PlankToolbar> m_PlankToolbar;
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
-    std::atomic<float> m_CurrentVideoPacketLossPercent;
+    VideoFecLossPercent m_CurrentVideoFecLoss;
     std::atomic<std::uint32_t> m_CurrentNetworkRttMs;
-    std::mutex m_VideoPacketLossSamplesLock;
+    mutable std::mutex m_VideoPacketLossSamplesLock;
     VideoPacketLossPeakWindow m_VideoPacketLossPeakWindow;
+    VideoPacketLossPeakWindow m_VideoPacketLossAfterFecPeakWindow;
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
     std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
     std::atomic<int> m_ConfirmedBitratePeakKbps {0};

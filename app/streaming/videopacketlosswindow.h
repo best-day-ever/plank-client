@@ -8,22 +8,31 @@
 
 inline constexpr int VideoPacketLossDisplayDecimalPlaces = 2;
 
+struct VideoFecLossPercent
+{
+    float before = -1.0f;
+    float after = -1.0f;
+};
+
 class VideoPacketLossInterval
 {
 public:
-    std::optional<float> addCumulative(std::uint64_t sourceSymbols,
-                                       std::uint64_t missingSourceSymbols)
+    std::optional<VideoFecLossPercent> addCumulative(std::uint64_t sourceSymbols,
+                                       std::uint64_t missingSourceSymbols,
+                                       std::uint64_t unrecoveredSourceSymbols)
     {
-        if (missingSourceSymbols > sourceSymbols) {
+        if (missingSourceSymbols > sourceSymbols || unrecoveredSourceSymbols > missingSourceSymbols) {
             reset();
             return std::nullopt;
         }
 
         if (!m_Initialized || sourceSymbols < m_SourceSymbols ||
-                missingSourceSymbols < m_MissingSourceSymbols) {
+                missingSourceSymbols < m_MissingSourceSymbols ||
+                unrecoveredSourceSymbols < m_UnrecoveredSourceSymbols) {
             m_Initialized = true;
             m_SourceSymbols = sourceSymbols;
             m_MissingSourceSymbols = missingSourceSymbols;
+            m_UnrecoveredSourceSymbols = unrecoveredSourceSymbols;
             return std::nullopt;
         }
 
@@ -31,15 +40,20 @@ public:
                 sourceSymbols - m_SourceSymbols;
         const std::uint64_t intervalMissingSourceSymbols =
                 missingSourceSymbols - m_MissingSourceSymbols;
+        const std::uint64_t intervalUnrecoveredSourceSymbols =
+                unrecoveredSourceSymbols - m_UnrecoveredSourceSymbols;
         m_SourceSymbols = sourceSymbols;
         m_MissingSourceSymbols = missingSourceSymbols;
+        m_UnrecoveredSourceSymbols = unrecoveredSourceSymbols;
         if (intervalSourceSymbols == 0 ||
-                intervalMissingSourceSymbols > intervalSourceSymbols) {
+                intervalMissingSourceSymbols > intervalSourceSymbols ||
+                intervalUnrecoveredSourceSymbols > intervalMissingSourceSymbols) {
             return std::nullopt;
         }
 
-        return static_cast<float>(intervalMissingSourceSymbols) * 100.0f /
-                static_cast<float>(intervalSourceSymbols);
+        const float scale = 100.0f / static_cast<float>(intervalSourceSymbols);
+        return VideoFecLossPercent {intervalMissingSourceSymbols * scale,
+                                   intervalUnrecoveredSourceSymbols * scale};
     }
 
     void reset()
@@ -47,12 +61,14 @@ public:
         m_Initialized = false;
         m_SourceSymbols = 0;
         m_MissingSourceSymbols = 0;
+        m_UnrecoveredSourceSymbols = 0;
     }
 
 private:
     bool m_Initialized = false;
     std::uint64_t m_SourceSymbols = 0;
     std::uint64_t m_MissingSourceSymbols = 0;
+    std::uint64_t m_UnrecoveredSourceSymbols = 0;
 };
 
 class VideoPacketLossPeakWindow

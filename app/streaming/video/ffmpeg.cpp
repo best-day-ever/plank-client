@@ -923,8 +923,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
 {
     int offset = 0;
     const char* codecString;
-    const float videoPacketLossPercent =
-            Session::get()->currentVideoPacketLossPercent();
+    const auto videoFecLoss = Session::get()->currentVideoFecLoss();
     int ret;
 
     // Start with an empty string
@@ -1062,23 +1061,23 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
         char beforeFecLossString[32];
         char afterFecLossString[32];
 
-        if (videoPacketLossPercent >= 0.0f) {
+        if (videoFecLoss.before >= 0.0f) {
             snprintf(beforeFecLossString,
                      sizeof(beforeFecLossString),
                      "%.*f%%",
                      VideoPacketLossDisplayDecimalPlaces,
-                     videoPacketLossPercent);
+                     videoFecLoss.before);
         }
         else {
             snprintf(beforeFecLossString, sizeof(beforeFecLossString), "N/A");
         }
 
-        if (stats.renderedFrames != 0 && stats.totalFrames != 0) {
+        if (videoFecLoss.after >= 0.0f) {
             snprintf(afterFecLossString,
                      sizeof(afterFecLossString),
                      "%.*f%%",
                      VideoPacketLossDisplayDecimalPlaces,
-                     (float)stats.networkDroppedFrames / stats.totalFrames * 100);
+                     videoFecLoss.after);
         }
         else {
             snprintf(afterFecLossString, sizeof(afterFecLossString), "N/A");

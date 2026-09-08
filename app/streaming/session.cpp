@@ -95,7 +95,7 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clVideoBitrateApplied,
     Session::clCursorChunk,
     Session::clCursorPosition,
-    Session::clVideoPacketLossUpdate,
+    nullptr, // Native transport publishes the paired FEC counters directly.
 };
 
 Session* Session::s_ActiveSession;
@@ -333,7 +333,7 @@ void Session::postTabletCursorActivationEvent()
     SDL_PushEvent(&event);
 }
 
-void Session::clVideoPacketLossUpdate(float packetLossPercent)
+void Session::updateVideoFecLoss(VideoFecLossPercent loss)
 {
     Session* session = s_ActiveSession;
     if (session == nullptr) {
@@ -341,19 +341,13 @@ void Session::clVideoPacketLossUpdate(float packetLossPercent)
     }
 
     const Uint64 now = SDL_GetTicks();
-    const float currentPacketLossPercent =
-            qBound(0.0f, packetLossPercent, 100.0f);
-    float peakPacketLossPercent;
-
-    {
-        std::lock_guard<std::mutex> lock(session->m_VideoPacketLossSamplesLock);
-        peakPacketLossPercent = session->m_VideoPacketLossPeakWindow.addSample(
-                    now, currentPacketLossPercent);
-    }
-
-    // The toolbar and on-screen statistics both load this authoritative value.
-    session->m_CurrentVideoPacketLossPercent.store(
-                peakPacketLossPercent, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(session->m_VideoPacketLossSamplesLock);
+    // Publish both ten-second peaks together. Toolbar and overlay share this
+    // snapshot; frame drops and decoder/render queues are separate metrics.
+    session->m_CurrentVideoFecLoss = {
+        session->m_VideoPacketLossPeakWindow.addSample(now, loss.before),
+        session->m_VideoPacketLossAfterFecPeakWindow.addSample(now, loss.after)
+    };
 }
 
 bool Session::chooseDecoder(DecoderSelectionMode selectionMode,
@@ -715,7 +709,6 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_LastAudioTelemetryTime(0),
       m_CurrentRenderedFps(0.0f),
       m_CurrentVideoMbps(0.0f),
-      m_CurrentVideoPacketLossPercent(-1.0f),
       m_CurrentNetworkRttMs(0)
 {
     if (m_Computer->plankAuthentication) {
@@ -1095,7 +1088,9 @@ void Session::stopPlankTransportDataPlane()
                     << "video-FEC-source-symbols="
                     << stats.video_fec_source_symbols
                     << "video-FEC-source-symbols-missing="
-                    << stats.video_fec_source_symbols_missing;
+                    << stats.video_fec_source_symbols_missing
+                    << "video-FEC-source-symbols-unrecovered="
+                    << stats.video_fec_source_symbols_unrecovered;
         }
         QByteArray lastError(512, '\0');
         plank_transport_native_endpoint_last_error(
@@ -1124,8 +1119,9 @@ void Session::startPlankTransportMediaReceivers()
     {
         std::lock_guard<std::mutex> lock(m_VideoPacketLossSamplesLock);
         m_VideoPacketLossPeakWindow.reset();
+        m_VideoPacketLossAfterFecPeakWindow.reset();
+        m_CurrentVideoFecLoss = {};
     }
-    m_CurrentVideoPacketLossPercent.store(-1.0f, std::memory_order_relaxed);
     m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
     m_LastPlankVideoReceived.store(0);
     m_PlankTransportReceiversStopping.store(false);
@@ -1190,9 +1186,10 @@ void Session::plankTransportVideoReceiveLoop()
 
         const auto packetLossPercent = packetLossInterval.addCumulative(
                     stats.video_fec_source_symbols,
-                    stats.video_fec_source_symbols_missing);
+                    stats.video_fec_source_symbols_missing,
+                    stats.video_fec_source_symbols_unrecovered);
         if (packetLossPercent.has_value()) {
-            clVideoPacketLossUpdate(*packetLossPercent);
+            updateVideoFecLoss(*packetLossPercent);
         }
     };
 
@@ -3871,8 +3868,7 @@ void Session::execInternal()
             m_PlankToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
-                        m_CurrentVideoPacketLossPercent.load(
-                            std::memory_order_relaxed));
+                        currentVideoFecLoss().before);
             const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
             if (action == PlankToolbar::Action::Disconnect) {
