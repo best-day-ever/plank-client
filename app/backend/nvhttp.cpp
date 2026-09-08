@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QXmlStreamReader>
 #include <QSslKey>
+#include <QSslCipher>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -881,7 +882,9 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (!approvedCertificate || !approvedProtocol) {
         qWarning() << "Rejecting PLANK TLS session"
                    << "certificate" << approvedCertificate
-                   << "tls13" << approvedProtocol;
+                   << "tls13" << approvedProtocol
+                   << "protocol" << reply->sslConfiguration().sessionProtocol()
+                   << "cipherProtocol" << reply->sslConfiguration().sessionCipher().protocol();
         GfeHttpResponseException exception(401, "Invalid PLANK TLS session");
         delete reply;
         throw exception;
