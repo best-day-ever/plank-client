@@ -716,9 +716,8 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
     return parsed;
 }
 
-NvOutputTopology NvHTTP::prepareMacDisplay(const QString& bookmarkMode, bool greeter)
+NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode)
 {
-    const QString mode = plankMacSessionMode(bookmarkMode, greeter);
     const QSize size = NvOutputTopology::virtualModeSize(mode);
     if (!NvOutputTopology::qualifiedVirtualModes().contains(mode) || !size.isValid()) {
         throw GfeHttpResponseException(400, "Unsupported Mac desktop resolution");

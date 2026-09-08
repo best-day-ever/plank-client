@@ -10,9 +10,3 @@ inline bool plankAuthenticatedGreeter(const QJsonObject& response)
             !response.value(QStringLiteral("session_token")).toString().isEmpty() &&
             response.value(QStringLiteral("desktop_stage")).toString() == QStringLiteral("greeter");
 }
-
-// The sign-in canvas is temporary. Never rewrite the saved desktop resolution.
-inline QString plankMacSessionMode(const QString& bookmarkMode, bool greeter)
-{
-    return greeter ? QStringLiteral("1920x1080") : bookmarkMode;
-}

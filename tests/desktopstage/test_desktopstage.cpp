@@ -6,16 +6,6 @@ class TestDesktopStage : public QObject
 {
     Q_OBJECT
 private slots:
-    void preservesBookmarkAcrossMacLogin()
-    {
-        for (const QString& mode : {QStringLiteral("1920x1080"), QStringLiteral("3840x2160"),
-                                   QStringLiteral("5120x2160")}) {
-            QCOMPARE(plankMacSessionMode(mode, true), QStringLiteral("1920x1080"));
-            QCOMPARE(plankMacSessionMode(mode, false), mode);
-            QCOMPARE(plankMacSessionMode(mode, true), QStringLiteral("1920x1080"));
-        }
-    }
-
     void boundsSilenceTrigger()
     {
         using namespace PlankHostRecovery;

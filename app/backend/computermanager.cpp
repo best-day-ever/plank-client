@@ -715,7 +715,7 @@ private:
                 desktopMode = m_Computer->plankVirtualMode1;
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode, greeter) : http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(
