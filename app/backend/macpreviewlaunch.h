@@ -42,7 +42,7 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
             object.value("max_udp_payload_size") != QJsonValue(udpPayloadSize) ||
             object.value("capture") != topology.toJson().value("capture") ||
             object.value("services") != QJsonValue(QJsonObject {
-                {"audio", false}, {"input", false}, {"cursor", "embedded"}})) return false;
+                {"audio", true}, {"input", true}, {"cursor", "embedded"}})) return false;
 
     const QString token = object.value("transport_token").toString();
     if (token.size() != 44) return false;
@@ -55,7 +55,14 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     // Schema 1 explicitly supports PLD1 bitrate updates/acknowledgements.
     reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
-    // Audio/input/local-cursor remain explicitly absent. No fake Opus values.
+    reply.configuration.serviceFlags = PLANK_NATIVE_SERVICE_AUDIO | PLANK_NATIVE_SERVICE_INPUT;
+    reply.configuration.audioPacketDurationMs = 5;
+    reply.configuration.opusConfiguration.sampleRate = 48000;
+    reply.configuration.opusConfiguration.channelCount = 2;
+    reply.configuration.opusConfiguration.streams = 1;
+    reply.configuration.opusConfiguration.coupledStreams = 1;
+    reply.configuration.opusConfiguration.mapping[0] = 0;
+    reply.configuration.opusConfiguration.mapping[1] = 1;
     return true;
 }
 

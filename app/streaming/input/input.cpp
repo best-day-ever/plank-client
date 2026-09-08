@@ -159,8 +159,10 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         ensureWaylandTabletCursorAttached(m_Window);
     }
     else {
-        SDL_LogError(SDL_LOG_CATEGORY_INPUT,
-                     "Host does not support required PLANK local cursor transport");
+        // Session accepts this only for the authenticated embedded-cursor
+        // contract. Keep the local pointer for toolbar/letterbox interaction.
+        m_MouseCursorCapturedVisibilityState = false;
+        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "PLANK embedded host cursor enabled");
     }
 #ifdef HAVE_LIBINPUT_TABLET
     const auto requestTabletCursor = [this]() {

@@ -1501,13 +1501,6 @@ bool Session::initialize()
         emit displayLaunchError(error);
         return false;
     }
-    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
-        // Remove this gate only with the authenticated Mac media launch and
-        // explicit optional-service negotiation. Never use the Linux launch
-        // path or claim audio/cursor services merely to activate a preview.
-        emit displayLaunchError(tr("The macOS preview profile is saved, but Mac streaming is not available in this build yet."));
-        return false;
-    }
     if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT &&
             m_PlankVideoProfile ==
                 StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444 &&
@@ -1564,7 +1557,8 @@ bool Session::initialize()
     LiInitializeVideoCallbacks(&m_VideoCallbacks);
     m_VideoCallbacks.setup = drSetup;
 
-    m_StreamConfig.fps = m_Preferences->fps;
+    m_StreamConfig.fps = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
+                60 : m_Preferences->fps;
     m_StreamConfig.bitrate = m_PlankBitrateKbps;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -1582,6 +1576,10 @@ bool Session::initialize()
     case StreamingPreferences::AC_71_SURROUND:
         m_StreamConfig.audioConfiguration = AUDIO_CONFIGURATION_71_SURROUND;
         break;
+    }
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        // The authenticated Mac contract is system audio, stereo 48 kHz.
+        m_StreamConfig.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
     }
 
     LiInitializeAudioCallbacks(&m_AudioCallbacks);
@@ -2171,6 +2169,11 @@ bool Session::configurePlankHostLayout()
             return false;
         }
     }
+    else if (layoutPolicy == QStringLiteral("fixed") &&
+             m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+             m_Computer->outputTopology.featureFlags == NvOutputTopology::FixedCaptureFlags) {
+        m_ResolvedHostLayout = layoutPolicy;
+    }
     else if (layoutPolicy == NvOutputTopology::PhysicalHostLayout) {
         m_ResolvedHostLayout = NvOutputTopology::PhysicalHostLayout;
     }
@@ -2230,18 +2233,21 @@ QSize Session::configurePlankDisplayMode()
     QSize nativeCanvasResolution;
     {
         QReadLocker lock(&m_Computer->lock);
-        if (m_ResolvedHostLayout == NvOutputTopology::PhysicalHostLayout) {
+        if (m_ResolvedHostLayout == NvOutputTopology::PhysicalHostLayout ||
+                m_ResolvedHostLayout == QStringLiteral("fixed")) {
             nativeCanvasResolution = QSize(m_Computer->outputTopology.desktopWidth,
                                            m_Computer->outputTopology.desktopHeight);
         }
     }
-    if (m_ResolvedHostLayout != NvOutputTopology::PhysicalHostLayout) {
+    if (m_ResolvedHostLayout != NvOutputTopology::PhysicalHostLayout &&
+            m_ResolvedHostLayout != QStringLiteral("fixed")) {
         nativeCanvasResolution = NvOutputTopology::virtualCanvasSize(
                     m_ResolvedHostLayout, m_ResolvedVirtualModes);
     }
 
     QSize selectedResolution;
-    if (m_ResolvedScalingMode == NvOutputTopology::NativeScalingMode) {
+    if (m_ResolvedScalingMode == NvOutputTopology::NativeScalingMode ||
+            m_ResolvedHostLayout == QStringLiteral("fixed")) {
         if (!nativeCanvasResolution.isValid()) {
             const QString error = tr("Native scaling requires a valid host desktop pixel size.");
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
@@ -2528,6 +2534,8 @@ bool Session::startConnectionAsync(bool reconnecting,
     QString acceptedCaptureSource;
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
+    const bool macCapture = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
+    MacPreviewLaunch::Reply macLaunch;
     quint16 quicUdpPayloadMtu = 0;
     if (m_Preferences->quicUdpPayloadMtu != 0) {
         quicUdpPayloadMtu = PlankNetwork::quicUdpPayloadMtuForRoute(
@@ -2595,6 +2603,25 @@ bool Session::startConnectionAsync(bool reconnecting,
             return false;
         }
         const auto startApp = [&]() {
+            if (macCapture) {
+                QString pin;
+                const NvOutputTopology topology = http->getOutputTopology(&pin);
+                if (topology.toJson() != m_Computer->outputTopology.toJson() ||
+                        topology.desktopWidth != m_StreamConfig.width ||
+                        topology.desktopHeight != m_StreamConfig.height) {
+                    throw GfeHttpResponseException(409, "The Mac display changed. Reconnect to refresh its capture geometry.");
+                }
+                macLaunch = http->startMacPreview(topology, pin, m_StreamConfig.bitrate, quicUdpPayloadMtu);
+                plankTransportPort = http->controlPort();
+                plankTransportCertificateSha256 = pin;
+                plankTransportToken = QString::fromLatin1(macLaunch.transportToken);
+                macLaunch.transportToken.fill('\0');
+                macLaunch.transportToken.clear();
+                acceptedCaptureSource = captureSource;
+                acceptedEncoderBackend = encoderBackend;
+                acceptedEncodingMode = encodingMode;
+                return;
+            }
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
                           m_App.id, &m_StreamConfig,
                           m_Preferences->playAudioOnHost,
@@ -2905,7 +2932,11 @@ bool Session::startConnectionAsync(bool reconnecting,
     plankTransportToken.fill(QChar('\0'));
 
     QString nativeNegotiationError;
-    if (!negotiatePlankTransportSession(plankTransportPort, nativeNegotiationError)) {
+    const bool negotiated = macCapture ?
+                LiSetPlankNativeSessionConfiguration(&macLaunch.configuration) == 0 :
+                negotiatePlankTransportSession(plankTransportPort, nativeNegotiationError);
+    if (!negotiated) {
+        if (macCapture) nativeNegotiationError = tr("The Mac returned an invalid native media configuration.");
         stopPlankTransportDataPlane();
         if (!reconnecting) {
             emit displayLaunchError(nativeNegotiationError);
@@ -2947,7 +2978,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     startPlankTransportMediaReceivers();
 #endif
 
-    if ((LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
+    if (!macCapture && (LiGetHostFeatureFlags() & LI_FF_LOCAL_CURSOR) == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Host does not advertise required PLANK local cursor transport");
         stopPlankTransportMediaReceivers();
