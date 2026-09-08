@@ -4,6 +4,7 @@
 #include <streaming/session.h>
 
 #include "vaapi.h"
+#include "../packedbt709.h"
 #include "utils.h"
 #include <streaming/streamutils.h>
 
@@ -22,6 +23,7 @@ VAAPIRenderer::VAAPIRenderer(int decoderSelectionPass)
       m_BlacklistedForDirectRendering(false),
       m_RequiresExplicitPixelFormat(false),
       m_IdentityGbr(false),
+      m_PackedBt709(false),
       m_OverlayMutex(nullptr)
 #ifdef HAVE_EGL
     , m_EglExportType(EglExportType::Unknown),
@@ -217,6 +219,7 @@ VAAPIRenderer::initialize(PDECODER_PARAMETERS params)
     m_Window = params->window;
     m_VideoFormat = params->videoFormat;
     m_IdentityGbr = params->enableIdentityGbr;
+    m_PackedBt709 = plankUsesPackedBt709(params);
 
     m_HwContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
     if (!m_HwContext) {
@@ -594,6 +597,9 @@ int VAAPIRenderer::getDecoderColorspace()
     if (m_IdentityGbr) {
         return COLORSPACE_IDENTITY_GBR;
     }
+    if (m_PackedBt709) {
+        return COLORSPACE_REC_709;
+    }
 
     // Gallium drivers don't support Rec 709 yet - https://gitlab.freedesktop.org/mesa/mesa/issues/1915
     // Intel-vaapi-driver defaults to Rec 601 - https://github.com/intel/intel-vaapi-driver/blob/021bcb79d1bd873bbd9fbca55f40320344bab866/src/i965_output_dri.c#L186
@@ -602,7 +608,7 @@ int VAAPIRenderer::getDecoderColorspace()
 
 int VAAPIRenderer::getDecoderColorRange()
 {
-    return m_IdentityGbr ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
+    return (m_IdentityGbr || m_PackedBt709) ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
 }
 
 int VAAPIRenderer::getDecoderCapabilities()
@@ -961,7 +967,7 @@ VAAPIRenderer::canExportSurfaceHandle(int layerTypeFlag, VADRMPRIMESurfaceDescri
     // YUV444 layout the driver selects for this export probe. Match the exact
     // identity surface that FFmpeg requests for real decoded frames so the EGL
     // capability check tests the same zero-copy path used during playback.
-    if (m_IdentityGbr) {
+    if (m_IdentityGbr || m_PackedBt709) {
         attrs[attributeCount].type = VASurfaceAttribPixelFormat;
         attrs[attributeCount].flags = VA_SURFACE_ATTRIB_SETTABLE;
         attrs[attributeCount].value.type = VAGenericValueTypeInteger;
@@ -1085,7 +1091,9 @@ uint32_t VAAPIRenderer::getEGLImportFormat(uint32_t drmFormat) {
     // Y410 stores U, Y, and V in the same bit positions that XR30 uses for
     // B, G, and R. The identity transport defines U=B, Y=G, V=R, so importing
     // this surface as XR30 reverses the mapping without a color conversion.
-    if (m_IdentityGbr && drmFormat == DRM_FORMAT_Y410) {
+    // BT.709 uses the same packed storage, but the EGL shader must explicitly
+    // convert V:Y:U to RGB instead of displaying those channels as identity.
+    if ((m_IdentityGbr || m_PackedBt709) && drmFormat == DRM_FORMAT_Y410) {
         return DRM_FORMAT_XRGB2101010;
     }
 
@@ -1103,9 +1111,9 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
 
     // Prefer exporting composed images absent a user override or lack of support for exporting or importing
     if (qgetenv("VAAPI_EGL_SEPARATE_LAYERS") == "1") {
-        if (m_IdentityGbr) {
+        if (m_IdentityGbr || m_PackedBt709) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Identity GBR requires composed VAAPI layers");
+                         "Packed 4:4:4 requires composed VAAPI layers");
             return false;
         }
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -1113,9 +1121,9 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
         m_EglExportType = EglExportType::Separate;
     }
     else if (!canExportSurfaceHandle(VA_EXPORT_SURFACE_COMPOSED_LAYERS, &descriptor)) {
-        if (m_IdentityGbr) {
+        if (m_IdentityGbr || m_PackedBt709) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Identity GBR requires composed VAAPI layer export");
+                         "Packed 4:4:4 requires composed VAAPI layer export");
             return false;
         }
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -1124,13 +1132,13 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
     }
     else {
         const uint32_t importFormat = getEGLImportFormat(descriptor.layers[0].drm_format);
-        if (m_IdentityGbr && importFormat == descriptor.layers[0].drm_format) {
+        if ((m_IdentityGbr || m_PackedBt709) && importFormat == descriptor.layers[0].drm_format) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Identity GBR requires an AYUV, XYUV8888, or Y410 VAAPI surface");
             return false;
         }
         else if (!m_EglImageFactory.supportsImportingFormat(dpy, importFormat)) {
-            if (m_IdentityGbr) {
+            if (m_IdentityGbr || m_PackedBt709) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "EGL cannot import the packed identity surface");
                 return false;
@@ -1140,7 +1148,7 @@ VAAPIRenderer::initializeEGL(EGLDisplay dpy,
             m_EglExportType = EglExportType::Separate;
         }
         else if (!m_EglImageFactory.supportsImportingModifier(dpy, importFormat, descriptor.objects[0].drm_format_modifier)) {
-            if (m_IdentityGbr) {
+            if (m_IdentityGbr || m_PackedBt709) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "EGL cannot import the packed identity surface modifier");
                 return false;
@@ -1218,6 +1226,15 @@ VAAPIRenderer::exportEGLImages(AVFrame *frame, EGLDisplay dpy,
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "vaExportSurfaceHandle failed: %d", st);
         return -1;
+    }
+
+    // Never apply the raw packed shader to a different driver's layout.
+    if (m_PackedBt709 && (m_PrimeDescriptor.num_layers != 1 ||
+            m_PrimeDescriptor.layers[0].num_planes != 1 ||
+            m_PrimeDescriptor.layers[0].drm_format != DRM_FORMAT_Y410)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Packed BT.709 requires a single-plane Y410 surface");
+        goto fail;
     }
 
     st = vaSyncSurface(vaDeviceContext->display, surface_id);

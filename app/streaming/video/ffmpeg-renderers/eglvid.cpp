@@ -90,7 +90,8 @@ EGLRenderer::EGLRenderer(IFFmpegRenderer *backendRenderer)
         m_GlesMajorVersion(0),
         m_GlesMinorVersion(0),
         m_HasExtUnpackSubimage(false),
-        m_IdentityGbr8Bit(false)
+        m_IdentityGbr8Bit(false),
+        m_PackedBt709(false)
 {
     SDL_assert(backendRenderer);
     SDL_assert(backendRenderer->canExportEGL());
@@ -407,6 +408,7 @@ bool EGLRenderer::compileShaders() {
 
         m_ShaderProgramParams[OPAQUE_PARAM_TEXTURE] = glGetUniformLocation(m_ShaderProgram, "uTexture");
         m_ShaderProgramParams[OPAQUE_PARAM_IDENTITY_GBR_8] = glGetUniformLocation(m_ShaderProgram, "uIdentityGbr8");
+        m_ShaderProgramParams[OPAQUE_PARAM_PACKED_BT709] = glGetUniformLocation(m_ShaderProgram, "uPackedBt709");
     }
     else {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -454,12 +456,14 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
     }
     m_IdentityGbr8Bit = params->enableIdentityGbr &&
                         !(params->videoFormat & VIDEO_FORMAT_MASK_10BIT);
+    m_PackedBt709 = m_Backend->usesPackedBt709EGL();
 
-    // This renderer doesn't support HDR, so pick a different one.
+    // Packed identity and BT.709 are both SDR despite their 10-bit storage.
+    // Other 10-bit paths still require a different frontend.
     // HACK: This avoids a deadlock in SDL_CreateRenderer() if
     // Vulkan was used before and SDL is trying to load EGL.
-    if ((params->videoFormat & VIDEO_FORMAT_MASK_10BIT) && !params->enableIdentityGbr) {
-        EGL_LOG(Info, "EGL doesn't support HDR rendering");
+    if ((params->videoFormat & VIDEO_FORMAT_MASK_10BIT) && !params->enableIdentityGbr && !m_PackedBt709) {
+        EGL_LOG(Info, "EGL 10-bit rendering requires a supported packed SDR path");
         return false;
     }
 
@@ -467,6 +471,9 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
         EGL_LOG(Info,
                 "Enabling %s identity GBR presentation",
                 m_IdentityGbr8Bit ? "8-bit" : "10-bit");
+    }
+    if (m_PackedBt709) {
+        EGL_LOG(Info, "Enabling 10-bit packed BT.709 full-range GPU presentation (Y410/XR30)");
     }
 
     // HACK: Work around bug where renderer will repeatedly fail with:
@@ -993,6 +1000,8 @@ void EGLRenderer::renderFrame(AVFrame* frame)
                 glUniform1i(
                     m_ShaderProgramParams[OPAQUE_PARAM_IDENTITY_GBR_8],
                     m_IdentityGbr8Bit ? 1 : 0);
+                glUniform1i(m_ShaderProgramParams[OPAQUE_PARAM_PACKED_BT709],
+                            m_PackedBt709 ? 1 : 0);
             }
 
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -1062,6 +1071,21 @@ void EGLRenderer::renderFrame(AVFrame* frame)
 bool EGLRenderer::testRenderFrame(AVFrame* frame)
 {
     EGLImage imgs[EGL_MAX_PLANES];
+
+    // Validate the actual packed shader before accepting the hardware path.
+    // This remains a one-time probe, not per-frame CPU work or readback.
+    if (m_PackedBt709) {
+        if (!SDL_GL_MakeCurrent(m_Window, m_Context)) {
+            return false;
+        }
+        m_EGLImagePixelFormat = m_Backend->getEGLImagePixelFormat();
+        const bool ready = m_EGLImagePixelFormat == AV_PIX_FMT_DRM_PRIME &&
+                specialize();
+        SDL_GL_MakeCurrent(m_Window, nullptr);
+        if (!ready) {
+            return false;
+        }
+    }
 
     // Make sure we can get working EGLImages from the backend renderer.
     // Some devices (Raspberry Pi) will happily decode into DRM formats that

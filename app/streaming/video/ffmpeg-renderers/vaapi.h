@@ -50,6 +50,7 @@ public:
     virtual AVPixelFormat getEGLImagePixelFormat() override;
     virtual uint32_t getEGLImportFormat(uint32_t drmFormat) override;
     virtual bool initializeEGL(EGLDisplay dpy, const EGLExtensions &ext) override;
+    virtual bool usesPackedBt709EGL() const override { return m_PackedBt709; }
     virtual ssize_t exportEGLImages(AVFrame *frame, EGLDisplay dpy, EGLImage images[EGL_MAX_PLANES]) override;
     virtual void freeEGLImages(EGLDisplay dpy, EGLImage[EGL_MAX_PLANES]) override;
 #endif
@@ -81,6 +82,7 @@ private:
     bool m_HasRfiLatencyBug;
     bool m_RequiresExplicitPixelFormat;
     bool m_IdentityGbr;
+    bool m_PackedBt709;
 
     SDL_Mutex* m_OverlayMutex;
     VAImageFormat m_OverlayFormat;

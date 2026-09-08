@@ -286,6 +286,12 @@ public:
     }
 
 #ifdef HAVE_EGL
+    // True only when the backend aliases packed Y410 as raw XR30 for the
+    // frontend's explicit full-range BT.709 conversion.
+    virtual bool usesPackedBt709EGL() const {
+        return false;
+    }
+
     // By default we can't do EGL
     virtual bool canExportEGL() {
         return false;

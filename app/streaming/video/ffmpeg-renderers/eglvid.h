@@ -67,6 +67,7 @@ private:
     int m_GlesMinorVersion;
     bool m_HasExtUnpackSubimage;
     bool m_IdentityGbr8Bit;
+    bool m_PackedBt709;
 
 #define NV12_PARAM_YUVMAT 0
 #define NV12_PARAM_OFFSET 1
@@ -74,6 +75,7 @@ private:
 #define NV12_PARAM_PLANE2 3
 #define OPAQUE_PARAM_TEXTURE 0
 #define OPAQUE_PARAM_IDENTITY_GBR_8 1
+#define OPAQUE_PARAM_PACKED_BT709 2
     int m_ShaderProgramParams[4];
 
 #define OVERLAY_PARAM_TEXTURE 0

@@ -377,7 +377,10 @@ bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool
         // Identity GBR relies on importing the packed Y410 VAAPI surface as
         // XR30. libplacebo treats Y410 as YUV and cannot preserve that channel
         // alias, while the DRM HDR frontend is unnecessary for this SDR mode.
-        if (params->enableIdentityGbr && m_BackendRenderer->canExportEGL()) {
+        // Apple's full-range BT.709 Y410 needs the same raw import, followed
+        // by an explicit GPU matrix. Do not send it through Vulkan first.
+        const bool packedBt709 = m_BackendRenderer->usesPackedBt709EGL();
+        if ((params->enableIdentityGbr || packedBt709) && m_BackendRenderer->canExportEGL()) {
             m_FrontendRenderer = new EGLRenderer(m_BackendRenderer);
             if (m_FrontendRenderer->initialize(params)) {
                 return true;

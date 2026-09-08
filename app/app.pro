@@ -244,6 +244,7 @@ SOURCES += \
     wm.cpp
 
 HEADERS += \
+    streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/nvapp.h \
