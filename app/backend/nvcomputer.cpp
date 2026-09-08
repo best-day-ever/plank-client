@@ -171,7 +171,8 @@ NvComputer::NvComputer(QSettings& settings)
             this->plankVideoProfile = StreamingPreferences::PLANK_PROFILE_H264_10BIT_444;
         }
     }
-    if (this->plankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+    if (this->plankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+            this->plankHostLayout != NvOutputTopology::MatchClientHostLayout) {
         this->plankHostLayout = QStringLiteral("fixed");
     }
     else if (this->plankHostLayout == QStringLiteral("fixed")) {

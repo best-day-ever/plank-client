@@ -20,6 +20,7 @@ private slots:
     void parsesFixedCapture();
     void rejectsInvalidFixedCapture();
     void recognizesDescriptionCapabilities();
+    void matchesMacClientCanvas();
 };
 
 void TestOutputTopology::recognizesDescriptionCapabilities()
@@ -35,6 +36,29 @@ void TestOutputTopology::recognizesDescriptionCapabilities()
     QVERIFY(!NvOutputTopology::supportsDescription(version, NvOutputTopology::OutputTopologyFeature));
     QVERIFY(!NvOutputTopology::supportsDescription(version, fixed ^ NvOutputTopology::HostLayoutMetadataFeature));
     QVERIFY(!NvOutputTopology::supportsDescription(version, fixed | NvOutputTopology::SelectedOutputFeature));
+    QCOMPARE(NvOutputTopology::hostPlatform(version, fixed), 2);
+    QCOMPARE(NvOutputTopology::hostPlatform(version, linuxFlags), 1);
+    QCOMPARE(NvOutputTopology::hostPlatform(version, 0), 0);
+    QCOMPARE(NvOutputTopology::hostPlatform(version - 1, fixed), 0);
+}
+
+void TestOutputTopology::matchesMacClientCanvas()
+{
+    // Pixel dimensions are independent of logical compositor scaling.
+    for (QSize logical : {QSize(3840,2160), QSize(3072,1728), QSize(1920,1080)}) {
+        QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({{QRect(QPoint(-100,0), logical), QSize(3840,2160)}}), QString("3840x2160"));
+    }
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({{QRect(0,0,5120,2160), QSize(5120,2160)}}), QString("5120x2160"));
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(2560,0,2560,2160), QSize(2560,2160)},
+        {QRect(0,0,2560,2160), QSize(2560,2160)}}), QString("5120x2160"));
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,3840,2160), QSize(3840,2160)},
+        {QRect(3840,0,3840,2160), QSize(3840,2160)}}).isEmpty());
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,1920,1080), QSize(1920,1080)},
+        {QRect(0,1080,1920,1080), QSize(1920,1080)}}).isEmpty());
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({}).isEmpty());
 }
 
 static QJsonObject fixedCaptureFixture()
@@ -62,7 +86,7 @@ void TestOutputTopology::parsesFixedCapture()
     QVERIFY(!NvOutputTopology::fromJson({}, topology));
     QCOMPARE(topology.toJson(), fixture);
     QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("physical")));
-    QVERIFY(!topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
+    QVERIFY(topology.allowsBookmarkHostLayout(QStringLiteral("match-client")));
     for (QSize points : {QSize(3840, 2160), QSize(2560, 1440)}) {
         auto varied = fixture;
         auto capture = varied["capture"].toObject();

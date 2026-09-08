@@ -225,6 +225,7 @@ public:
     Q_INVOKABLE void stopPollingAsync();
 
     Q_INVOKABLE QStringList plankVirtualModeChoices() const;
+    Q_INVOKABLE int probeHostPlatform(QString address);
 
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),
                                         int hostLayout = 0, int virtualMode1 = 9,
@@ -259,6 +260,7 @@ public:
     void clientSideAttributeUpdated(NvComputer* computer);
 
 signals:
+    void hostPlatformDetected(int requestId, QString address, int platform);
     void computerStateChanged(NvComputer* computer);
 
     void authenticationCompleted(NvComputer* computer, QString error);
@@ -286,6 +288,8 @@ private:
                                                      QString password);
 
     StreamingPreferences* m_Prefs;
+    bool m_HostPlatformProbePending = false;
+    int m_HostPlatformProbeSequence = 0;
     int m_PollingRef;
     QReadWriteLock m_Lock;
     QMap<QString, NvComputer*> m_KnownHosts;

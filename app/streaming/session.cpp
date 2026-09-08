@@ -2176,7 +2176,16 @@ bool Session::configurePlankHostLayout()
         }
 
         QString error;
-        if (!NvOutputTopology::resolveClientDisplayLayout(
+        if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+            const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
+            if (mode.isEmpty() || NvOutputTopology::virtualModeSize(mode) !=
+                    QSize(m_Computer->outputTopology.desktopWidth, m_Computer->outputTopology.desktopHeight)) {
+                emit displayLaunchError(mode.isEmpty() ? error : tr("Client displays changed during connection. Please reconnect to match the current display resolution."));
+                return false;
+            }
+            m_ResolvedHostLayout = QStringLiteral("fixed");
+        }
+        else if (!NvOutputTopology::resolveClientDisplayLayout(
                     displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
             emit displayLaunchError(error);
@@ -3134,6 +3143,15 @@ bool Session::runPlankReconnect()
                             m_Computer->plankTopologyVersion, m_Computer->plankFeatureFlags);
                 macDesktop = m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags;
                 desktopMode = m_Computer->plankVirtualMode1;
+                if (macDesktop && m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout) {
+                    QVector<NvClientDisplay> displays;
+                    for (const auto& display : std::as_const(m_ClientDisplays)) {
+                        displays.append({QRect(display.logicalBounds.x, display.logicalBounds.y,
+                                               display.logicalBounds.w, display.logicalBounds.h), display.nativeSize});
+                    }
+                    desktopMode = NvOutputTopology::resolveMacClientDisplayMode(displays);
+                    if (desktopMode.isEmpty()) return false;
+                }
             }
             if (topologySupported) {
                 topology = macDesktop ? http.prepareMacDisplay(desktopMode,

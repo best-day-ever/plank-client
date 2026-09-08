@@ -92,6 +92,8 @@ struct NvOutputTopology
     // Discovery decides whether to fetch topology; the authenticated JSON
     // parser still validates the complete platform-specific contract.
     static bool supportsDescription(int version, int featureFlags);
+    // UI hint only: unknown=0, Linux=1, macOS=2. Never authorization.
+    static int hostPlatform(int version, int featureFlags);
     static bool fromJson(const QJsonObject& object, NvOutputTopology& topology,
                          QString* error = nullptr);
     QJsonObject toJson() const;
@@ -101,6 +103,8 @@ struct NvOutputTopology
                                            QStringList& virtualModes,
                                            QString* error = nullptr);
     static QStringList qualifiedVirtualModes();
+    static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
+                                               QString* error = nullptr);
     static QSize virtualModeSize(const QString& mode);
     static QSize virtualCanvasSize(const QString& hostLayout,
                                    const QStringList& virtualModes);

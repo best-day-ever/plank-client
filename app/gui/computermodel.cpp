@@ -169,6 +169,9 @@ int ComputerModel::plankHostLayoutChoice(int computerIndex) const
     if (computer->plankHostLayout == NvOutputTopology::PhysicalHostLayout) {
         return 1;
     }
+    if (computer->plankHostLayout == QStringLiteral("fixed")) {
+        return 1; // Mac model: Match Client, then fixed virtual display.
+    }
     if (computer->plankHostLayout == NvOutputTopology::SingleHostLayout) {
         return 2;
     }

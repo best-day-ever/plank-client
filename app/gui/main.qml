@@ -416,7 +416,7 @@ ApplicationWindow {
         }
 
         function ensureVirtualModesCompatible() {
-            if (addCaptureSource.currentIndex === 2) return
+            if (addCaptureSource.captureSource === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -456,7 +456,7 @@ ApplicationWindow {
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
             addScalingChoice.currentIndex = 1
-            addCaptureSource.currentIndex = 0
+            addCaptureSource.selectCaptureSource(0)
             addEncodingProfile.currentIndex = 6
             profileBitratesKbps = []
         }
@@ -471,8 +471,7 @@ ApplicationWindow {
                                                    addScalingChoice.currentIndex,
                                                    addEncodingProfile.model.get(
                                                        addEncodingProfile.currentIndex).val,
-                                                   addCaptureSourceModel.get(
-                                                       addCaptureSource.currentIndex).val,
+                                                   addCaptureSource.captureSource,
                                                    profileBitratesKbps)
             }
         }
@@ -531,33 +530,14 @@ ApplicationWindow {
                 font.bold: true
             }
 
-            PlankComboBox {
+            PlankCaptureSourceBox {
                 id: addCaptureSource
                 Layout.fillWidth: true
-                textRole: "text"
-                currentIndex: 0
-                model: ListModel {
-                    id: addCaptureSourceModel
-                    ListElement {
-                        text: qsTr("NvFBC — 8-bit source")
-                        val: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
-                    }
-                    ListElement {
-                        text: qsTr("Native X11/XShm — 10-bit (Experimental)")
-                        val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10
-                    }
-                    ListElement {
-                        text: qsTr("ScreenCaptureKit — macOS (Experimental)")
-                        val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT
-                    }
-                }
-                onCurrentIndexChanged: {
-                    if (currentIndex === 2) addHostLayout.currentIndex = 0
-                    if (currentIndex === 1 || currentIndex === 2) {
-                        addEncodingProfile.currentIndex = 0
-                    } else {
-                        addEncodingProfile.currentIndex = 6
-                    }
+                hostAddress: addressText.text
+                probingEnabled: addPcDialog.visible
+                onCaptureSourceChanged: {
+                    addHostLayout.currentIndex = 0
+                    addEncodingProfile.currentIndex = captureSource === 0 ? 6 : 0
                     Qt.callLater(addPcDialog.applyProfileBitrate)
                 }
             }
@@ -565,7 +545,6 @@ ApplicationWindow {
             Label {
                 text: qsTr("Encoding profile")
                 font.bold: true
-                opacity: addCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
 
             PlankComboBox {
@@ -573,8 +552,8 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 textRole: "text"
                 currentIndex: 6
-                model: addCaptureSource.currentIndex === 2 ? addAppleEncodingProfileModel :
-                       addCaptureSource.currentIndex === 0 ?
+                model: addCaptureSource.captureSource === 2 ? addAppleEncodingProfileModel :
+                       addCaptureSource.captureSource === 0 ?
                            addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
                 onActivated: {
                     addPcDialog.applyProfileBitrate()
@@ -669,8 +648,7 @@ ApplicationWindow {
             PlankComboBox {
                 id: addHostLayout
                 Layout.fillWidth: true
-                enabled: addCaptureSource.currentIndex !== 2
-                model: addCaptureSource.currentIndex === 2 ? [qsTr("One Mac virtual display")] : [
+                model: addCaptureSource.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
@@ -679,15 +657,15 @@ ApplicationWindow {
             }
 
             Label {
-                text: addCaptureSource.currentIndex === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
+                text: addCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: addCaptureSource.currentIndex === 2 || addHostLayout.currentIndex >= 2 ? 1.0 : 0.5
+                opacity: (addCaptureSource.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2) ? 1.0 : 0.5
             }
 
             PlankComboBox {
                 id: addVirtualMode1
                 Layout.fillWidth: true
-                enabled: addCaptureSource.currentIndex === 2 || addHostLayout.currentIndex >= 2
+                enabled: (addCaptureSource.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2)
                 currentIndex: 9
                 model: addPcDialog.virtualModeChoices
                 delegate: ItemDelegate {
@@ -699,6 +677,7 @@ ApplicationWindow {
             }
 
             Label {
+                visible: addCaptureSource.captureSource !== 2
                 text: qsTr("Virtual display 2 resolution")
                 font.bold: true
                 opacity: addHostLayout.currentIndex === 3 ? 1.0 : 0.5
@@ -706,6 +685,7 @@ ApplicationWindow {
 
             PlankComboBox {
                 id: addVirtualMode2
+                visible: addCaptureSource.captureSource !== 2
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex === 3
                 currentIndex: 1

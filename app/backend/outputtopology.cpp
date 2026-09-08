@@ -400,7 +400,7 @@ bool NvOutputTopology::displayPolicyKnown() const
 
 bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
 {
-    if (featureFlags == FixedCaptureFlags) return layout == QStringLiteral("fixed");
+    if (featureFlags == FixedCaptureFlags) return layout == QStringLiteral("fixed") || layout == MatchClientHostLayout;
     if (!displayPolicyKnown()) {
         return true;
     }
@@ -437,6 +437,26 @@ bool NvOutputTopology::matchesRequestedHostLayout(const QString& layout,
             desktopHeight == qMax(left.height, right.height) &&
             left.sourceX == 0 && left.sourceY == 0 &&
             right.sourceX == left.width && right.sourceY == 0;
+}
+
+int NvOutputTopology::hostPlatform(int version, int flags)
+{
+    if (!supportsDescription(version, flags)) return 0;
+    return flags == FixedCaptureFlags ? 2 : 1;
+}
+
+QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays, QString* error)
+{
+    QString layout;
+    QStringList modes;
+    if (!resolveClientDisplayLayout(displays, layout, modes, error)) return {};
+    const QSize canvas = virtualCanvasSize(layout, modes);
+    const QString mode = QStringLiteral("%1x%2").arg(canvas.width()).arg(canvas.height());
+    if (canvas.width() > 5120 || canvas.height() > 2160 || !qualifiedVirtualModes().contains(mode)) {
+        if (error) *error = QStringLiteral("The client display canvas (%1) is not a supported Mac desktop resolution. Select a fixed Mac resolution or change the client display layout.").arg(mode);
+        return {};
+    }
+    return mode;
 }
 
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,

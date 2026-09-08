@@ -448,7 +448,7 @@ CenteredGridView {
         }
 
         function ensureVirtualModesCompatible() {
-            if (editCaptureSource.currentIndex === 2) return
+            if (editCaptureSource.captureSource === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -472,7 +472,7 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
             hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
-            editCaptureSource.currentIndex = originalCaptureSource
+            editCaptureSource.selectCaptureSource(originalCaptureSource)
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
@@ -515,8 +515,7 @@ CenteredGridView {
                                                     editVirtualMode2.currentIndex,
                                                     editEncodingProfile.model.get(
                                                         editEncodingProfile.currentIndex).val,
-                                                    editCaptureSourceModel.get(
-                                                        editCaptureSource.currentIndex).val,
+                                                    editCaptureSource.captureSource,
                                                     profileBitratesKbps)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.open()
@@ -548,32 +547,14 @@ CenteredGridView {
                 text: qsTr("Capture source")
                 font.bold: true
             }
-            PlankComboBox {
+            PlankCaptureSourceBox {
                 id: editCaptureSource
                 Layout.fillWidth: true
-                textRole: "text"
-                model: ListModel {
-                    id: editCaptureSourceModel
-                    ListElement {
-                        text: qsTr("NvFBC — 8-bit source")
-                        val: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
-                    }
-                    ListElement {
-                        text: qsTr("Native X11/XShm — 10-bit (Experimental)")
-                        val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10
-                    }
-                    ListElement {
-                        text: qsTr("ScreenCaptureKit — macOS (Experimental)")
-                        val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT
-                    }
-                }
-                onCurrentIndexChanged: {
-                    if (currentIndex === 2) editHostLayout.currentIndex = 0
-                    if (currentIndex === 1 || currentIndex === 2) {
-                        editEncodingProfile.currentIndex = 0
-                    } else {
-                        editEncodingProfile.currentIndex = 3
-                    }
+                hostAddress: editAddressText.text
+                probingEnabled: editBookmarkDialog.visible
+                onCaptureSourceChanged: {
+                    editHostLayout.currentIndex = 0
+                    editEncodingProfile.currentIndex = captureSource === 0 ? 3 : 0
                     Qt.callLater(editBookmarkDialog.applyProfileBitrate)
                 }
             }
@@ -581,14 +562,13 @@ CenteredGridView {
             Label {
                 text: qsTr("Encoding profile")
                 font.bold: true
-                opacity: editCaptureSource.currentIndex === 0 ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editEncodingProfile
                 Layout.fillWidth: true
                 textRole: "text"
-                model: editCaptureSource.currentIndex === 2 ? editAppleEncodingProfileModel :
-                       editCaptureSource.currentIndex === 0 ?
+                model: editCaptureSource.captureSource === 2 ? editAppleEncodingProfileModel :
+                       editCaptureSource.captureSource === 0 ?
                            editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
                 onActivated: {
                     editBookmarkDialog.applyProfileBitrate()
@@ -682,8 +662,7 @@ CenteredGridView {
             PlankComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
-                enabled: editCaptureSource.currentIndex !== 2
-                model: editCaptureSource.currentIndex === 2 ? [qsTr("One Mac virtual display")] : [
+                model: editCaptureSource.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
@@ -693,21 +672,21 @@ CenteredGridView {
 
             Label {
                 Layout.fillWidth: true
-                visible: editBookmarkDialog.hostDisplayPolicy === 0
+                visible: editCaptureSource.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
                 text: qsTr("This headless workstation does not provide physical displays.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }
 
             Label {
-                text: editCaptureSource.currentIndex === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
+                text: editCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: editCaptureSource.currentIndex === 2 || editHostLayout.currentIndex >= 2 ? 1.0 : 0.5
+                opacity: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2) ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode1
                 Layout.fillWidth: true
-                enabled: editCaptureSource.currentIndex === 2 || editHostLayout.currentIndex >= 2
+                enabled: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2)
                 model: editBookmarkDialog.virtualModeChoices
                 delegate: ItemDelegate {
                     width: editVirtualMode1.width
@@ -718,12 +697,14 @@ CenteredGridView {
             }
 
             Label {
+                visible: editCaptureSource.captureSource !== 2
                 text: qsTr("Virtual display 2 resolution")
                 font.bold: true
                 opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode2
+                visible: editCaptureSource.captureSource !== 2
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
                 model: editBookmarkDialog.virtualModeChoices

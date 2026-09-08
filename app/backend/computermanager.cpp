@@ -8,8 +8,11 @@
 #include <QThread>
 #include <QThreadPool>
 #include <QCoreApplication>
+#include <QGuiApplication>
+#include <QScreen>
 
 #include <utility>
+#include <limits>
 
 #define SER_HOSTS "hosts"
 #define SER_HOSTS_BACKUP "hostsbackup"
@@ -670,11 +673,12 @@ class PendingAuthenticationTask : public QObject, public QRunnable
 
 public:
     PendingAuthenticationTask(ComputerManager* computerManager, NvComputer* computer,
-                              QString username, QString password)
+                              QString username, QString password, QString matchedDesktopMode)
         : m_ComputerManager(computerManager),
           m_Computer(computer),
           m_Username(std::move(username)),
-          m_Password(std::move(password))
+          m_Password(std::move(password)),
+          m_MatchedDesktopMode(std::move(matchedDesktopMode))
     {
         connect(this, &PendingAuthenticationTask::authenticationCompleted,
                 computerManager, &ComputerManager::authenticationCompleted);
@@ -713,7 +717,7 @@ private:
                 topologySupported = NvOutputTopology::supportsDescription(
                             m_Computer->plankTopologyVersion, m_Computer->plankFeatureFlags);
                 macDesktop = m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags;
-                desktopMode = m_Computer->plankVirtualMode1;
+                desktopMode = m_MatchedDesktopMode.isEmpty() ? m_Computer->plankVirtualMode1 : m_MatchedDesktopMode;
                 appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(m_Computer->plankVideoProfile);
             }
             if (topologySupported) {
@@ -753,13 +757,39 @@ private:
     NvComputer* m_Computer;
     QString m_Username;
     QString m_Password;
+    QString m_MatchedDesktopMode;
 };
 
 void ComputerManager::authenticateHost(NvComputer* computer, QString username,
                                        QString password)
 {
+    QString matchedMode;
+    bool matchMac;
+    {
+        QReadLocker lock(&computer->lock);
+        matchMac = computer->plankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+                computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout;
+    }
+    if (matchMac) {
+        // Read Qt screens on the GUI thread before starting authentication;
+        // devicePixelRatio removes compositor scaling from the requested pixels.
+        Q_ASSERT(QThread::currentThread() == qApp->thread());
+        QVector<NvClientDisplay> displays;
+        for (QScreen* screen : QGuiApplication::screens()) {
+            const QRect geometry = screen->geometry();
+            const qreal ratio = screen->devicePixelRatio();
+            displays.append({geometry, QSize(qRound(geometry.width() * ratio), qRound(geometry.height() * ratio))});
+        }
+        QString error;
+        matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
+        if (matchedMode.isEmpty()) {
+            password.fill(QChar('\0'));
+            emit authenticationCompleted(computer, error);
+            return;
+        }
+    }
     PendingAuthenticationTask* authentication = new PendingAuthenticationTask(
-        this, computer, std::move(username), std::move(password));
+        this, computer, std::move(username), std::move(password), matchedMode);
     QThreadPool::globalInstance()->start(authentication);
 }
 
@@ -816,6 +846,53 @@ void ComputerManager::stopPollingAsync()
     }
 }
 
+class HostPlatformProbe : public QObject, public QRunnable
+{
+    Q_OBJECT
+public:
+    explicit HostPlatformProbe(NvAddress address) : m_Address(std::move(address)) {}
+    void run() override {
+        int platform = 0;
+        try {
+            NvHTTP http(m_Address);
+            const QString info = http.getServerInfo(NvHTTP::NVLL_NONE, true);
+            if (NvHTTP::getXmlString(info, "PlankAuth") == QLatin1String("1") &&
+                    NvHTTP::getXmlString(info, "PlankHostMetadataVersion") == QLatin1String("1")) {
+                platform = NvOutputTopology::hostPlatform(
+                    NvHTTP::getXmlString(info, "PlankTopologyVersion").toInt(),
+                    NvHTTP::getXmlString(info, "PlankFeatureFlags").toInt());
+            }
+        } catch (const GfeHttpResponseException&) {
+        } catch (const QtNetworkReplyException&) {
+        }
+        emit completed(platform);
+    }
+signals:
+    void completed(int platform);
+private:
+    NvAddress m_Address;
+};
+
+int ComputerManager::probeHostPlatform(QString address)
+{
+    Q_ASSERT(QThread::currentThread() == thread());
+    NvAddress parsed;
+    if (!parseManualAddress(address, parsed)) return -1;
+    if (m_HostPlatformProbePending) return 0;
+    m_HostPlatformProbePending = true;
+    // Bounded requests, no unbounded per-keystroke worker queue. Responses are
+    // only a UI hint, never a certificate pin or an authentication decision.
+    if (m_HostPlatformProbeSequence == std::numeric_limits<int>::max()) m_HostPlatformProbeSequence = 0;
+    const int requestId = ++m_HostPlatformProbeSequence;
+    auto* task = new HostPlatformProbe(parsed);
+    connect(task, &HostPlatformProbe::completed, this, [this, requestId, address](int platform) {
+        m_HostPlatformProbePending = false;
+        emit hostPlatformDetected(requestId, address, platform);
+    }, Qt::QueuedConnection);
+    QThreadPool::globalInstance()->start(task);
+    return requestId;
+}
+
 QStringList ComputerManager::plankVirtualModeChoices() const
 {
     QStringList choices = NvOutputTopology::qualifiedVirtualModes();
@@ -833,7 +910,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          QVariantList profileBitrates)
 {
     NvAddress manualAddress;
-    const QString hostLayout = captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
+    const QString hostLayout = captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayoutChoice != 0 ?
                 QStringLiteral("fixed") : hostLayoutFromChoice(hostLayoutChoice);
     const QString virtualMode1 = virtualModeFromChoice(virtualMode1Choice);
     const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
@@ -921,7 +998,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     NvAddress manualAddress;
     QVector<int> profileBitratesKbps;
     nickname = nickname.trimmed();
-    if (captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+    if (captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayout != NvOutputTopology::MatchClientHostLayout) {
         hostLayout = QStringLiteral("fixed");
     }
     if (computer == nullptr || nickname.isEmpty() ||
