@@ -86,6 +86,9 @@ struct NvOutputTopology
     static const char* SingleHostLayout;
     static const char* DualHorizontalHostLayout;
 
+    // Discovery decides whether to fetch topology; the authenticated JSON
+    // parser still validates the complete platform-specific contract.
+    static bool supportsDescription(int version, int featureFlags);
     static bool fromJson(const QJsonObject& object, NvOutputTopology& topology,
                          QString* error = nullptr);
     QJsonObject toJson() const;

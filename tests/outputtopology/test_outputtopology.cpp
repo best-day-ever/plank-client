@@ -19,7 +19,23 @@ private slots:
     void rejectsUnsupportedClientLayouts();
     void parsesFixedCapture();
     void rejectsInvalidFixedCapture();
+    void recognizesDescriptionCapabilities();
 };
+
+void TestOutputTopology::recognizesDescriptionCapabilities()
+{
+    const int version = NvOutputTopology::ProtocolVersion;
+    const int fixed = NvOutputTopology::FixedCaptureFlags;
+    const int linuxFlags = NvOutputTopology::SupportedFeatureFlags;
+    QVERIFY(NvOutputTopology::supportsDescription(version, fixed));
+    QVERIFY(NvOutputTopology::supportsDescription(version, linuxFlags));
+    QVERIFY(!NvOutputTopology::supportsDescription(version - 1, fixed));
+    QVERIFY(!NvOutputTopology::supportsDescription(version + 1, linuxFlags));
+    QVERIFY(!NvOutputTopology::supportsDescription(version, 0));
+    QVERIFY(!NvOutputTopology::supportsDescription(version, NvOutputTopology::OutputTopologyFeature));
+    QVERIFY(!NvOutputTopology::supportsDescription(version, fixed ^ NvOutputTopology::HostLayoutMetadataFeature));
+    QVERIFY(!NvOutputTopology::supportsDescription(version, fixed | NvOutputTopology::SelectedOutputFeature));
+}
 
 static QJsonObject fixedCaptureFixture()
 {

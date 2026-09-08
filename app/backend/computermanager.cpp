@@ -703,15 +703,12 @@ private:
             NvHTTP http(address);
             const QString token = http.authenticate(m_Username, m_Password);
             NvOutputTopology topology;
-            const bool topologySupported =
-                    m_Computer->plankTopologyVersion == NvOutputTopology::ProtocolVersion &&
-                    (m_Computer->plankFeatureFlags &
-                     (NvOutputTopology::OutputTopologyFeature |
-                      NvOutputTopology::SelectedOutputFeature |
-                      NvOutputTopology::UnifiedAbsoluteInputFeature)) ==
-                    (NvOutputTopology::OutputTopologyFeature |
-                     NvOutputTopology::SelectedOutputFeature |
-                     NvOutputTopology::UnifiedAbsoluteInputFeature);
+            bool topologySupported;
+            {
+                QReadLocker lock(&m_Computer->lock);
+                topologySupported = NvOutputTopology::supportsDescription(
+                            m_Computer->plankTopologyVersion, m_Computer->plankFeatureFlags);
+            }
             if (topologySupported) {
                 topology = http.getOutputTopology();
             }

@@ -14,6 +14,15 @@ const char* NvOutputTopology::PhysicalHostLayout = "physical";
 const char* NvOutputTopology::SingleHostLayout = "single";
 const char* NvOutputTopology::DualHorizontalHostLayout = "dual-horizontal";
 
+bool NvOutputTopology::supportsDescription(int version, int featureFlags)
+{
+    if (version != ProtocolVersion) return false;
+    if (featureFlags & FixedCaptureFeature) return featureFlags == FixedCaptureFlags;
+    const int linuxDescription = OutputTopologyFeature | SelectedOutputFeature |
+            UnifiedAbsoluteInputFeature;
+    return (featureFlags & linuxDescription) == linuxDescription;
+}
+
 namespace {
 QJsonObject applePreviewProfile()
 {
