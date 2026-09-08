@@ -1292,6 +1292,11 @@ void Session::plankTransportDataReceiveLoop()
         if (result != PLANK_TRANSPORT_OK) {
             if (!m_PlankTransportReceiversStopping.load()) {
                 qWarning() << "Native KyProto control receive failed:" << result;
+                // This receiver owns termination for the shared QUIC connection.
+                // Drain queued control records first (notably session takeover),
+                // then use the existing duplicate-safe reconnect callback. A
+                // closed receive path must not wait for a mouse/key send failure.
+                clConnectionTerminated(result);
             }
             return;
         }
