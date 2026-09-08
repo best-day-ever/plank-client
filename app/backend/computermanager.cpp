@@ -693,7 +693,14 @@ private:
     void run()
     {
         try {
-            NvHTTP http(m_Computer);
+            // An explicit sign-in starts a new conversation, not a request
+            // authorized with a previous (possibly expired) session token.
+            NvAddress address;
+            {
+                QReadLocker lock(&m_Computer->lock);
+                address = m_Computer->activeAddress;
+            }
+            NvHTTP http(address);
             const QString token = http.authenticate(m_Username, m_Password);
             NvOutputTopology topology;
             const bool topologySupported =
