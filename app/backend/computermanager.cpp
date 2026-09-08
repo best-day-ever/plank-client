@@ -784,7 +784,11 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
         if (matchedMode.isEmpty()) {
             password.fill(QChar('\0'));
-            emit authenticationCompleted(computer, error);
+            // Preserve the asynchronous completion contract even for local
+            // validation errors, so callers can finish opening their wait UI.
+            QMetaObject::invokeMethod(this, [this, computer, error]() {
+                emit authenticationCompleted(computer, error);
+            }, Qt::QueuedConnection);
             return;
         }
     }

@@ -2136,6 +2136,7 @@ bool Session::configurePlankHostLayout()
     QString scalingMode;
     QString virtualMode1;
     QString virtualMode2;
+    QSize authenticatedDesktopSize;
     bool hostRejectsRequestedLayout = false;
     {
         QReadLocker lock(&m_Computer->lock);
@@ -2143,6 +2144,8 @@ bool Session::configurePlankHostLayout()
         scalingMode = m_Computer->plankScalingMode;
         virtualMode1 = m_Computer->plankVirtualMode1;
         virtualMode2 = m_Computer->plankVirtualMode2;
+        authenticatedDesktopSize = QSize(m_Computer->outputTopology.desktopWidth,
+                                         m_Computer->outputTopology.desktopHeight);
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
         hostRejectsRequestedLayout = hostPolicyKnown &&
                 !m_Computer->outputTopology.allowsBookmarkHostLayout(layoutPolicy);
@@ -2179,7 +2182,7 @@ bool Session::configurePlankHostLayout()
         if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
             const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
             if (mode.isEmpty() || NvOutputTopology::virtualModeSize(mode) !=
-                    QSize(m_Computer->outputTopology.desktopWidth, m_Computer->outputTopology.desktopHeight)) {
+                    authenticatedDesktopSize) {
                 emit displayLaunchError(mode.isEmpty() ? error : tr("Client displays changed during connection. Please reconnect to match the current display resolution."));
                 return false;
             }
