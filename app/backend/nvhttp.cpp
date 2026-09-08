@@ -806,7 +806,8 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     connect(reply.data(), &QNetworkReply::readyRead, &loop, drain);
     connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
-    QTimer::singleShot(REQUEST_TIMEOUT_MS, &loop, &QEventLoop::quit);
+    QTimer::singleShot(path == QLatin1String("/plank/display") ? 10000 : REQUEST_TIMEOUT_MS,
+                      &loop, &QEventLoop::quit);
     if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
     if (!reply->isFinished()) reply->abort();
     if (!oversized) drain();
