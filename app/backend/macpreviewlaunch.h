@@ -4,7 +4,7 @@
 #include <Limelight.h>
 #include <QByteArray>
 
-// Typed schema-1 preview only. Never reinterpret Linux's PLS1 launch response
+// Typed schema-2 preview only. Never reinterpret Linux's PLS1 launch response
 // or infer services from a platform name or a decoder's capabilities.
 namespace MacPreviewLaunch {
 
@@ -16,7 +16,7 @@ inline QJsonObject request(const NvOutputTopology& topology, int bitrateKbps,
             !NvOutputTopology::fromJson(topology.toJson(), checked) ||
             bitrateKbps < 10000 || bitrateKbps > 150000 ||
             udpPayloadSize < 1200 || udpPayloadSize > 65527) return {};
-    return {{"schema_version", 1}, {"capture_generation", checked.generation},
+    return {{"schema_version", 2}, {"capture_generation", checked.generation},
             {"capture_id", checked.outputs.first().id},
             {"width", checked.desktopWidth}, {"height", checked.desktopHeight},
             {"encoding_mode", checked.appleEncodingMode}, {"frame_rate", 60},
@@ -36,13 +36,13 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     reply = {};
     if (request(topology, 10000, udpPayloadSize).isEmpty() ||
             approvedControlPort < 1 || approvedControlPort > 65535 ||
-            object.size() != 7 || object.value("schema_version") != QJsonValue(1) ||
+            object.size() != 7 || object.value("schema_version") != QJsonValue(2) ||
             object.value("state") != QJsonValue("connecting") ||
             object.value("udp_port") != QJsonValue(approvedControlPort) ||
             object.value("max_udp_payload_size") != QJsonValue(udpPayloadSize) ||
             object.value("capture") != topology.toJson().value("capture") ||
             object.value("services") != QJsonValue(QJsonObject {
-                {"audio", true}, {"input", true}, {"cursor", "embedded"}})) return false;
+                {"audio", true}, {"input", true}, {"pen", "normalized"}, {"cursor", "embedded"}})) return false;
 
     const QString token = object.value("transport_token").toString();
     if (token.size() != 44) return false;
@@ -53,8 +53,8 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     reply.configuration.structSize = sizeof(reply.configuration);
     reply.configuration.negotiatedVideoFormat = topology.appleEncodingMode == QLatin1String("hevc-10-444-videotoolbox") ?
                 VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_MAIN10;
-    // Schema 1 explicitly supports PLD1 bitrate updates/acknowledgements.
-    reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK;
+    // Schema 2 explicitly supports normalized pen and PLD1 bitrate updates.
+    reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK | LI_FF_PEN_TOUCH_EVENTS;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
     reply.configuration.serviceFlags = PLANK_NATIVE_SERVICE_AUDIO | PLANK_NATIVE_SERVICE_INPUT;
     reply.configuration.audioPacketDurationMs = 5;

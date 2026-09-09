@@ -3,6 +3,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/computermanager.h"
 #include "streaming/plankpresentation.h"
+#include "streaming/plankembeddedcursor.h"
 
 #include <SDL3/SDL.h>
 
@@ -114,6 +115,7 @@ private:
     bool m_PointerRegionLockToggledByUser;
     bool m_LocalToolbarAvailable;
     bool m_LocalCursorSupported;
+    PlankEmbeddedCursor m_EmbeddedCursor;
     bool m_RemoteCursorVisible;
     bool m_CompositorCursorRequestedVisible;
     bool m_TabletCursorActive;

@@ -485,6 +485,7 @@ wayland {
     SOURCES += streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.cpp
     HEADERS += \
         streaming/plankwaylandcursor.h \
+        streaming/plankembeddedcursor.h \
         streaming/plankwaylandtoolbar.h \
         streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.h
 }

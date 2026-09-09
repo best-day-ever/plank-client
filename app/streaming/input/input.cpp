@@ -502,6 +502,11 @@ void SdlInputHandler::applyPendingTabletCursorActivation()
     if (!m_TabletCursorActivationPending.load()) {
         return;
     }
+    if (!m_LocalCursorSupported) {
+        m_TabletCursorActivationPending.store(false);
+        if (isCaptureActive()) setCursorVisible(false);
+        return;
+    }
     reconcileWaylandTabletCursorOutputs();
     if (!m_LocalCursorSupported || !isCaptureActive() ||
             m_WaylandTabletCursorOutputs.empty()) {
@@ -776,6 +781,10 @@ void SdlInputHandler::setCaptureActive(bool active)
 void SdlInputHandler::setCursorVisible(bool visible)
 {
     m_CompositorCursorRequestedVisible = visible;
+    if (!m_LocalCursorSupported && !m_EmbeddedCursor.setVisible(visible)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Unable to update embedded-session cursor image: %s", SDL_GetError());
+    }
     if (visible && !m_TabletCursorActive) {
         SDL_ShowCursor();
     }
