@@ -9,7 +9,8 @@ namespace PlankNetwork
 // ZeroTier carries an inner IPv4/UDP/QUIC packet inside a physical UDP
 // payload capped at 1432 bytes on the qualified path. A 1344-byte QUIC UDP
 // payload remains below that boundary for both normal and extended ZeroTier
-// frames while yielding a 1280-byte KyProto video RaptorQ symbol.
+// frames while yielding a 1280-byte KyProto video RaptorQ symbol. This is an
+// automatic ceiling, not permission to exceed a smaller interface MTU.
 constexpr quint16 ZeroTierPhysicalUdpPayloadLimit = 1432;
 constexpr quint16 ZeroTierExtendedFrameOverhead = 51;
 constexpr quint16 InnerIpv4UdpOverhead = 28;
@@ -37,30 +38,35 @@ inline quint16 quicUdpPayloadMtuForRoute(int configuredMtu,
                                          quint32 interfaceMtu = 0,
                                          bool isIpv6 = false)
 {
-    if (configuredMtu >= MinimumQuicUdpPayloadMtu &&
-            configuredMtu <= MaximumQuicUdpPayloadMtu) {
-        return quint16(configuredMtu);
+    // Zero is reserved for rejection here, never transport path discovery.
+    if (configuredMtu != 0 &&
+            (configuredMtu < MinimumQuicUdpPayloadMtu ||
+             configuredMtu > MaximumQuicUdpPayloadMtu)) {
+        return 0;
     }
-
-    if (isZeroTier) {
-        return ZeroTierQuicUdpPayloadMtu;
-    }
-
     const quint32 networkOverhead = isIpv6 ? InnerIpv6UdpOverhead :
                                             InnerIpv4UdpOverhead;
-    if (interfaceMtu > networkOverhead + AutomaticPathSafetyMargin) {
-        const quint32 payloadMtu = interfaceMtu - networkOverhead -
-                                   AutomaticPathSafetyMargin;
-        if (payloadMtu >= MinimumQuicUdpPayloadMtu) {
-            return quint16(qMin(payloadMtu,
-                                quint32(MaximumAutomaticQuicUdpPayloadMtu)));
+    quint32 interfacePayloadLimit = MaximumQuicUdpPayloadMtu;
+    if (interfaceMtu != 0) {
+        // Check before subtracting, including interfaces below QUIC's minimum.
+        if (interfaceMtu < MinimumQuicUdpPayloadMtu + networkOverhead +
+                           AutomaticPathSafetyMargin) {
+            return 0;
         }
+        interfacePayloadLimit = interfaceMtu - networkOverhead - AutomaticPathSafetyMargin;
     }
 
-    // Keeping both endpoints at the minimum QUIC payload is safer than
-    // allowing DPLPMTUD to shrink the path underneath a RaptorQ object that
-    // was already packetized with larger symbols.
-    return MinimumQuicUdpPayloadMtu;
+    // An explicit override may replace automatic policy, but must fit any known
+    // interface limit. Keep the 20-byte margin for both automatic/manual values.
+    if (configuredMtu != 0) {
+        return quint32(configuredMtu) <= interfacePayloadLimit ? quint16(configuredMtu) : 0;
+    }
+
+    // Unknown MTU is distinct from a known, unusably small MTU. Retain the
+    // qualified ZeroTier ceiling / minimum-QUIC fallback only for unknown MTU.
+    const quint16 automaticCeiling = isZeroTier ? ZeroTierQuicUdpPayloadMtu :
+            (interfaceMtu ? MaximumAutomaticQuicUdpPayloadMtu : MinimumQuicUdpPayloadMtu);
+    return quint16(qMin(interfacePayloadLimit, quint32(automaticCeiling)));
 }
 
 inline bool isZeroTierInterface(const QString& interfaceName,

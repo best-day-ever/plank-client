@@ -410,7 +410,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability(
             for (const QNetworkAddressEntry& addr : allInterfaceAddresses) {
                 if (addr.ip() == s.localAddress()) {
                     if (interfaceMtu != nullptr) {
-                        *interfaceMtu = nic.maximumTransmissionUnit();
+                        *interfaceMtu = qMax(0, nic.maximumTransmissionUnit());
                     }
                     if (isIpv6 != nullptr) {
                         *isIpv6 = s.localAddress().protocol() ==

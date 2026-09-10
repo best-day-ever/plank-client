@@ -2562,28 +2562,38 @@ bool Session::startConnectionAsync(bool reconnecting,
     QString acceptedEncodingMode;
     const bool macCapture = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
     MacPreviewLaunch::Reply macLaunch;
-    quint16 quicUdpPayloadMtu = 0;
-    if (m_Preferences->quicUdpPayloadMtu != 0) {
-        quicUdpPayloadMtu = PlankNetwork::quicUdpPayloadMtuForRoute(
-                    m_Preferences->quicUdpPayloadMtu, false);
-        qInfo() << "Manual fixed QUIC UDP payload ceiling:"
-                << quicUdpPayloadMtu << "bytes";
+    quint32 routeInterfaceMtu = 0;
+    bool routeIsIpv6 = false;
+    const NvComputer::ReachabilityType routeReachability =
+            m_Computer->getActiveAddressReachability(&routeInterfaceMtu, &routeIsIpv6);
+    const int configuredMtu = m_Preferences->quicUdpPayloadMtu;
+    const quint16 quicUdpPayloadMtu = PlankNetwork::quicUdpPayloadMtuForRoute(
+                configuredMtu, routeReachability == NvComputer::RI_ZEROTIER,
+                routeInterfaceMtu, routeIsIpv6);
+    if (quicUdpPayloadMtu == 0) {
+        const quint32 overhead = routeIsIpv6 ? PlankNetwork::InnerIpv6UdpOverhead :
+                                              PlankNetwork::InnerIpv4UdpOverhead;
+        const quint32 minimumMtu = PlankNetwork::MinimumQuicUdpPayloadMtu +
+                overhead + PlankNetwork::AutomaticPathSafetyMargin;
+        if (routeInterfaceMtu && routeInterfaceMtu < minimumMtu) {
+            emit displayLaunchError(tr("The network interface MTU is %1 bytes. PLANK requires at least %2 bytes for %3, including protocol headers and its safety margin.")
+                                    .arg(routeInterfaceMtu).arg(minimumMtu)
+                                    .arg(routeIsIpv6 ? QStringLiteral("IPv6") : QStringLiteral("IPv4")));
+        }
+        else {
+            emit displayLaunchError(tr("The configured QUIC UDP payload (%1 bytes) is invalid or exceeds the network interface's safe payload limit. Choose Automatic or a smaller value of at least 1200 bytes.")
+                                    .arg(configuredMtu));
+        }
+        qWarning() << "Rejected QUIC UDP payload: configured=" << configuredMtu
+                   << "interface MTU=" << routeInterfaceMtu
+                   << (routeIsIpv6 ? "IPv6" : "IPv4");
+        return false;
     }
-    else {
-        quint32 routeInterfaceMtu = 0;
-        bool routeIsIpv6 = false;
-        const NvComputer::ReachabilityType routeReachability =
-                m_Computer->getActiveAddressReachability(&routeInterfaceMtu,
-                                                          &routeIsIpv6);
-        quicUdpPayloadMtu = PlankNetwork::quicUdpPayloadMtuForRoute(
-                    0,
-                    routeReachability == NvComputer::RI_ZEROTIER,
-                    routeInterfaceMtu,
-                    routeIsIpv6);
-        qInfo() << "Automatically resolved fixed QUIC UDP payload ceiling:"
-                << quicUdpPayloadMtu << "bytes from interface MTU"
-                << routeInterfaceMtu << (routeIsIpv6 ? "(IPv6)" : "(IPv4)");
-    }
+    qInfo() << (configuredMtu ? "Manual fixed QUIC UDP payload ceiling:" :
+                              "Automatically resolved fixed QUIC UDP payload ceiling:")
+            << quicUdpPayloadMtu << "bytes from interface MTU" << routeInterfaceMtu
+            << (routeIsIpv6 ? "(IPv6)" : "(IPv4)")
+            << "ZeroTier=" << (routeReachability == NvComputer::RI_ZEROTIER);
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);

@@ -878,8 +878,8 @@ Flickable {
 
                 PlankSettingHelp {
                     text: automaticQuicMtuCheckBox.checked ?
-                              qsTr("Automatic uses 1344 bytes on detected ZeroTier routes and Quinn path discovery elsewhere.") :
-                              qsTr("The manual value is the complete QUIC UDP payload, excluding outer IP and UDP headers.")
+                              qsTr("Automatic subtracts protocol headers and a 20-byte safety margin from the interface MTU, with a 1344-byte ceiling on ZeroTier routes. The size stays fixed during the connection; downstream limits are not probed.") :
+                              qsTr("The complete QUIC UDP payload, excluding IP and UDP headers. Must be at least 1200 bytes and fit the known interface MTU with headers and a 20-byte safety margin.")
                 }
 
                 PlankSettingLabel {
