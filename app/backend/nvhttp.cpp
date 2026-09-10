@@ -819,6 +819,15 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     if (oversized) throw GfeHttpResponseException(400, "Mac preview response exceeded its size limit");
     if (status != 200 && status != 0) {
         // Do not expose arbitrary server text, redirect URLs, or response tokens.
+        const auto failure = QJsonDocument::fromJson(response).object();
+        response.fill('\0');
+        if (status == 403 && failure.value(QStringLiteral("state")) == QLatin1String("denied") &&
+                failure.value(QStringLiteral("error")) == QLatin1String("host_permissions_required")) {
+            throw GfeHttpResponseException(status,
+                "PLANK Host requires macOS permissions. On the Mac, open PLANK Host in Applications "
+                "and approve Screen Recording and Accessibility in System Settings > Privacy & Security. "
+                "If already enabled, the permissions may belong to an earlier signed build.");
+        }
         throw GfeHttpResponseException(status, path == QLatin1String("/plank/display") ?
             "Mac desktop resolution change was not accepted" : "Mac stream launch was not accepted");
     }
