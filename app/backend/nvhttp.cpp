@@ -9,7 +9,6 @@
 
 #include <QDebug>
 #include <QDateTime>
-#include <QUuid>
 #include <QtNetwork/QNetworkReply>
 #include <QEventLoop>
 #include <QTimer>
@@ -860,10 +859,9 @@ NvHTTP::openConnection(QUrl baseUrl,
     QUrl url(baseUrl);
     url.setPath("/" + command);
 
-    // Retain the protocol client identifier expected by the host.
-    url.setQuery("uniqueid=0123456789ABCDEF&uuid=" +
-                 QUuid::createUuid().toRfc4122().toHex() +
-                 ((arguments != nullptr) ? ("&" + arguments) : ""));
+    // Only operation parameters belong in the query. PLANK authorization is
+    // carried separately; discovery and topology need no client ID/cache nonce.
+    url.setQuery(arguments);
 
     QNetworkRequest request(url);
 
