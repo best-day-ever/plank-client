@@ -2927,6 +2927,11 @@ bool Session::startConnectionAsync(bool reconnecting,
             qInfo() << "PLANK authentication token consumed after launch";
         }
     } catch (const GfeHttpResponseException& e) {
+        if (reconnecting && e.getStatusCode() == 403) {
+            // Operator consent cannot recover through automatic reauthentication.
+            m_ReconnectCancelled.store(true);
+            emit displayLaunchError(e.toQString());
+        }
         if (!reconnecting) {
             emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
         } else {
@@ -3181,6 +3186,10 @@ bool Session::runPlankReconnect()
         } catch (const GfeHttpResponseException& error) {
             qWarning() << "PLANK reauthentication attempt" << attempt
                        << "failed:" << error.toQString();
+            if (error.getStatusCode() == 403) {
+                m_ReconnectCancelled.store(true);
+                emit displayLaunchError(error.toQString());
+            }
         } catch (const QtNetworkReplyException& error) {
             qWarning() << "PLANK reconnect attempt" << attempt
                        << "could not reach the host:" << error.toQString();

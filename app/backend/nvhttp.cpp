@@ -635,6 +635,9 @@ QString NvHTTP::authenticate(QString username, QString password, bool* greeterCo
         if (state == "denied") {
             throw GfeHttpResponseException(401, "Operating-system authentication failed");
         }
+        if (state == "busy") {
+            throw GfeHttpResponseException(503, "Host authentication is busy. Please try again shortly.");
+        }
         if (state != "challenge" || !result.value("messages").isArray()) {
             throw GfeHttpResponseException(400, "Invalid PAM conversation response");
         }
