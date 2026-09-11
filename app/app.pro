@@ -1,7 +1,7 @@
 QT += core quick network quickcontrols2 svg
 CONFIG += c++17
 
-unix:!macx:contains(CONFIG, plank-transport) {
+unix:contains(CONFIG, plank-transport) {
     isEmpty(PLANK_TRANSPORT_DIR) {
         PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
     }
@@ -40,7 +40,9 @@ unix:!macx:contains(CONFIG, plank-transport) {
     QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
 
     INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
-    LIBS += $$PLANK_TRANSPORT_LIBRARY -ldl -lpthread -lm -lrt
+    LIBS += $$PLANK_TRANSPORT_LIBRARY -ldl -lpthread -lm
+    !macx: LIBS += -lrt
+    macx: LIBS += -framework Security -framework SystemConfiguration
     DEFINES += PLANK_TRANSPORT=1
 }
 
@@ -452,7 +454,6 @@ macx {
 
     SOURCES += \
         streaming/video/ffmpeg-renderers/vt_base.mm \
-        streaming/video/ffmpeg-renderers/vt_avsamplelayer.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
 
     HEADERS += \
@@ -601,19 +602,14 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest
 }
 macx {
-    # Create Info.plist in object dir with the correct version string
-    system(cp $$PWD/Info.plist $$OUT_PWD/Info.plist)
-    system(sed -i -e 's/VERSION/$$cat(version.txt)/g' $$OUT_PWD/Info.plist)
-
-    QMAKE_INFO_PLIST = $$OUT_PWD/Info.plist
+    QMAKE_MACOSX_DEPLOYMENT_TARGET = 27.0
+    QMAKE_APPLE_DEVICE_ARCHS = arm64
+    QMAKE_INFO_PLIST = $$PWD/Info.plist
 
     APP_BUNDLE_RESOURCES.files = moonlight.icns
     APP_BUNDLE_RESOURCES.path = Contents/Resources
 
-    APP_BUNDLE_PLIST.files = $$OUT_PWD/Info.plist
-    APP_BUNDLE_PLIST.path = Contents
-
-    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES APP_BUNDLE_PLIST
+    QMAKE_BUNDLE_DATA += APP_BUNDLE_RESOURCES
 
     !disable-prebuilts {
         APP_BUNDLE_FRAMEWORKS.files = $$files(../libs/mac/Frameworks/*.framework, true) $$files(../libs/mac/lib/*.dylib, true)

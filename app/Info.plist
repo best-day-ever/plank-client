@@ -17,7 +17,7 @@
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0.0</string>
+	<string>27.0</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
@@ -34,9 +34,9 @@
 		<string>_nvstream._tcp</string>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>VERSION</string>
+	<string>@VERSION@</string>
 	<key>CFBundleShortVersionString</key>
-	<string>VERSION</string>
+	<string>@VERSION@</string>
 	<key>CFBundleDisplayName</key>
 	<string>PLANK Client</string>
 	<key>LSApplicationCategoryType</key>

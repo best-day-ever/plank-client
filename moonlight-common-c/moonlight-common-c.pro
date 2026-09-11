@@ -15,7 +15,7 @@ CONFIG += staticlib
 # Include global qmake defs
 include(../globaldefs.pri)
 
-unix:!macx:contains(CONFIG, plank-transport) {
+unix:contains(CONFIG, plank-transport) {
     isEmpty(PLANK_TRANSPORT_DIR) {
         PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
     }
@@ -43,10 +43,10 @@ win32 {
     INCLUDEPATH += $$PWD/../libs/windows/include
     DEFINES += HAS_QOS_FLOWID=1 HAS_PQOS_FLOWID=1
 }
-macx {
+macx:!disable-prebuilts {
     INCLUDEPATH += $$PWD/../libs/mac/include
 }
-unix:!macx {
+unix:if(!macx|disable-prebuilts) {
     CONFIG += link_pkgconfig
     PKGCONFIG += openssl
     DEFINES += HAVE_CLOCK_GETTIME=1

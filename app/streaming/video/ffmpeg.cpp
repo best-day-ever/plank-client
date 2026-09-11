@@ -1291,8 +1291,9 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
 #endif
 #ifdef Q_OS_DARWIN
         case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
-            // Use the older AVSampleBufferDisplayLayer if Metal cannot be used
-            return VTRendererFactory::createRenderer();
+            // PLANK has one macOS presentation path. If hardware fails, try
+            // exact-format software decoding through the same Metal renderer.
+            return nullptr;
 #endif
 #ifdef HAVE_LIBVA
         case AV_HWDEVICE_TYPE_VAAPI:

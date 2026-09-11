@@ -2,7 +2,6 @@
 // libavutil both defining AVMediaType
 #define AVMediaType AVMediaType_FFmpeg
 #include "vt.h"
-#include "pacer/pacer.h"
 #undef AVMediaType
 
 #include <SDL3/SDL_system.h>
@@ -223,7 +222,7 @@ public:
                 // Pace ourselves by waiting if too many frames are pending presentation
                 SDL_LockMutex(m_PresentationMutex);
                 if (m_PendingPresentationCount > 2) {
-                    if (SDL_WaitConditionTimeout(m_PresentationCond, m_PresentationMutex, 100) == SDL_MUTEX_TIMEDOUT) {
+                    if (!SDL_WaitConditionTimeout(m_PresentationCond, m_PresentationMutex, 100)) {
                         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                                     "Presentation wait timed out after 100 ms");
                     }
@@ -802,7 +801,7 @@ public:
 
         // Create a texture to hold our pixel data
         SDL_assert(!SDL_MUSTLOCK(newSurface));
-        SDL_assert(newSurface->format->format == SDL_PIXELFORMAT_ARGB8888);
+        SDL_assert(newSurface->format == SDL_PIXELFORMAT_ARGB8888);
         auto texDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                           width:newSurface->w
                                                                          height:newSurface->h
