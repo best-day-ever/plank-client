@@ -48,6 +48,7 @@
 #include "utils.h"
 #include "gui/computermodel.h"
 #include "backend/computermanager.h"
+#include <QSslSocket>
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
@@ -750,6 +751,19 @@ int main(int argc, char *argv[])
     }
 
     QGuiApplication app(argc, argv);
+
+#ifdef Q_OS_MACOS
+    // Our authenticated setup requires TLS1.3. Qt's SecureTransport backend
+    // cannot provide it; never silently select that backend on a clean Mac.
+    if (!QSslSocket::setActiveBackend(QStringLiteral("openssl")) ||
+            !QSslSocket::supportedProtocols().contains(QSsl::TlsV1_3)) {
+        qCritical() << "PLANK requires the bundled OpenSSL TLS1.3 backend; available:"
+                    << QSslSocket::availableBackends();
+        return 10;
+    }
+    qInfo() << "PLANK TLS backend:" << QSslSocket::activeBackend()
+            << QSslSocket::sslLibraryVersionString();
+#endif
     QGuiApplication::setApplicationDisplayName("PLANK Client");
 
 #ifdef Q_OS_DARWIN
