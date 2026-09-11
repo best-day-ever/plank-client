@@ -4,6 +4,15 @@ CONFIG += debug_and_release
 # Ensure symbols are always generated
 CONFIG += force_debug_info
 
+# SDK27 Clang recognizes __yield but requires its ACLE declaration. Qt6.10.2
+# qYieldCpu uses the intrinsic without including this header itself.
+macx:contains(QMAKE_APPLE_DEVICE_ARCHS, arm64) {
+    QMAKE_CFLAGS += -include arm_acle.h
+    QMAKE_CXXFLAGS += -include arm_acle.h
+    QMAKE_OBJECTIVE_CFLAGS += -include arm_acle.h
+    QMAKE_OBJECTIVE_CXXFLAGS += -include arm_acle.h
+}
+
 # Disable asserts on release builds
 CONFIG(release, debug|release) {
     DEFINES += NDEBUG

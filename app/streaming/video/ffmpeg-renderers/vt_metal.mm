@@ -19,6 +19,7 @@
 
 extern "C" {
     #include <libavutil/pixdesc.h>
+    #include <libavutil/hwcontext.h>
 }
 
 struct CscParams
