@@ -22,88 +22,7 @@ extern "C" {
     #include <libavutil/hwcontext.h>
 }
 
-struct CscParams
-{
-    vector_float3 matrix[3];
-    vector_float3 offsets;
-};
-
-struct ParamBuffer
-{
-    CscParams cscParams;
-    float bitnessScaleFactor;
-};
-static const CscParams k_CscParams_IdentityGbr = {
-    { { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-    { 0.0f, 0.0f, 0.0f },
-};
-
-static const CscParams k_CscParams_Bt601Lim = {
-    // CSC Matrix
-    {
-        { 1.1644f, 0.0f, 1.5960f },
-        { 1.1644f, -0.3917f, -0.8129f },
-        { 1.1644f, 2.0172f, 0.0f }
-    },
-
-    // Offsets
-    { 16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f },
-};
-static const CscParams k_CscParams_Bt601Full = {
-    // CSC Matrix
-    {
-        { 1.0f, 0.0f, 1.4020f },
-        { 1.0f, -0.3441f, -0.7141f },
-        { 1.0f, 1.7720f, 0.0f },
-    },
-
-    // Offsets
-    { 0.0f, 128.0f / 255.0f, 128.0f / 255.0f },
-};
-static const CscParams k_CscParams_Bt709Lim = {
-    // CSC Matrix
-    {
-        { 1.1644f, 0.0f, 1.7927f },
-        { 1.1644f, -0.2132f, -0.5329f },
-        { 1.1644f, 2.1124f, 0.0f },
-    },
-
-    // Offsets
-    { 16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f },
-};
-static const CscParams k_CscParams_Bt709Full = {
-    // CSC Matrix
-    {
-        { 1.0f, 0.0f, 1.5748f },
-        { 1.0f, -0.1873f, -0.4681f },
-        { 1.0f, 1.8556f, 0.0f },
-    },
-
-    // Offsets
-    { 0.0f, 128.0f / 255.0f, 128.0f / 255.0f },
-};
-static const CscParams k_CscParams_Bt2020Lim = {
-    // CSC Matrix
-    {
-        { 1.1644f, 0.0f, 1.6781f },
-        { 1.1644f, -0.1874f, -0.6505f },
-        { 1.1644f, 2.1418f, 0.0f },
-    },
-
-    // Offsets
-    { 16.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f },
-};
-static const CscParams k_CscParams_Bt2020Full = {
-    // CSC Matrix
-    {
-        { 1.0f, 0.0f, 1.4746f },
-        { 1.0f, -0.1646f, -0.5714f },
-        { 1.0f, 1.8814f, 0.0f },
-    },
-
-    // Offsets
-    { 0.0f, 128.0f / 255.0f, 128.0f / 255.0f },
-};
+#include "vt_colors.h"
 
 struct Vertex
 {
@@ -306,80 +225,39 @@ public:
         }
     }
 
-    int getBitnessScaleFactor(AVFrame* frame)
-    {
-        if (frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
-            // VideoToolbox frames never require scaling
-            return 1;
-        }
-        else {
-            const AVPixFmtDescriptor* formatDesc = av_pix_fmt_desc_get((AVPixelFormat)frame->format);
-            if (!formatDesc) {
-                // This shouldn't be possible but handle it anyway
-                SDL_assert(formatDesc);
-                return 1;
-            }
-
-            // This assumes plane 0 is exclusively the Y component
-            SDL_assert(formatDesc->comp[0].step == 1 || formatDesc->comp[0].step == 2);
-            return pow(2, (formatDesc->comp[0].step * 8) - formatDesc->comp[0].depth);
-        }
-    }
 
     bool updateColorSpaceForFrame(AVFrame* frame)
     {
         int colorspace = getFrameColorspace(frame);
         bool fullRange = isFrameFullRange(frame);
         if (colorspace != m_LastColorSpace || fullRange != m_LastFullRange) {
-            CGColorSpaceRef newColorSpace;
-            ParamBuffer paramBuffer;
-
-            // Free any unpresented drawable since we're changing pixel formats
             discardNextDrawable();
-
-            switch (colorspace) {
-            case COLORSPACE_IDENTITY_GBR:
-                m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                m_MetalLayer.pixelFormat = MTLPixelFormatBGR10A2Unorm;
-                paramBuffer.cscParams = k_CscParams_IdentityGbr;
-                break;
-            case COLORSPACE_REC_709:
-                m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_709);
-                m_MetalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-                paramBuffer.cscParams = (fullRange ? k_CscParams_Bt709Full : k_CscParams_Bt709Lim);
-                break;
-            case COLORSPACE_REC_2020:
-                // https://developer.apple.com/documentation/metal/hdr_content/using_color_spaces_to_display_hdr_content
-                if (frame->color_trc == AVCOL_TRC_SMPTE2084) {
-                    m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2100_PQ);
-                    m_MetalLayer.pixelFormat = MTLPixelFormatBGR10A2Unorm;
-                }
-                else {
-                    m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_2020);
-                    m_MetalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-                }
-                paramBuffer.cscParams = (fullRange ? k_CscParams_Bt2020Full : k_CscParams_Bt2020Lim);
-                break;
-            default:
-            case COLORSPACE_REC_601:
-                m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                m_MetalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-                paramBuffer.cscParams = (fullRange ? k_CscParams_Bt601Full : k_CscParams_Bt601Lim);
-                break;
-            }
-
-            // SDR still needs a 10-bit drawable for 10-bit profiles.
             AVPixelFormat storage = (AVPixelFormat)frame->format;
-            if (frame->hw_frames_ctx) {
+            if (frame->hw_frames_ctx)
                 storage = ((AVHWFramesContext*)frame->hw_frames_ctx->data)->sw_format;
-            }
             const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(storage);
-            if (descriptor && descriptor->comp[0].depth == 10)
-                m_MetalLayer.pixelFormat = MTLPixelFormatBGR10A2Unorm;
-            paramBuffer.bitnessScaleFactor = getBitnessScaleFactor(frame);
-
-            // The CAMetalLayer retains the CGColorSpace
+            if (!descriptor || (descriptor->comp[0].depth != 8 && descriptor->comp[0].depth != 10))
+                return false;
+            const int depth = descriptor->comp[0].depth;
+            const bool highBits = descriptor->comp[0].shift > 0;
+            PlankVTMatrix matrix = PlankVTMatrix::Bt709;
+            CFStringRef colorSpaceName = frame->color_trc == AVCOL_TRC_IEC61966_2_1 ?
+                    kCGColorSpaceSRGB : kCGColorSpaceITUR_709;
+            if (colorspace == COLORSPACE_IDENTITY_GBR) {
+                matrix = PlankVTMatrix::IdentityGbr;
+                colorSpaceName = kCGColorSpaceSRGB;
+            } else if (colorspace == COLORSPACE_REC_601) {
+                matrix = PlankVTMatrix::Bt601;
+                colorSpaceName = kCGColorSpaceSRGB;
+            } else if (colorspace == COLORSPACE_REC_2020) {
+                matrix = PlankVTMatrix::Bt2020;
+                colorSpaceName = kCGColorSpaceITUR_2020;
+            }
+            const auto paramBuffer = plankVTColorParams(matrix, fullRange, depth, highBits);
+            CGColorSpaceRef newColorSpace = CGColorSpaceCreateWithName(colorSpaceName);
+            m_MetalLayer.colorspace = newColorSpace;
             CGColorSpaceRelease(newColorSpace);
+            m_MetalLayer.pixelFormat = depth == 10 ? MTLPixelFormatBGR10A2Unorm : MTLPixelFormatBGRA8Unorm;
 
             // Create the new colorspace parameter buffer for our fragment shader
             [m_CscParamsBuffer release];
