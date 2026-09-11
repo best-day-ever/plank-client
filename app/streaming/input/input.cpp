@@ -849,7 +849,9 @@ bool SdlInputHandler::mapRemoteCursorPositionToWindow(
 PlankWaylandCursor*
 SdlInputHandler::ensureWaylandTabletCursorAttached(SDL_Window* targetWindow)
 {
-    if (!m_LocalCursorSupported || targetWindow == nullptr) {
+    const char* driver = SDL_GetCurrentVideoDriver();
+    if (!m_LocalCursorSupported || targetWindow == nullptr ||
+            driver == nullptr || SDL_strcmp(driver, "wayland") != 0) {
         return nullptr;
     }
 

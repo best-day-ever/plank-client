@@ -3,7 +3,7 @@
 #include <Limelight.h>
 #include <cmath>
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
 extern "C" {
 #include <libavutil/channel_layout.h>
 #include <libavutil/opt.h>
@@ -27,7 +27,7 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
       m_SubmittedAudioFrames(0),
       m_LastSubmittedAudioMediaTimeMs(-1),
       m_SkippedAudioBlocks(0)
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
       , m_SwrContext(nullptr)
 #endif
 {
@@ -85,7 +85,7 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
     m_SampleRate = want.freq;
     m_ChannelCount = want.channels;
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
     if (m_EnableAvSyncCorrection) {
         AVChannelLayout channelLayout;
         av_channel_layout_default(&channelLayout, want.channels);
@@ -135,7 +135,7 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
                 m_FrameSize);
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PipeWire device buffer: %u samples (%u ms)",
+                "Audio device buffer: %u samples (%u ms)",
                 deviceSampleFrames,
                 m_DeviceBufferDurationMs);
 
@@ -165,7 +165,7 @@ SdlAudioRenderer::~SdlAudioRenderer()
         SDL_free(m_AudioBuffer);
     }
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
     swr_free(&m_SwrContext);
 #endif
 
@@ -223,7 +223,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
     const void* queuedBuffer = m_AudioBuffer;
     int queuedBytes = bytesWritten;
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
     if (m_EnableAvSyncCorrection && m_SwrContext != nullptr && inputFrames > 0) {
         const Uint32 now = SDL_GetTicks();
         const int backlogAudioMs = LiGetPendingAudioDuration();

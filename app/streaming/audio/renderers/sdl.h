@@ -5,7 +5,7 @@
 #include <SDL3/SDL.h>
 #include <vector>
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
 struct SwrContext;
 #endif
 
@@ -55,7 +55,7 @@ private:
     PlankAvSync::AudioRateController m_AudioRateController;
     PlankAvSync::AudioBacklogController m_AudioBacklogController;
 
-#if defined(HAVE_FFMPEG) && defined(Q_OS_LINUX)
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
     SwrContext* m_SwrContext;
     std::vector<float> m_CorrectedAudioBuffer;
 #endif
