@@ -115,9 +115,7 @@ void Path::initialize(bool portable)
     }
     else {
 #ifdef Q_OS_DARWIN
-        // On macOS, $TMPDIR is some random folder under /var/folders/ that nobody can
-        // easily find, so use the system's global tmp directory instead.
-        s_LogDir = "/tmp";
+        s_LogDir = QDir::homePath() + "/Library/Logs/PLANK/Client";
 #elif defined(Q_OS_LINUX)
         QString stateHome = qEnvironmentVariable("XDG_STATE_HOME");
         if (stateHome.isEmpty() || !QDir::isAbsolutePath(stateHome)) {

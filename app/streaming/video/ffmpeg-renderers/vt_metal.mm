@@ -535,6 +535,8 @@ public:
 
                 switch (CVPixelBufferGetPixelFormatType(pixBuf)) {
                 case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
+                case kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange:
+                case kCVPixelFormatType_422YpCbCr8BiPlanarFullRange:
                 case kCVPixelFormatType_444YpCbCr8BiPlanarVideoRange:
                 case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
                 case kCVPixelFormatType_444YpCbCr8BiPlanarFullRange:
@@ -542,6 +544,8 @@ public:
                     break;
 
                 case kCVPixelFormatType_420YpCbCr10BiPlanarFullRange:
+                case kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange:
+                case kCVPixelFormatType_422YpCbCr10BiPlanarFullRange:
                 case kCVPixelFormatType_444YpCbCr10BiPlanarFullRange:
                 case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
                 case kCVPixelFormatType_444YpCbCr10BiPlanarVideoRange:
@@ -619,6 +623,11 @@ public:
                 else if (i == Overlay::OverlayDebug) {
                     // Top left
                     renderRect.x = 0;
+                    renderRect.y = m_LastDrawableHeight - overlayTexture.height;
+                }
+                else if (i == Overlay::OverlayToolbar) {
+                    const float position = Session::get()->getOverlayManager().getOverlayHorizontalPosition(Overlay::OverlayToolbar);
+                    renderRect.x = std::max(0, m_LastDrawableWidth - (int)overlayTexture.width) * position;
                     renderRect.y = m_LastDrawableHeight - overlayTexture.height;
                 }
 
@@ -784,10 +793,11 @@ public:
 
         // Compile our shaders
         QString shaderSource = QString::fromUtf8(Path::readDataFile("vt_renderer.metal"));
-        m_ShaderLibrary = [m_MetalLayer.device newLibraryWithSource:shaderSource.toNSString() options:nullptr error:nullptr];
+        NSError* shaderError = nil;
+        m_ShaderLibrary = [m_MetalLayer.device newLibraryWithSource:shaderSource.toNSString() options:nullptr error:&shaderError];
         if (!m_ShaderLibrary) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Failed to compile shaders");
+                         "Failed to compile shaders: %s", shaderError.localizedDescription.UTF8String);
             return false;
         }
 

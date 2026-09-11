@@ -438,7 +438,7 @@ int main(int argc, char *argv[])
     QDir logDir(Path::getLogDir());
     QString logNamePattern;
 
-#ifdef Q_OS_LINUX
+#if defined(Q_OS_LINUX) || defined(Q_OS_DARWIN)
     const QFileDevice::Permissions privateDirectoryPermissions =
             QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner;
     bool logDirectoryReady = logDir.exists() || logDir.mkpath(".", privateDirectoryPermissions);
@@ -463,7 +463,7 @@ int main(int argc, char *argv[])
 #endif
     {
         s_LoggerFile = new QFile(logDir.filePath(logFileName));
-#ifdef Q_OS_LINUX
+#if defined(Q_OS_LINUX) || defined(Q_OS_DARWIN)
         const bool opened = logDirectoryReady &&
                             s_LoggerFile->open(QIODevice::WriteOnly | QIODevice::Text,
                                                QFileDevice::ReadOwner | QFileDevice::WriteOwner);
@@ -485,7 +485,7 @@ int main(int argc, char *argv[])
     av_log_set_callback(ffmpegLogToDiskHandler);
 #endif
 
-#ifdef Q_OS_LINUX
+#if defined(Q_OS_LINUX) || defined(Q_OS_DARWIN)
     if (s_LoggerFile != nullptr && s_LoggerFile->isOpen()) {
         qInfo() << "Persistent client log:" << s_LoggerFile->fileName();
     }

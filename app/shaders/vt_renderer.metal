@@ -21,36 +21,36 @@ vertex Vertex vs_draw(constant Vertex *vertices [[ buffer(0) ]], uint id [[ vert
     return vertices[id];
 }
 
-fragment half4 ps_draw_biplanar(Vertex v [[ stage_in ]],
+fragment float4 ps_draw_biplanar(Vertex v [[ stage_in ]],
                                 constant CscParams &cscParams [[ buffer(0) ]],
-                                texture2d<half> luminancePlane [[ texture(0) ]],
-                                texture2d<half> chrominancePlane [[ texture(1) ]])
+                                texture2d<float> luminancePlane [[ texture(0) ]],
+                                texture2d<float> chrominancePlane [[ texture(1) ]])
 {
-    half3 yuv = half3(luminancePlane.sample(s, v.texCoords).r,
+    float3 yuv = float3(luminancePlane.sample(s, v.texCoords).r,
                       chrominancePlane.sample(s, v.texCoords).rg);
     yuv *= cscParams.bitnessScaleFactor;
     yuv -= cscParams.offsets;
 
-    return half4(yuv * cscParams.matrix, 1.0h);
+    return float4(yuv * cscParams.matrix, 1.0f);
 }
 
-fragment half4 ps_draw_triplanar(Vertex v [[ stage_in ]],
+fragment float4 ps_draw_triplanar(Vertex v [[ stage_in ]],
                                  constant CscParams &cscParams [[ buffer(0) ]],
-                                 texture2d<half> luminancePlane [[ texture(0) ]],
-                                 texture2d<half> chrominancePlaneU [[ texture(1) ]],
-                                 texture2d<half> chrominancePlaneV [[ texture(2) ]])
+                                 texture2d<float> luminancePlane [[ texture(0) ]],
+                                 texture2d<float> chrominancePlaneU [[ texture(1) ]],
+                                 texture2d<float> chrominancePlaneV [[ texture(2) ]])
 {
-    half3 yuv = half3(luminancePlane.sample(s, v.texCoords).r,
+    float3 yuv = float3(luminancePlane.sample(s, v.texCoords).r,
                       chrominancePlaneU.sample(s, v.texCoords).r,
                       chrominancePlaneV.sample(s, v.texCoords).r);
     yuv *= cscParams.bitnessScaleFactor;
     yuv -= cscParams.offsets;
 
-    return half4(yuv * cscParams.matrix, 1.0h);
+    return float4(yuv * cscParams.matrix, 1.0f);
 }
 
-fragment half4 ps_draw_rgb(Vertex v [[ stage_in ]],
-                           texture2d<half> rgbTexture [[ texture(0) ]])
+fragment float4 ps_draw_rgb(Vertex v [[ stage_in ]],
+                           texture2d<float> rgbTexture [[ texture(0) ]])
 {
     return rgbTexture.sample(s, v.texCoords);
 }
