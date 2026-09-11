@@ -32,6 +32,10 @@ struct ParamBuffer
     CscParams cscParams;
     float bitnessScaleFactor;
 };
+static const CscParams k_CscParams_IdentityGbr = {
+    { { 0.0f, 0.0f, 1.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
+    { 0.0f, 0.0f, 0.0f },
+};
 
 static const CscParams k_CscParams_Bt601Lim = {
     // CSC Matrix
@@ -332,6 +336,11 @@ public:
             discardNextDrawable();
 
             switch (colorspace) {
+            case COLORSPACE_IDENTITY_GBR:
+                m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+                m_MetalLayer.pixelFormat = MTLPixelFormatBGR10A2Unorm;
+                paramBuffer.cscParams = k_CscParams_IdentityGbr;
+                break;
             case COLORSPACE_REC_709:
                 m_MetalLayer.colorspace = newColorSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_709);
                 m_MetalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
@@ -357,6 +366,14 @@ public:
                 break;
             }
 
+            // SDR still needs a 10-bit drawable for 10-bit profiles.
+            AVPixelFormat storage = (AVPixelFormat)frame->format;
+            if (frame->hw_frames_ctx) {
+                storage = ((AVHWFramesContext*)frame->hw_frames_ctx->data)->sw_format;
+            }
+            const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(storage);
+            if (descriptor && descriptor->comp[0].depth == 10)
+                m_MetalLayer.pixelFormat = MTLPixelFormatBGR10A2Unorm;
             paramBuffer.bitnessScaleFactor = getBitnessScaleFactor(frame);
 
             // The CAMetalLayer retains the CGColorSpace
@@ -850,8 +867,7 @@ public:
 
     int getDecoderColorspace() override
     {
-        // macOS seems to handle Rec 601 best
-        return COLORSPACE_REC_601;
+        return COLORSPACE_REC_709;
     }
 
     int getDecoderCapabilities() override
@@ -880,7 +896,7 @@ public:
                 // Otherwise it's supported if we can map it
                 const int expectedPixelDepth = (videoFormat & VIDEO_FORMAT_MASK_10BIT) ? 10 : 8;
                 const int expectedLog2ChromaW = (videoFormat & VIDEO_FORMAT_MASK_YUV444) ? 0 : 1;
-                const int expectedLog2ChromaH = (videoFormat & VIDEO_FORMAT_MASK_YUV444) ? 0 : 1;
+                const int expectedLog2ChromaH = (videoFormat & (VIDEO_FORMAT_MASK_YUV444 | VIDEO_FORMAT_MASK_YUV422)) ? 0 : 1;
 
                 const AVPixFmtDescriptor* formatDesc = av_pix_fmt_desc_get(pixelFormat);
                 if (!formatDesc) {
