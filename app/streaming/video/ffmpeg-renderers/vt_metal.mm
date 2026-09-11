@@ -246,7 +246,8 @@ public:
     bool updateVideoRegionSizeForFrame(AVFrame* frame)
     {
         int drawableWidth, drawableHeight;
-        SDL_Metal_GetDrawableSize(m_Window, &drawableWidth, &drawableHeight);
+        if (!SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight))
+            return false;
 
         // Check if anything has changed since the last vertex buffer upload
         if (m_VideoVertexBuffer &&
