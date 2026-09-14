@@ -28,6 +28,10 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#ifdef Q_OS_MACOS
+#include "macquitbridge.h"
+#endif
+
 #ifdef HAVE_FFMPEG
 #include "streaming/video/ffmpeg.h"
 #endif
@@ -751,6 +755,10 @@ int main(int argc, char *argv[])
     }
 
     QGuiApplication app(argc, argv);
+
+#ifdef Q_OS_MACOS
+    MacQuitBridge macQuitBridge(app);
+#endif
 
 #ifdef Q_OS_MACOS
     // Our authenticated setup requires TLS1.3. Qt's SecureTransport backend
