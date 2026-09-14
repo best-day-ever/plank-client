@@ -18,6 +18,9 @@ private slots:
     void invalidPortUsesBuiltInDefault();
     void configuredRelayWakePortIsReturned();
     void invalidRelayWakePortUsesBuiltInDefault();
+    void relayWakeDefaultsOff();
+    void relayWakeOptIn_data();
+    void relayWakeOptIn();
 };
 
 void TestPlankClientPolicy::omittedValueIsNotManaged()
@@ -144,6 +147,48 @@ void TestPlankClientPolicy::invalidRelayWakePortUsesBuiltInDefault()
 
     const PlankClientPolicy policy(path);
     QCOMPARE(policy.relayWakePort(), PlankClientPolicy::BuiltInRelayWakePort);
+}
+
+void TestPlankClientPolicy::relayWakeDefaultsOff()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("client.conf"));
+    const PlankClientPolicy policy(path);
+    QVERIFY(!policy.relayWakeEnabled());
+    QSettings settings(path, QSettings::IniFormat);
+    settings.setValue(QStringLiteral("network/relay_wake_port"), 30123);
+    settings.sync();
+    QVERIFY(!policy.relayWakeEnabled());
+}
+
+void TestPlankClientPolicy::relayWakeOptIn_data()
+{
+    QTest::addColumn<QString>("configured");
+    QTest::addColumn<bool>("enabled");
+    QTest::newRow("true") << QStringLiteral("true") << true;
+    QTest::newRow("false") << QStringLiteral("false") << false;
+    QTest::newRow("empty") << QString() << false;
+    QTest::newRow("invalid") << QStringLiteral("sometimes") << false;
+    QTest::newRow("numeric") << QStringLiteral("1") << false;
+    QTest::newRow("normalized") << QStringLiteral(" TRUE ") << true;
+}
+
+void TestPlankClientPolicy::relayWakeOptIn()
+{
+    QFETCH(QString, configured);
+    QFETCH(bool, enabled);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("client.conf"));
+    const PlankClientPolicy policy(path);
+    QSettings settings(path, QSettings::IniFormat);
+    settings.setValue(QStringLiteral("network/relay_wake_enabled"), configured);
+    settings.sync();
+    QCOMPARE(policy.relayWakeEnabled(), enabled);
+    settings.remove(QStringLiteral("network/relay_wake_enabled"));
+    settings.sync();
+    QVERIFY(!policy.relayWakeEnabled());
 }
 
 QTEST_APPLESS_MAIN(TestPlankClientPolicy)

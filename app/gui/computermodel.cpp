@@ -269,8 +269,19 @@ void ComputerModel::renameComputer(int computerIndex, QString name)
     m_ComputerManager->renameHost(m_Computers[computerIndex], name);
 }
 
+bool ComputerModel::relayWakeEnabled() const
+{
+    return PlankClientPolicy().relayWakeEnabled();
+}
+
 void ComputerModel::requestRelayWake(int computerIndex)
 {
+    // Recheck policy at dispatch, even if an already-open menu is still visible.
+    if (!relayWakeEnabled()) {
+        emit relayWakeCompleted(tr("Wake PC is disabled by administrator policy."));
+        return;
+    }
+
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         emit relayWakeCompleted(tr("The selected workstation bookmark is unavailable."));
         return;
@@ -282,6 +293,10 @@ void ComputerModel::requestRelayWake(int computerIndex)
         QReadLocker lock(&computer->lock);
         if (!computer->manualBookmark || computer->manualAddress.isNull()) {
             emit relayWakeCompleted(tr("Wake PC requires a manually configured bookmark."));
+            return;
+        }
+        if (computer->state != NvComputer::CS_OFFLINE) {
+            emit relayWakeCompleted(tr("Wake PC requires an offline workstation."));
             return;
         }
         address = computer->manualAddress.address();

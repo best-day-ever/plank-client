@@ -45,6 +45,12 @@ quint16 PlankClientPolicy::networkPort() const
                           QStringLiteral("PLANK network"));
 }
 
+bool PlankClientPolicy::relayWakeEnabled() const
+{
+    bool enabled = false;
+    return managedBoolean(QStringLiteral("network/relay_wake_enabled"), &enabled) && enabled;
+}
+
 quint16 PlankClientPolicy::relayWakePort() const
 {
     return configuredPort(QStringLiteral("network/relay_wake_port"),

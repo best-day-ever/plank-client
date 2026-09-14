@@ -239,7 +239,7 @@ CenteredGridView {
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
                     text: qsTr("Wake PC")
-                    visible: model.manualBookmark &&
+                    visible: computerModel.relayWakeEnabled && model.manualBookmark &&
                              !model.statusUnknown && !model.online
                     onTriggered: computerModel.requestRelayWake(index)
                 }

@@ -13,6 +13,7 @@ public:
 
     bool managedBoolean(const QString& key, bool* value) const;
     quint16 networkPort() const;
+    bool relayWakeEnabled() const;
     quint16 relayWakePort() const;
 
     static constexpr quint16 BuiltInNetworkPort = 28989;

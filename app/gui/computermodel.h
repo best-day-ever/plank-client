@@ -6,6 +6,7 @@
 class ComputerModel : public QAbstractListModel
 {
     Q_OBJECT
+    Q_PROPERTY(bool relayWakeEnabled READ relayWakeEnabled CONSTANT)
 
     enum Roles
     {
@@ -37,6 +38,8 @@ public:
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
     Q_INVOKABLE void requestRelayWake(int computerIndex);
+
+    bool relayWakeEnabled() const;
 
     Q_INVOKABLE Session* createSessionForPlankDesktop(int computerIndex);
 
