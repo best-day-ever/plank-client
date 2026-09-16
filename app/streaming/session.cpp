@@ -1879,7 +1879,10 @@ bool Session::snapshotClientDisplays()
                 std::make_tuple(right.logicalBounds.x,
                                 right.logicalBounds.y);
     });
-    m_UseMultiDisplayPresentation = m_IsFullScreen &&
+    // Remember multi-output capability even when the session starts windowed.
+    // Fullscreen may be entered later without reconnecting; only the active
+    // presentation layout, not display discovery, depends on that state.
+    m_UseMultiDisplayPresentation =
             (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
              strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             m_ClientDisplays.size() == 2;
@@ -2119,12 +2122,12 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
     }
     for (SDL_Window* window : m_SecondaryWindows) {
         if (fullscreen) {
-            SDL_ShowWindow(window);
             if (!SDL_SetWindowFullscreen(window, m_FullScreenFlag)) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Failed to set secondary presentation fullscreen state: %s",
                             SDL_GetError());
             }
+            SDL_ShowWindow(window);
         }
         else {
             SDL_HideWindow(window);
@@ -3703,7 +3706,8 @@ void Session::execInternal()
 
             SDL_PropertiesID properties = SDL_CreateProperties();
             const Uint32 flags = defaultWindowFlags |
-                    StreamUtils::getPlatformWindowFlags();
+                    StreamUtils::getPlatformWindowFlags() |
+                    (m_IsFullScreen ? 0 : SDL_WINDOW_HIDDEN);
             SDL_SetStringProperty(properties,
                                   SDL_PROP_WINDOW_CREATE_TITLE_STRING,
                                   windowName.c_str());
@@ -3724,7 +3728,7 @@ void Session::execInternal()
                                   flags);
             SDL_SetBooleanProperty(properties,
                                    SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
-                                   true);
+                                   m_IsFullScreen);
             SDL_Window* secondary = SDL_CreateWindowWithProperties(properties);
             SDL_DestroyProperties(properties);
             if (secondary == nullptr) {
@@ -3747,9 +3751,9 @@ void Session::execInternal()
                 return;
             }
             SDL_SetWindowFullscreenMode(secondary, nullptr);
-            SDL_SetWindowFullscreen(secondary, true);
-            if (!placeFullscreenWindowOnDisplay(secondary,
-                                                display.displayId)) {
+            if (m_IsFullScreen &&
+                    !placeFullscreenWindowOnDisplay(secondary,
+                                                    display.displayId)) {
                 SDL_DestroyWindow(secondary);
                 emit displayLaunchError(
                     tr("Unable to place the second fullscreen surface on its client monitor."));
@@ -3768,8 +3772,8 @@ void Session::execInternal()
             }
             m_SecondaryWindows.append(secondary);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Created PLANK fullscreen surface for output %u",
-                        display.displayId);
+                        "Created PLANK presentation surface for output %u (initially %s)",
+                        display.displayId, m_IsFullScreen ? "fullscreen" : "hidden");
         }
     }
 
