@@ -54,6 +54,5 @@ private:
     std::int64_t m_LastPasteboardChangeCount = -1;
     std::uint64_t m_OutboundGeneration = 0;
     std::uint64_t m_LastAppliedHostGeneration = 0;
-    std::string m_LastSentText;
     std::string m_LastAppliedHostText;
 };

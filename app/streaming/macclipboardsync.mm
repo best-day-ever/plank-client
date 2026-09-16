@@ -103,7 +103,6 @@ void MacClipboardSync::start()
     m_LastPasteboardChangeCount = -1;
     m_OutboundGeneration = 0;
     m_LastAppliedHostGeneration = 0;
-    m_LastSentText.clear();
     m_LastAppliedHostText.clear();
 }
 
@@ -120,7 +119,6 @@ void MacClipboardSync::stop()
     m_LastPasteboardChangeCount = -1;
     m_OutboundGeneration = 0;
     m_LastAppliedHostGeneration = 0;
-    m_LastSentText.clear();
     m_LastAppliedHostText.clear();
 }
 
@@ -234,8 +232,8 @@ bool MacClipboardSync::sendLocalClipboard(const std::string& text)
     std::uint64_t sessionEpoch = 0;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (!m_Running || text == m_LastSentText) {
-            return m_Running;
+        if (!m_Running) {
+            return false;
         }
         generation = ++m_OutboundGeneration;
         sessionEpoch = m_SessionEpoch;
@@ -259,7 +257,6 @@ bool MacClipboardSync::sendLocalClipboard(const std::string& text)
         if (!m_Running || m_SessionEpoch != sessionEpoch) {
             return false;
         }
-        m_LastSentText = text;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Sent clipboard offer to host (%zu bytes, generation %llu)",
