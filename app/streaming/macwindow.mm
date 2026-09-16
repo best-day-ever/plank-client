@@ -4,6 +4,43 @@
 #import <Cocoa/Cocoa.h>
 #include <cmath>
 
+bool MacWindow::fullscreenTopInset(Uint32 displayId, int* top)
+{
+    @autoreleasepool {
+        for (NSScreen* screen in NSScreen.screens) {
+            if ([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue] == displayId) {
+                // visibleFrame also excludes the Dock/menu bar: that is NOT
+                // the native fullscreen viewport. Only reserve the camera area.
+                *top = static_cast<int>(std::ceil(screen.safeAreaInsets.top));
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+void MacWindow::logGeometry(SDL_Window* window)
+{
+    @autoreleasepool {
+        NSWindow* nativeWindow = (__bridge NSWindow*)SDL_GetPointerProperty(
+            SDL_GetWindowProperties(window), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+        if (!nativeWindow || !nativeWindow.screen)
+            return;
+        const NSRect panel = nativeWindow.screen.frame;
+        const NSRect frame = nativeWindow.frame;
+        const NSRect content = nativeWindow.contentView.bounds;
+        int pixelWidth = 0, pixelHeight = 0;
+        SDL_GetWindowSizeInPixels(window, &pixelWidth, &pixelHeight);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK Mac presentation: native-fullscreen=%d panel=%.0fx%.0f frame=%.0fx%.0f content=%.0fx%.0f drawable=%dx%d scale=%.2f",
+                    (nativeWindow.styleMask & NSWindowStyleMaskFullScreen) != 0,
+                    (double)panel.size.width, (double)panel.size.height,
+                    (double)frame.size.width, (double)frame.size.height,
+                    (double)content.size.width, (double)content.size.height,
+                    pixelWidth, pixelHeight, (double)nativeWindow.backingScaleFactor);
+    }
+}
+
 int MacWindow::unobscuredToolbarLeft(SDL_Window* window, int currentLeft, int toolbarWidth)
 {
     @autoreleasepool {

@@ -790,7 +790,8 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
             for (uint32_t index = 0; index < count; ++index) {
                 SDL_DisplayMode mode;
                 SDL_Rect safeArea;
-                if (!StreamUtils::getMacCurrentDisplayMode(ids[index], &mode, &safeArea)) {
+                if (!StreamUtils::getMacCurrentDisplayMode(ids[index], &mode, &safeArea,
+                        m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED)) {
                     displays.clear();
                     break;
                 }

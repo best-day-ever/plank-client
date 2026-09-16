@@ -5,6 +5,8 @@
 
 #ifdef Q_OS_DARWIN
 #include <ApplicationServices/ApplicationServices.h>
+#include "macwindow.h"
+#include "macdisplaygeometry.h"
 #endif
 
 #ifdef Q_OS_UNIX
@@ -177,7 +179,7 @@ int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
 }
 
 #ifdef Q_OS_DARWIN
-bool StreamUtils::getMacCurrentDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* bounds)
+bool StreamUtils::getMacCurrentDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* bounds, bool fullscreen)
 {
     SDL_zerop(mode);
     const auto current = CGDisplayCopyDisplayMode(displayId);
@@ -188,10 +190,20 @@ bool StreamUtils::getMacCurrentDisplayMode(Uint32 displayId, SDL_DisplayMode* mo
     *bounds = {qRound(logical.origin.x), qRound(logical.origin.y),
                qRound(logical.size.width), qRound(logical.size.height)};
     CGDisplayModeRelease(current);
+    if (fullscreen) {
+        int top = 0;
+        if (!MacWindow::fullscreenTopInset(displayId, &top) ||
+                !MacDisplayGeometry::insetTop(bounds->w, bounds->h, mode->w, mode->h, top))
+            return false;
+        bounds->y += top;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK Mac Match Client: fullscreen viewport=%dx%d backing=%dx%d top-inset=%d",
+                    bounds->w, bounds->h, mode->w, mode->h, top);
+    }
     return mode->w > 0 && mode->h > 0 && bounds->w > 0 && bounds->h > 0;
 }
 
-bool StreamUtils::getMacCurrentDisplayModeForBounds(const SDL_Rect& bounds, SDL_DisplayMode* mode)
+bool StreamUtils::getMacCurrentDisplayModeForBounds(const SDL_Rect& bounds, SDL_DisplayMode* mode, SDL_Rect* matchedBounds, bool fullscreen)
 {
     CGDirectDisplayID ids[16], selected = 0;
     uint32_t count = 0;
@@ -204,9 +216,9 @@ bool StreamUtils::getMacCurrentDisplayModeForBounds(const SDL_Rect& bounds, SDL_
             selected = ids[i];
         }
     }
-    SDL_Rect actual;
-    return selected && getMacCurrentDisplayMode(selected, mode, &actual) &&
-        actual.x == bounds.x && actual.y == bounds.y && actual.w == bounds.w && actual.h == bounds.h;
+    // Selection uses the complete display bounds. The returned viewport may
+    // exclude the notch, but must not replace the display's placement/identity.
+    return selected && getMacCurrentDisplayMode(selected, mode, matchedBounds, fullscreen);
 }
 
 bool StreamUtils::getMacNativeDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* safeArea)

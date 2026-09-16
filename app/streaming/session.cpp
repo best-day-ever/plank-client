@@ -9,6 +9,9 @@
 #include "streaming/streamutils.h"
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
+#ifdef Q_OS_DARWIN
+#include "streaming/macwindow.h"
+#endif
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -1488,11 +1491,9 @@ void Session::clearPlankReconnectCredentials()
 bool Session::initialize()
 {
 #ifdef Q_OS_DARWIN
-    // AppKit fullscreen Spaces restrict the content to the area below the
-    // camera housing. Use SDL's borderless desktop fullscreen over the entire
-    // display instead, without selecting an exclusive display mode. The
-    // toolbar separately avoids the camera housing; video retains exact pixels.
-    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
+    // Keep native fullscreen Spaces, including trackpad app switching. Match
+    // Client uses the notch-safe viewport; never switch the desktop mode.
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
 #endif
 
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
@@ -1863,7 +1864,11 @@ bool Session::snapshotClientDisplays()
 #ifdef Q_OS_DARWIN
         if (matchMacDesktop) {
             SDL_DisplayMode currentMode;
-            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds, &currentMode)) return false;
+            SDL_Rect matchedBounds;
+            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
+                    &currentMode, &matchedBounds, m_IsFullScreen)) return false;
+            snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
+                                             matchedBounds.w, matchedBounds.h);
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
             // Presentation tiles must share the matched backing-pixel canvas,
             // not mix differently scaled panel-native pixel dimensions.
@@ -2183,7 +2188,7 @@ bool Session::configurePlankHostLayout()
     if (layoutPolicy == NvOutputTopology::MatchClientHostLayout) {
         QVector<NvClientDisplay> displays;
         for (const auto& display : std::as_const(m_ClientDisplays)) {
-            displays.append({QRect(display.logicalBounds.x,
+            displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : QRect(display.logicalBounds.x,
                                    display.logicalBounds.y,
                                    display.logicalBounds.w,
                                    display.logicalBounds.h),
@@ -3243,7 +3248,7 @@ bool Session::runPlankReconnect()
                 if (macDesktop && m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout) {
                     QVector<NvClientDisplay> displays;
                     for (const auto& display : std::as_const(m_ClientDisplays)) {
-                        displays.append({QRect(display.logicalBounds.x, display.logicalBounds.y,
+                        displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : QRect(display.logicalBounds.x, display.logicalBounds.y,
                                                display.logicalBounds.w, display.logicalBounds.h), display.nativeSize, display.macBackingSize});
                     }
                     desktopMode = NvOutputTopology::resolveMacClientDisplayMode(displays, nullptr, &desktopScale);
@@ -4226,6 +4231,19 @@ void Session::execInternal()
             }
             break;
 
+#ifdef Q_OS_DARWIN
+        case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+        case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+            if (SDL_Window* window = windowForEvent(event.window.windowID)) {
+                MacWindow::logGeometry(window);
+                m_InputHandler->updateKeyboardGrabState();
+                if (m_PlankToolbar) {
+                    m_PlankToolbar->notifyWindowChanged();
+                }
+            }
+            break;
+#endif
+
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         case SDL_EVENT_WINDOW_SHOWN:
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
@@ -4238,6 +4256,11 @@ void Session::execInternal()
             if (eventWindow == nullptr) {
                 break;
             }
+#ifdef Q_OS_DARWIN
+            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                MacWindow::logGeometry(eventWindow);
+            }
+#endif
             if (m_PlankToolbar && eventWindow == m_Window &&
                     event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 m_PlankToolbar->notifyWindowChanged();
