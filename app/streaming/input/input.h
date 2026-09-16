@@ -18,6 +18,9 @@ class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
 class PlankWaylandCursor;
+#ifdef HAVE_MAC_RAW_WACOM
+class MacRawWacomInput;
+#endif
 
 class SdlInputHandler
 {
@@ -200,6 +203,10 @@ private:
     } m_SpecialKeyCombos[KeyComboMax];
 
     std::atomic_uint64_t m_StreamDimensions;
+
+#ifdef HAVE_MAC_RAW_WACOM
+    std::unique_ptr<MacRawWacomInput> m_MacRawWacomInput;
+#endif
 
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;

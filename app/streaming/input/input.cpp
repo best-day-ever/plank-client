@@ -7,6 +7,11 @@
 #include "streaming/streamutils.h"
 #include "utils.h"
 
+#ifdef HAVE_MAC_RAW_WACOM
+#include "streaming/input/macrawwacom.h"
+#include "streaming/macwindow.h"
+#endif
+
 #ifdef HAVE_LIBINPUT_TABLET
 #include "streaming/input/linuxwacom.h"
 #include "streaming/input/linuxrawwacom.h"
@@ -122,6 +127,9 @@ QSize SdlInputHandler::streamDimensions() const
 
 SdlInputHandler::~SdlInputHandler()
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    m_MacRawWacomInput.reset();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     m_LinuxWacomInput.reset();
     m_LinuxRawWacomInput.reset();
@@ -164,12 +172,22 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         m_MouseCursorCapturedVisibilityState = false;
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "PLANK embedded host cursor enabled");
     }
-#ifdef HAVE_LIBINPUT_TABLET
+#if defined(HAVE_LIBINPUT_TABLET) || defined(HAVE_MAC_RAW_WACOM)
     const auto requestTabletCursor = [this]() {
         if (!m_TabletCursorActivationPending.exchange(true)) {
             Session::postTabletCursorActivationEvent();
         }
     };
+#endif
+#ifdef HAVE_MAC_RAW_WACOM
+    if ((LiGetHostFeatureFlags() & (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
+            (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
+        m_MacRawWacomInput.reset(new MacRawWacomInput(requestTabletCursor));
+        m_MacRawWacomInput->setActive(isCaptureActive() &&
+            (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
+#endif
+#ifdef HAVE_LIBINPUT_TABLET
     if (qEnvironmentVariableIntValue("PLANK_EXTERNAL_WACOM_BRIDGE") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                     "Normalized Wacom capture disabled for external raw-HID qualification");
@@ -485,6 +503,9 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     if (!mapRemoteCursorPositionToWindow(position, targetWindow, x, y)) {
         return;
     }
+#ifdef HAVE_MAC_RAW_WACOM
+    updateTabletCursorVisibility();
+#endif
     PlankWaylandCursor* cursor =
             ensureWaylandTabletCursorAttached(targetWindow);
     if (cursor == nullptr) {
@@ -509,7 +530,11 @@ void SdlInputHandler::applyPendingTabletCursorActivation()
     }
     reconcileWaylandTabletCursorOutputs();
     if (!m_LocalCursorSupported || !isCaptureActive() ||
-            m_WaylandTabletCursorOutputs.empty()) {
+            (m_WaylandTabletCursorOutputs.empty()
+#ifdef HAVE_MAC_RAW_WACOM
+             && !m_MacRawWacomInput
+#endif
+             )) {
         m_TabletCursorActivationPending.store(false);
         return;
     }
@@ -565,6 +590,9 @@ void SdlInputHandler::notifyMouseLeave()
 void SdlInputHandler::notifyFocusLost()
 {
     activateCompositorCursor();
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->setActive(false);
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(false);
@@ -581,6 +609,9 @@ void SdlInputHandler::notifyFocusLost()
 
 void SdlInputHandler::notifyFocusGained()
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->setActive(isCaptureActive());
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(true);
@@ -594,7 +625,9 @@ void SdlInputHandler::notifyFocusGained()
 void SdlInputHandler::handleRawHidControl(const unsigned char* data,
                                           unsigned int length)
 {
-#ifdef HAVE_LIBINPUT_TABLET
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->handleControl(data, length);
+#elif defined(HAVE_LIBINPUT_TABLET)
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->handleControl(data, length);
     }
@@ -606,6 +639,9 @@ void SdlInputHandler::handleRawHidControl(const unsigned char* data,
 
 void SdlInputHandler::beginRawHidReconnect()
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->beginReconnect();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->beginReconnect();
@@ -615,6 +651,9 @@ void SdlInputHandler::beginRawHidReconnect()
 
 void SdlInputHandler::finishRawHidReconnect()
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->finishReconnect();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->finishReconnect();
@@ -734,6 +773,13 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 
 void SdlInputHandler::setCaptureActive(bool active)
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) {
+        SDL_Window* focus = SDL_GetKeyboardFocus();
+        m_MacRawWacomInput->setActive(active && focus &&
+            presentationWindow(SDL_GetWindowID(focus)) != nullptr);
+    }
+#endif
     if (active) {
         setCursorVisible(m_LocalCursorSupported ?
                              (!m_MouseWasInVideoRegion || m_RemoteCursorVisible) :
@@ -802,6 +848,11 @@ void SdlInputHandler::activateCompositorCursor()
     }
 
     m_TabletCursorActive = false;
+#ifdef HAVE_MAC_RAW_WACOM
+    for (const auto& output : m_PresentationLayout.outputs)
+        MacWindow::hideTabletCursor(output.window);
+    MacWindow::hideTabletCursor(m_Window);
+#endif
     for (auto& output : m_WaylandTabletCursorOutputs) {
         output.cursor->setVisible(false);
         output.cursor->dispatchPending();
@@ -983,6 +1034,16 @@ void SdlInputHandler::updateTabletCursorVisibility()
             m_RemoteCursorVisible &&
             m_AppliedRemoteCursorPositionSequence >
                 m_TabletCursorActivationSequence;
+#ifdef HAVE_MAC_RAW_WACOM
+    for (const auto& output : m_PresentationLayout.outputs) {
+        if (output.window != positionWindow) MacWindow::hideTabletCursor(output.window);
+    }
+    if (positionWindow && m_AppliedRemoteCursorValid) {
+        const auto& image = m_AppliedRemoteCursor;
+        MacWindow::tabletCursor(positionWindow, image.pixels.data(), image.width, image.height,
+            image.hotspotX, image.hotspotY, image.generation, x, y, visible);
+    }
+#endif
     for (auto& output : m_WaylandTabletCursorOutputs) {
         output.cursor->setVisible(visible && output.window == positionWindow);
         output.cursor->dispatchPending();

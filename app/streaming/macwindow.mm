@@ -2,7 +2,80 @@
 #include "planktoolbarlogic.h"
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #include <cmath>
+
+@interface PlankTabletCursorView : NSView
+@property(nonatomic) std::uint64_t cursorGeneration;
+@end
+@implementation PlankTabletCursorView
+- (NSView*)hitTest:(NSPoint)point { (void)point; return nil; }
+- (BOOL)acceptsFirstResponder { return NO; }
+@end
+
+namespace {
+PlankTabletCursorView* tabletView(SDL_Window* window, bool create)
+{
+    if (!window) return nil;
+    NSWindow* native = (__bridge NSWindow*)SDL_GetPointerProperty(
+        SDL_GetWindowProperties(window), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+    for (NSView* view in native.contentView.subviews)
+        if ([view isKindOfClass:[PlankTabletCursorView class]])
+            return (PlankTabletCursorView*)view;
+    if (!create || !native.contentView) return nil;
+    PlankTabletCursorView* view = [[PlankTabletCursorView alloc] initWithFrame:NSZeroRect];
+    view.wantsLayer = YES;
+    view.hidden = YES;
+    [native.contentView addSubview:view positioned:NSWindowAbove relativeTo:nil];
+    [view release]; // the native content view owns its cursor's lifetime
+    return view;
+}
+void releaseCursorPixels(void*, const void* data, size_t) { free(const_cast<void*>(data)); }
+}
+
+void MacWindow::tabletCursor(SDL_Window* window, const unsigned char* pixels, unsigned width,
+                            unsigned height, unsigned hotX, unsigned hotY, std::uint64_t generation,
+                            int x, int y, bool visible)
+{
+    @autoreleasepool {
+        PlankTabletCursorView* view = tabletView(window, visible);
+        if (!view) return;
+        if (!visible) { view.hidden = YES; return; }
+        if (!pixels || !width || !height || width > 512 || height > 512) return;
+        if (view.cursorGeneration != generation || !view.layer.contents) {
+            const auto size = std::size_t(width) * height * 4;
+            void* copy = malloc(size);
+            if (!copy) return;
+            memcpy(copy, pixels, size);
+            CGDataProviderRef provider = CGDataProviderCreateWithData(nullptr, copy, size, releaseCursorPixels);
+            if (!provider) { free(copy); return; }
+            CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+            CGImageRef image = CGImageCreate(width, height, 8, 32, width * 4, space,
+                kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst,
+                provider, nullptr, false, kCGRenderingIntentDefault);
+            view.layer.contents = (__bridge id)image;
+            view.layer.contentsGravity = kCAGravityResize;
+            view.cursorGeneration = generation;
+            if (image) CGImageRelease(image);
+            CGColorSpaceRelease(space);
+            CGDataProviderRelease(provider);
+        }
+        const CGFloat top = y - static_cast<int>(hotY);
+        const CGFloat nativeY = view.superview.isFlipped ? top : NSHeight(view.superview.bounds) - top - height;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        view.frame = NSMakeRect(x - static_cast<int>(hotX), nativeY, width, height);
+        // Metal/toolbar surfaces may have been replaced since the last frame.
+        [view.superview addSubview:view positioned:NSWindowAbove relativeTo:nil];
+        view.hidden = NO;
+        [CATransaction commit];
+    }
+}
+
+void MacWindow::hideTabletCursor(SDL_Window* window)
+{
+    @autoreleasepool { tabletView(window, false).hidden = YES; }
+}
 
 int MacWindow::unobscuredToolbarLeft(SDL_Window* window, int currentLeft, int toolbarWidth)
 {

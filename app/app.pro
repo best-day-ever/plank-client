@@ -454,6 +454,11 @@ win32:!winrt {
 macx {
     message(VideoToolbox renderer selected)
 
+    DEFINES += HAVE_MAC_RAW_WACOM
+    SOURCES += streaming/input/macrawwacom.cpp
+    HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h
+    LIBS += -framework IOKit -framework CoreFoundation
+
     SOURCES += \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
