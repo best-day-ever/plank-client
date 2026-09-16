@@ -21,35 +21,57 @@ inline bool validUtf8(const char* data, std::size_t size)
     for (std::size_t index = 0; index < size;) {
         const auto byte = static_cast<unsigned char>(data[index]);
         if (byte <= 0x7F) {
+            if (byte == 0) {
+                return false;
+            }
             ++index;
             continue;
         }
-        std::size_t continuation = 0;
-        if ((byte & 0xE0) == 0xC0) {
-            continuation = 1;
-        }
-        else if ((byte & 0xF0) == 0xE0) {
-            continuation = 2;
-        }
-        else if ((byte & 0xF8) == 0xF0) {
-            continuation = 3;
-        }
-        else {
-            return false;
-        }
-        if (index + continuation >= size) {
-            return false;
-        }
-        for (std::size_t offset = 1; offset <= continuation; ++offset) {
-            const auto next = static_cast<unsigned char>(data[index + offset]);
-            if ((next & 0xC0) != 0x80) {
+        const auto continuation = [&](std::size_t offset) {
+            return index + offset < size &&
+                    (static_cast<unsigned char>(data[index + offset]) & 0xC0) == 0x80;
+        };
+        if (byte >= 0xC2 && byte <= 0xDF) {
+            if (!continuation(1)) {
                 return false;
             }
+            index += 2;
+            continue;
         }
-        index += continuation + 1;
+        if (byte >= 0xE0 && byte <= 0xEF) {
+            if (!continuation(1) || !continuation(2)) {
+                return false;
+            }
+            const auto second = static_cast<unsigned char>(data[index + 1]);
+            if ((byte == 0xE0 && second < 0xA0) ||
+                    (byte == 0xED && second > 0x9F)) {
+                return false;
+            }
+            index += 3;
+            continue;
+        }
+        if (byte >= 0xF0 && byte <= 0xF4) {
+            if (!continuation(1) || !continuation(2) || !continuation(3)) {
+                return false;
+            }
+            const auto second = static_cast<unsigned char>(data[index + 1]);
+            if ((byte == 0xF0 && second < 0x90) ||
+                    (byte == 0xF4 && second > 0x8F)) {
+                return false;
+            }
+            index += 4;
+            continue;
+        }
+        return false;
     }
     return true;
 }
+
+enum class AppendResult {
+    Rejected,
+    Incomplete,
+    Complete,
+};
 
 struct Assembly {
     bool active = false;
@@ -67,11 +89,12 @@ struct Assembly {
         bytes.clear();
     }
 
-    bool appendChunk(const PLANK_CLIPBOARD_WIRE_HEADER& wire,
-                     const std::uint8_t* chunkData)
+    AppendResult appendChunk(const PLANK_CLIPBOARD_WIRE_HEADER& wire,
+                             const std::uint8_t* chunkData)
     {
         const auto magic = qFromLittleEndian(wire.magic);
         const auto version = qFromLittleEndian(wire.version);
+        const auto reserved = qFromLittleEndian(wire.reserved);
         const auto flags = qFromLittleEndian(wire.flags);
         const auto generationValue = qFromLittleEndian(wire.generation);
         const auto totalSizeValue = qFromLittleEndian(wire.totalSize);
@@ -82,20 +105,24 @@ struct Assembly {
 
         if (magic != PLANK_CLIPBOARD_WIRE_MAGIC ||
                 version != PLANK_CLIPBOARD_WIRE_VERSION ||
+                reserved != 0 ||
+                generationValue == 0 ||
                 (flags & ~knownFlags) != 0 ||
                 totalSizeValue == 0 ||
                 totalSizeValue > PLANK_CLIPBOARD_MAX_TEXT_SIZE ||
+                chunkSize == 0 ||
                 chunkSize > PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE ||
                 chunkOffset > totalSizeValue ||
-                chunkSize > totalSizeValue - chunkOffset) {
+                chunkSize > totalSizeValue - chunkOffset ||
+                chunkData == nullptr) {
             reset();
-            return false;
+            return AppendResult::Rejected;
         }
 
         if ((flags & PLANK_CLIPBOARD_FLAG_FIRST_CHUNK) != 0) {
             if (chunkOffset != 0) {
                 reset();
-                return false;
+                return AppendResult::Rejected;
             }
             active = true;
             generation = generationValue;
@@ -107,24 +134,28 @@ struct Assembly {
         if (!active || generation != generationValue || totalSize != totalSizeValue ||
                 chunkOffset != nextOffset) {
             reset();
-            return false;
+            return AppendResult::Rejected;
         }
 
         std::memcpy(bytes.data() + chunkOffset, chunkData, chunkSize);
         nextOffset += chunkSize;
 
         if ((flags & PLANK_CLIPBOARD_FLAG_LAST_CHUNK) == 0) {
-            return false;
+            if (nextOffset == totalSize) {
+                reset();
+                return AppendResult::Rejected;
+            }
+            return AppendResult::Incomplete;
         }
 
         if (nextOffset != totalSize ||
                 !validUtf8(reinterpret_cast<const char*>(bytes.data()), bytes.size())) {
             reset();
-            return false;
+            return AppendResult::Rejected;
         }
 
         active = false;
-        return true;
+        return AppendResult::Complete;
     }
 };
 

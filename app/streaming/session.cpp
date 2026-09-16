@@ -1138,6 +1138,9 @@ void Session::startPlankTransportMediaReceivers()
     m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
     m_LastPlankVideoReceived.store(0);
     m_PlankTransportReceiversStopping.store(false);
+#ifdef Q_OS_MACOS
+    startClipboardSync();
+#endif
     m_PlankTransportVideoThread = std::thread([this]() {
         plankTransportVideoReceiveLoop();
     });
@@ -1149,15 +1152,12 @@ void Session::startPlankTransportMediaReceivers()
     m_PlankTransportDataThread = std::thread([this]() {
         plankTransportDataReceiveLoop();
     });
-#ifdef Q_OS_MACOS
-    startClipboardSync();
-#endif
 }
 
 void Session::stopPlankTransportMediaReceivers()
 {
 #ifdef Q_OS_MACOS
-    stopClipboardSync();
+    stopClipboardPollTimer();
 #endif
     m_PlankTransportReceiversStopping.store(true);
     if (m_PlankTransportVideoThread.joinable()) {
@@ -1169,6 +1169,9 @@ void Session::stopPlankTransportMediaReceivers()
     if (m_PlankTransportDataThread.joinable()) {
         m_PlankTransportDataThread.join();
     }
+#ifdef Q_OS_MACOS
+    stopClipboardSync();
+#endif
 }
 
 void Session::plankTransportVideoReceiveLoop()
@@ -1532,17 +1535,14 @@ void Session::startClipboardSync()
                                    payload,
                                    size) == PLANK_TRANSPORT_OK;
                     },
+                    [this] { return anyPresentationWindowFocused(); },
                     [this] { return clipboardSyncEnabled(); },
-                    [this](std::vector<std::uint8_t> text) {
-                        auto* payload = new std::vector<std::uint8_t>(std::move(text));
+                    [] {
                         SDL_Event event {};
                         event.type = SDL_EVENT_USER;
                         event.user.code = SDL_CODE_PLANK_CLIPBOARD;
-                        event.user.data1 = payload;
                         event.user.timestamp = SDL_GetTicks();
-                        if (!SDL_PushEvent(&event)) {
-                            delete payload;
-                        }
+                        SDL_PushEvent(&event);
                     });
     }
     m_ClipboardSync->start();
@@ -4129,11 +4129,8 @@ void Session::execInternal()
             return true;
         case SDL_CODE_PLANK_CLIPBOARD:
 #ifdef Q_OS_MACOS
-            if (m_ClipboardSync != nullptr && userEvent.data1 != nullptr) {
-                const auto* payload =
-                        static_cast<const std::vector<std::uint8_t>*>(userEvent.data1);
-                m_ClipboardSync->applyHostTextOnMainThread(*payload);
-                delete payload;
+            if (m_ClipboardSync != nullptr) {
+                m_ClipboardSync->applyPendingHostTextOnMainThread();
             }
 #endif
             return true;
