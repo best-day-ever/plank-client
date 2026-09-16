@@ -7,6 +7,9 @@
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
+#ifdef Q_OS_MACOS
+#include "macclipboardsync.h"
+#endif
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
 #ifdef Q_OS_MACOS
@@ -55,6 +58,7 @@
 #define SDL_CODE_PLANK_TABLET_CURSOR 108
 #define SDL_CODE_PLANK_CURSOR_POSITION 109
 #define SDL_CODE_PLANK_REPLANK_COMPLETE 110
+#define SDL_CODE_PLANK_CLIPBOARD 111
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -1143,10 +1147,16 @@ void Session::startPlankTransportMediaReceivers()
     m_PlankTransportDataThread = std::thread([this]() {
         plankTransportDataReceiveLoop();
     });
+#ifdef Q_OS_MACOS
+    startClipboardSync();
+#endif
 }
 
 void Session::stopPlankTransportMediaReceivers()
 {
+#ifdef Q_OS_MACOS
+    stopClipboardSync();
+#endif
     m_PlankTransportReceiversStopping.store(true);
     if (m_PlankTransportVideoThread.joinable()) {
         m_PlankTransportVideoThread.join();
@@ -1424,6 +1434,21 @@ void Session::plankTransportDataReceiveLoop()
             LiNotifyPlankCursorPosition(
                         event.payload, event.payload_size);
             break;
+        case PLANK_TRANSPORT_EVENT_CLIPBOARD_OFFER:
+            if (event.payload_size < sizeof(PLANK_CLIPBOARD_WIRE_HEADER) ||
+                    event.payload_size > sizeof(PLANK_CLIPBOARD_WIRE_HEADER) +
+                        PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE) {
+                LiNotifyPlankHostTermination(-1);
+                return;
+            }
+#ifdef Q_OS_MACOS
+            if (m_ClipboardSync && clipboardSyncEnabled() &&
+                    !m_ClipboardSync->handleHostOffer(event.payload, event.payload_size)) {
+                LiNotifyPlankHostTermination(-1);
+                return;
+            }
+#endif
+            break;
         default:
             qWarning() << "Rejected unexpected native KyProto event type"
                        << event.type;
@@ -1480,6 +1505,55 @@ int Session::plankTransportNativeInputSender(void* context, uint8_t type,
     return plank_transport_native_input_send(
                 static_cast<PlankTransportNativeEndpoint*>(context), type,
                 payload, payloadLength);
+}
+#endif
+
+#ifdef Q_OS_MACOS
+bool Session::clipboardSyncEnabled() const
+{
+    return m_Computer != nullptr &&
+            (m_Computer->plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0;
+}
+
+void Session::startClipboardSync()
+{
+#ifdef PLANK_TRANSPORT
+    if (!clipboardSyncEnabled() || m_PlankTransportEndpoint == nullptr) {
+        return;
+    }
+    if (!m_ClipboardSync) {
+        m_ClipboardSync = std::make_unique<MacClipboardSync>(
+                    [this](const std::uint8_t* payload, std::size_t size) {
+                        return plankTransportNativeInputSender(
+                                   m_PlankTransportEndpoint,
+                                   PLANK_TRANSPORT_INPUT_CLIPBOARD_OFFER,
+                                   payload,
+                                   size) == PLANK_TRANSPORT_OK;
+                    },
+                    [this] { return anyPresentationWindowFocused(); },
+                    [this] { return clipboardSyncEnabled(); },
+                    [this](std::vector<std::uint8_t> text) {
+                        auto* payload = new std::vector<std::uint8_t>(std::move(text));
+                        SDL_Event event {};
+                        event.type = SDL_EVENT_USER;
+                        event.user.code = SDL_CODE_PLANK_CLIPBOARD;
+                        event.user.data1 = payload;
+                        event.user.timestamp = SDL_GetTicks();
+                        if (!SDL_PushEvent(&event)) {
+                            delete payload;
+                        }
+                    });
+    }
+    m_ClipboardSync->start();
+    qInfo() << "Started PLANK clipboard sync";
+#endif
+}
+
+void Session::stopClipboardSync()
+{
+    if (m_ClipboardSync) {
+        m_ClipboardSync->stop();
+    }
 }
 #endif
 
@@ -3998,6 +4072,16 @@ void Session::execInternal()
             if (m_InputHandler != nullptr) {
                 m_InputHandler->applyPendingRemoteCursorPosition();
             }
+            return true;
+        case SDL_CODE_PLANK_CLIPBOARD:
+#ifdef Q_OS_MACOS
+            if (m_ClipboardSync != nullptr && userEvent.data1 != nullptr) {
+                const auto* payload =
+                        static_cast<const std::vector<std::uint8_t>*>(userEvent.data1);
+                m_ClipboardSync->applyHostTextOnMainThread(*payload);
+                delete payload;
+            }
+#endif
             return true;
         default:
             return false;

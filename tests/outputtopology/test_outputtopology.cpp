@@ -239,7 +239,7 @@ void TestOutputTopology::parsesQualificationVector()
     QVERIFY2(NvOutputTopology::fromJson(document.object(), topology, &error), qPrintable(error));
     QCOMPARE(topology.outputs.size(), 2);
     QCOMPARE(topology.desktopWidth, 5120);
-    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 524287);
+    QCOMPARE(topology.featureFlags & NvOutputTopology::SupportedFeatureFlags, 4718591);
     QVERIFY((topology.featureFlags & NvOutputTopology::CaptureSourceSelectionFeature) != 0);
     QVERIFY((topology.featureFlags & NvOutputTopology::EncoderBackendSelectionFeature) != 0);
     QVERIFY((topology.featureFlags & NvOutputTopology::NvfbcHevc10NvencFeature) != 0);
