@@ -10,6 +10,9 @@
 #include "streaming/input/plankmousemotion.h"
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
+#ifdef Q_OS_DARWIN
+#include "streaming/macwindow.h"
+#endif
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -1489,11 +1492,11 @@ void Session::clearPlankReconnectCredentials()
 bool Session::initialize()
 {
 #ifdef Q_OS_DARWIN
-    // AppKit fullscreen Spaces restrict the content to the area below the
-    // camera housing. Use SDL's borderless desktop fullscreen over the entire
-    // display instead, without selecting an exclusive display mode. The
-    // toolbar separately avoids the camera housing; video retains exact pixels.
-    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
+    // Keep native fullscreen Spaces (including trackpad app switching). Our
+    // pinned Cocoa delegate requests the full display content size; only the
+    // toolbar avoids the camera housing. Never switch the desktop display mode.
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
+    SDL_SetHint("PLANK_MAC_FULLSCREEN_FULL_DISPLAY", "1");
 #endif
 
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
@@ -4232,6 +4235,19 @@ void Session::execInternal()
             }
             break;
 
+#ifdef Q_OS_DARWIN
+        case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+        case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+            if (SDL_Window* window = windowForEvent(event.window.windowID)) {
+                MacWindow::logGeometry(window);
+                m_InputHandler->updateKeyboardGrabState();
+                if (m_PlankToolbar) {
+                    m_PlankToolbar->notifyWindowChanged();
+                }
+            }
+            break;
+#endif
+
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         case SDL_EVENT_WINDOW_SHOWN:
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
@@ -4244,6 +4260,11 @@ void Session::execInternal()
             if (eventWindow == nullptr) {
                 break;
             }
+#ifdef Q_OS_DARWIN
+            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                MacWindow::logGeometry(eventWindow);
+            }
+#endif
             if (m_PlankToolbar && eventWindow == m_Window &&
                     event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 m_PlankToolbar->notifyWindowChanged();

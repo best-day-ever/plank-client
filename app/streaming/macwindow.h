@@ -4,6 +4,7 @@
 #include <cstdint>
 
 namespace MacWindow {
+void logGeometry(SDL_Window* window);
 int unobscuredToolbarLeft(SDL_Window* window, int currentLeft, int toolbarWidth);
 void tabletCursor(SDL_Window* window, const unsigned char* pixels, unsigned width,
                   unsigned height, unsigned hotX, unsigned hotY, std::uint64_t generation,
