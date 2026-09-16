@@ -1542,7 +1542,13 @@ void Session::startClipboardSync()
                         event.type = SDL_EVENT_USER;
                         event.user.code = SDL_CODE_PLANK_CLIPBOARD;
                         event.user.timestamp = SDL_GetTicks();
-                        SDL_PushEvent(&event);
+                        if (!SDL_PushEvent(&event)) {
+                            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                         "Unable to queue host clipboard offer: %s",
+                                         SDL_GetError());
+                            return false;
+                        }
+                        return true;
                     });
     }
     m_ClipboardSync->start();

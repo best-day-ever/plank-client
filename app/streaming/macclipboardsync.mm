@@ -136,19 +136,30 @@ void MacClipboardSync::pollLocalClipboardOnMainThread()
                 (changeCount >= 0 && changeCount == m_LastPasteboardChangeCount)) {
             return;
         }
-        m_LastPasteboardChangeCount = changeCount;
     }
     const std::string text = readGeneralPasteboardText();
     if (text.empty()) {
+        std::lock_guard<std::mutex> lock(m_StateMutex);
+        if (m_Running) {
+            m_LastPasteboardChangeCount = changeCount;
+        }
         return;
     }
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
         if (!m_Running || text == m_LastAppliedHostText) {
+            if (m_Running) {
+                m_LastPasteboardChangeCount = changeCount;
+            }
             return;
         }
     }
-    sendLocalClipboard(text);
+    if (sendLocalClipboard(text)) {
+        std::lock_guard<std::mutex> lock(m_StateMutex);
+        if (m_Running) {
+            m_LastPasteboardChangeCount = changeCount;
+        }
+    }
 }
 
 bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t length)
@@ -203,23 +214,28 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
         m_PendingHostText = std::move(pending);
     }
 
-    if (m_QueueHostText) {
-        m_QueueHostText();
+    if (!m_QueueHostText || !m_QueueHostText()) {
+        std::lock_guard<std::mutex> lock(m_StateMutex);
+        if (m_PendingHostText.has_value() &&
+                m_PendingHostText->sessionEpoch == m_SessionEpoch) {
+            m_PendingHostText.reset();
+        }
+        return false;
     }
     return true;
 }
 
-void MacClipboardSync::sendLocalClipboard(const std::string& text)
+bool MacClipboardSync::sendLocalClipboard(const std::string& text)
 {
     if (!m_IsEnabled() || !m_HasStreamFocus() || text.empty()) {
-        return;
+        return false;
     }
     std::uint64_t generation = 0;
     std::uint64_t sessionEpoch = 0;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
         if (!m_Running || text == m_LastSentText) {
-            return;
+            return m_Running;
         }
         generation = ++m_OutboundGeneration;
         sessionEpoch = m_SessionEpoch;
@@ -234,14 +250,14 @@ void MacClipboardSync::sendLocalClipboard(const std::string& text)
         if (!m_SendInputFrame(frame.data(), frame.size())) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Failed to send clipboard offer to host");
-            return;
+            return false;
         }
     }
 
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
         if (!m_Running || m_SessionEpoch != sessionEpoch) {
-            return;
+            return false;
         }
         m_LastSentText = text;
     }
@@ -249,6 +265,7 @@ void MacClipboardSync::sendLocalClipboard(const std::string& text)
                 "Sent clipboard offer to host (%zu bytes, generation %llu)",
                 text.size(),
                 static_cast<unsigned long long>(generation));
+    return true;
 }
 
 bool MacClipboardSync::applyPendingHostTextOnMainThread()
