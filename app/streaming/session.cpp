@@ -7,6 +7,7 @@
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
+#include "streaming/input/plankmousemotion.h"
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
 
@@ -4552,24 +4553,7 @@ void Session::execInternal()
                 // transport. Aggregate it here when the toolbar is present so
                 // the toolbar tracker and host receive the identical delta.
                 if (event.motion.which != SDL_TOUCH_MOUSEID) {
-                    SDL_Event nextMotionEvent;
-                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
-                                          SDL_EVENT_MOUSE_MOTION,
-                                          SDL_EVENT_MOUSE_MOTION) > 0) {
-                        if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
-                            if (nextMotionEvent.motion.windowID !=
-                                    event.motion.windowID) {
-                                SDL_PushEvent(&nextMotionEvent);
-                                break;
-                            }
-                            event.motion.timestamp =
-                                    nextMotionEvent.motion.timestamp;
-                            event.motion.x = nextMotionEvent.motion.x;
-                            event.motion.y = nextMotionEvent.motion.y;
-                            event.motion.xrel += nextMotionEvent.motion.xrel;
-                            event.motion.yrel += nextMotionEvent.motion.yrel;
-                        }
-                    }
+                    PlankMouseMotion::coalescePending(event.motion);
                 }
                 // The single-window toolbar observes the same authoritative
                 // coordinates, but motion always remains remote-desktop input.

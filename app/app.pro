@@ -266,6 +266,7 @@ HEADERS += \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/plankpointerlogic.h \
+    streaming/input/plankmousemotion.h \
     streaming/session.h \
     streaming/plankdisplaymode.h \
     streaming/plankpresentation.h \

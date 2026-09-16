@@ -1,5 +1,6 @@
 #include "input.h"
 #include "plankpointerlogic.h"
+#include "plankmousemotion.h"
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -97,24 +98,11 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         return;
     }
 
-    // Batch all pending mouse motion events to save CPU time
-    float x = event->x, y = event->y;
-    SDL_Event nextEvent;
-    while (batchPendingEvents &&
-           SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
-                          SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
-        event = &nextEvent.motion;
-
-        // Ignore synthetic mouse events
-        if (event->which != SDL_TOUCH_MOUSEID &&
-                event->windowID == SDL_GetWindowID(window)) {
-            x = event->x;
-            y = event->y;
-        } else if (event->windowID != SDL_GetWindowID(window)) {
-            SDL_PushEvent(&nextEvent);
-            break;
-        }
+    SDL_MouseMotionEvent motion = *event;
+    if (batchPendingEvents) {
+        PlankMouseMotion::coalescePending(motion);
     }
+    float x = motion.x, y = motion.y;
 
     // We should not reference the original event anymore
     event = nullptr;
