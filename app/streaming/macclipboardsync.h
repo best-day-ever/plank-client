@@ -2,10 +2,10 @@
 
 #include "plankclipboard.h"
 
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,10 +17,12 @@ char* macReadGeneralPasteboardTextForSdl();
 class MacClipboardSync {
 public:
     using SendInputFrame = std::function<bool(const std::uint8_t*, std::size_t)>;
+    using FocusPredicate = std::function<bool()>;
     using EnabledPredicate = std::function<bool()>;
-    using QueueHostText = std::function<void(std::vector<std::uint8_t>)>;
+    using QueueHostText = std::function<void()>;
 
     MacClipboardSync(SendInputFrame sendInputFrame,
+                     FocusPredicate hasStreamFocus,
                      EnabledPredicate isEnabled,
                      QueueHostText queueHostText);
     ~MacClipboardSync();
@@ -28,23 +30,30 @@ public:
     void start();
     void stop();
     bool handleHostOffer(const std::uint8_t* data, std::size_t length);
-    void applyHostTextOnMainThread(const std::vector<std::uint8_t>& text);
+    bool applyPendingHostTextOnMainThread();
     void pollLocalClipboardOnMainThread();
 
 private:
+    struct PendingHostText {
+        std::uint64_t sessionEpoch = 0;
+        std::vector<std::uint8_t> text;
+    };
+
     void sendLocalClipboard(const std::string& text);
 
     SendInputFrame m_SendInputFrame;
+    FocusPredicate m_HasStreamFocus;
     EnabledPredicate m_IsEnabled;
     QueueHostText m_QueueHostText;
-    std::atomic_bool m_Running {false};
-    std::atomic_bool m_ApplyingRemote {false};
     std::mutex m_StateMutex;
+    bool m_Running = false;
+    bool m_ApplyingRemote = false;
+    std::uint64_t m_SessionEpoch = 0;
     plank::clipboard::Assembly m_Assembly;
+    std::optional<PendingHostText> m_PendingHostText;
     std::int64_t m_LastPasteboardChangeCount = -1;
     std::uint64_t m_OutboundGeneration = 0;
     std::uint64_t m_LastAppliedHostGeneration = 0;
-    std::uint64_t m_LastSentGeneration = 0;
     std::string m_LastSentText;
     std::string m_LastAppliedHostText;
 };
