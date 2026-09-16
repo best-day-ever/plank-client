@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "outputtopology.h"
+#include "../../app/streaming/macdisplaygeometry.h"
 
 class TestOutputTopology : public QObject
 {
@@ -22,8 +23,29 @@ private slots:
     void recognizesDescriptionCapabilities();
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
+    void matchesMacFullscreenViewport();
     void buildsMacDisplayRequest();
 };
+
+void TestOutputTopology::matchesMacFullscreenViewport()
+{
+    for (int inset : {0, 24, 34, 38}) {
+        int logicalHeight = 1107;
+        int pixelHeight = 2214;
+        QVERIFY(MacDisplayGeometry::insetTop(1710, logicalHeight, 3420, pixelHeight, inset));
+        int scale = 0;
+        QString error;
+        const QVector<NvClientDisplay> displays = {{QRect(-1710, inset, 1710, logicalHeight),
+            QSize(3420, pixelHeight), QSize(3420, pixelHeight)}};
+        QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &scale),
+                 QStringLiteral("3420x%1").arg(pixelHeight));
+        QCOMPARE(scale, 2);
+        QVERIFY(error.isEmpty());
+        const auto request = NvOutputTopology::macDisplayRequest(
+            QStringLiteral("3420x%1").arg(pixelHeight), "hevc-10-444-videotoolbox", scale);
+        QVERIFY(!request.isEmpty());
+    }
+}
 
 void TestOutputTopology::buildsMacDisplayRequest()
 {

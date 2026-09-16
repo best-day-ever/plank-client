@@ -1492,11 +1492,9 @@ void Session::clearPlankReconnectCredentials()
 bool Session::initialize()
 {
 #ifdef Q_OS_DARWIN
-    // Keep native fullscreen Spaces (including trackpad app switching). Our
-    // pinned Cocoa delegate requests the full display content size; only the
-    // toolbar avoids the camera housing. Never switch the desktop display mode.
+    // Keep native fullscreen Spaces, including trackpad app switching. Match
+    // Client uses the notch-safe viewport; never switch the desktop mode.
     SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
-    SDL_SetHint("PLANK_MAC_FULLSCREEN_FULL_DISPLAY", "1");
 #endif
 
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
@@ -1867,7 +1865,11 @@ bool Session::snapshotClientDisplays()
 #ifdef Q_OS_DARWIN
         if (matchMacDesktop) {
             SDL_DisplayMode currentMode;
-            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds, &currentMode)) return false;
+            SDL_Rect matchedBounds;
+            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
+                    &currentMode, &matchedBounds, m_IsFullScreen)) return false;
+            snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
+                                             matchedBounds.w, matchedBounds.h);
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
             // Presentation tiles must share the matched backing-pixel canvas,
             // not mix differently scaled panel-native pixel dimensions.
@@ -2191,7 +2193,7 @@ bool Session::configurePlankHostLayout()
     if (layoutPolicy == NvOutputTopology::MatchClientHostLayout) {
         QVector<NvClientDisplay> displays;
         for (const auto& display : std::as_const(m_ClientDisplays)) {
-            displays.append({QRect(display.logicalBounds.x,
+            displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : QRect(display.logicalBounds.x,
                                    display.logicalBounds.y,
                                    display.logicalBounds.w,
                                    display.logicalBounds.h),
@@ -3251,7 +3253,7 @@ bool Session::runPlankReconnect()
                 if (macDesktop && m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout) {
                     QVector<NvClientDisplay> displays;
                     for (const auto& display : std::as_const(m_ClientDisplays)) {
-                        displays.append({QRect(display.logicalBounds.x, display.logicalBounds.y,
+                        displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : QRect(display.logicalBounds.x, display.logicalBounds.y,
                                                display.logicalBounds.w, display.logicalBounds.h), display.nativeSize, display.macBackingSize});
                     }
                     desktopMode = NvOutputTopology::resolveMacClientDisplayMode(displays, nullptr, &desktopScale);
