@@ -4,6 +4,12 @@
 
 #include "macclipboardsync.h"
 
+NSPasteboard* plankClipboardTestPasteboard()
+{
+    static NSPasteboard* pasteboard = [NSPasteboard pasteboardWithUniqueName];
+    return pasteboard;
+}
+
 class TestMacClipboardSync : public QObject
 {
     Q_OBJECT
@@ -12,7 +18,7 @@ private:
     static void setPasteboardText(const char* text)
     {
         @autoreleasepool {
-            NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+            NSPasteboard* pasteboard = plankClipboardTestPasteboard();
             [pasteboard clearContents];
             [pasteboard setString:[NSString stringWithUTF8String:text]
                          forType:NSPasteboardTypeString];
@@ -32,6 +38,15 @@ private:
     }
 
 private slots:
+    void initTestCase()
+    {
+        QVERIFY(plankClipboardTestPasteboard() != nil);
+        QVERIFY([plankClipboardTestPasteboard() setString:@"fixture" forType:NSPasteboardTypeString]);
+    }
+    void cleanupTestCase()
+    {
+        [plankClipboardTestPasteboard() releaseGlobally];
+    }
     void rejectsMalformedFrameLength();
     void acceptsIndependentDirectionGenerations();
     void resetsGenerationAndRejectsStaleEventsOnReconnect();

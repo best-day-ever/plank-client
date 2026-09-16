@@ -1,4 +1,5 @@
 QT += core gui testlib
+DEFINES += PLANK_CLIPBOARD_TEST_PASTEBOARD
 CONFIG += console testcase c++17 link_pkgconfig
 TEMPLATE = app
 
