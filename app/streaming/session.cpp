@@ -1488,19 +1488,11 @@ void Session::clearPlankReconnectCredentials()
 bool Session::initialize()
 {
 #ifdef Q_OS_DARWIN
-    if (qEnvironmentVariableIntValue("I_WANT_BUGGY_FULLSCREEN") == 0) {
-        // Using modesetting on modern versions of macOS is extremely unreliable
-        // and leads to hangs, deadlocks, and other nasty stuff. The only time
-        // people seem to use it is to get the full screen on notched Macs,
-        // which setting SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES=1 also accomplishes
-        // with much less headache.
-        //
-        // https://github.com/moonlight-stream/moonlight-qt/issues/973
-        // https://github.com/moonlight-stream/moonlight-qt/issues/999
-        // https://github.com/moonlight-stream/moonlight-qt/issues/1211
-        // https://github.com/moonlight-stream/moonlight-qt/issues/1218
-        SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
-    }
+    // AppKit fullscreen Spaces restrict the content to the area below the
+    // camera housing. Use SDL's borderless desktop fullscreen over the entire
+    // display instead, without selecting an exclusive display mode. The
+    // toolbar separately avoids the camera housing; video retains exact pixels.
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
 #endif
 
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
@@ -2394,12 +2386,7 @@ void Session::updateOptimalWindowDisplayMode()
 {
     bool preserveDesktopMode = strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
 #ifdef Q_OS_DARWIN
-    {
-        QReadLocker lock(&m_Computer->lock);
-        preserveDesktopMode = preserveDesktopMode ||
-            (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
-             m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout);
-    }
+    preserveDesktopMode = true;
 #endif
     // A PLANK Wayland session is a desktop surface, not a monitor
     // mode switch. Let the compositor size the fullscreen surface and keep
@@ -2408,8 +2395,9 @@ void Session::updateOptimalWindowDisplayMode()
     // exposing the fullscreen mode dimensions through SDL_GetWindowSize().
     // Our renderer already performs the required aspect scaling and
     // letterboxing, so an exclusive Wayland display mode adds no value.
-    // Mac Match Client also preserves the desktop mode it just measured;
-    // exclusive-mode selection must not change the user's Retina scale.
+    // Mac fullscreen also preserves the current desktop mode; exclusive-mode
+    // selection must not change the user's Retina scale, including manual
+    // remote resolutions and connections to Linux hosts.
     if (preserveDesktopMode) {
         if (!SDL_SetWindowFullscreenMode(m_Window, nullptr)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,

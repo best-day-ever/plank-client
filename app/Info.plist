@@ -12,6 +12,8 @@
 	<string>la.instinctual.PLANK.Client</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSPrefersDisplaySafeAreaCompatibilityMode</key>
+	<false/>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>

@@ -453,10 +453,12 @@ macx {
     message(VideoToolbox renderer selected)
 
     SOURCES += \
+        streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
 
     HEADERS += \
+        streaming/macwindow.h \
         streaming/video/ffmpeg-renderers/vt.h
 }
 embedded {

@@ -11,6 +11,7 @@ class TestPlankToolbarLogic : public QObject
     Q_OBJECT
 
 private slots:
+    void avoidsCameraHousingWithoutChangingSafePositions();
     void resolvesReportedAndDerivedDensity();
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
@@ -28,6 +29,18 @@ private slots:
     void retainsTenSecondPeakForBothStatsViews();
     void sharesPacketLossDisplayPrecision();
 };
+
+void TestPlankToolbarLogic::avoidsCameraHousingWithoutChangingSafePositions()
+{
+    using PlankToolbarLogic::unobscuredToolbarLeft;
+    QCOMPARE(unobscuredToolbarLeft(585, 539, 1710, 770, 940), 115);
+    QCOMPARE(unobscuredToolbarLeft(70, 539, 1710, 770, 940), 70);
+    QCOMPARE(unobscuredToolbarLeft(1000, 539, 1710, 770, 940), 1000);
+    QCOMPARE(unobscuredToolbarLeft(200, 300, 1000, 250, 430), 565);
+    QCOMPARE(unobscuredToolbarLeft(100, 539, 900, 400, 500), 0);
+    QCOMPARE(unobscuredToolbarLeft(300, 539, 1200, 1200, 1200), 300);
+    QCOMPARE(unobscuredToolbarLeft(150, 270, 855, 385, 470), 57);
+}
 
 void TestPlankToolbarLogic::resolvesReportedAndDerivedDensity()
 {
