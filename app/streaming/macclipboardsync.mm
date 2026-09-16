@@ -3,7 +3,21 @@
 #include <AppKit/AppKit.h>
 #include <SDL3/SDL.h>
 
+#ifdef PLANK_CLIPBOARD_TEST_PASTEBOARD
+// Supplied only by the native test binary; never linked into the application.
+extern NSPasteboard* plankClipboardTestPasteboard();
+#endif
+
 namespace {
+
+NSPasteboard* clipboardPasteboard()
+{
+#ifdef PLANK_CLIPBOARD_TEST_PASTEBOARD
+    return plankClipboardTestPasteboard();
+#else
+    return [NSPasteboard generalPasteboard];
+#endif
+}
 
 NSArray<NSString*>* pasteboardTextTypes()
 {
@@ -17,7 +31,7 @@ NSArray<NSString*>* pasteboardTextTypes()
 std::string readGeneralPasteboardText()
 {
     @autoreleasepool {
-        NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+        NSPasteboard* pasteboard = clipboardPasteboard();
         if (pasteboard == nil) {
             return {};
         }
@@ -46,7 +60,7 @@ void writeGeneralPasteboardText(const std::vector<std::uint8_t>& bytes)
         if (text == nil) {
             return;
         }
-        NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+        NSPasteboard* pasteboard = clipboardPasteboard();
         [pasteboard clearContents];
         [pasteboard setString:text forType:NSPasteboardTypeString];
     }
@@ -55,7 +69,7 @@ void writeGeneralPasteboardText(const std::vector<std::uint8_t>& bytes)
 int currentPasteboardChangeCount()
 {
     @autoreleasepool {
-        NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+        NSPasteboard* pasteboard = clipboardPasteboard();
         return pasteboard != nil ? pasteboard.changeCount : -1;
     }
 }
