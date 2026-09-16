@@ -460,6 +460,7 @@ macx {
 
     HEADERS += \
         streaming/macwindow.h \
+        streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h
 }
 embedded {
