@@ -69,6 +69,30 @@ PlankPresentationSlice PlankPresentation::sliceForDrawable(
     return slice;
 }
 
+int PlankPresentation::resolvePointerOutput(const QVector<QRect>& windowRects,
+                                           int sourceOutput,
+                                           const QPointF& sourcePoint,
+                                           QPointF& outputPoint)
+{
+    outputPoint = sourcePoint;
+    if (sourceOutput < 0 || sourceOutput >= windowRects.size() ||
+            !windowRects.at(sourceOutput).isValid()) {
+        return -1;
+    }
+    const QPointF desktopPoint = sourcePoint + windowRects.at(sourceOutput).topLeft();
+    for (int i = 0; i < windowRects.size(); ++i) {
+        const auto& rect = windowRects.at(i);
+        if (rect.isValid() && desktopPoint.x() >= rect.x() &&
+                desktopPoint.x() < rect.x() + rect.width() &&
+                desktopPoint.y() >= rect.y() &&
+                desktopPoint.y() < rect.y() + rect.height()) {
+            outputPoint = desktopPoint - rect.topLeft();
+            return i;
+        }
+    }
+    return sourceOutput;
+}
+
 bool PlankPresentation::mapWindowPointToStream(
         const QPointF& windowPoint,
         const QSize& windowSize,

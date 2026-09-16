@@ -17,11 +17,13 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore synthetic mouse events
         return;
     }
+    float x = event->x, y = event->y;
+    window = pointerPresentationWindow(window, x, y);
     activateCompositorCursor();
     if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
-                isMouseInVideoRegion(event->x, event->y,
-                                     event->windowID)) {
+                isMouseInVideoRegion(qRound(x), qRound(y),
+                                     SDL_GetWindowID(window))) {
             // Capture the mouse again if clicked when unbound.
             // We start capture on left button released instead of
             // pressed to avoid sending an errant mouse button released
@@ -33,8 +35,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Not capturing
         return;
     }
-    else if (!isMouseInVideoRegion(event->x, event->y,
-                                   event->windowID) && event->down) {
+    else if (!isMouseInVideoRegion(qRound(x), qRound(y),
+                                   SDL_GetWindowID(window)) && event->down) {
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
@@ -67,7 +69,7 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     // absolute position immediately before the button so a stale tablet or
     // coalesced motion sample cannot make the remote click land elsewhere.
     if (event->down && !sendAbsoluteMousePosition(
-                window, qRound(event->x), qRound(event->y), false)) {
+                window, qRound(x), qRound(y), false)) {
         return;
     }
 
@@ -96,7 +98,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
 
     // Batch all pending mouse motion events to save CPU time
-    Sint32 x = event->x, y = event->y;
+    float x = event->x, y = event->y;
     SDL_Event nextEvent;
     while (batchPendingEvents &&
            SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
@@ -117,13 +119,15 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     // We should not reference the original event anymore
     event = nullptr;
 
+    window = pointerPresentationWindow(window, x, y);
+
     int windowWidth, windowHeight;
     SDL_GetWindowSize(window, &windowWidth, &windowHeight);
 
     bool mouseInVideoRegion;
 
     mouseInVideoRegion = isMouseInVideoRegion(
-                x, y, SDL_GetWindowID(window), windowWidth, windowHeight);
+                qRound(x), qRound(y), SDL_GetWindowID(window), windowWidth, windowHeight);
 
     // Send the mouse position update if one of the following is true:
     // a) it is in the video region now
@@ -139,7 +143,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         }
     }
     if (mouseInVideoRegion || m_MouseWasInVideoRegion || m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
-        sendAbsoluteMousePosition(window, x, y, true);
+        sendAbsoluteMousePosition(window, qRound(x), qRound(y), true);
     }
 
     // Adjust the cursor visibility if applicable
@@ -255,6 +259,38 @@ bool SdlInputHandler::isMouseInVideoRegion(int mouseX, int mouseY,
                 streamSize,
                 m_PresentationLayout.canvasSize, output->canvasRect,
                 streamPoint, false);
+}
+
+SDL_Window* SdlInputHandler::pointerPresentationWindow(SDL_Window* source,
+                                                      float& x, float& y) const
+{
+#ifdef Q_OS_DARWIN
+    if (m_PresentationLayout.isMultiOutput()) {
+        QVector<QRect> windowRects;
+        int sourceOutput = -1;
+        for (const auto& output : m_PresentationLayout.outputs) {
+            int wx, wy, width, height;
+            if (!SDL_GetWindowPosition(output.window, &wx, &wy) ||
+                    !SDL_GetWindowSize(output.window, &width, &height)) {
+                return source;
+            }
+            if (output.window == source) sourceOutput = windowRects.size();
+            windowRects.append(QRect(wx, wy, width, height));
+        }
+        QPointF point;
+        const int target = PlankPresentation::resolvePointerOutput(
+            windowRects, sourceOutput, QPointF(x, y), point);
+        if (target >= 0) {
+            x = point.x();
+            y = point.y();
+            return m_PresentationLayout.outputs.at(target).window;
+        }
+    }
+#else
+    Q_UNUSED(x);
+    Q_UNUSED(y);
+#endif
+    return source;
 }
 
 SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const

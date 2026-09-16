@@ -51,6 +51,13 @@ public:
         const QRect& outputCanvasRect,
         const QSize& drawableSize);
 
+    // Captured drag events stay relative to the window where the press began.
+    // Resolve them in desktop logical coordinates before applying per-output DPI.
+    // Outside every presentation window, retain the source for normal clamping.
+    static int resolvePointerOutput(const QVector<QRect>& windowRects,
+                                    int sourceOutput, const QPointF& sourcePoint,
+                                    QPointF& outputPoint);
+
     static bool mapWindowPointToStream(
         const QPointF& windowPoint,
         const QSize& windowSize,

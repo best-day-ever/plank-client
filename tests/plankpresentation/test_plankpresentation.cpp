@@ -17,6 +17,10 @@ private slots:
     void mapsMixedRetinaDrawable();
     void scalesLetterboxToBackingPixels();
     void rejectsInvisibleOrInvalidDrawables();
+    void routesCapturedDragAcrossMixedDpiOutputs();
+    void routesCapturedDragAtExactSeam();
+    void retainsCapturedDragOutsidePresentation();
+    void rejectsInvalidPointerSource();
 };
 
 void TestPlankPresentation::exactDualOutputSlices()
@@ -180,6 +184,69 @@ void TestPlankPresentation::rejectsInvisibleOrInvalidDrawables()
         QSize(1920, 1080), QRect(), QSize(1920, 1080)).visible);
     QVERIFY(!PlankPresentation::sliceForDrawable(QSize(1920, 1080),
         QSize(1920, 1080), QRect(0, 0, 1920, 1080), QSize(0, 0)).visible);
+}
+
+void TestPlankPresentation::routesCapturedDragAcrossMixedDpiOutputs()
+{
+    // The button remains captured by the originating window in both directions.
+    // Logical desktop coordinates use the active Mac scaling, not panel pixels.
+    const QVector<QRect> windows {QRect(-2056, 0, 2056, 1329),
+                                 QRect(0, 0, 2560, 1440)};
+    const QVector<QRect> canvasRects {QRect(0, 0, 3456, 2234),
+                                     QRect(3456, 0, 2560, 1440)};
+    const QSize canvas(6016, 2234);
+    QPointF local, stream;
+    int target = PlankPresentation::resolvePointerOutput(windows, 1,
+                                                         QPointF(-1028, 664.5), local);
+    QCOMPARE(target, 0);
+    QCOMPARE(local, QPointF(1028, 664.5));
+    QVERIFY(PlankPresentation::mapWindowPointToStream(local, windows[target].size(),
+        canvas, canvas, canvasRects[target], stream, true));
+    QCOMPARE(stream, QPointF(1728, 1117));
+
+    target = PlankPresentation::resolvePointerOutput(windows, 0,
+                                                      QPointF(3336, 720), local);
+    QCOMPARE(target, 1);
+    QCOMPARE(local, QPointF(1280, 720));
+    QVERIFY(PlankPresentation::mapWindowPointToStream(local, windows[target].size(),
+        canvas, canvas, canvasRects[target], stream, true));
+    QCOMPARE(stream, QPointF(4736, 720));
+}
+
+void TestPlankPresentation::routesCapturedDragAtExactSeam()
+{
+    const QVector<QRect> windows {QRect(-1728, 40, 1728, 1117),
+                                 QRect(0, 0, 2560, 1440)};
+    QPointF local;
+    QCOMPARE(PlankPresentation::resolvePointerOutput(windows, 0,
+        QPointF(1728, 160), local), 1);
+    QCOMPARE(local, QPointF(0, 200));
+    QCOMPARE(PlankPresentation::resolvePointerOutput(windows, 1,
+        QPointF(-0.5, 200), local), 0);
+    QCOMPARE(local, QPointF(1727.5, 160));
+}
+
+void TestPlankPresentation::retainsCapturedDragOutsidePresentation()
+{
+    const QVector<QRect> windows {QRect(-1728, 0, 1728, 1117),
+                                 QRect(0, 0, 2560, 1440)};
+    QPointF local;
+    // Below the shorter screen: preserve the existing clamping/release policy.
+    QCOMPARE(PlankPresentation::resolvePointerOutput(windows, 1,
+        QPointF(-100, 1200), local), 1);
+    QCOMPARE(local, QPointF(-100, 1200));
+    QCOMPARE(PlankPresentation::resolvePointerOutput(windows, 1,
+        QPointF(100, 200), local), 1);
+    QCOMPARE(local, QPointF(100, 200));
+}
+
+void TestPlankPresentation::rejectsInvalidPointerSource()
+{
+    QPointF local;
+    QCOMPARE(PlankPresentation::resolvePointerOutput({}, 0, QPointF(), local), -1);
+    QCOMPARE(PlankPresentation::resolvePointerOutput({QRect()}, 0, QPointF(), local), -1);
+    QCOMPARE(PlankPresentation::resolvePointerOutput({QRect(0, 0, 100, 100)},
+        1, QPointF(), local), -1);
 }
 
 QTEST_APPLESS_MAIN(TestPlankPresentation)

@@ -186,6 +186,8 @@ private:
                                    bool allowClampedPosition);
 
     SDL_Window* presentationWindow(Uint32 windowId) const;
+    SDL_Window* pointerPresentationWindow(SDL_Window* source,
+                                          float& x, float& y) const;
     const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
 
