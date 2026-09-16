@@ -59,6 +59,7 @@
 #define SDL_CODE_PLANK_CURSOR_POSITION 109
 #define SDL_CODE_PLANK_REPLANK_COMPLETE 110
 #define SDL_CODE_PLANK_CLIPBOARD 111
+#define SDL_CODE_PLANK_CLIPBOARD_POLL 112
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -79,6 +80,7 @@
 #include "plank_transport.h"
 #include "plank_transport_control.h"
 #include "plank_transport_event.h"
+#include "plank_transport_input.h"
 #include "plank_transport_setup.h"
 #endif
 
@@ -1530,7 +1532,6 @@ void Session::startClipboardSync()
                                    payload,
                                    size) == PLANK_TRANSPORT_OK;
                     },
-                    [this] { return anyPresentationWindowFocused(); },
                     [this] { return clipboardSyncEnabled(); },
                     [this](std::vector<std::uint8_t> text) {
                         auto* payload = new std::vector<std::uint8_t>(std::move(text));
@@ -1551,9 +1552,58 @@ void Session::startClipboardSync()
 
 void Session::stopClipboardSync()
 {
+    stopClipboardPollTimer();
     if (m_ClipboardSync) {
         m_ClipboardSync->stop();
     }
+}
+
+void Session::queueClipboardPollEvent()
+{
+    SDL_Event event {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_PLANK_CLIPBOARD_POLL;
+    event.user.timestamp = SDL_GetTicks();
+    SDL_PushEvent(&event);
+}
+
+namespace {
+
+Uint32 clipboardPollTimerCallback(void*, SDL_TimerID, Uint32 interval)
+{
+    SDL_Event event {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_PLANK_CLIPBOARD_POLL;
+    event.user.timestamp = SDL_GetTicks();
+    SDL_PushEvent(&event);
+    return interval;
+}
+
+}  // namespace
+
+void Session::startClipboardPollTimer()
+{
+    if (m_ClipboardPollTimerId != 0 || m_ClipboardSync == nullptr) {
+        return;
+    }
+    const SDL_TimerID timerId = SDL_AddTimer(250, clipboardPollTimerCallback, nullptr);
+    if (timerId == 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to start clipboard poll timer: %s",
+                    SDL_GetError());
+        return;
+    }
+    m_ClipboardPollTimerId = timerId;
+    queueClipboardPollEvent();
+}
+
+void Session::stopClipboardPollTimer()
+{
+    if (m_ClipboardPollTimerId == 0) {
+        return;
+    }
+    SDL_RemoveTimer(m_ClipboardPollTimerId);
+    m_ClipboardPollTimerId = 0;
 }
 #endif
 
@@ -3715,6 +3765,10 @@ void Session::execInternal()
         return;
     }
 
+#ifdef Q_OS_MACOS
+    startClipboardPollTimer();
+#endif
+
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
 
@@ -4083,6 +4137,13 @@ void Session::execInternal()
             }
 #endif
             return true;
+        case SDL_CODE_PLANK_CLIPBOARD_POLL:
+#ifdef Q_OS_MACOS
+            if (m_ClipboardSync != nullptr) {
+                m_ClipboardSync->pollLocalClipboardOnMainThread();
+            }
+#endif
+            return true;
         default:
             return false;
         }
@@ -4296,6 +4357,9 @@ void Session::execInternal()
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 m_InputHandler->notifyFocusGained();
+#ifdef Q_OS_MACOS
+                queueClipboardPollEvent();
+#endif
                 break;
             default:
                 break;
@@ -4421,6 +4485,9 @@ void Session::execInternal()
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
+#ifdef Q_OS_MACOS
+                queueClipboardPollEvent();
+#endif
                 break;
             case SDL_EVENT_WINDOW_MOUSE_LEAVE:
                 m_InputHandler->notifyMouseLeave();

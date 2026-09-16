@@ -5,20 +5,22 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
+#include <vector>
+
+#ifdef Q_OS_MACOS
+// Returns SDL_malloc'd UTF-8 text, or nullptr when unavailable.
+char* macReadGeneralPasteboardTextForSdl();
+#endif
 
 class MacClipboardSync {
 public:
     using SendInputFrame = std::function<bool(const std::uint8_t*, std::size_t)>;
-    using FocusPredicate = std::function<bool()>;
     using EnabledPredicate = std::function<bool()>;
     using QueueHostText = std::function<void(std::vector<std::uint8_t>)>;
 
     MacClipboardSync(SendInputFrame sendInputFrame,
-                     FocusPredicate hasStreamFocus,
                      EnabledPredicate isEnabled,
                      QueueHostText queueHostText);
     ~MacClipboardSync();
@@ -27,16 +29,14 @@ public:
     void stop();
     bool handleHostOffer(const std::uint8_t* data, std::size_t length);
     void applyHostTextOnMainThread(const std::vector<std::uint8_t>& text);
+    void pollLocalClipboardOnMainThread();
 
 private:
-    void pollLoop();
     void sendLocalClipboard(const std::string& text);
 
     SendInputFrame m_SendInputFrame;
-    FocusPredicate m_HasStreamFocus;
     EnabledPredicate m_IsEnabled;
     QueueHostText m_QueueHostText;
-    std::thread m_PollThread;
     std::atomic_bool m_Running {false};
     std::atomic_bool m_ApplyingRemote {false};
     std::mutex m_StateMutex;
@@ -45,4 +45,6 @@ private:
     std::uint64_t m_OutboundGeneration = 0;
     std::uint64_t m_LastAppliedHostGeneration = 0;
     std::uint64_t m_LastSentGeneration = 0;
+    std::string m_LastSentText;
+    std::string m_LastAppliedHostText;
 };
