@@ -37,6 +37,8 @@ private slots:
     void resetsGenerationAndRejectsStaleEventsOnReconnect();
     void suppressesRepeatedHostText();
     void sendsOnlyWithStreamFocus();
+    void retriesAfterTransportSendFailure();
+    void rejectsHostOfferWhenEventQueueFails();
     void ignoresOffersWhileStopped();
     void validatesUnicodeScalars();
 };
@@ -48,7 +50,10 @@ void TestMacClipboardSync::rejectsMalformedFrameLength()
                 [](const std::uint8_t*, std::size_t) { return true; },
                 [] { return true; },
                 [] { return true; },
-                [&] { ++queuedEvents; });
+                [&] {
+                    ++queuedEvents;
+                    return true;
+                });
     sync.start();
 
     auto truncated = oneFrame("frame", 1);
@@ -73,7 +78,10 @@ void TestMacClipboardSync::acceptsIndependentDirectionGenerations()
                 },
                 [] { return true; },
                 [] { return true; },
-                [&] { ++queuedEvents; });
+                [&] {
+                    ++queuedEvents;
+                    return true;
+                });
     sync.start();
 
     setPasteboardText("client generation one");
@@ -97,7 +105,10 @@ void TestMacClipboardSync::resetsGenerationAndRejectsStaleEventsOnReconnect()
                 [](const std::uint8_t*, std::size_t) { return true; },
                 [] { return true; },
                 [] { return true; },
-                [&] { ++queuedEvents; });
+                [&] {
+                    ++queuedEvents;
+                    return true;
+                });
     sync.start();
 
     const auto oldSession = oneFrame("old session", 42);
@@ -121,7 +132,10 @@ void TestMacClipboardSync::suppressesRepeatedHostText()
                 [](const std::uint8_t*, std::size_t) { return true; },
                 [] { return true; },
                 [] { return true; },
-                [&] { ++queuedEvents; });
+                [&] {
+                    ++queuedEvents;
+                    return true;
+                });
     sync.start();
 
     auto frame = oneFrame("same text", 1);
@@ -149,7 +163,7 @@ void TestMacClipboardSync::sendsOnlyWithStreamFocus()
                 },
                 [&] { return focused; },
                 [] { return true; },
-                [] {});
+                [] { return true; });
     sync.start();
 
     setPasteboardText("focus gated");
@@ -161,6 +175,39 @@ void TestMacClipboardSync::sendsOnlyWithStreamFocus()
     QCOMPARE(sent.size(), std::size_t {1});
 }
 
+void TestMacClipboardSync::retriesAfterTransportSendFailure()
+{
+    int sends = 0;
+    MacClipboardSync sync(
+                [&](const std::uint8_t*, std::size_t) {
+                    return ++sends > 1;
+                },
+                [] { return true; },
+                [] { return true; },
+                [] { return true; });
+    sync.start();
+
+    setPasteboardText("retry send");
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sends, 1);
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sends, 2);
+}
+
+void TestMacClipboardSync::rejectsHostOfferWhenEventQueueFails()
+{
+    MacClipboardSync sync(
+                [](const std::uint8_t*, std::size_t) { return true; },
+                [] { return true; },
+                [] { return true; },
+                [] { return false; });
+    sync.start();
+
+    const auto frame = oneFrame("queue failure", 1);
+    QVERIFY(!sync.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(!sync.applyPendingHostTextOnMainThread());
+}
+
 void TestMacClipboardSync::ignoresOffersWhileStopped()
 {
     int queuedEvents = 0;
@@ -168,7 +215,10 @@ void TestMacClipboardSync::ignoresOffersWhileStopped()
                 [](const std::uint8_t*, std::size_t) { return true; },
                 [] { return true; },
                 [] { return true; },
-                [&] { ++queuedEvents; });
+                [&] {
+                    ++queuedEvents;
+                    return true;
+                });
     sync.start();
     sync.stop();
 

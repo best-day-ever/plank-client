@@ -19,7 +19,7 @@ public:
     using SendInputFrame = std::function<bool(const std::uint8_t*, std::size_t)>;
     using FocusPredicate = std::function<bool()>;
     using EnabledPredicate = std::function<bool()>;
-    using QueueHostText = std::function<void()>;
+    using QueueHostText = std::function<bool()>;
 
     MacClipboardSync(SendInputFrame sendInputFrame,
                      FocusPredicate hasStreamFocus,
@@ -39,7 +39,7 @@ private:
         std::vector<std::uint8_t> text;
     };
 
-    void sendLocalClipboard(const std::string& text);
+    bool sendLocalClipboard(const std::string& text);
 
     SendInputFrame m_SendInputFrame;
     FocusPredicate m_HasStreamFocus;
