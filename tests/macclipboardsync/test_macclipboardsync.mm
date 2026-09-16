@@ -38,6 +38,7 @@ private slots:
     void suppressesRepeatedHostText();
     void sendsOnlyWithStreamFocus();
     void retriesAfterTransportSendFailure();
+    void resendsTextAfterHostClipboardChanges();
     void rejectsHostOfferWhenEventQueueFails();
     void ignoresOffersWhileStopped();
     void validatesUnicodeScalars();
@@ -192,6 +193,32 @@ void TestMacClipboardSync::retriesAfterTransportSendFailure()
     QCOMPARE(sends, 1);
     sync.pollLocalClipboardOnMainThread();
     QCOMPARE(sends, 2);
+}
+
+void TestMacClipboardSync::resendsTextAfterHostClipboardChanges()
+{
+    std::vector<std::vector<std::uint8_t>> sent;
+    MacClipboardSync sync(
+                [&](const std::uint8_t* data, std::size_t size) {
+                    sent.emplace_back(data, data + size);
+                    return true;
+                },
+                [] { return true; },
+                [] { return true; },
+                [] { return true; });
+    sync.start();
+
+    setPasteboardText("A");
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t {1});
+
+    const auto host = oneFrame("B", 1);
+    QVERIFY(sync.handleHostOffer(host.data(), host.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+
+    setPasteboardText("A");
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t {2});
 }
 
 void TestMacClipboardSync::rejectsHostOfferWhenEventQueueFails()
