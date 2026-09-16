@@ -505,6 +505,9 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     }
 #ifdef HAVE_MAC_RAW_WACOM
     updateTabletCursorVisibility();
+    if (m_MacRawWacomInput) {
+        followPointerFocus(targetWindow, 0, PointerFocusPosition::HostTablet);
+    }
 #endif
     PlankWaylandCursor* cursor =
             ensureWaylandTabletCursorAttached(targetWindow);

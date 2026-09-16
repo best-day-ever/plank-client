@@ -297,7 +297,8 @@ SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
 }
 
 void SdlInputHandler::followPointerFocus(SDL_Window* target,
-                                        SDL_MouseButtonFlags eventButtons)
+                                        SDL_MouseButtonFlags eventButtons,
+                                        PointerFocusPosition position)
 {
 #ifdef Q_OS_DARWIN
     // The fullscreen surfaces are one remote desktop. Transfer native focus
@@ -305,6 +306,12 @@ void SdlInputHandler::followPointerFocus(SDL_Window* target,
     // Never switch away from the Cocoa window that owns an in-progress drag.
     if (!m_PresentationLayout.isMultiOutput() || !isCaptureActive() ||
             eventButtons != 0 || SDL_GetMouseState(nullptr, nullptr) != 0) {
+        return;
+    }
+    const bool tablet = position == PointerFocusPosition::HostTablet;
+    if (tablet && !PlankPointerLogic::tabletFocusPositionIsCurrent(
+                m_TabletCursorActive, m_AppliedRemoteCursorPositionValid,
+                m_AppliedRemoteCursorPositionSequence, m_TabletCursorActivationSequence)) {
         return;
     }
     SDL_Window* focused = SDL_GetKeyboardFocus();
@@ -319,18 +326,21 @@ void SdlInputHandler::followPointerFocus(SDL_Window* target,
         return;
     }
 
-    // Queued events may describe an old pointer position. Check the current
-    // desktop position before raising anything, and never activate the app
-    // when another app or a non-presentation dialog owns keyboard focus.
-    int wx, wy, width, height;
-    if (!SDL_GetWindowPosition(target, &wx, &wy) ||
-            !SDL_GetWindowSize(target, &width, &height)) {
+    // Raw tablet reports go directly to the Host and do not move the Mac's
+    // mouse pointer. Their target was mapped from the fresh Host position.
+    // Only local mouse events can be checked against the Mac desktop pointer.
+    // Both paths retain native mouse drags and require owned presentation focus.
+    float gx, gy;
+    if (SDL_GetGlobalMouseState(&gx, &gy) != 0) {
         return;
     }
-    float gx, gy;
-    if (SDL_GetGlobalMouseState(&gx, &gy) != 0 ||
-            gx < wx || gy < wy || gx >= wx + width || gy >= wy + height) {
-        return;
+    if (!tablet) {
+        int wx, wy, width, height;
+        if (!SDL_GetWindowPosition(target, &wx, &wy) ||
+                !SDL_GetWindowSize(target, &width, &height) ||
+                gx < wx || gy < wy || gx >= wx + width || gy >= wy + height) {
+            return;
+        }
     }
     if (!SDL_RaiseWindow(target)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
@@ -338,13 +348,15 @@ void SdlInputHandler::followPointerFocus(SDL_Window* target,
                     SDL_GetError());
     }
     else {
-        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
-                    "PLANK fullscreen pointer focus: %u -> %u",
+        SDL_LogInfo(tablet ? SDL_LOG_CATEGORY_APPLICATION : SDL_LOG_CATEGORY_INPUT,
+                    "PLANK fullscreen %s focus: %u -> %u",
+                    tablet ? "tablet" : "pointer",
                     SDL_GetWindowID(focused), SDL_GetWindowID(target));
     }
 #else
     Q_UNUSED(target);
     Q_UNUSED(eventButtons);
+    Q_UNUSED(position);
 #endif
 }
 

@@ -191,7 +191,9 @@ private:
     SDL_Window* presentationWindow(Uint32 windowId) const;
     SDL_Window* pointerPresentationWindow(SDL_Window* source,
                                           float& x, float& y) const;
-    void followPointerFocus(SDL_Window* target, SDL_MouseButtonFlags eventButtons);
+    enum class PointerFocusPosition { LocalMouse, HostTablet };
+    void followPointerFocus(SDL_Window* target, SDL_MouseButtonFlags eventButtons,
+                            PointerFocusPosition position = PointerFocusPosition::LocalMouse);
     const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
 

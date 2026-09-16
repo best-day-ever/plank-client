@@ -2,12 +2,14 @@
 
 #include "streaming/plankpresentation.h"
 #include "streaming/input/plankmousemotion.h"
+#include "streaming/input/plankpointerlogic.h"
 
 class TestPlankPresentation : public QObject
 {
     Q_OBJECT
 
 private slots:
+    void rejectsStaleTabletFocus();
     void coalescesAdjacentMouseMotion();
     void preservesMouseMotionBarriers_data();
     void preservesMouseMotionBarriers();
@@ -26,6 +28,21 @@ private slots:
     void retainsCapturedDragOutsidePresentation();
     void rejectsInvalidPointerSource();
 };
+
+void TestPlankPresentation::rejectsStaleTabletFocus()
+{
+    using PlankPointerLogic::tabletFocusPositionIsCurrent;
+    QVERIFY(tabletFocusPositionIsCurrent(true, true, 101, 100));
+    // Returning to the real mouse cancels tablet authority, even if a newer
+    // Host packet was already queued. Resuming needs a post-activation sample.
+    QVERIFY(!tabletFocusPositionIsCurrent(false, true, 101, 100));
+    QVERIFY(!tabletFocusPositionIsCurrent(true, false, 101, 100));
+    QVERIFY(!tabletFocusPositionIsCurrent(true, true, 100, 100));
+    QVERIFY(!tabletFocusPositionIsCurrent(true, true, 99, 100));
+    // Reconnect resets the position epoch; no sample is eligible until received.
+    QVERIFY(!tabletFocusPositionIsCurrent(true, false, 0, 0));
+    QVERIFY(tabletFocusPositionIsCurrent(true, true, 1, 0));
+}
 
 void TestPlankPresentation::exactDualOutputSlices()
 {
