@@ -415,6 +415,7 @@ private:
         SDL_DisplayID displayId = 0;
         SDL_Rect logicalBounds = {};
         QSize nativeSize;
+        QSize macBackingSize;
         QRect canvasRect;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;

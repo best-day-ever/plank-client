@@ -177,6 +177,38 @@ int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
 }
 
 #ifdef Q_OS_DARWIN
+bool StreamUtils::getMacCurrentDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* bounds)
+{
+    SDL_zerop(mode);
+    const auto current = CGDisplayCopyDisplayMode(displayId);
+    if (!current) return false;
+    mode->w = static_cast<int>(CGDisplayModeGetPixelWidth(current));
+    mode->h = static_cast<int>(CGDisplayModeGetPixelHeight(current));
+    const CGRect logical = CGDisplayBounds(displayId);
+    *bounds = {qRound(logical.origin.x), qRound(logical.origin.y),
+               qRound(logical.size.width), qRound(logical.size.height)};
+    CGDisplayModeRelease(current);
+    return mode->w > 0 && mode->h > 0 && bounds->w > 0 && bounds->h > 0;
+}
+
+bool StreamUtils::getMacCurrentDisplayModeForBounds(const SDL_Rect& bounds, SDL_DisplayMode* mode)
+{
+    CGDirectDisplayID ids[16], selected = 0;
+    uint32_t count = 0;
+    if (CGGetActiveDisplayList(16, ids, &count) != kCGErrorSuccess) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        const CGRect cg = CGDisplayBounds(ids[i]);
+        if (qRound(cg.origin.x) == bounds.x && qRound(cg.origin.y) == bounds.y &&
+                qRound(cg.size.width) == bounds.w && qRound(cg.size.height) == bounds.h) {
+            if (selected) return false;
+            selected = ids[i];
+        }
+    }
+    SDL_Rect actual;
+    return selected && getMacCurrentDisplayMode(selected, mode, &actual) &&
+        actual.x == bounds.x && actual.y == bounds.y && actual.w == bounds.w && actual.h == bounds.h;
+}
+
 bool StreamUtils::getMacNativeDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* safeArea)
 {
     SDL_zerop(mode);

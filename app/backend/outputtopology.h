@@ -30,6 +30,7 @@ struct NvClientDisplay
 {
     QRect bounds;
     QSize nativeSize;
+    QSize backingSize {}; // macOS current compositor pixels; absent on other platforms
 };
 
 struct NvOutputTopology
@@ -104,7 +105,8 @@ struct NvOutputTopology
                                            QString* error = nullptr);
     static QStringList qualifiedVirtualModes();
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
-                                               QString* error = nullptr);
+                                               QString* error = nullptr, int* scale = nullptr);
+    static QJsonObject macDisplayRequest(const QString& mode, const QString& encodingMode, int scale);
     static QSize virtualModeSize(const QString& mode);
     static QSize macDisplayModeSize(const QString& mode);
     static QSize virtualCanvasSize(const QString& hostLayout,

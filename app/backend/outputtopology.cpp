@@ -456,9 +456,20 @@ QSize NvOutputTopology::macDisplayModeSize(const QString& mode)
     return QSize(width, height);
 }
 
-QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays, QString* error)
+QJsonObject NvOutputTopology::macDisplayRequest(const QString& mode, const QString& encodingMode, int scale)
+{
+    const QSize size = macDisplayModeSize(mode);
+    if (!size.isValid() || (scale != 1 && scale != 2) ||
+            (encodingMode != QLatin1String("hevc-10-420-videotoolbox") &&
+             encodingMode != QLatin1String("hevc-10-444-videotoolbox"))) return {};
+    return {{"schema_version", 3}, {"width", size.width()}, {"height", size.height()},
+            {"scale", scale}, {"encoding_mode", encodingMode}};
+}
+
+QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays, QString* error, int* scale)
 {
     if (error) error->clear();
+    if (scale) *scale = 1;
     if (displays.isEmpty() || displays.size() > 2) {
         if (error) *error = QStringLiteral("Match client displays requires exactly one or two active client monitors.");
         return {};
@@ -471,21 +482,30 @@ QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisp
             return {};
         }
     }
-    int width = 0, height = 0;
+    int width = 0, height = 0, canvasScale = 0;
     for (const auto& display : displays) {
-        const QString size = QStringLiteral("%1x%2").arg(display.nativeSize.width()).arg(display.nativeSize.height());
+        const QSize pixels = display.backingSize.isValid() ? display.backingSize : display.nativeSize;
+        const int displayScale = display.backingSize.isValid() && pixels == display.bounds.size() * 2 ? 2 : 1;
+        if ((display.backingSize.isValid() && pixels != display.bounds.size() * displayScale) ||
+                (canvasScale && canvasScale != displayScale)) {
+            if (error) *error = QStringLiteral("Match Client requires the same 1x or 2x Retina scale on both monitors. Use a manual resolution for mixed scaling.");
+            return {};
+        }
+        canvasScale = displayScale;
+        const QString size = QStringLiteral("%1x%2").arg(pixels.width()).arg(pixels.height());
         if (!display.bounds.isValid() || !macDisplayModeSize(size).isValid()) {
             if (error) *error = QStringLiteral("Mac desktop dimensions must be even pixel counts between 2 and 8192. Detected %1.").arg(size);
             return {};
         }
-        width += display.nativeSize.width();
-        height = qMax(height, display.nativeSize.height());
+        width += pixels.width();
+        height = qMax(height, pixels.height());
     }
     const QString mode = QStringLiteral("%1x%2").arg(width).arg(height);
     if (!macDisplayModeSize(mode).isValid()) {
         if (error) *error = QStringLiteral("The client display canvas (%1) exceeds the Mac desktop size limit.").arg(mode);
         return {};
     }
+    if (scale) *scale = canvasScale;
     return mode;
 }
 

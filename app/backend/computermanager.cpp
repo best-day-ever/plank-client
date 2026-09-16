@@ -677,12 +677,13 @@ class PendingAuthenticationTask : public QObject, public QRunnable
 
 public:
     PendingAuthenticationTask(ComputerManager* computerManager, NvComputer* computer,
-                              QString username, QString password, QString matchedDesktopMode)
+                              QString username, QString password, QString matchedDesktopMode, int matchedDesktopScale)
         : m_ComputerManager(computerManager),
           m_Computer(computer),
           m_Username(std::move(username)),
           m_Password(std::move(password)),
-          m_MatchedDesktopMode(std::move(matchedDesktopMode))
+          m_MatchedDesktopMode(std::move(matchedDesktopMode)),
+          m_MatchedDesktopScale(matchedDesktopScale)
     {
         connect(this, &PendingAuthenticationTask::authenticationCompleted,
                 computerManager, &ComputerManager::authenticationCompleted);
@@ -725,7 +726,7 @@ private:
                 appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(m_Computer->plankVideoProfile);
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode) : http.getOutputTopology();
+                topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode, m_MatchedDesktopScale) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(
@@ -762,12 +763,14 @@ private:
     QString m_Username;
     QString m_Password;
     QString m_MatchedDesktopMode;
+    int m_MatchedDesktopScale;
 };
 
 void ComputerManager::authenticateHost(NvComputer* computer, QString username,
                                        QString password)
 {
     QString matchedMode;
+    int matchedScale = 1;
     bool matchMac;
     {
         QReadLocker lock(&computer->lock);
@@ -776,7 +779,8 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
     }
     if (matchMac) {
         // Snapshot on the GUI thread before authentication. On macOS use the
-        // same native mode lookup as Session, not a scaled Retina backing size.
+        // current backing pixels AND logical size used by Session. Panel-native
+        // pixels alone lose the user's Retina "Looks like" setting.
         Q_ASSERT(QThread::currentThread() == qApp->thread());
         QVector<NvClientDisplay> displays;
 #ifdef Q_OS_DARWIN
@@ -786,13 +790,12 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
             for (uint32_t index = 0; index < count; ++index) {
                 SDL_DisplayMode mode;
                 SDL_Rect safeArea;
-                if (!StreamUtils::getMacNativeDisplayMode(ids[index], &mode, &safeArea)) {
+                if (!StreamUtils::getMacCurrentDisplayMode(ids[index], &mode, &safeArea)) {
                     displays.clear();
                     break;
                 }
-                const CGRect bounds = CGDisplayBounds(ids[index]);
-                displays.append({QRect(qRound(bounds.origin.x), qRound(bounds.origin.y),
-                    qRound(bounds.size.width), qRound(bounds.size.height)), QSize(mode.w, mode.h)});
+                displays.append({QRect(safeArea.x, safeArea.y, safeArea.w, safeArea.h),
+                    QSize(mode.w, mode.h), QSize(mode.w, mode.h)});
             }
         }
 #else
@@ -803,7 +806,7 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         }
 #endif
         QString error;
-        matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
+        matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &matchedScale);
         if (matchedMode.isEmpty()) {
             password.fill(QChar('\0'));
             // Preserve the asynchronous completion contract even for local
@@ -815,7 +818,7 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         }
     }
     PendingAuthenticationTask* authentication = new PendingAuthenticationTask(
-        this, computer, std::move(username), std::move(password), matchedMode);
+        this, computer, std::move(username), std::move(password), matchedMode, matchedScale);
     QThreadPool::globalInstance()->start(authentication);
 }
 

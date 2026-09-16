@@ -1,5 +1,5 @@
 QT += core testlib
-CONFIG += console testcase c++11
+CONFIG += console testcase c++17
 TEMPLATE = app
 
 SOURCES += \

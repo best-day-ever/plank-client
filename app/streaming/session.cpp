@@ -1860,6 +1860,13 @@ bool Session::snapshotClientDisplays()
             return false;
         }
         snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
+#ifdef Q_OS_DARWIN
+        if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+            SDL_DisplayMode currentMode;
+            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds, &currentMode)) return false;
+            snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
+        }
+#endif
         m_ClientDisplays.append(snapshot);
     }
 
@@ -2137,6 +2144,7 @@ bool Session::configurePlankHostLayout()
     QString virtualMode1;
     QString virtualMode2;
     QSize authenticatedDesktopSize;
+    QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
     {
         QReadLocker lock(&m_Computer->lock);
@@ -2146,6 +2154,7 @@ bool Session::configurePlankHostLayout()
         virtualMode2 = m_Computer->plankVirtualMode2;
         authenticatedDesktopSize = QSize(m_Computer->outputTopology.desktopWidth,
                                          m_Computer->outputTopology.desktopHeight);
+        authenticatedLogicalSize = m_Computer->outputTopology.captureLogicalBounds.size();
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
         hostRejectsRequestedLayout = hostPolicyKnown &&
                 !m_Computer->outputTopology.allowsBookmarkHostLayout(layoutPolicy);
@@ -2175,14 +2184,16 @@ bool Session::configurePlankHostLayout()
                                    display.logicalBounds.y,
                                    display.logicalBounds.w,
                                    display.logicalBounds.h),
-                             display.nativeSize});
+                             display.nativeSize, display.macBackingSize});
         }
 
         QString error;
         if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
-            const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
+            int scale = 1;
+            const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &scale);
             if (mode.isEmpty() || NvOutputTopology::macDisplayModeSize(mode) !=
-                    authenticatedDesktopSize) {
+                    authenticatedDesktopSize || authenticatedLogicalSize !=
+                    QSizeF(authenticatedDesktopSize.width() / scale, authenticatedDesktopSize.height() / scale)) {
                 emit displayLaunchError(mode.isEmpty() ? error : tr("Client displays changed during connection. Please reconnect to match the current display resolution."));
                 return false;
             }
@@ -3155,6 +3166,7 @@ bool Session::runPlankReconnect()
             bool topologySupported;
             bool macDesktop;
             QString desktopMode;
+            int desktopScale = 1;
             {
                 QReadLocker lock(&m_Computer->lock);
                 topologySupported = NvOutputTopology::supportsDescription(
@@ -3165,15 +3177,15 @@ bool Session::runPlankReconnect()
                     QVector<NvClientDisplay> displays;
                     for (const auto& display : std::as_const(m_ClientDisplays)) {
                         displays.append({QRect(display.logicalBounds.x, display.logicalBounds.y,
-                                               display.logicalBounds.w, display.logicalBounds.h), display.nativeSize});
+                                               display.logicalBounds.w, display.logicalBounds.h), display.nativeSize, display.macBackingSize});
                     }
-                    desktopMode = NvOutputTopology::resolveMacClientDisplayMode(displays);
+                    desktopMode = NvOutputTopology::resolveMacClientDisplayMode(displays, nullptr, &desktopScale);
                     if (desktopMode.isEmpty()) return false;
                 }
             }
             if (topologySupported) {
                 topology = macDesktop ? http.prepareMacDisplay(desktopMode,
-                    StreamingPreferences::plankAppleEncodingMode(m_PlankVideoProfile)) : http.getOutputTopology();
+                    StreamingPreferences::plankAppleEncodingMode(m_PlankVideoProfile), desktopScale) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
             {

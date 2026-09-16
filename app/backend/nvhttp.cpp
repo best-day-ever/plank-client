@@ -718,11 +718,11 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
     return parsed;
 }
 
-NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& encodingMode)
+NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale)
 {
     const QSize size = NvOutputTopology::macDisplayModeSize(mode);
-    if (!size.isValid() ||
-            (encodingMode != QLatin1String("hevc-10-420-videotoolbox") && encodingMode != QLatin1String("hevc-10-444-videotoolbox"))) {
+    const auto request = NvOutputTopology::macDisplayRequest(mode, encodingMode, scale);
+    if (request.isEmpty()) {
         throw GfeHttpResponseException(400, "Unsupported Mac desktop resolution");
     }
     QString pin;
@@ -730,12 +730,13 @@ NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& e
     if (current.featureFlags != NvOutputTopology::FixedCaptureFlags) {
         throw GfeHttpResponseException(400, "Host does not support Mac desktop preparation");
     }
-    const auto object = postPinnedMacJson(QStringLiteral("/plank/display"),
-        {{"schema_version", 2}, {"width", size.width()}, {"height", size.height()}, {"encoding_mode", encodingMode}}, pin);
+    const auto object = postPinnedMacJson(QStringLiteral("/plank/display"), request, pin);
     NvOutputTopology result;
     if (!NvOutputTopology::fromJson(object, result) ||
             result.featureFlags != NvOutputTopology::FixedCaptureFlags ||
-            result.desktopWidth != size.width() || result.desktopHeight != size.height() || result.appleEncodingMode != encodingMode) {
+            result.desktopWidth != size.width() || result.desktopHeight != size.height() ||
+            result.captureLogicalBounds.size() != QSizeF(size.width() / scale, size.height() / scale) ||
+            result.appleEncodingMode != encodingMode) {
         throw GfeHttpResponseException(400, "Mac desktop did not reach the requested resolution");
     }
     return result;

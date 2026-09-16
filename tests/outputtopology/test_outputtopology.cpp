@@ -21,7 +21,57 @@ private slots:
     void rejectsInvalidFixedCapture();
     void recognizesDescriptionCapabilities();
     void matchesMacClientCanvas();
+    void matchesRetinaClientCanvas();
+    void buildsMacDisplayRequest();
 };
+
+void TestOutputTopology::buildsMacDisplayRequest()
+{
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/macos-display-v3.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto fixture = QJsonDocument::fromJson(file.readAll()).object();
+    QCOMPARE(NvOutputTopology::macDisplayRequest("3420x2214", "hevc-10-420-videotoolbox", 2), fixture);
+    auto manual = fixture;
+    manual["scale"] = 1;
+    manual["encoding_mode"] = "hevc-10-444-videotoolbox";
+    QCOMPARE(NvOutputTopology::macDisplayRequest("3420x2214", "hevc-10-444-videotoolbox", 1), manual);
+    QVERIFY(NvOutputTopology::macDisplayRequest("3420x2214", "hevc-10-444-videotoolbox", 3).isEmpty());
+    QVERIFY(NvOutputTopology::macDisplayRequest("3420x2214", "invalid", 2).isEmpty());
+    QVERIFY(NvOutputTopology::macDisplayRequest("3421x2214", "hevc-10-444-videotoolbox", 2).isEmpty());
+}
+
+void TestOutputTopology::matchesRetinaClientCanvas()
+{
+    int scale = 0;
+    QString error;
+    // Current compositor backing pixels, not panel-native pixels. Odd logical
+    // heights are valid when the actual encoded height remains even.
+    const QVector<NvClientDisplay> laptop = {{QRect(0,0,1710,1107), QSize(3024,1964), QSize(3420,2214)}};
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode(laptop, &error, &scale), QString("3420x2214"));
+    QCOMPARE(scale, 2);
+    QVERIFY(error.isEmpty());
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,1920,1080), QSize(3840,2160), QSize(3840,2160)},
+        {QRect(-1710,0,1710,1107), QSize(3024,1964), QSize(3420,2214)}}, &error, &scale), QString("7260x2214"));
+    QCOMPARE(scale, 2);
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,1920,1080), QSize(1920,1080), QSize(1920,1080)}}, &error, &scale), QString("1920x1080"));
+    QCOMPARE(scale, 1);
+    // Linux clients retain their existing native-pixel policy.
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,1920,1080), QSize(3840,2160)}}, &error, &scale), QString("3840x2160"));
+    QCOMPARE(scale, 1);
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,1710,1107), QSize(3420,2214), QSize(3420,2214)},
+        {QRect(1710,0,1920,1080), QSize(1920,1080), QSize(1920,1080)}}, &error, &scale).isEmpty());
+    QVERIFY(error.contains("same 1x or 2x"));
+    QCOMPARE(scale, 1);
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,1710,1107), QSize(3024,1964), QSize(3024,1964)}}, &error, &scale).isEmpty());
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,2500,1500), QSize(5000,3000), QSize(5000,3000)},
+        {QRect(2500,0,2500,1500), QSize(5000,3000), QSize(5000,3000)}}, &error, &scale).isEmpty());
+}
 
 void TestOutputTopology::recognizesDescriptionCapabilities()
 {
