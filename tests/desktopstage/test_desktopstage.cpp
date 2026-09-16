@@ -1,11 +1,39 @@
 #include <QtTest>
 #include "desktopstage.h"
 #include "hostrecovery.h"
+#include "../../app/streaming/plankreconnectpolicy.h"
 
 class TestDesktopStage : public QObject
 {
     Q_OBJECT
 private slots:
+    void reconnectWaitDeadline()
+    {
+        PlankReconnectPolicy policy;
+        QVERIFY(!policy.allowsRequest(0));
+        policy.allowUntil(30000);
+        QVERIFY(policy.allowsRequest(29999));
+        QVERIFY(!policy.allowsRequest(30000));
+        QVERIFY(!policy.allowsRequest(60000)); // Unanswered prompt remains paused.
+        policy.allowUntil(90000); // Explicit Keep Waiting, not a timer retry.
+        QVERIFY(policy.allowsRequest(60000));
+        QVERIFY(!policy.allowsRequest(90000));
+    }
+
+    void reconnectRejectionPolicy()
+    {
+        for (int status : {400, 403, 404, 423}) {
+            QVERIFY(PlankReconnectPolicy::terminalStatus(status, true));
+            QVERIFY(PlankReconnectPolicy::terminalStatus(status, false));
+        }
+        QVERIFY(PlankReconnectPolicy::terminalStatus(401, true));
+        QVERIFY(!PlankReconnectPolicy::terminalStatus(401, false)); // Expired worker token.
+        for (int status : {409, 425, 429, 500, 502, 503, 504}) {
+            QVERIFY(!PlankReconnectPolicy::terminalStatus(status, true));
+            QVERIFY(!PlankReconnectPolicy::terminalStatus(status, false));
+        }
+    }
+
     void boundsSilenceTrigger()
     {
         using namespace PlankHostRecovery;

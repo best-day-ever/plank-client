@@ -545,6 +545,7 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
 
 QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
 {
+    waitForRequestPermission();
     if (!m_SessionToken.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
     }
@@ -577,16 +578,19 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
     disconnect(sslErrorsConnection);
     disconnect(encryptedConnection);
     if (reply->error() != QNetworkReply::NoError) {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto error = reply->error();
         const QString message = reply->errorString();
         delete reply;
-        throw QtNetworkReplyException(QNetworkReply::UnknownNetworkError, message);
+        if (status >= 400) throw GfeHttpResponseException(status, "PLANK authentication request rejected");
+        throw QtNetworkReplyException(error, message);
     }
     const QSslConfiguration negotiatedSsl = negotiatedPlankTls(reply);
     if (!isPlankCertificate(negotiatedSsl.peerCertificate()) ||
             negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
         delete reply;
-        throw GfeHttpResponseException(401,
-                                       "PLANK TLS validation failed");
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
+                                      "PLANK TLS validation failed");
     }
     const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
     delete reply;
@@ -745,6 +749,7 @@ NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& e
 QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& body,
                                     const QString& certificateSha256)
 {
+    waitForRequestPermission();
     const QByteArray pin = QByteArray::fromHex(certificateSha256.toLatin1());
     if ((path != QLatin1String("/plank/launch") && path != QLatin1String("/plank/display")) ||
             body.isEmpty() || pin.size() != 32 ||
@@ -778,6 +783,7 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
     rememberPlankTls(&manager, &manager);
     bool certificateChecked = false;
+    bool certificateRejected = false;
     auto matchesPin = [&pin](QNetworkReply* reply) {
         const auto ssl = negotiatedPlankTls(reply);
         return isPlankCertificate(ssl.peerCertificate()) &&
@@ -792,7 +798,7 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     });
     connect(&manager, &QNetworkAccessManager::encrypted, &manager, [&](QNetworkReply* reply) {
         certificateChecked = matchesPin(reply);
-        if (!certificateChecked) reply->abort();
+        if (!certificateChecked) { certificateRejected = true; reply->abort(); }
     });
     QScopedPointer<QNetworkReply> reply(manager.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
     constexpr qint64 MaximumReplyBytes = 32768;
@@ -815,8 +821,14 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
     if (!reply->isFinished()) reply->abort();
     if (!oversized) drain();
+    if (!certificateChecked && !certificateRejected &&
+            reply->error() != QNetworkReply::NoError &&
+            reply->error() != QNetworkReply::SslHandshakeFailedError) {
+        throw QtNetworkReplyException(reply->error(), "Mac control connection failed or timed out");
+    }
     if (!certificateChecked || !matchesPin(reply.data())) {
-        throw GfeHttpResponseException(401, "Mac preview TLS certificate changed or was rejected");
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
+                                      "Mac preview TLS certificate changed or was rejected");
     }
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (oversized) throw GfeHttpResponseException(400, "Mac preview response exceeded its size limit");
@@ -846,6 +858,13 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     return document.object();
 }
 
+void NvHTTP::waitForRequestPermission()
+{
+    if (m_RequestGate && !m_RequestGate()) {
+        throw QtNetworkReplyException(QNetworkReply::OperationCanceledError, "PLANK reconnect cancelled");
+    }
+}
+
 QNetworkReply*
 NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
@@ -853,6 +872,7 @@ NvHTTP::openConnection(QUrl baseUrl,
                        int timeoutMs,
                        NvLogLevel logLevel)
 {
+    waitForRequestPermission();
     // Port must be set
     Q_ASSERT(baseUrl.port(0) != 0);
 
@@ -927,7 +947,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         }
 
         if (reply->error() == QNetworkReply::SslHandshakeFailedError) {
-            GfeHttpResponseException exception(401, "PLANK TLS validation failed");
+            QtNetworkReplyException exception(QNetworkReply::SslHandshakeFailedError, "PLANK TLS validation failed");
             delete reply;
             throw exception;
         }
@@ -937,6 +957,12 @@ NvHTTP::openConnection(QUrl baseUrl,
             throw exception;
         }
         else {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status >= 400 && (command == QLatin1String("plank/topology") ||
+                                 command == QLatin1String("applist"))) {
+                delete reply;
+                throw GfeHttpResponseException(status, "PLANK desktop readiness request rejected");
+            }
             QtNetworkReplyException exception(reply->error(), reply->errorString());
             delete reply;
             throw exception;
@@ -954,7 +980,7 @@ NvHTTP::openConnection(QUrl baseUrl,
                    << "tls13" << approvedProtocol
                    << "protocol" << reply->sslConfiguration().sessionProtocol()
                    << "cipherProtocol" << reply->sslConfiguration().sessionCipher().protocol();
-        GfeHttpResponseException exception(401, "Invalid PLANK TLS session");
+        QtNetworkReplyException exception(QNetworkReply::SslHandshakeFailedError, "Invalid PLANK TLS session");
         delete reply;
         throw exception;
     }

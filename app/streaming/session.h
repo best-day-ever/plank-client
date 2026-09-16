@@ -20,6 +20,7 @@
 #include "audio/renderers/renderer.h"
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
+#include "plankreconnectpolicy.h"
 
 class ComputerManager;
 class PlankToolbar;
@@ -214,6 +215,7 @@ private:
     void setPlankReconnectStatus(const char* text, bool warning);
 
     bool runPlankReconnect();
+    bool waitForPlankReconnectRequest();
 
     bool finishPlankReconnect(bool success,
                                        const PlankReconnectState& state);
@@ -400,6 +402,7 @@ private:
     QString m_PlankHostCertificateSha256;
     std::atomic_bool m_Reconnecting;
     std::atomic_bool m_ReconnectCancelled;
+    PlankReconnectPolicy m_ReconnectPolicy;
     std::atomic_bool m_CanReconnect;
     std::atomic_bool m_ConnectionStartCancelled;
     std::atomic_bool m_WaitingForSessionCleanup;

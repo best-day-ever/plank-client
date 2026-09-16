@@ -2618,6 +2618,7 @@ bool Session::startConnectionAsync(bool reconnecting,
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
+        if (reconnecting) http->setRequestGate([this] { return waitForPlankReconnectRequest(); });
         const QString captureSource =
                 m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
                     QStringLiteral("screencapturekit") :
@@ -2670,6 +2671,14 @@ bool Session::startConnectionAsync(bool reconnecting,
                         topology.desktopWidth != m_StreamConfig.width ||
                         topology.desktopHeight != m_StreamConfig.height) {
                     throw GfeHttpResponseException(409, "The Mac display changed. Reconnect to refresh its capture geometry.");
+                }
+                // Launch is one-shot, including an ambiguous network timeout.
+                // Readiness failures above keep the setup context instead.
+                {
+                    QWriteLocker lock(&m_Computer->lock);
+                    m_Computer->sessionToken.fill(QChar('\0'));
+                    m_Computer->sessionToken.clear();
+                    m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
                 }
                 macLaunch = http->startMacPreview(topology, pin, m_StreamConfig.bitrate, quicUdpPayloadMtu);
                 plankTransportPort = http->controlPort();
@@ -2764,6 +2773,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                                 m_Computer->currentGameId = 0;
                             }
                             http = std::make_unique<NvHTTP>(m_Computer);
+                            if (reconnecting) http->setRequestGate([this] { return waitForPlankReconnectRequest(); });
                             const QString token = http->authenticate(
                                         m_PlankUsername,
                                         m_PlankPassword);
@@ -2774,7 +2784,12 @@ bool Session::startConnectionAsync(bool reconnecting,
                             }
                             authenticationRefreshRequired = false;
                             qInfo() << "PLANK authenticated to the replacement display worker";
+                        } catch (const GfeHttpResponseException& retryError) {
+                            if (reconnecting && PlankReconnectPolicy::terminalStatus(retryError.getStatusCode(), true))
+                                m_ReconnectCancelled.store(true);
+                            throw;
                         } catch (const QtNetworkReplyException& retryError) {
+                            if (retryError.getError() == QNetworkReply::SslHandshakeFailedError) throw;
                             qInfo() << "PLANK replacement display worker is not ready for authentication:"
                                     << retryError.toQString();
                             continue;
@@ -2825,6 +2840,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                         qInfo() << "PLANK display transition wait attempt failed:"
                                 << retryError.toQString();
                     } catch (const QtNetworkReplyException& retryError) {
+                        if (retryError.getError() == QNetworkReply::SslHandshakeFailedError) throw;
                         qInfo() << "PLANK display transition worker is not ready:"
                                 << retryError.toQString();
                     }
@@ -2958,10 +2974,18 @@ bool Session::startConnectionAsync(bool reconnecting,
             qInfo() << "PLANK authentication token consumed after launch";
         }
     } catch (const GfeHttpResponseException& e) {
-        if (reconnecting && e.getStatusCode() == 403) {
+        if (reconnecting && PlankReconnectPolicy::terminalStatus(e.getStatusCode(), false)) {
             // Operator consent cannot recover through automatic reauthentication.
             m_ReconnectCancelled.store(true);
             emit displayLaunchError(e.toQString());
+        }
+        m_WaitingForSessionCleanup.store(false);
+        emit sessionCleanupWaitChanged(false, QString());
+        if (reconnecting && e.getStatusCode() == 401) {
+            QWriteLocker lock(&m_Computer->lock);
+            m_Computer->sessionToken.fill(QChar('\0'));
+            m_Computer->sessionToken.clear();
+            m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
         }
         if (!reconnecting) {
             emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
@@ -2970,6 +2994,12 @@ bool Session::startConnectionAsync(bool reconnecting,
         }
         return false;
     } catch (const QtNetworkReplyException& e) {
+        if (reconnecting && e.getError() == QNetworkReply::SslHandshakeFailedError) {
+            m_ReconnectCancelled.store(true);
+            emit displayLaunchError(e.toQString());
+        }
+        m_WaitingForSessionCleanup.store(false);
+        emit sessionCleanupWaitChanged(false, QString());
         if (!reconnecting) {
             emit displayLaunchError(e.toQString());
         } else {
@@ -3142,6 +3172,15 @@ bool Session::beginPlankReconnect(
     return true;
 }
 
+bool Session::waitForPlankReconnectRequest()
+{
+    while (!m_ReconnectCancelled.load() && !m_ConnectionStartCancelled.load()) {
+        if (m_ReconnectPolicy.allowsRequest(SDL_GetTicks())) return true;
+        SDL_Delay(50);
+    }
+    return false;
+}
+
 bool Session::runPlankReconnect()
 {
     if (m_PlankUsername.isEmpty() ||
@@ -3149,27 +3188,38 @@ bool Session::runPlankReconnect()
         return false;
     }
 
-    for (int attempt = 1; !m_ReconnectCancelled.load(); ++attempt) {
+    {
+        QWriteLocker lock(&m_Computer->lock);
+        m_Computer->sessionToken.fill(QChar('\0'));
+        m_Computer->sessionToken.clear();
+        m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+        m_Computer->currentGameId = 0;
+    }
+    for (int attempt = 1; waitForPlankReconnectRequest(); ++attempt) {
+        bool authenticating = false;
         try {
+            QString token;
             {
-                QWriteLocker lock(&m_Computer->lock);
-                m_Computer->sessionToken.fill(QChar('\0'));
-                m_Computer->sessionToken.clear();
-                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
-                // A replacement media worker has no in-memory app state.
-                // Prefer a fresh launch; startConnectionAsync() falls back to
-                // resume when this is merely a transient same-worker outage.
-                m_Computer->currentGameId = 0;
+                QReadLocker lock(&m_Computer->lock);
+                token = m_Computer->sessionToken;
             }
             NvHTTP http(m_Computer);
-            bool greeterConfirmed = false;
-            const QString token = http.authenticate(
-                        m_PlankUsername,
-                        m_PlankPassword, &greeterConfirmed);
-            if (greeterConfirmed &&
-                    ((m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature) ||
-                     m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags)) {
-                m_ReconnectGreeterConfirmed.store(true);
+            http.setRequestGate([this] { return waitForPlankReconnectRequest(); });
+            if (token.isEmpty()) {
+                authenticating = true;
+                bool greeterConfirmed = false;
+                token = http.authenticate(m_PlankUsername, m_PlankPassword, &greeterConfirmed);
+                authenticating = false;
+                {
+                    QWriteLocker lock(&m_Computer->lock);
+                    m_Computer->sessionToken = token;
+                    m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
+                }
+                if (greeterConfirmed &&
+                        ((m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature) ||
+                         m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags)) {
+                    m_ReconnectGreeterConfirmed.store(true);
+                }
             }
 
             NvOutputTopology topology;
@@ -3208,21 +3258,31 @@ bool Session::runPlankReconnect()
                 m_Computer->updateAppList(apps);
             }
 
-            if (startConnectionAsync(true) &&
-                    !m_ReconnectCancelled.load()) {
+            if (waitForPlankReconnectRequest() && startConnectionAsync(true) &&
+                    waitForPlankReconnectRequest()) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK reconnect transport completed on attempt %d",
                             attempt);
                 return true;
             }
         } catch (const GfeHttpResponseException& error) {
-            qWarning() << "PLANK reauthentication attempt" << attempt
+            qWarning() << "PLANK reconnect attempt" << attempt
                        << "failed:" << error.toQString();
-            if (error.getStatusCode() == 403) {
+            if (PlankReconnectPolicy::terminalStatus(error.getStatusCode(), authenticating)) {
                 m_ReconnectCancelled.store(true);
                 emit displayLaunchError(error.toQString());
             }
+            if (error.getStatusCode() == 401) {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->sessionToken.fill(QChar('\0'));
+                m_Computer->sessionToken.clear();
+                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+            }
         } catch (const QtNetworkReplyException& error) {
+            if (error.getError() == QNetworkReply::SslHandshakeFailedError) {
+                m_ReconnectCancelled.store(true);
+                emit displayLaunchError(error.toQString());
+            }
             qWarning() << "PLANK reconnect attempt" << attempt
                        << "could not reach the host:" << error.toQString();
         }
@@ -3232,12 +3292,6 @@ bool Session::runPlankReconnect()
 #endif
         LiStopConnection();
         stopPlankTransportDataPlane();
-        {
-            QWriteLocker lock(&m_Computer->lock);
-            m_Computer->sessionToken.fill(QChar('\0'));
-            m_Computer->sessionToken.clear();
-            m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
-        }
         if (!m_ReconnectCancelled.load()) {
             constexpr int RetryDelayMs = 1000;
             constexpr int CancellationPollMs = 50;
@@ -3959,6 +4013,8 @@ void Session::execInternal()
                 m_PlankToolbar->hideReconnectPrompt();
                 reconnectDecisionDeadline = SDL_GetTicks() +
                         static_cast<Uint64>(m_Preferences->plankUnreachableTimeoutSeconds) * 1000;
+                m_ReconnectPolicy.allowUntil(reconnectDecisionDeadline);
+                setPlankReconnectStatus("Waiting for workstation...", false);
             }
             if (action == PlankToolbar::Action::ToggleFullscreen) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -4111,10 +4167,11 @@ void Session::execInternal()
                                 tr("The workstation desktop changed, but the client could not start reconnecting."));
                     goto DispatchDeferredCleanup;
                 }
-                reconnectThread = new PlankReconnectThread(this);
-                reconnectThread->start();
                 reconnectDecisionDeadline = SDL_GetTicks() +
                         static_cast<Uint64>(m_Preferences->plankUnreachableTimeoutSeconds) * 1000;
+                m_ReconnectPolicy.allowUntil(reconnectDecisionDeadline);
+                reconnectThread = new PlankReconnectThread(this);
+                reconnectThread->start();
                 break;
             case SDL_CODE_PLANK_REPLANK_COMPLETE:
             {
@@ -4565,6 +4622,12 @@ DispatchDeferredCleanup:
     delete m_InputHandler;
     m_InputHandler = nullptr;
     clearPlankReconnectCredentials();
+    {
+        QWriteLocker lock(&m_Computer->lock);
+        m_Computer->sessionToken.fill(QChar('\0'));
+        m_Computer->sessionToken.clear();
+        m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+    }
 
 #ifdef PLANK_TRANSPORT
     // Native media threads call directly into the active decoder and audio

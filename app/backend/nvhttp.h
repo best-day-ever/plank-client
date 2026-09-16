@@ -11,6 +11,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QJsonObject>
+#include <functional>
 
 class NvComputer;
 
@@ -147,6 +148,10 @@ public:
 
     void setPlankSessionToken(QString sessionToken);
 
+    // Used only by the session recovery worker; ordinary discovery/login has
+    // no gate. False cancels, while the callback may wait for a local decision.
+    void setRequestGate(std::function<bool()> gate) { m_RequestGate = std::move(gate); }
+
     QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
@@ -202,6 +207,7 @@ public:
 
     QUrl m_BaseUrlHttps;
 private:
+    void waitForRequestPermission();
     void
     handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
 
@@ -220,4 +226,5 @@ private:
     QNetworkAccessManager* m_Nam;
     QString m_SessionToken;
     QString m_WorkerInstance;
+    std::function<bool()> m_RequestGate;
 };
