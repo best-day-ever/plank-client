@@ -176,32 +176,30 @@ int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
     return qRound(mode->refresh_rate);
 }
 
-bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, SDL_Rect* safeArea)
-{
 #ifdef Q_OS_DARWIN
-#define MAX_DISPLAYS 16
-    CGDirectDisplayID displayIds[MAX_DISPLAYS];
-    uint32_t displayCount = 0;
-    CGGetActiveDisplayList(MAX_DISPLAYS, displayIds, &displayCount);
-    if (displayIndex >= (int)displayCount) {
-        return false;
-    }
-
+bool StreamUtils::getMacNativeDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* safeArea)
+{
     SDL_zerop(mode);
 
     // Retina displays have non-native resolutions both below and above (!) their
     // native resolution, so it's impossible for us to figure out what's actually
     // native on macOS using the SDL API alone. We'll talk to CoreGraphics to
     // find the correct resolution and match it in our SDL list.
-    CFArrayRef modeList = CGDisplayCopyAllDisplayModes(displayIds[displayIndex], nullptr);
+    CFArrayRef modeList = CGDisplayCopyAllDisplayModes(displayId, nullptr);
+    if (!modeList) return false;
     CFIndex count = CFArrayGetCount(modeList);
     for (CFIndex i = 0; i < count; i++) {
         auto cgMode = (CGDisplayModeRef)(CFArrayGetValueAtIndex(modeList, i));
         if ((CGDisplayModeGetIOFlags(cgMode) & kDisplayModeNativeFlag) != 0) {
-            mode->w = static_cast<int>(CGDisplayModeGetWidth(cgMode));
-            mode->h = static_cast<int>(CGDisplayModeGetHeight(cgMode));
+            mode->w = static_cast<int>(CGDisplayModeGetPixelWidth(cgMode));
+            mode->h = static_cast<int>(CGDisplayModeGetPixelHeight(cgMode));
             break;
         }
+    }
+
+    if (mode->w <= 0 || mode->h <= 0) {
+        CFRelease(modeList);
+        return false;
     }
 
     safeArea->x = 0;
@@ -219,11 +217,11 @@ bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, 
     // To avoid potential false positives, let's avoid checking for external displays, since
     // we might have scenarios like a 1920x1200 display with an alternate 1920x1080 mode
     // which would falsely trigger our notch detection here.
-    if (CGDisplayIsBuiltin(displayIds[displayIndex])) {
+    if (CGDisplayIsBuiltin(displayId)) {
         for (CFIndex i = 0; i < count; i++) {
             auto cgMode = (CGDisplayModeRef)(CFArrayGetValueAtIndex(modeList, i));
-            auto cgModeWidth = static_cast<int>(CGDisplayModeGetWidth(cgMode));
-            auto cgModeHeight = static_cast<int>(CGDisplayModeGetHeight(cgMode));
+            auto cgModeWidth = static_cast<int>(CGDisplayModeGetPixelWidth(cgMode));
+            auto cgModeHeight = static_cast<int>(CGDisplayModeGetPixelHeight(cgMode));
 
             // If the modes differ by more than 100, we'll assume it's not a notch mode
             if (mode->w == cgModeWidth && mode->h != cgModeHeight && mode->h <= cgModeHeight + 100) {
@@ -235,6 +233,34 @@ bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, 
 #endif
 
     CFRelease(modeList);
+    return true;
+}
+#endif
+
+bool StreamUtils::getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, SDL_Rect* safeArea)
+{
+#ifdef Q_OS_DARWIN
+    CGDirectDisplayID displayIds[16];
+    uint32_t count = 0;
+    if (CGGetActiveDisplayList(16, displayIds, &count) != kCGErrorSuccess ||
+            displayIndex < 0 || displayIndex >= static_cast<int>(count)) return false;
+    CGDirectDisplayID displayId = displayIds[displayIndex];
+    if (SDL_WasInit(SDL_INIT_VIDEO)) {
+        // SDL and CoreGraphics do not promise the same enumeration order.
+        SDL_Rect bounds;
+        if (!SDL_GetDisplayBounds(getDisplayId(displayIndex), &bounds)) return false;
+        displayId = 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            const CGRect cg = CGDisplayBounds(displayIds[i]);
+            if (qRound(cg.origin.x) == bounds.x && qRound(cg.origin.y) == bounds.y &&
+                    qRound(cg.size.width) == bounds.w && qRound(cg.size.height) == bounds.h) {
+                if (displayId) return false;
+                displayId = displayIds[i];
+            }
+        }
+        if (!displayId) return false;
+    }
+    if (!getMacNativeDisplayMode(displayId, mode, safeArea)) return false;
 
     // Special case for probing for notched displays prior to video subsystem initialization
     // in Session::initialize() for Darwin only!

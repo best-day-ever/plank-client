@@ -2181,7 +2181,7 @@ bool Session::configurePlankHostLayout()
         QString error;
         if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
             const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
-            if (mode.isEmpty() || NvOutputTopology::virtualModeSize(mode) !=
+            if (mode.isEmpty() || NvOutputTopology::macDisplayModeSize(mode) !=
                     authenticatedDesktopSize) {
                 emit displayLaunchError(mode.isEmpty() ? error : tr("Client displays changed during connection. Please reconnect to match the current display resolution."));
                 return false;

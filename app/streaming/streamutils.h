@@ -38,6 +38,10 @@ public:
     static
     bool getNativeDesktopMode(int displayIndex, SDL_DisplayMode* mode, SDL_Rect* safeArea);
 
+#ifdef __APPLE__
+    static bool getMacNativeDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* safeArea);
+#endif
+
     static
     int getDisplayRefreshRate(SDL_Window* window);
 

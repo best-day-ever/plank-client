@@ -445,15 +445,45 @@ int NvOutputTopology::hostPlatform(int version, int flags)
     return flags == FixedCaptureFlags ? 2 : 1;
 }
 
+QSize NvOutputTopology::macDisplayModeSize(const QString& mode)
+{
+    const auto parts = mode.split(QLatin1Char('x'));
+    if (parts.size() != 2) return {};
+    bool widthOk, heightOk;
+    const int width = parts[0].toInt(&widthOk), height = parts[1].toInt(&heightOk);
+    if (!widthOk || !heightOk || width < 2 || height < 2 || width > 8192 || height > 8192 ||
+            width % 2 || height % 2 || mode != QStringLiteral("%1x%2").arg(width).arg(height)) return {};
+    return QSize(width, height);
+}
+
 QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays, QString* error)
 {
-    QString layout;
-    QStringList modes;
-    if (!resolveClientDisplayLayout(displays, layout, modes, error)) return {};
-    const QSize canvas = virtualCanvasSize(layout, modes);
-    const QString mode = QStringLiteral("%1x%2").arg(canvas.width()).arg(canvas.height());
-    if (canvas.width() > 5120 || canvas.height() > 2160 || !qualifiedVirtualModes().contains(mode)) {
-        if (error) *error = QStringLiteral("The client display canvas (%1) is not a supported Mac desktop resolution. Select a fixed Mac resolution or change the client display layout.").arg(mode);
+    if (error) error->clear();
+    if (displays.isEmpty() || displays.size() > 2) {
+        if (error) *error = QStringLiteral("Match client displays requires exactly one or two active client monitors.");
+        return {};
+    }
+    if (displays.size() == 2) {
+        const QRect a = displays[0].bounds, b = displays[1].bounds;
+        if (!(a.right() < b.left() || b.right() < a.left()) ||
+                a.top() > b.bottom() || b.top() > a.bottom()) {
+            if (error) *error = QStringLiteral("Match client displays currently requires two monitors arranged left to right.");
+            return {};
+        }
+    }
+    int width = 0, height = 0;
+    for (const auto& display : displays) {
+        const QString size = QStringLiteral("%1x%2").arg(display.nativeSize.width()).arg(display.nativeSize.height());
+        if (!display.bounds.isValid() || !macDisplayModeSize(size).isValid()) {
+            if (error) *error = QStringLiteral("Mac desktop dimensions must be even pixel counts between 2 and 8192. Detected %1.").arg(size);
+            return {};
+        }
+        width += display.nativeSize.width();
+        height = qMax(height, display.nativeSize.height());
+    }
+    const QString mode = QStringLiteral("%1x%2").arg(width).arg(height);
+    if (!macDisplayModeSize(mode).isValid()) {
+        if (error) *error = QStringLiteral("The client display canvas (%1) exceeds the Mac desktop size limit.").arg(mode);
         return {};
     }
     return mode;

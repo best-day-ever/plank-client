@@ -720,8 +720,8 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
 
 NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& encodingMode)
 {
-    const QSize size = NvOutputTopology::virtualModeSize(mode);
-    if (!NvOutputTopology::qualifiedVirtualModes().contains(mode) || !size.isValid() ||
+    const QSize size = NvOutputTopology::macDisplayModeSize(mode);
+    if (!size.isValid() ||
             (encodingMode != QLatin1String("hevc-10-420-videotoolbox") && encodingMode != QLatin1String("hevc-10-444-videotoolbox"))) {
         throw GfeHttpResponseException(400, "Unsupported Mac desktop resolution");
     }

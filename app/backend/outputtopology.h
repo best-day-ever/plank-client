@@ -106,6 +106,7 @@ struct NvOutputTopology
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
                                                QString* error = nullptr);
     static QSize virtualModeSize(const QString& mode);
+    static QSize macDisplayModeSize(const QString& mode);
     static QSize virtualCanvasSize(const QString& hostLayout,
                                    const QStringList& virtualModes);
     bool displayPolicyKnown() const;

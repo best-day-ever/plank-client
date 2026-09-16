@@ -52,9 +52,27 @@ void TestOutputTopology::matchesMacClientCanvas()
     QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({
         {QRect(2560,0,2560,2160), QSize(2560,2160)},
         {QRect(0,0,2560,2160), QSize(2560,2160)}}), QString("5120x2160"));
-    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+    QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode({
         {QRect(0,0,3840,2160), QSize(3840,2160)},
-        {QRect(3840,0,3840,2160), QSize(3840,2160)}}).isEmpty());
+        {QRect(3840,0,3840,2160), QSize(3840,2160)}}), QString("7680x2160"));
+    for (QSize native : {QSize(3024,1964), QSize(3456,2234), QSize(2880,1864), QSize(2160,3840)}) {
+        const QString mode = QStringLiteral("%1x%2").arg(native.width()).arg(native.height());
+        const QVector<NvClientDisplay> screens = {{QRect(QPoint(0,0), native / 2), native}};
+        QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode(screens), mode);
+        QCOMPARE(NvOutputTopology::macDisplayModeSize(mode), native);
+        QVERIFY(!NvOutputTopology::virtualModeSize(mode).isValid());
+        QString layout;
+        QStringList modes;
+        QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(screens, layout, modes));
+    }
+    for (const QString mode : {"0x2160", "3023x1964", "3024x1963", "8194x2160",
+            "3840x8194", "-2x2", "03024x1964", "3024X1964", "3024x1964x2", "2x+2",
+            "2x2 ", "9999999999999999999x2"}) {
+        QVERIFY(!NvOutputTopology::macDisplayModeSize(mode).isValid());
+    }
+    QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
+        {QRect(0,0,5120,2160), QSize(5120,2160)},
+        {QRect(5120,0,5120,2160), QSize(5120,2160)}}).isEmpty());
     QVERIFY(NvOutputTopology::resolveMacClientDisplayMode({
         {QRect(0,0,1920,1080), QSize(1920,1080)},
         {QRect(0,1080,1920,1080), QSize(1920,1080)}}).isEmpty());

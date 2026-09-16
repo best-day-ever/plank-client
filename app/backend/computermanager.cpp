@@ -10,6 +10,10 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QScreen>
+#ifdef Q_OS_DARWIN
+#include "streaming/streamutils.h"
+#include <ApplicationServices/ApplicationServices.h>
+#endif
 
 #include <utility>
 #include <limits>
@@ -771,15 +775,33 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
                 computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout;
     }
     if (matchMac) {
-        // Read Qt screens on the GUI thread before starting authentication;
-        // devicePixelRatio removes compositor scaling from the requested pixels.
+        // Snapshot on the GUI thread before authentication. On macOS use the
+        // same native mode lookup as Session, not a scaled Retina backing size.
         Q_ASSERT(QThread::currentThread() == qApp->thread());
         QVector<NvClientDisplay> displays;
+#ifdef Q_OS_DARWIN
+        CGDirectDisplayID ids[16];
+        uint32_t count = 0;
+        if (CGGetActiveDisplayList(16, ids, &count) == kCGErrorSuccess) {
+            for (uint32_t index = 0; index < count; ++index) {
+                SDL_DisplayMode mode;
+                SDL_Rect safeArea;
+                if (!StreamUtils::getMacNativeDisplayMode(ids[index], &mode, &safeArea)) {
+                    displays.clear();
+                    break;
+                }
+                const CGRect bounds = CGDisplayBounds(ids[index]);
+                displays.append({QRect(qRound(bounds.origin.x), qRound(bounds.origin.y),
+                    qRound(bounds.size.width), qRound(bounds.size.height)), QSize(mode.w, mode.h)});
+            }
+        }
+#else
         for (QScreen* screen : QGuiApplication::screens()) {
             const QRect geometry = screen->geometry();
             const qreal ratio = screen->devicePixelRatio();
             displays.append({geometry, QSize(qRound(geometry.width() * ratio), qRound(geometry.height() * ratio))});
         }
+#endif
         QString error;
         matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error);
         if (matchedMode.isEmpty()) {
