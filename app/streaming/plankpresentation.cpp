@@ -47,6 +47,28 @@ PlankPresentationSlice PlankPresentation::sliceForOutput(
     return slice;
 }
 
+PlankPresentationSlice PlankPresentation::sliceForDrawable(
+        const QSize& streamSize, const QSize& canvasSize,
+        const QRect& outputCanvasRect, const QSize& drawableSize)
+{
+    if (!outputCanvasRect.isValid() || !drawableSize.isValid()) {
+        return {};
+    }
+    auto slice = sliceForOutput(streamSize, canvasSize, outputCanvasRect);
+    if (slice.visible) {
+        const auto& rect = slice.destinationRect;
+        const qreal sx = qreal(drawableSize.width()) / outputCanvasRect.width();
+        const qreal sy = qreal(drawableSize.height()) / outputCanvasRect.height();
+        const int left = qRound(rect.x() * sx);
+        const int top = qRound(rect.y() * sy);
+        slice.destinationRect = QRect(left, top,
+            qRound((rect.x() + rect.width()) * sx) - left,
+            qRound((rect.y() + rect.height()) * sy) - top);
+        slice.visible = !slice.destinationRect.isEmpty();
+    }
+    return slice;
+}
+
 bool PlankPresentation::mapWindowPointToStream(
         const QPointF& windowPoint,
         const QSize& windowSize,

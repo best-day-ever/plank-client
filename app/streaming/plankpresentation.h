@@ -43,6 +43,14 @@ public:
         const QSize& canvasSize,
         const QRect& outputCanvasRect);
 
+    // Convert the shared canvas slice to an individual window's backing pixels.
+    // Input uses logical window coordinates against the same canvas rectangle.
+    static PlankPresentationSlice sliceForDrawable(
+        const QSize& streamSize,
+        const QSize& canvasSize,
+        const QRect& outputCanvasRect,
+        const QSize& drawableSize);
+
     static bool mapWindowPointToStream(
         const QPointF& windowPoint,
         const QSize& windowSize,

@@ -1880,7 +1880,8 @@ bool Session::snapshotClientDisplays()
                                 right.logicalBounds.y);
     });
     m_UseMultiDisplayPresentation = m_IsFullScreen &&
-            strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+            (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
+             strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             m_ClientDisplays.size() == 2;
     if (m_UseMultiDisplayPresentation) {
         const auto& left = m_ClientDisplays.at(0).logicalBounds;
@@ -2042,7 +2043,7 @@ bool Session::placeFullscreenWindowOnDisplay(SDL_Window* window,
     actualDisplay = SDL_GetDisplayForWindow(window);
     if (actualDisplay != displayId) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Wayland compositor kept fullscreen surface on output %u instead of requested output %u",
+                    "Window system kept fullscreen surface on output %u instead of requested output %u",
                      actualDisplay, displayId);
         return false;
     }
@@ -3767,7 +3768,7 @@ void Session::execInternal()
             }
             m_SecondaryWindows.append(secondary);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Created PLANK Wayland fullscreen surface for output %u",
+                        "Created PLANK fullscreen surface for output %u",
                         display.displayId);
         }
     }

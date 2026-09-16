@@ -14,6 +14,9 @@ private slots:
     void mapsCursorIntoSingleOutput();
     void mapsCursorAcrossDualOutputSeam();
     void mapsCursorAcrossAsymmetricOutputSeam();
+    void mapsMixedRetinaDrawable();
+    void scalesLetterboxToBackingPixels();
+    void rejectsInvisibleOrInvalidDrawables();
 };
 
 void TestPlankPresentation::exactDualOutputSlices()
@@ -131,6 +134,52 @@ void TestPlankPresentation::mapsCursorAcrossAsymmetricOutputSeam()
                 QPointF(5119, 1080), canvas, canvas,
                 QRect(3840, 0, 1280, 2160), QSize(1280, 2160), windowPoint));
     QCOMPARE(windowPoint, QPointF(1279, 1080));
+}
+
+void TestPlankPresentation::mapsMixedRetinaDrawable()
+{
+    const QSize canvas(6016, 2234);
+    const QRect laptop(2560, 0, 3456, 2234);
+    const auto slice = PlankPresentation::sliceForDrawable(canvas, canvas, laptop,
+                                                          QSize(3456, 2234));
+    QCOMPARE(slice.sourceRect, QRectF(laptop));
+    QCOMPARE(slice.destinationRect, QRect(0, 0, 3456, 2234));
+    QPointF streamPoint, windowPoint;
+    QVERIFY(PlankPresentation::mapWindowPointToStream(
+        QPointF(864, 558.5), QSize(1728, 1117), canvas, canvas, laptop,
+        streamPoint, false));
+    QCOMPARE(streamPoint, QPointF(4288, 1117));
+    QVERIFY(PlankPresentation::mapStreamPointToWindow(streamPoint, canvas, canvas,
+        laptop, QSize(1728, 1117), windowPoint));
+    QCOMPARE(windowPoint, QPointF(864, 558.5));
+}
+
+void TestPlankPresentation::scalesLetterboxToBackingPixels()
+{
+    const auto slice = PlankPresentation::sliceForDrawable(
+        QSize(3840, 2160), QSize(5120, 2160), QRect(0, 0, 2560, 2160),
+        QSize(1280, 1080));
+    QVERIFY(slice.visible);
+    QCOMPARE(slice.sourceRect, QRectF(0, 0, 1920, 2160));
+    QCOMPARE(slice.destinationRect, QRect(320, 0, 960, 1080));
+    QPointF point;
+    QVERIFY(!PlankPresentation::mapWindowPointToStream(
+        QPointF(100, 500), QSize(1280, 1080), QSize(3840, 2160),
+        QSize(5120, 2160), QRect(0, 0, 2560, 2160), point, false));
+    QVERIFY(PlankPresentation::mapWindowPointToStream(
+        QPointF(800, 540), QSize(1280, 1080), QSize(3840, 2160),
+        QSize(5120, 2160), QRect(0, 0, 2560, 2160), point, false));
+    QCOMPARE(point, QPointF(960, 1080));
+}
+
+void TestPlankPresentation::rejectsInvisibleOrInvalidDrawables()
+{
+    QVERIFY(!PlankPresentation::sliceForDrawable(QSize(1920, 2160),
+        QSize(5120, 2160), QRect(0, 0, 1280, 2160), QSize(1280, 2160)).visible);
+    QVERIFY(!PlankPresentation::sliceForDrawable(QSize(1920, 1080),
+        QSize(1920, 1080), QRect(), QSize(1920, 1080)).visible);
+    QVERIFY(!PlankPresentation::sliceForDrawable(QSize(1920, 1080),
+        QSize(1920, 1080), QRect(0, 0, 1920, 1080), QSize(0, 0)).visible);
 }
 
 QTEST_APPLESS_MAIN(TestPlankPresentation)
