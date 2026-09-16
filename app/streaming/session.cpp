@@ -2618,7 +2618,7 @@ bool Session::startConnectionAsync(bool reconnecting,
 
     try {
         std::unique_ptr<NvHTTP> http = std::make_unique<NvHTTP>(m_Computer);
-        if (reconnecting) http->setRequestGate([this] { return waitForPlankReconnectRequest(); });
+        if (reconnecting) http->setRequestGate([this](bool auth) { return waitForPlankReconnectRequest(auth); });
         const QString captureSource =
                 m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
                     QStringLiteral("screencapturekit") :
@@ -2773,7 +2773,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                                 m_Computer->currentGameId = 0;
                             }
                             http = std::make_unique<NvHTTP>(m_Computer);
-                            if (reconnecting) http->setRequestGate([this] { return waitForPlankReconnectRequest(); });
+                            if (reconnecting) http->setRequestGate([this](bool auth) { return waitForPlankReconnectRequest(auth); });
                             const QString token = http->authenticate(
                                         m_PlankUsername,
                                         m_PlankPassword);
@@ -3172,10 +3172,17 @@ bool Session::beginPlankReconnect(
     return true;
 }
 
-bool Session::waitForPlankReconnectRequest()
+bool Session::waitForPlankReconnectRequest(bool restartAuthenticationAfterWait)
 {
+    bool waited = false;
     while (!m_ReconnectCancelled.load() && !m_ConnectionStartCancelled.load()) {
-        if (m_ReconnectPolicy.allowsRequest(SDL_GetTicks())) return true;
+        if (m_ReconnectPolicy.allowsRequest(SDL_GetTicks())) {
+            // A password conversation may have expired while Ask was open.
+            // Restart it after explicit consent, rather than submitting a stale
+            // challenge response and treating its rejection as a bad password.
+            return !(waited && restartAuthenticationAfterWait);
+        }
+        waited = true;
         SDL_Delay(50);
     }
     return false;
@@ -3204,7 +3211,7 @@ bool Session::runPlankReconnect()
                 token = m_Computer->sessionToken;
             }
             NvHTTP http(m_Computer);
-            http.setRequestGate([this] { return waitForPlankReconnectRequest(); });
+            http.setRequestGate([this](bool auth) { return waitForPlankReconnectRequest(auth); });
             if (token.isEmpty()) {
                 authenticating = true;
                 bool greeterConfirmed = false;
@@ -3259,7 +3266,7 @@ bool Session::runPlankReconnect()
             }
 
             if (waitForPlankReconnectRequest() && startConnectionAsync(true) &&
-                    waitForPlankReconnectRequest()) {
+                    !m_ReconnectCancelled.load() && m_ReconnectPolicy.allowsRequest(SDL_GetTicks())) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK reconnect transport completed on attempt %d",
                             attempt);
@@ -3284,10 +3291,13 @@ bool Session::runPlankReconnect()
                 emit displayLaunchError(error.toQString());
             }
             qWarning() << "PLANK reconnect attempt" << attempt
-                       << "could not reach the host:" << error.toQString();
+                       << "was deferred or failed:" << error.toQString();
         }
 
 #ifdef PLANK_TRANSPORT
+        // If setup finished after the Ask deadline, discard that transport
+        // before pausing. Do not keep a hidden connection alive (or accept a
+        // dead one) while the operator is away from the unanswered prompt.
         stopPlankTransportMediaReceivers();
 #endif
         LiStopConnection();

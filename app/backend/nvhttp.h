@@ -150,7 +150,7 @@ public:
 
     // Used only by the session recovery worker; ordinary discovery/login has
     // no gate. False cancels, while the callback may wait for a local decision.
-    void setRequestGate(std::function<bool()> gate) { m_RequestGate = std::move(gate); }
+    void setRequestGate(std::function<bool(bool)> gate) { m_RequestGate = std::move(gate); }
 
     QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
@@ -207,7 +207,7 @@ public:
 
     QUrl m_BaseUrlHttps;
 private:
-    void waitForRequestPermission();
+    void waitForRequestPermission(bool authenticating = false);
     void
     handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
 
@@ -226,5 +226,5 @@ private:
     QNetworkAccessManager* m_Nam;
     QString m_SessionToken;
     QString m_WorkerInstance;
-    std::function<bool()> m_RequestGate;
+    std::function<bool(bool)> m_RequestGate;
 };

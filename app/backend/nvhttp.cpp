@@ -545,7 +545,7 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
 
 QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
 {
-    waitForRequestPermission();
+    waitForRequestPermission(true);
     if (!m_SessionToken.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
     }
@@ -858,9 +858,9 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     return document.object();
 }
 
-void NvHTTP::waitForRequestPermission()
+void NvHTTP::waitForRequestPermission(bool authenticating)
 {
-    if (m_RequestGate && !m_RequestGate()) {
+    if (m_RequestGate && !m_RequestGate(authenticating)) {
         throw QtNetworkReplyException(QNetworkReply::OperationCanceledError, "PLANK reconnect cancelled");
     }
 }

@@ -215,7 +215,7 @@ private:
     void setPlankReconnectStatus(const char* text, bool warning);
 
     bool runPlankReconnect();
-    bool waitForPlankReconnectRequest();
+    bool waitForPlankReconnectRequest(bool restartAuthenticationAfterWait = false);
 
     bool finishPlankReconnect(bool success,
                                        const PlankReconnectState& state);
