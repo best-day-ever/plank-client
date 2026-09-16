@@ -1841,6 +1841,14 @@ int Session::getTargetDisplayIndex() const
 bool Session::snapshotClientDisplays()
 {
     m_ClientDisplays.clear();
+#ifdef Q_OS_DARWIN
+    bool matchMacDesktop;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        matchMacDesktop = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+            m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout;
+    }
+#endif
     const int targetIndex = getTargetDisplayIndex();
     m_TargetDisplayId = StreamUtils::getDisplayId(targetIndex);
     const int displayCount = StreamUtils::getDisplayCount();
@@ -1861,10 +1869,13 @@ bool Session::snapshotClientDisplays()
         }
         snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
 #ifdef Q_OS_DARWIN
-        if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        if (matchMacDesktop) {
             SDL_DisplayMode currentMode;
             if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds, &currentMode)) return false;
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
+            // Presentation tiles must share the matched backing-pixel canvas,
+            // not mix differently scaled panel-native pixel dimensions.
+            snapshot.nativeSize = snapshot.macBackingSize;
         }
 #endif
         m_ClientDisplays.append(snapshot);
@@ -2381,6 +2392,15 @@ void Session::getWindowDimensions(int& x, int& y,
 
 void Session::updateOptimalWindowDisplayMode()
 {
+    bool preserveDesktopMode = strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0;
+#ifdef Q_OS_DARWIN
+    {
+        QReadLocker lock(&m_Computer->lock);
+        preserveDesktopMode = preserveDesktopMode ||
+            (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+             m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout);
+    }
+#endif
     // A PLANK Wayland session is a desktop surface, not a monitor
     // mode switch. Let the compositor size the fullscreen surface and keep
     // SDL's window and pointer coordinates in the same space. SDL 3.4.2 can
@@ -2388,15 +2408,17 @@ void Session::updateOptimalWindowDisplayMode()
     // exposing the fullscreen mode dimensions through SDL_GetWindowSize().
     // Our renderer already performs the required aspect scaling and
     // letterboxing, so an exclusive Wayland display mode adds no value.
-    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
+    // Mac Match Client also preserves the desktop mode it just measured;
+    // exclusive-mode selection must not change the user's Retina scale.
+    if (preserveDesktopMode) {
         if (!SDL_SetWindowFullscreenMode(m_Window, nullptr)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Failed to select Wayland desktop fullscreen mode: %s",
+                        "Failed to select desktop fullscreen mode: %s",
                         SDL_GetError());
         }
         else {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Using compositor-native Wayland fullscreen mode");
+                        "Using compositor-native desktop fullscreen mode");
         }
         return;
     }
