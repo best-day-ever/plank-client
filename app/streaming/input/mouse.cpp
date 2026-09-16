@@ -78,6 +78,11 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
                                BUTTON_ACTION_PRESS :
                                BUTTON_ACTION_RELEASE,
                            button);
+    if (!event->down) {
+        // A captured drag can finish on the other output without another move.
+        // Forward its release before transferring native window focus.
+        followPointerFocus(window, 0);
+    }
 }
 
 void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
@@ -147,6 +152,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
 
     m_MouseWasInVideoRegion = mouseInVideoRegion;
+    followPointerFocus(window, motion.state);
 }
 
 bool SdlInputHandler::sendAbsoluteMousePosition(
@@ -288,6 +294,58 @@ SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
     }
     SDL_Window* window = SDL_GetWindowFromID(windowId);
     return presentationOutput(window) != nullptr ? window : nullptr;
+}
+
+void SdlInputHandler::followPointerFocus(SDL_Window* target,
+                                        SDL_MouseButtonFlags eventButtons)
+{
+#ifdef Q_OS_DARWIN
+    // The fullscreen surfaces are one remote desktop. Transfer native focus
+    // on hover so a secondary click does not need a preceding activation click.
+    // Never switch away from the Cocoa window that owns an in-progress drag.
+    if (!m_PresentationLayout.isMultiOutput() || !isCaptureActive() ||
+            eventButtons != 0 || SDL_GetMouseState(nullptr, nullptr) != 0) {
+        return;
+    }
+    SDL_Window* focused = SDL_GetKeyboardFocus();
+    if (focused == nullptr || focused == target ||
+            presentationOutput(focused) == nullptr ||
+            presentationOutput(target) == nullptr) {
+        return;
+    }
+    const auto targetFlags = SDL_GetWindowFlags(target);
+    if (!(targetFlags & SDL_WINDOW_FULLSCREEN) ||
+            (targetFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))) {
+        return;
+    }
+
+    // Queued events may describe an old pointer position. Check the current
+    // desktop position before raising anything, and never activate the app
+    // when another app or a non-presentation dialog owns keyboard focus.
+    int wx, wy, width, height;
+    if (!SDL_GetWindowPosition(target, &wx, &wy) ||
+            !SDL_GetWindowSize(target, &width, &height)) {
+        return;
+    }
+    float gx, gy;
+    if (SDL_GetGlobalMouseState(&gx, &gy) != 0 ||
+            gx < wx || gy < wy || gx >= wx + width || gy >= wy + height) {
+        return;
+    }
+    if (!SDL_RaiseWindow(target)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Unable to transfer fullscreen pointer focus: %s",
+                    SDL_GetError());
+    }
+    else {
+        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                    "PLANK fullscreen pointer focus: %u -> %u",
+                    SDL_GetWindowID(focused), SDL_GetWindowID(target));
+    }
+#else
+    Q_UNUSED(target);
+    Q_UNUSED(eventButtons);
+#endif
 }
 
 const PlankPresentationOutput* SdlInputHandler::presentationOutput(
