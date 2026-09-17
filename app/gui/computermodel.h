@@ -43,8 +43,6 @@ public:
 
     Q_INVOKABLE Session* createSessionForPlankDesktop(int computerIndex);
 
-    Q_INVOKABLE int plankRetinaSizeChoice(int computerIndex) const;
-
     Q_INVOKABLE int plankScalingChoice(int computerIndex) const;
 
     Q_INVOKABLE int plankVideoProfile(int computerIndex) const;
@@ -69,7 +67,7 @@ public:
                                           int virtualMode1Choice,
                                           int virtualMode2Choice,
                                           int videoProfile, int captureSource,
-                                          const QVariantList& profileBitratesKbps, int retinaSize = 0);
+                                          const QVariantList& profileBitratesKbps);
 
 signals:
     void authenticationCompleted(QVariant error);

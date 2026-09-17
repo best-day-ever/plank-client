@@ -193,8 +193,7 @@ public:
              QString& plankTransportToken,
              QString& acceptedCaptureSource,
              QString& acceptedEncoderBackend,
-             QString& acceptedEncodingMode,
-             int primaryOutput = -1);
+             QString& acceptedEncodingMode);
 
     QVector<NvApp>
     getAppList();

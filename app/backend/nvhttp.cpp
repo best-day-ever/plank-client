@@ -202,8 +202,7 @@ NvHTTP::startApp(QString verb,
                  QString& plankTransportToken,
                  QString& acceptedCaptureSource,
                  QString& acceptedEncoderBackend,
-                 QString& acceptedEncodingMode,
-                 int primaryOutput)
+                 QString& acceptedEncodingMode)
 {
     QString plankOutputArguments;
     if (!captureDisplayMode.isEmpty()) {
@@ -232,10 +231,6 @@ NvHTTP::startApp(QString verb,
         }
         if ((plankFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
-            if (primaryOutput >= 0 &&
-                    (plankFeatureFlags & NvOutputTopology::MatchedPrimaryOutputFeature)) {
-                plankOutputArguments += "&plankPrimaryOutput=" + QString::number(primaryOutput);
-            }
             plankOutputArguments +=
                     "&plankHostLayout=" +
                     QString::fromLatin1(QUrl::toPercentEncoding(hostLayout));
