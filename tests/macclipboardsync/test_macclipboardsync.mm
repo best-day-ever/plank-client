@@ -428,8 +428,10 @@ void TestMacClipboardSync::periodicPollingResumesAfterReconnect()
     pump(); // Consume the immediate event before the copy under test.
     const auto afterRestart = sends;
     setPasteboardText("after reconnect");
-    QTest::qWait(350);
-    pump();
+    // Hosted runners may schedule SDL's timer thread late. Wait for the real
+    // queued timer event with a bound, rather than assuming 100 ms of slack
+    // beyond the 250 ms interval is sufficient under load.
+    QTRY_VERIFY_WITH_TIMEOUT((pump(), sends > afterRestart), 2000);
     QCOMPARE(sends, afterRestart + 1);
     timer.stop();
     sync.stop();
