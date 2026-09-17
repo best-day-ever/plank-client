@@ -2807,10 +2807,10 @@ bool Session::startConnectionAsync(bool reconnecting,
                 constexpr int CancellationPollMs = 50;
                 bool started = false;
 
-                if (m_PlankUsername.isEmpty() ||
-                        m_PlankPassword.isEmpty()) {
-                    throw;
-                }
+                // A failed local setup can consume the one-session credential
+                // handoff while leaving its bearer token valid. The current
+                // worker can complete this transition with that token; only
+                // a replacement worker requires fresh credentials.
                 m_WaitingForSessionCleanup.store(true);
                 emit sessionCleanupWaitChanged(
                             true,
@@ -2831,6 +2831,23 @@ bool Session::startConnectionAsync(bool reconnecting,
                     if (m_ConnectionStartCancelled.load()) break;
 
                     if (authenticationRefreshRequired) {
+                        if (m_PlankUsername.isEmpty() ||
+                                m_PlankPassword.isEmpty()) {
+                            {
+                                QWriteLocker lock(&m_Computer->lock);
+                                m_Computer->sessionToken.fill(QChar('\0'));
+                                m_Computer->sessionToken.clear();
+                                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+                            }
+                            if (m_ComputerManager != nullptr) {
+                                m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+                            }
+                            qInfo() << "PLANK replacement display worker requires a new sign-in";
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            throw GfeHttpResponseException(
+                                        401, "The Host display session changed. Please sign in again.");
+                        }
                         try {
                             {
                                 QWriteLocker lock(&m_Computer->lock);
