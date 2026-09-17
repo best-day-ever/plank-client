@@ -439,7 +439,10 @@ void TestMacClipboardSync::periodicPollingResumesAfterReconnect()
 // Session call sites. Full renderer/network handoff remains a paired-system gate.
 void TestMacClipboardSync::sessionReconnectPollingWiring()
 {
-    QFile source(QFINDTESTDATA("../../app/streaming/session.cpp"));
+    const auto sourceRoot = qEnvironmentVariable("PLANK_SOURCE_ROOT");
+    QFile source(sourceRoot.isEmpty()
+                 ? QFINDTESTDATA("../../app/streaming/session.cpp")
+                 : sourceRoot + "/apps/client/app/streaming/session.cpp");
     QVERIFY(source.open(QIODevice::ReadOnly));
     const auto code = source.readAll();
     const auto begin = code.indexOf("bool Session::finishPlankReconnect(");
