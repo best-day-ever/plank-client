@@ -6,6 +6,10 @@
 #include "streaming/plankwaylandcursor.h"
 #include "streaming/streamutils.h"
 #include "utils.h"
+#ifdef Q_OS_MACOS
+#include "streaming/macquitshortcut.h"
+#include "streaming/macwindow.h"
+#endif
 
 #ifdef HAVE_LIBINPUT_TABLET
 #include "streaming/input/linuxwacom.h"
@@ -100,6 +104,19 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
             WMUtils::isRunningDesktopEnvironment();
+#ifdef Q_OS_MACOS
+    m_MacQuitShortcut = std::make_unique<MacQuitShortcut>([this] {
+        if (!isSystemKeyCaptureActive())
+            return false;
+        for (const auto& output : m_PresentationLayout.outputs) {
+            // SDL focus notifications may still be queued. A local Qt dialog
+            // must never inherit the stream's shortcut ownership.
+            if (MacWindow::hasKeyboardFocus(output.window))
+                return true;
+        }
+        return false;
+    });
+#endif
 }
 
 void SdlInputHandler::setStreamDimensions(int streamWidth, int streamHeight)
@@ -122,6 +139,9 @@ QSize SdlInputHandler::streamDimensions() const
 
 SdlInputHandler::~SdlInputHandler()
 {
+#ifdef Q_OS_MACOS
+    m_MacQuitShortcut.reset();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     m_LinuxWacomInput.reset();
     m_LinuxRawWacomInput.reset();
@@ -564,6 +584,9 @@ void SdlInputHandler::notifyMouseLeave()
 
 void SdlInputHandler::notifyFocusLost()
 {
+#ifdef Q_OS_MACOS
+    m_MacQuitShortcut->refresh();
+#endif
     activateCompositorCursor();
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
@@ -581,6 +604,9 @@ void SdlInputHandler::notifyFocusLost()
 
 void SdlInputHandler::notifyFocusGained()
 {
+#ifdef Q_OS_MACOS
+    m_MacQuitShortcut->refresh();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(true);
@@ -697,6 +723,9 @@ void SdlInputHandler::updateKeyboardGrabState()
     }
 
     m_KeyboardCaptureActive = shouldGrab;
+#ifdef Q_OS_MACOS
+    m_MacQuitShortcut->refresh();
+#endif
 }
 
 bool SdlInputHandler::isSystemKeyCaptureActive()

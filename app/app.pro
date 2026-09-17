@@ -245,7 +245,7 @@ SOURCES += \
     backend/systemproperties.cpp \
     wm.cpp
 
-macx: HEADERS += macquitbridge.h
+macx: HEADERS += macapplication.h
 
 HEADERS += \
     streaming/video/packedbt709.h \
@@ -456,11 +456,13 @@ macx {
     message(VideoToolbox renderer selected)
 
     SOURCES += \
+        streaming/macquitshortcut.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
 
     HEADERS += \
+        streaming/macquitshortcut.h \
         streaming/macwindow.h \
         streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h

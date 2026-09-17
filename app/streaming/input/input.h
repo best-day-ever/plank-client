@@ -18,6 +18,9 @@ class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
 class PlankWaylandCursor;
+#ifdef Q_OS_MACOS
+class MacQuitShortcut;
+#endif
 
 class SdlInputHandler
 {
@@ -92,6 +95,9 @@ public:
     void updatePointerRegionLock();
 
 private:
+#ifdef Q_OS_MACOS
+    std::unique_ptr<MacQuitShortcut> m_MacQuitShortcut;
+#endif
     enum KeyCombo {
         KeyComboQuit,
         KeyComboUngrabInput,
