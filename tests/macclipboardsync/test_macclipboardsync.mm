@@ -3,6 +3,8 @@
 #include <AppKit/AppKit.h>
 
 #include "macclipboardsync.h"
+#include "clipboardpolltimer.h"
+#include <thread>
 
 NSPasteboard* plankClipboardTestPasteboard()
 {
@@ -57,6 +59,13 @@ private slots:
     void rejectsHostOfferWhenEventQueueFails();
     void ignoresOffersWhileStopped();
     void validatesUnicodeScalars();
+    void disconnectDoesNotResendRemoteText();
+    void disconnectPreservesNewLocalCopy();
+    void localCopyCanReturnToLastRemoteText();
+    void newerOfferReplacesPendingText();
+    void repeatHostOfferAfterLocalChangeAppliesAgain();
+    void periodicPollingResumesAfterReconnect();
+    void sessionReconnectPollingWiring();
 };
 
 void TestMacClipboardSync::rejectsMalformedFrameLength()
@@ -165,7 +174,8 @@ void TestMacClipboardSync::suppressesRepeatedHostText()
 
     frame = oneFrame("same text", 3);
     QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
-    QCOMPARE(queuedEvents, 1);
+    QCOMPARE(queuedEvents, 2);
+    QVERIFY(!sync.applyPendingHostTextOnMainThread());
 }
 
 void TestMacClipboardSync::sendsOnlyWithStreamFocus()
@@ -269,6 +279,98 @@ void TestMacClipboardSync::ignoresOffersWhileStopped()
     QCOMPARE(queuedEvents, 0);
 }
 
+void TestMacClipboardSync::disconnectDoesNotResendRemoteText()
+{
+    int sends = 0;
+    auto sender = [&](const std::uint8_t*, std::size_t) { ++sends; return true; };
+    auto yes = [] { return true; };
+    MacClipboardSync first(sender, yes, yes, yes);
+    first.start();
+    auto frame = oneFrame("private Host A text", 1);
+    QVERIFY(first.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(first.applyPendingHostTextOnMainThread());
+    // Teardown can occur on the deferred cleanup worker. Do not process Qt's
+    // event loop before the next poll: cleanup must also protect a fresh object.
+    std::thread cleanup([&] { first.stop(); });
+    cleanup.join();
+    MacClipboardSync second(sender, yes, yes, yes);
+    second.start();
+    second.pollLocalClipboardOnMainThread();
+    QCOMPARE(sends, 0);
+    QVERIFY([[plankClipboardTestPasteboard() stringForType:NSPasteboardTypeString] length] == 0);
+    frame = oneFrame("Host B text", 1);
+    QVERIFY(second.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(second.applyPendingHostTextOnMainThread());
+    second.stop();
+    second.start();
+    second.pollLocalClipboardOnMainThread();
+    QCOMPARE(sends, 0);
+}
+
+void TestMacClipboardSync::disconnectPreservesNewLocalCopy()
+{
+    auto yes = [] { return true; };
+    MacClipboardSync sync([](const std::uint8_t*, std::size_t) { return true; }, yes, yes, yes);
+    sync.start();
+    const auto frame = oneFrame("A", 1);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+    // Even identical text is a new user-owned copy when its change count differs.
+    setPasteboardText("A");
+    const auto count = plankClipboardTestPasteboard().changeCount;
+    sync.stop();
+    QCOMPARE(plankClipboardTestPasteboard().changeCount, count);
+    QVERIFY([[plankClipboardTestPasteboard() stringForType:NSPasteboardTypeString] isEqualToString:@"A"]);
+}
+
+void TestMacClipboardSync::localCopyCanReturnToLastRemoteText()
+{
+    int sends = 0;
+    auto yes = [] { return true; };
+    MacClipboardSync sync([&](const std::uint8_t*, std::size_t) { ++sends; return true; }, yes, yes, yes);
+    sync.start();
+    const auto frame = oneFrame("A", 1);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+    setPasteboardText("B");
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sends, 1);
+    setPasteboardText("A");
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sends, 2);
+}
+
+void TestMacClipboardSync::newerOfferReplacesPendingText()
+{
+    auto yes = [] { return true; };
+    MacClipboardSync sync([](const std::uint8_t*, std::size_t) { return true; }, yes, yes, yes);
+    sync.start();
+    auto frame = oneFrame("A", 1);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+    frame = oneFrame("B", 2);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    frame = oneFrame("A", 3);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    sync.applyPendingHostTextOnMainThread();
+    QVERIFY([[plankClipboardTestPasteboard() stringForType:NSPasteboardTypeString] isEqualToString:@"A"]);
+}
+
+void TestMacClipboardSync::repeatHostOfferAfterLocalChangeAppliesAgain()
+{
+    auto yes = [] { return true; };
+    MacClipboardSync sync([](const std::uint8_t*, std::size_t) { return true; }, yes, yes, yes);
+    sync.start();
+    auto frame = oneFrame("A", 1);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+    setPasteboardText("B"); // Not observed by the local poll yet.
+    frame = oneFrame("A", 2);
+    QVERIFY(sync.handleHostOffer(frame.data(), frame.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+    QVERIFY([[plankClipboardTestPasteboard() stringForType:NSPasteboardTypeString] isEqualToString:@"A"]);
+}
+
 void TestMacClipboardSync::validatesUnicodeScalars()
 {
     const char valid[] = "\xF0\x9F\x94\xA5";
@@ -285,6 +387,73 @@ void TestMacClipboardSync::validatesUnicodeScalars()
 
     const char embeddedNull[] = {'a', '\0', 'b'};
     QVERIFY(!plank::clipboard::validUtf8(embeddedNull, sizeof(embeddedNull)));
+}
+
+void TestMacClipboardSync::periodicPollingResumesAfterReconnect()
+{
+    QVERIFY(SDL_Init(SDL_INIT_EVENTS));
+    struct SdlCleanup { ~SdlCleanup() { SDL_Quit(); } } cleanup;
+    constexpr Sint32 pollEvent = 1234;
+    unsigned sends = 0;
+    MacClipboardSync sync([&](const std::uint8_t*, std::size_t) {
+        ++sends;
+        return true;
+    }, [] { return true; }, [] { return true; }, [] { return true; });
+    ClipboardPollTimer timer;
+    auto pump = [&] {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_USER && event.user.code == pollEvent) {
+                sync.pollLocalClipboardOnMainThread();
+            }
+        }
+    };
+    setPasteboardText("before reconnect");
+    sync.start();
+    QVERIFY(timer.start(pollEvent));
+    pump();
+    QCOMPARE(sends, 1U);
+
+    // Receiver teardown, failed attempt, and successful restart. Focus stays
+    // true throughout; no focus event or manual poll can wake the new copy.
+    timer.stop();
+    sync.stop();
+    SDL_FlushEvents(SDL_EVENT_USER, SDL_EVENT_USER);
+    setPasteboardText("during reconnect");
+    QTest::qWait(300);
+    pump();
+    QCOMPARE(sends, 1U);
+    sync.start();
+    QVERIFY(timer.start(pollEvent));
+    pump(); // Consume the immediate event before the copy under test.
+    const auto afterRestart = sends;
+    setPasteboardText("after reconnect");
+    QTest::qWait(350);
+    pump();
+    QCOMPARE(sends, afterRestart + 1);
+    timer.stop();
+    sync.stop();
+}
+
+// Pair the real timer/NSPasteboard lifecycle test above with a guard on its
+// Session call sites. Full renderer/network handoff remains a paired-system gate.
+void TestMacClipboardSync::sessionReconnectPollingWiring()
+{
+    QFile source(QFINDTESTDATA("../../app/streaming/session.cpp"));
+    QVERIFY(source.open(QIODevice::ReadOnly));
+    const auto code = source.readAll();
+    const auto begin = code.indexOf("bool Session::finishPlankReconnect(");
+    const auto end = code.indexOf("\n}\n", begin);
+    QVERIFY(begin >= 0 && end > begin);
+    const auto finish = code.mid(begin, end - begin);
+    const auto failure = finish.indexOf("if (!success)");
+    const auto earlyReturn = finish.indexOf("return false;", failure);
+    const auto restart = finish.indexOf("startClipboardPollTimer();");
+    QVERIFY(failure >= 0 && earlyReturn > failure && restart > earlyReturn);
+    const auto teardown = code.indexOf("void Session::stopPlankTransportMediaReceivers()");
+    const auto teardownEnd = code.indexOf("\n}\n", teardown);
+    QVERIFY(teardown >= 0 && teardownEnd > teardown);
+    QVERIFY(code.mid(teardown, teardownEnd - teardown).contains("stopClipboardPollTimer();"));
 }
 
 QTEST_MAIN(TestMacClipboardSync)

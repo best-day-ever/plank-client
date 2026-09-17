@@ -48,21 +48,21 @@ std::string readGeneralPasteboardText()
     return {};
 }
 
-void writeGeneralPasteboardText(const std::vector<std::uint8_t>& bytes)
+bool writeGeneralPasteboardText(const std::vector<std::uint8_t>& bytes)
 {
     if (bytes.empty()) {
-        return;
+        return false;
     }
     @autoreleasepool {
         NSString* text = [[NSString alloc] initWithBytes:bytes.data()
                                                   length:bytes.size()
                                                 encoding:NSUTF8StringEncoding];
         if (text == nil) {
-            return;
+            return false;
         }
         NSPasteboard* pasteboard = clipboardPasteboard();
         [pasteboard clearContents];
-        [pasteboard setString:text forType:NSPasteboardTypeString];
+        return [pasteboard setString:text forType:NSPasteboardTypeString];
     }
 }
 
@@ -71,6 +71,37 @@ int currentPasteboardChangeCount()
     @autoreleasepool {
         NSPasteboard* pasteboard = clipboardPasteboard();
         return pasteboard != nil ? pasteboard.changeCount : -1;
+    }
+}
+
+// stop() also runs on connection/cleanup workers. Keep value-only cleanup
+// records alive independently of the sync object; never block a worker waiting
+// for the main thread that may be joining it. A new session drains these before
+// reading the pasteboard, even if the queued main-thread block has not run yet.
+struct RemotePasteboardCleanup {
+    std::int64_t changeCount;
+    std::string text;
+};
+std::mutex cleanupMutex;
+std::vector<RemotePasteboardCleanup> pendingCleanup;
+
+void clearStoppedRemotePasteboardsOnMainThread()
+{
+    SDL_assert([NSThread isMainThread]);
+    std::vector<RemotePasteboardCleanup> work;
+    {
+        std::lock_guard<std::mutex> lock(cleanupMutex);
+        work.swap(pendingCleanup);
+    }
+    @autoreleasepool {
+        for (const auto& entry : work) {
+            NSPasteboard* pasteboard = clipboardPasteboard();
+            if (pasteboard != nil && pasteboard.changeCount == entry.changeCount &&
+                    readGeneralPasteboardText() == entry.text &&
+                    pasteboard.changeCount == entry.changeCount) {
+                [pasteboard clearContents];
+            }
+        }
     }
 }
 
@@ -118,57 +149,69 @@ void MacClipboardSync::start()
     m_OutboundGeneration = 0;
     m_LastAppliedHostGeneration = 0;
     m_LastAppliedHostText.clear();
+    m_RemotePasteboardChangeCount = -1;
 }
 
 void MacClipboardSync::stop()
 {
-    std::lock_guard<std::mutex> lock(m_StateMutex);
-    if (!m_Running) {
-        return;
+    {
+        std::lock_guard<std::mutex> lock(m_StateMutex);
+        if (!m_Running) {
+            return;
+        }
+        m_Running = false;
+        if (m_RemotePasteboardChangeCount >= 0) {
+            std::lock_guard<std::mutex> cleanupLock(cleanupMutex);
+            pendingCleanup.push_back({m_RemotePasteboardChangeCount,
+                                      std::move(m_LastAppliedHostText)});
+        }
+        m_ApplyingRemote = false;
+        m_Assembly.reset();
+        m_PendingHostText.reset();
+        m_LastPasteboardChangeCount = -1;
+        m_RemotePasteboardChangeCount = -1;
+        m_OutboundGeneration = 0;
+        m_LastAppliedHostGeneration = 0;
+        m_LastAppliedHostText.clear();
     }
-    m_Running = false;
-    m_ApplyingRemote = false;
-    m_Assembly.reset();
-    m_PendingHostText.reset();
-    m_LastPasteboardChangeCount = -1;
-    m_OutboundGeneration = 0;
-    m_LastAppliedHostGeneration = 0;
-    m_LastAppliedHostText.clear();
+    if ([NSThread isMainThread]) {
+        clearStoppedRemotePasteboardsOnMainThread();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            clearStoppedRemotePasteboardsOnMainThread();
+        });
+    }
 }
 
 void MacClipboardSync::pollLocalClipboardOnMainThread()
 {
+    clearStoppedRemotePasteboardsOnMainThread();
     if (!m_IsEnabled() || !m_HasStreamFocus()) {
         return;
     }
     const auto changeCount = currentPasteboardChangeCount();
+    std::uint64_t epoch;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (!m_Running || m_ApplyingRemote ||
-                (changeCount >= 0 && changeCount == m_LastPasteboardChangeCount)) {
+        if (!m_Running || m_ApplyingRemote || changeCount < 0 ||
+                changeCount == m_LastPasteboardChangeCount) {
             return;
+        }
+        epoch = m_SessionEpoch;
+        if (changeCount != m_RemotePasteboardChangeCount) {
+            // A new local copy owns the pasteboard, even if its bytes equal an
+            // earlier remote offer. It must not be suppressed or cleared later.
+            m_RemotePasteboardChangeCount = -1;
+            m_LastAppliedHostText.clear();
         }
     }
     const std::string text = readGeneralPasteboardText();
-    if (text.empty()) {
-        std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (m_Running) {
-            m_LastPasteboardChangeCount = changeCount;
-        }
-        return;
+    if (currentPasteboardChangeCount() != changeCount) {
+        return; // Retry a stable snapshot on the next poll.
     }
-    {
+    if (text.empty() || sendLocalClipboard(text, epoch)) {
         std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (!m_Running || text == m_LastAppliedHostText) {
-            if (m_Running) {
-                m_LastPasteboardChangeCount = changeCount;
-            }
-            return;
-        }
-    }
-    if (sendLocalClipboard(text)) {
-        std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (m_Running) {
+        if (m_Running && m_SessionEpoch == epoch) {
             m_LastPasteboardChangeCount = changeCount;
         }
     }
@@ -191,6 +234,7 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
     }
 
     const auto generation = qFromLittleEndian(wire.generation);
+    std::uint64_t epoch = 0;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
         if (!m_Running) {
@@ -208,28 +252,27 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
         }
         PendingHostText pending;
         pending.sessionEpoch = m_SessionEpoch;
+        pending.generation = generation;
+        epoch = m_SessionEpoch;
         pending.text = std::move(m_Assembly.bytes);
         m_Assembly.reset();
 
-        const std::string completedText(
-                    reinterpret_cast<const char*>(pending.text.data()),
-                    pending.text.size());
         m_LastAppliedHostGeneration = generation;
-        if (completedText == m_LastAppliedHostText ||
-                (m_PendingHostText.has_value() &&
-                 m_PendingHostText->sessionEpoch == m_SessionEpoch &&
-                 completedText == std::string(
-                     reinterpret_cast<const char*>(m_PendingHostText->text.data()),
-                     m_PendingHostText->text.size()))) {
+        // Every complete newer offer supersedes pending work, including a
+        // return to the last applied string. AppKit deduplication happens on
+        // the main thread using the current pasteboard change count.
+        const bool alreadyQueued = m_PendingHostText.has_value();
+        m_PendingHostText = std::move(pending);
+        if (alreadyQueued) {
             return true;
         }
-        m_PendingHostText = std::move(pending);
     }
 
     if (!m_QueueHostText || !m_QueueHostText()) {
         std::lock_guard<std::mutex> lock(m_StateMutex);
         if (m_PendingHostText.has_value() &&
-                m_PendingHostText->sessionEpoch == m_SessionEpoch) {
+                m_PendingHostText->sessionEpoch == epoch &&
+                m_PendingHostText->generation == generation) {
             m_PendingHostText.reset();
         }
         return false;
@@ -237,7 +280,7 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
     return true;
 }
 
-bool MacClipboardSync::sendLocalClipboard(const std::string& text)
+bool MacClipboardSync::sendLocalClipboard(const std::string& text, std::uint64_t expectedEpoch)
 {
     if (!m_IsEnabled() || !m_HasStreamFocus() || text.empty()) {
         return false;
@@ -246,7 +289,7 @@ bool MacClipboardSync::sendLocalClipboard(const std::string& text)
     std::uint64_t sessionEpoch = 0;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (!m_Running) {
+        if (!m_Running || m_SessionEpoch != expectedEpoch) {
             return false;
         }
         generation = ++m_OutboundGeneration;
@@ -281,6 +324,7 @@ bool MacClipboardSync::sendLocalClipboard(const std::string& text)
 
 bool MacClipboardSync::applyPendingHostTextOnMainThread()
 {
+    clearStoppedRemotePasteboardsOnMainThread();
     std::lock_guard<std::mutex> lock(m_StateMutex);
     if (!m_Running || !m_PendingHostText.has_value() ||
             m_PendingHostText->sessionEpoch != m_SessionEpoch) {
@@ -293,14 +337,19 @@ bool MacClipboardSync::applyPendingHostTextOnMainThread()
     const std::string incoming(
                 reinterpret_cast<const char*>(pending.text.data()),
                 pending.text.size());
-    if (incoming == m_LastAppliedHostText) {
+    if (incoming == m_LastAppliedHostText &&
+            currentPasteboardChangeCount() == m_RemotePasteboardChangeCount) {
         return false;
     }
 
     m_ApplyingRemote = true;
-    writeGeneralPasteboardText(pending.text);
+    if (!writeGeneralPasteboardText(pending.text)) {
+        m_ApplyingRemote = false;
+        return false;
+    }
     m_LastAppliedHostText = incoming;
     m_LastPasteboardChangeCount = currentPasteboardChangeCount();
+    m_RemotePasteboardChangeCount = m_LastPasteboardChangeCount;
     m_ApplyingRemote = false;
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Applied host clipboard offer (%zu bytes)",

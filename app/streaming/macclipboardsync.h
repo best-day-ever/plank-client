@@ -36,10 +36,11 @@ public:
 private:
     struct PendingHostText {
         std::uint64_t sessionEpoch = 0;
+        std::uint64_t generation = 0;
         std::vector<std::uint8_t> text;
     };
 
-    bool sendLocalClipboard(const std::string& text);
+    bool sendLocalClipboard(const std::string& text, std::uint64_t expectedEpoch);
 
     SendInputFrame m_SendInputFrame;
     FocusPredicate m_HasStreamFocus;
@@ -52,6 +53,7 @@ private:
     plank::clipboard::Assembly m_Assembly;
     std::optional<PendingHostText> m_PendingHostText;
     std::int64_t m_LastPasteboardChangeCount = -1;
+    std::int64_t m_RemotePasteboardChangeCount = -1;
     std::uint64_t m_OutboundGeneration = 0;
     std::uint64_t m_LastAppliedHostGeneration = 0;
     std::string m_LastAppliedHostText;

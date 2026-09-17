@@ -1567,51 +1567,24 @@ void Session::stopClipboardSync()
 
 void Session::queueClipboardPollEvent()
 {
-    SDL_Event event {};
-    event.type = SDL_EVENT_USER;
-    event.user.code = SDL_CODE_PLANK_CLIPBOARD_POLL;
-    event.user.timestamp = SDL_GetTicks();
-    SDL_PushEvent(&event);
+    ClipboardPollTimer::queue(SDL_CODE_PLANK_CLIPBOARD_POLL);
 }
-
-namespace {
-
-Uint32 clipboardPollTimerCallback(void*, SDL_TimerID, Uint32 interval)
-{
-    SDL_Event event {};
-    event.type = SDL_EVENT_USER;
-    event.user.code = SDL_CODE_PLANK_CLIPBOARD_POLL;
-    event.user.timestamp = SDL_GetTicks();
-    SDL_PushEvent(&event);
-    return interval;
-}
-
-}  // namespace
 
 void Session::startClipboardPollTimer()
 {
-    if (m_ClipboardPollTimerId != 0 || m_ClipboardSync == nullptr) {
-        return;
-    }
-    const SDL_TimerID timerId = SDL_AddTimer(250, clipboardPollTimerCallback, nullptr);
-    if (timerId == 0) {
+    if (m_ClipboardSync != nullptr &&
+            !m_ClipboardPollTimer.start(SDL_CODE_PLANK_CLIPBOARD_POLL)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to start clipboard poll timer: %s",
                     SDL_GetError());
-        return;
     }
-    m_ClipboardPollTimerId = timerId;
-    queueClipboardPollEvent();
 }
 
 void Session::stopClipboardPollTimer()
 {
-    if (m_ClipboardPollTimerId == 0) {
-        return;
-    }
-    SDL_RemoveTimer(m_ClipboardPollTimerId);
-    m_ClipboardPollTimerId = 0;
+    m_ClipboardPollTimer.stop();
 }
+
 #endif
 
 void Session::clearPlankReconnectCredentials()
@@ -3577,6 +3550,11 @@ bool Session::finishPlankReconnect(
     if (state.inputCaptureWasActive) {
         m_InputHandler->setCaptureActive(true);
     }
+#ifdef Q_OS_MACOS
+    // Receiver teardown removes this timer on every reconnect attempt. Resume
+    // periodic polling only after success, back on the SDL/AppKit main thread.
+    startClipboardPollTimer();
+#endif
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "PLANK reconnect completed (%s renderer)",
                 resumedRenderer ? "retained" : "recreated");
