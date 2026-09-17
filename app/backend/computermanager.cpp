@@ -12,6 +12,7 @@
 #include <QScreen>
 #ifdef Q_OS_DARWIN
 #include "streaming/streamutils.h"
+#include "streaming/macdisplaygeometry.h"
 #include <ApplicationServices/ApplicationServices.h>
 #endif
 
@@ -791,7 +792,8 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
                 SDL_DisplayMode mode;
                 SDL_Rect safeArea;
                 if (!StreamUtils::getMacCurrentDisplayMode(ids[index], &mode, &safeArea,
-                        m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED)) {
+                        m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED &&
+                        MacDisplayGeometry::useNativeFullscreen(count))) {
                     displays.clear();
                     break;
                 }

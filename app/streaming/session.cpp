@@ -12,6 +12,7 @@
 #include "backend/nvaddress.h"
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
+#include "streaming/macdisplaygeometry.h"
 #endif
 
 #include <Limelight.h>
@@ -1491,12 +1492,6 @@ void Session::clearPlankReconnectCredentials()
 
 bool Session::initialize()
 {
-#ifdef Q_OS_DARWIN
-    // Keep native fullscreen Spaces, including trackpad app switching. Match
-    // Client uses the notch-safe viewport; never switch the desktop mode.
-    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
-#endif
-
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
                 m_PlankVideoProfile,
                 m_PlankCaptureSource)) {
@@ -1527,6 +1522,14 @@ bool Session::initialize()
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
+
+#ifdef Q_OS_DARWIN
+    // Single-display native Spaces use the matched camera-safe viewport.
+    // Multiple connected displays retain coordinated desktop fullscreen and
+    // full-panel matching, including sessions initially opened windowed.
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
+                MacDisplayGeometry::useNativeFullscreen(m_ClientDisplays.size()) ? "1" : "0");
+#endif
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
     if (!configurePlankLaunchGeometry()) {
@@ -1867,7 +1870,8 @@ bool Session::snapshotClientDisplays()
             SDL_DisplayMode currentMode;
             SDL_Rect matchedBounds;
             if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
-                    &currentMode, &matchedBounds, m_IsFullScreen)) return false;
+                    &currentMode, &matchedBounds, m_IsFullScreen &&
+                    MacDisplayGeometry::useNativeFullscreen(displayCount))) return false;
             snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
                                              matchedBounds.w, matchedBounds.h);
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);

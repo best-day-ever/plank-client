@@ -24,8 +24,28 @@ private slots:
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
+    void preservesMultipleDisplayFullscreen();
     void buildsMacDisplayRequest();
 };
+
+void TestOutputTopology::preservesMultipleDisplayFullscreen()
+{
+    QVERIFY(MacDisplayGeometry::useNativeFullscreen(1));
+    for (int count : {0, 2, 3}) {
+        QVERIFY(!MacDisplayGeometry::useNativeFullscreen(count));
+    }
+
+    // Mixed Retina/non-Retina windows keep their complete panel rectangles.
+    // A camera inset is applicable only to a native Space's content viewport.
+    for (int count : {1, 2}) {
+        int height = 1329, pixels = 2658;
+        if (MacDisplayGeometry::useNativeFullscreen(count)) {
+            QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
+        }
+        QCOMPARE(height, count == 1 ? 1291 : 1329);
+        QCOMPARE(pixels, height * 2);
+    }
+}
 
 void TestOutputTopology::matchesMacFullscreenViewport()
 {
