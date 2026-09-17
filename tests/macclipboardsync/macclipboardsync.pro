@@ -16,4 +16,5 @@ SOURCES += \
 
 HEADERS += \
     ../../app/streaming/macclipboardsync.h \
+    ../../app/streaming/clipboardpolltimer.h \
     ../../app/streaming/plankclipboard.h

@@ -467,6 +467,7 @@ macx {
         streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h \
         streaming/macclipboardsync.h \
+        streaming/clipboardpolltimer.h \
         streaming/plankclipboard.h
     OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
 }
