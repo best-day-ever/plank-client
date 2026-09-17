@@ -2,6 +2,15 @@
 
 #include <QtMath>
 
+bool PlankPresentation::setSecondaryFullscreen(SDL_Window* window, bool fullscreen)
+{
+    if (fullscreen && !SDL_ShowWindow(window)) return false;
+    if (!SDL_SetWindowFullscreen(window, fullscreen) || !SDL_SyncWindow(window)) return false;
+    // Hiding a Cocoa fullscreen window alone leaves its native Space behind.
+    // Wait for AppKit's exit transition before ordering the window out.
+    return fullscreen || SDL_HideWindow(window);
+}
+
 QRect PlankPresentation::videoRect(const QSize& streamSize,
                                              const QSize& canvasSize)
 {

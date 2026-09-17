@@ -149,7 +149,7 @@ int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
     @autoreleasepool {
-        SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "0");
+        SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
         if (!SDL_Init(SDL_INIT_VIDEO)) return 2;
         SDL_Window* left = SDL_CreateWindow("PLANK Metal probe: left", 320, 320,
             SDL_WINDOW_METAL | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE);
@@ -183,6 +183,35 @@ int main(int argc, char** argv)
             for (bool vsync : {false, true}) for (bool hardware : {false, true}) {
                 VTMetalRendererProbe::run(left, right, hardware, true, vsync);
                 VTMetalRendererProbe::run(left, right, hardware, false, vsync);
+            }
+            if (fullscreen) {
+                const SDL_DisplayID secondaryDisplay = SDL_GetDisplayForWindow(right);
+                NSWindow* native = (__bridge NSWindow*)SDL_GetPointerProperty(
+                    SDL_GetWindowProperties(right), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+                require(native != nil, "secondary AppKit window unavailable");
+                for (int cycle = 0; cycle < 3; ++cycle) {
+                    require(SDL_SetWindowFullscreen(left, false) && SDL_SyncWindow(left),
+                            "primary fullscreen exit failed");
+                    require(PlankPresentation::setSecondaryFullscreen(right, false),
+                            "secondary fullscreen exit failed");
+                    require(!(native.styleMask & NSWindowStyleMaskFullScreen),
+                            "hidden secondary retained its native fullscreen Space");
+                    require(!native.visible && (SDL_GetWindowFlags(right) & SDL_WINDOW_HIDDEN),
+                            "secondary remains visible in windowed presentation");
+                    require(!(SDL_GetWindowFlags(right) & SDL_WINDOW_FULLSCREEN),
+                            "secondary retains SDL fullscreen state");
+                    VTMetalRendererProbe::run(left, right, true, false, false);
+                    require(SDL_SetWindowFullscreen(left, true) && SDL_SyncWindow(left),
+                            "primary fullscreen reentry failed");
+                    require(PlankPresentation::setSecondaryFullscreen(right, true),
+                            "secondary fullscreen reentry failed");
+                    require(native.visible && (native.styleMask & NSWindowStyleMaskFullScreen),
+                            "secondary did not restore its native fullscreen Space");
+                    require(SDL_GetDisplayForWindow(right) == secondaryDisplay,
+                            "secondary changed displays after fullscreen reentry");
+                    VTMetalRendererProbe::run(left, right, true, true, false);
+                    std::printf("PASS native-Spaces exit/hide/reenter cycle=%d\n", cycle + 1);
+                }
             }
         } catch (const std::exception& e) {
             std::fprintf(stderr, "FAIL: %s (%s)\n", e.what(), SDL_GetError()); result = 1;

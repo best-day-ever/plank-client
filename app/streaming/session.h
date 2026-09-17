@@ -426,6 +426,7 @@ private:
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
     SDL_DisplayID m_TargetDisplayId = 0;
+    bool m_MultiDisplayPresentationAvailable = false;
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;
     bool m_HasWindowedPresentationGeometry = false;

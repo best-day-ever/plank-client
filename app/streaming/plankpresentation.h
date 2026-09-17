@@ -36,6 +36,9 @@ struct PlankPresentationSlice
 class PlankPresentation
 {
 public:
+    // Leave the native fullscreen Space before hiding a secondary surface.
+    static bool setSecondaryFullscreen(SDL_Window* window, bool fullscreen);
+
     static QRect videoRect(const QSize& streamSize, const QSize& canvasSize);
 
     static PlankPresentationSlice sliceForOutput(

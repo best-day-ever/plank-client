@@ -8,6 +8,7 @@ class TestOutputTopology : public QObject
     Q_OBJECT
 
 private slots:
+    void presentationOutputCountDuringTransitions();
     void parsesQualificationVector();
     void roundTripsQualificationVector();
     void rejectsDuplicateIdentity();
@@ -31,6 +32,24 @@ private slots:
     void parsesNegotiatedMatchedModes();
     void rejectsUnsafeMatchedModes();
 };
+
+void TestOutputTopology::presentationOutputCountDuringTransitions()
+{
+    NvOutputTopology topology;
+    topology.outputs.resize(1);
+    QCOMPARE(topology.outputCountForLayout("physical"), 1);
+    QCOMPARE(topology.outputCountForLayout("fixed"), 1);
+    // Matching two Client displays must use the requested count even before
+    // the Host has replaced its previous single-output desktop.
+    QCOMPARE(topology.outputCountForLayout("dual-horizontal"), 2);
+    topology.outputs.resize(2);
+    QCOMPARE(topology.outputCountForLayout("physical"), 2);
+    QCOMPARE(topology.outputCountForLayout("fixed"), 2);
+    QCOMPARE(topology.outputCountForLayout("single"), 1);
+    topology.outputs.clear();
+    QCOMPARE(topology.outputCountForLayout("physical"), 0);
+    QCOMPARE(topology.outputCountForLayout("unresolved"), 0);
+}
 
 void TestOutputTopology::matchesLinuxRetinaSizes()
 {

@@ -1921,11 +1921,11 @@ bool Session::snapshotClientDisplays()
     // Remember multi-output capability even when the session starts windowed.
     // Fullscreen may be entered later without reconnecting; only the active
     // presentation layout, not display discovery, depends on that state.
-    m_UseMultiDisplayPresentation =
+    m_MultiDisplayPresentationAvailable =
             (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
              strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             m_ClientDisplays.size() == 2;
-    if (m_UseMultiDisplayPresentation) {
+    if (m_MultiDisplayPresentationAvailable) {
         const auto& left = m_ClientDisplays.at(0).logicalBounds;
         const auto& right = m_ClientDisplays.at(1).logicalBounds;
         const bool horizontal = left.x + left.w <= right.x;
@@ -1934,7 +1934,7 @@ bool Session::snapshotClientDisplays()
         if (!horizontal || !overlapsVertically) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Two-output presentation requires client monitors arranged left to right; using the target output only");
-            m_UseMultiDisplayPresentation = false;
+            m_MultiDisplayPresentationAvailable = false;
         }
     }
 
@@ -1971,12 +1971,12 @@ bool Session::snapshotClientDisplays()
         m_TargetDisplayId = m_ClientDisplays.first().displayId;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK client presentation: outputs=%lld canvas=%dx%d mode=%s",
+                "PLANK client presentation capability: outputs=%lld canvas=%dx%d mode=%s",
                 static_cast<long long>(
-                    m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1),
-                m_UseMultiDisplayPresentation ? canvasX : targetNativeSize.width(),
-                m_UseMultiDisplayPresentation ? canvasHeight : targetNativeSize.height(),
-                m_UseMultiDisplayPresentation ? "multi-output" : "single-output");
+                    m_MultiDisplayPresentationAvailable ? m_ClientDisplays.size() : 1),
+                m_MultiDisplayPresentationAvailable ? canvasX : targetNativeSize.width(),
+                m_MultiDisplayPresentationAvailable ? canvasHeight : targetNativeSize.height(),
+                m_MultiDisplayPresentationAvailable ? "multi-output" : "single-output");
     return true;
 }
 
@@ -2127,7 +2127,8 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
                     "Failed to set presentation fullscreen state: %s",
                     SDL_GetError());
     }
-    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+    if ((strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
+         strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             !SDL_SyncWindow(m_Window)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Timed out synchronizing presentation fullscreen state: %s",
@@ -2160,16 +2161,10 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
         }
     }
     for (SDL_Window* window : m_SecondaryWindows) {
-        if (fullscreen) {
-            if (!SDL_SetWindowFullscreen(window, m_FullScreenFlag)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Failed to set secondary presentation fullscreen state: %s",
-                            SDL_GetError());
-            }
-            SDL_ShowWindow(window);
-        }
-        else {
-            SDL_HideWindow(window);
+        if (!PlankPresentation::setSecondaryFullscreen(window, fullscreen)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to transition secondary presentation window: %s",
+                        SDL_GetError());
         }
     }
     rebuildPresentationLayout();
@@ -2367,6 +2362,16 @@ bool Session::configurePlankLaunchGeometry()
     if (m_Computer->plankAuthentication &&
             !configurePlankHostLayout()) {
         return false;
+    }
+
+    {
+        QReadLocker lock(&m_Computer->lock);
+        const int hostOutputs = m_Computer->outputTopology.outputCountForLayout(m_ResolvedHostLayout);
+        m_UseMultiDisplayPresentation = m_MultiDisplayPresentationAvailable && hostOutputs > 1;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK presentation selection: host-outputs=%d client-multi=%d selected-outputs=%d",
+                    hostOutputs, m_MultiDisplayPresentationAvailable,
+                    m_UseMultiDisplayPresentation ? 2 : 1);
     }
 
     const QSize resolution = configurePlankDisplayMode();
