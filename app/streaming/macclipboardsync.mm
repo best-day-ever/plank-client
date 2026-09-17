@@ -326,7 +326,10 @@ bool MacClipboardSync::applyPendingHostTextOnMainThread()
 {
     clearStoppedRemotePasteboardsOnMainThread();
     std::lock_guard<std::mutex> lock(m_StateMutex);
-    if (!m_Running || !m_PendingHostText.has_value() ||
+    // A queued Host update must not take the clipboard from another Mac app.
+    // Discard it instead of replaying stale text when stream focus returns.
+    if (!m_Running || !m_IsEnabled() || !m_HasStreamFocus() ||
+            !m_PendingHostText.has_value() ||
             m_PendingHostText->sessionEpoch != m_SessionEpoch) {
         m_PendingHostText.reset();
         return false;
