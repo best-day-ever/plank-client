@@ -245,6 +245,8 @@ SOURCES += \
     backend/systemproperties.cpp \
     wm.cpp
 
+macx: HEADERS += macquitbridge.h
+
 HEADERS += \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
