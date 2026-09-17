@@ -516,7 +516,7 @@ void TestOutputTopology::rejectsUnsupportedClientLayouts()
     };
     QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
                 unsupportedDisplay, layout, modes, &error));
-    QVERIFY(error.contains(QStringLiteral("not supported")));
+    QVERIFY(error.contains(QStringLiteral("not a qualified PLANK virtual mode")));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)
