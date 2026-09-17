@@ -5,6 +5,7 @@
 
 namespace MacWindow {
 int activeDisplayCount();
+bool hasKeyboardFocus(SDL_Window* window);
 bool fullscreenTopInset(Uint32 displayId, int* top);
 void logGeometry(SDL_Window* window);
 int unobscuredToolbarLeft(SDL_Window* window, int currentLeft, int toolbarWidth);

@@ -29,7 +29,7 @@
 #include <SDL3/SDL_main.h>
 
 #ifdef Q_OS_MACOS
-#include "macquitbridge.h"
+#include "macapplication.h"
 #endif
 
 #ifdef HAVE_FFMPEG
@@ -760,10 +760,10 @@ int main(int argc, char *argv[])
         SDL_SetHint("SDL_VIDEO_WAYLAND_MODE_SCALING", "aspect");
     }
 
-    QGuiApplication app(argc, argv);
-
 #ifdef Q_OS_MACOS
-    MacQuitBridge macQuitBridge(app);
+    MacApplication app(argc, argv);
+#else
+    QGuiApplication app(argc, argv);
 #endif
 
 #ifdef Q_OS_MACOS

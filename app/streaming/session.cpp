@@ -10,6 +10,9 @@
 #include "streaming/input/plankmousemotion.h"
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
+#ifdef Q_OS_MACOS
+#include "macapplication.h"
+#endif
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
 #include "streaming/macdisplaygeometry.h"
@@ -1777,6 +1780,9 @@ private:
 
     void run() override
     {
+#ifdef Q_OS_MACOS
+        if (!m_Session->m_ApplicationExitRequested.load())
+#endif
         emit m_Session->sessionFinished();
 
         // The video decoder must already be destroyed, since it could
@@ -3549,6 +3555,28 @@ public:
 
 void Session::exec(QWindow* qtWindow)
 {
+#ifdef Q_OS_MACOS
+    auto* application = static_cast<MacApplication*>(QCoreApplication::instance());
+    if (!application->beginSession()) {
+        emit readyForDeletion();
+        return;
+    }
+    const auto exitConnection = connect(application, &MacApplication::exitRequested,
+                                       this, [this] {
+        m_ApplicationExitRequested.store(true);
+        cancelConnectionStart();
+        m_ReconnectCancelled.store(true);
+        m_CanReconnect.store(false);
+    });
+    // sessionFinished precedes asynchronous transport cleanup. Only this
+    // later signal releases application ownership. Queue onto Qt's thread;
+    // the Session itself may already have been garbage-collected by QML.
+    connect(this, &Session::readyForDeletion, application,
+            [application, exitConnection] {
+        QObject::disconnect(exitConnection);
+        application->endSession();
+    }, Qt::QueuedConnection);
+#endif
     m_QtWindow = qtWindow;
 
     // Use a separate thread for the streaming session on X11 or Wayland
@@ -3601,7 +3629,18 @@ void Session::execInternal()
     //
     // NB: This initializes the SDL video subsystem, so it must be
     // called on the main thread.
-    if (!initialize()) {
+    const bool initialized = initialize();
+    if (!initialized
+#ifdef Q_OS_MACOS
+            || m_ApplicationExitRequested.load()
+#endif
+            ) {
+#ifdef Q_OS_MACOS
+        if (initialized) {
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        }
+        if (!m_ApplicationExitRequested.load())
+#endif
         emit sessionFinished();
         emit readyForDeletion();
         return;
@@ -4035,6 +4074,11 @@ void Session::execInternal()
     }
     SDL_Event event;
     for (;;) {
+#ifdef Q_OS_MACOS
+        if (m_ApplicationExitRequested.load()) {
+            goto DispatchDeferredCleanup;
+        }
+#endif
         const Uint64 now = SDL_GetTicks();
         const bool videoSilent = PlankHostRecovery::videoSilent(now, m_LastPlankVideoReceived.load());
         if (workerProbe != nullptr && workerProbe->isFinished()) {
@@ -4126,9 +4170,14 @@ void Session::execInternal()
                         m_Preferences->plankUnreachableTimeoutSeconds);
             reconnectDecisionDeadline = 0;
         }
-        const int eventWaitTimeout = m_Reconnecting.load() ? 50 :
+        int eventWaitTimeout = m_Reconnecting.load() ? 50 :
                     (m_PlankToolbar ?
                          m_PlankToolbar->eventWaitTimeout() : 1000);
+#ifdef Q_OS_MACOS
+        // Native Quit changes explicit session state, not the SDL event queue.
+        // Bound the wait even when a stalled Host produces no events.
+        eventWaitTimeout = std::min(eventWaitTimeout, 50);
+#endif
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
             if (reconnectThread != nullptr &&
                     reconnectThread->isFinished() &&
@@ -4141,6 +4190,11 @@ void Session::execInternal()
             }
         }
 
+#ifdef Q_OS_MACOS
+        if (m_ApplicationExitRequested.load()) {
+            goto DispatchDeferredCleanup;
+        }
+#endif
         const bool reconnectCompletion =
                 event.type == SDL_EVENT_USER &&
                 event.user.code == SDL_CODE_PLANK_REPLANK_COMPLETE;
