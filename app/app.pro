@@ -458,7 +458,7 @@ macx {
 
     DEFINES += HAVE_MAC_RAW_WACOM
     SOURCES += streaming/input/macrawwacom.cpp
-    HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h
+    HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h
     LIBS += -framework IOKit -framework CoreFoundation
 
     SOURCES += \

@@ -1,5 +1,7 @@
 #include <QtTest>
+#include "macrawwacomasync.h"
 #include "macrawwacomlogic.h"
+#include <memory>
 
 class TestMacRawWacom : public QObject {
     Q_OBJECT
@@ -7,6 +9,7 @@ private slots:
     void frames();
     void malformed();
     void reportTypesAndIds();
+    void stalledReportAcrossFocusReconnectAndQuit();
 };
 
 static QByteArray frame(unsigned type, unsigned size)
@@ -61,6 +64,56 @@ void TestMacRawWacom::reportTypesAndIds()
     QCOMPARE(MacWacomWire::ioReportType(3), -1);
     QCOMPARE(MacWacomWire::reportPrefix(0), std::size_t(1));
     QCOMPARE(MacWacomWire::reportPrefix(16), std::size_t(0));
+}
+void TestMacRawWacom::stalledReportAcrossFocusReconnectAndQuit()
+{
+    auto results = std::make_shared<MacWacomAsyncResults>();
+    std::weak_ptr<MacWacomAsyncResults> callbackTarget = results;
+    MacWacomReleaseBarrier release;
+    const auto stalledFocusEpoch = results->epoch();
+
+    // A physical report callback has not arrived. Focus loss must advance the
+    // lease without waiting for it, and a later completion cannot reach Host.
+    const auto focusTicket = release.request();
+    QVERIFY(!release.wait(focusTicket, std::chrono::milliseconds(10)));
+    QVERIFY(!release.idle());
+    results->invalidate();
+    release.complete(focusTicket);
+    QVERIFY(release.wait(focusTicket, std::chrono::milliseconds(0)));
+    MacWacomAsyncResults::Completion lateFocus{};
+    lateFocus.epoch = stalledFocusEpoch;
+    lateFocus.transaction = 1;
+    results->publish(std::move(lateFocus));
+    QVERIFY(results->take().empty());
+
+    const auto stalledReconnectEpoch = results->epoch();
+    const auto reconnectTicket = release.request();
+    QVERIFY(!release.wait(reconnectTicket, std::chrono::milliseconds(10)));
+    results->invalidate();
+    release.complete(reconnectTicket);
+    MacWacomAsyncResults::Completion lateReconnect{};
+    lateReconnect.epoch = stalledReconnectEpoch;
+    lateReconnect.transaction = 2;
+    results->publish(std::move(lateReconnect));
+    QVERIFY(results->take().empty());
+
+    MacWacomAsyncResults::Completion current{};
+    current.epoch = results->epoch();
+    current.transaction = 3;
+    results->publish(std::move(current));
+    const auto ready = results->take();
+    QCOMPARE(ready.size(), std::size_t(1));
+    QCOMPARE(ready.front().transaction, 3U);
+
+    // Quit can destroy the mailbox while the OS still owns a request context.
+    // Its eventual callback holds only a weak reference and must do nothing.
+    const auto quitTicket = release.request();
+    QVERIFY(!release.wait(quitTicket, std::chrono::milliseconds(10)));
+    results.reset();
+    QVERIFY(callbackTarget.expired());
+    if (auto target = callbackTarget.lock()) QFAIL("Late callback reached a dead Client");
+    release.markExited();
+    QVERIFY(release.waitExited(std::chrono::milliseconds(0)));
 }
 QTEST_APPLESS_MAIN(TestMacRawWacom)
 #include "test_macrawwacom.moc"

@@ -1,4 +1,5 @@
 #include "macrawwacom.h"
+#include "macrawwacomasync.h"
 #include "macrawwacomlogic.h"
 #include "linuxrawwacom.h" // shared device-family policy; no Linux dependencies
 #include <Limelight.h>
@@ -14,6 +15,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -21,6 +23,12 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 std::atomic<unsigned> nextGeneration{0};
+// A driver that never invokes a timed-out callback may retain its request
+// context until process exit. Bound that storage instead of freeing memory a
+// late callback could still touch.
+std::atomic<unsigned> outstandingReports{0};
+constexpr unsigned MaxOutstandingReports = 64;
+constexpr CFTimeInterval ReportTimeoutMilliseconds = 1000;
 long number(IOHIDDeviceRef device, CFStringRef key)
 {
     CFTypeRef value = IOHIDDeviceGetProperty(device, key);
@@ -78,36 +86,64 @@ int errorNumber(IOReturn result)
 }
 }
 
-class MacRawWacomInput::Impl
+class MacRawWacomInput::Impl : public std::enable_shared_from_this<Impl>
 {
+    struct ActivityGuard {
+        explicit ActivityGuard(std::function<void()> callback) : callback(std::move(callback)) {}
+        std::mutex mutex;
+        bool enabled = true;
+        std::function<void()> callback;
+    };
 public:
-    explicit Impl(std::function<void()> activity) : activity(std::move(activity))
+    explicit Impl(std::function<void()> activity)
+        : activity(std::make_shared<ActivityGuard>(std::move(activity)))
     {
         // Constructor runs on the Client UI thread. Only the normal OS prompt
         // may grant access; never edit privacy databases or run as root.
         if (IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeUnknown)
             IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
-        worker = std::thread([this] { run(); });
+    }
+    void start()
+    {
+        worker = std::thread([self = shared_from_this()] { self->run(); });
     }
     ~Impl()
     {
+        // The worker can own the last reference after a timed-out shutdown.
+        if (worker.joinable()) worker.detach();
+    }
+    void shutdown()
+    {
+        {
+            std::lock_guard<std::mutex> lock(activity->mutex);
+            activity->enabled = false;
+            activity->callback = nullptr;
+        }
         active = false;
-        barrier();
+        const bool released = barrier();
+        shutdownRequested = true;
         stopping = true;
-        worker.join();
+        const bool exited = releaseBarrier.waitExited(std::chrono::seconds(2));
+        if (worker.joinable()) {
+            if (exited) worker.join();
+            else worker.detach(); // self-owned state remains until the worker exits
+        }
+        if (!released || !exited)
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Mac Wacom shutdown exceeded release deadline");
     }
     void setActive(bool value)
     {
-        active = value;
-        if (!value) barrier();
+        if (!value) { active = false; barrier(); }
+        else if (releaseBarrier.idle() && !stopping) active = true;
     }
     void beginReconnect() { reconnecting = true; barrier(); }
-    void finishReconnect() { barrier(); reconnecting = false; }
+    void finishReconnect() { if (barrier()) reconnecting = false; }
     void control(const unsigned char* data, unsigned length)
     {
         MacWacomWire::Control parsed;
         if (!MacWacomWire::parse(data, length, parsed)) return;
         std::lock_guard<std::mutex> lock(mutex);
+        if (stopping) return;
         if (queue.size() >= 128) { overflow = true; return; }
         queue.emplace_back(data, data + length);
     }
@@ -115,17 +151,32 @@ private:
     struct Interface {
         Impl* owner;
         std::uint16_t index;
-        IOHIDDeviceRef device;
+        IOHIDDeviceRef device = nullptr;
         std::array<unsigned char, PLANK_RAW_HID_MAX_REPORT_SIZE> buffer{};
         std::array<bool, 256> activityReports{};
         std::vector<unsigned char> descriptor;
     };
-    std::function<void()> activity;
-    std::atomic<bool> active{false}, reconnecting{false}, stopping{false}, overflow{false};
+    struct ReportRequest {
+        std::weak_ptr<MacWacomAsyncResults> results;
+        MacWacomAsyncResults::Completion completion;
+        IOHIDDeviceRef device;
+        std::array<unsigned char, PLANK_RAW_HID_MAX_REPORT_SIZE> buffer{};
+        CFIndex length = 0;
+        std::size_t prefix = 0;
+
+        ~ReportRequest()
+        {
+            if (device) CFRelease(device);
+            --outstandingReports;
+        }
+    };
+    std::shared_ptr<ActivityGuard> activity;
+    std::shared_ptr<MacWacomAsyncResults> reportResults = std::make_shared<MacWacomAsyncResults>();
+    MacWacomReleaseBarrier releaseBarrier;
+    std::atomic<bool> active{false}, reconnecting{false}, stopping{false},
+        shutdownRequested{false}, overflow{false};
     std::mutex mutex;
-    std::condition_variable completed;
     std::deque<std::vector<unsigned char>> queue;
-    std::uint64_t barrierRequested = 0, barrierCompleted = 0;
     std::thread worker;
     std::vector<std::unique_ptr<Interface>> interfaces;
     std::uint16_t generation = 0;
@@ -133,16 +184,18 @@ private:
     bool pending = false, attached = false, ioFailed = false;
     Clock::time_point retry{}, deadline{};
 
-    void barrier()
+    bool barrier()
     {
-        std::unique_lock<std::mutex> lock(mutex);
-        const auto ticket = ++barrierRequested;
-        completed.wait(lock, [this, ticket] { return barrierCompleted >= ticket; });
+        const auto ticket = releaseBarrier.request();
+        if (releaseBarrier.wait(ticket, std::chrono::seconds(2))) return true;
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Mac Wacom release barrier timed out");
+        return false;
     }
     bool send(std::uint16_t type, std::uint16_t index, std::uint32_t transaction,
               const unsigned char* payload = nullptr, std::size_t size = 0)
     {
-        if (size > PLANK_RAW_HID_MAX_PAYLOAD_SIZE || (size && !payload)) return false;
+        if (shutdownRequested || size > PLANK_RAW_HID_MAX_PAYLOAD_SIZE ||
+            (size && !payload)) return false;
         PLANK_RAW_HID_WIRE_HEADER h{};
         h.magic = qToLittleEndian(std::uint32_t(PLANK_RAW_HID_WIRE_MAGIC));
         h.version = qToLittleEndian(std::uint16_t(PLANK_RAW_HID_WIRE_VERSION));
@@ -167,15 +220,38 @@ private:
             self.ioFailed = true; return;
         }
         // Battery/status packets must not reclaim the cursor from a real mouse.
-        if (reportId < interface.activityReports.size() && interface.activityReports[reportId] && self.activity)
-            self.activity();
+        if (reportId < interface.activityReports.size() && interface.activityReports[reportId]) {
+            std::lock_guard<std::mutex> lock(self.activity->mutex);
+            if (self.activity->enabled && self.activity->callback) self.activity->callback();
+        }
     }
     static void removed(void* context, IOReturn, void*)
     {
         static_cast<Interface*>(context)->owner->ioFailed = true;
     }
+    static void reportCompleted(void* context, IOReturn result, void*, IOHIDReportType,
+                                std::uint32_t, unsigned char* bytes, CFIndex size)
+    {
+        // The callback owns this request. It retains the device and buffer
+        // even if the Client has already closed the physical lease.
+        std::unique_ptr<ReportRequest> request(static_cast<ReportRequest*>(context));
+        auto results = request->results.lock();
+        if (!results) return;
+        auto completion = std::move(request->completion);
+        completion.result = result;
+        if (completion.type == PLANK_RAW_HID_GET_REPORT && result == kIOReturnSuccess) {
+            if (size <= 0 || std::size_t(size) > request->buffer.size() - request->prefix ||
+                !bytes) completion.result = kIOReturnOverrun;
+            else {
+                if (request->prefix) completion.report.push_back(0);
+                completion.report.insert(completion.report.end(), bytes, bytes + size);
+            }
+        }
+        results->publish(std::move(completion));
+    }
     void release(bool destructive)
     {
+        if (pending || attached || !interfaces.empty()) reportResults->invalidate();
         if (pending || attached)
             send(destructive ? PLANK_RAW_HID_DETACH : PLANK_RAW_HID_SUSPEND, 0, 0);
         pending = attached = false;
@@ -318,58 +394,95 @@ private:
         }
         if (c.interfaceId >= interfaces.size()) return;
         auto& i = *interfaces[c.interfaceId];
+        MacWacomAsyncResults::Completion completion;
+        completion.epoch = reportResults->epoch();
+        completion.type = c.type;
+        completion.interfaceId = c.interfaceId;
+        completion.generation = c.generation;
+        completion.transaction = c.transaction;
         IOReturn result = kIOReturnBadArgument;
-        std::vector<unsigned char> reply(sizeof(std::int32_t));
+        int type = -1;
+        std::size_t prefix = 0;
         if (c.type == PLANK_RAW_HID_GET_REPORT) {
-            std::array<unsigned char, PLANK_RAW_HID_MAX_REPORT_SIZE> report{};
-            const auto prefix = MacWacomWire::reportPrefix(payload[0]);
-            report[0] = payload[0];
-            CFIndex length = report.size() - prefix;
-            const int type = MacWacomWire::ioReportType(payload[1]);
-            if (type >= 0) result = IOHIDDeviceGetReport(i.device, static_cast<IOHIDReportType>(type),
-                payload[0], report.data() + prefix, &length);
-            if (result == kIOReturnSuccess) {
-                if (length < 0 || std::size_t(length) > report.size() - prefix) result = kIOReturnOverrun;
-                else reply.insert(reply.end(), report.data(), report.data() + length + prefix);
-            }
+            type = MacWacomWire::ioReportType(payload[1]);
+            prefix = MacWacomWire::reportPrefix(payload[0]);
         } else {
-            const int type = MacWacomWire::ioReportType(payload[0]);
-            const auto prefix = MacWacomWire::reportPrefix(payload[1]);
-            if (type >= 0 && c.size > 1 + prefix)
-                result = IOHIDDeviceSetReport(i.device, static_cast<IOHIDReportType>(type), payload[1],
-                    payload + 1 + prefix, c.size - 1 - prefix);
+            type = MacWacomWire::ioReportType(payload[0]);
+            prefix = MacWacomWire::reportPrefix(payload[1]);
         }
+        if (type >= 0 && (c.type == PLANK_RAW_HID_GET_REPORT || c.size > 1 + prefix)) {
+            unsigned pendingCount = outstandingReports.load();
+            while (pendingCount < MaxOutstandingReports &&
+                   !outstandingReports.compare_exchange_weak(pendingCount, pendingCount + 1)) {}
+            if (pendingCount < MaxOutstandingReports) {
+                auto* request = new ReportRequest;
+                request->results = reportResults;
+                request->completion = completion;
+                CFRetain(i.device);
+                request->device = i.device;
+                request->prefix = prefix;
+                if (c.type == PLANK_RAW_HID_GET_REPORT) {
+                    request->buffer[0] = payload[0];
+                    request->length = request->buffer.size() - prefix;
+                    result = IOHIDDeviceGetReportWithCallback(i.device,
+                        static_cast<IOHIDReportType>(type), payload[0],
+                        request->buffer.data() + prefix, &request->length,
+                        ReportTimeoutMilliseconds, reportCompleted, request);
+                } else {
+                    request->length = c.size - 1 - prefix;
+                    std::memcpy(request->buffer.data(), payload + 1 + prefix, request->length);
+                    result = IOHIDDeviceSetReportWithCallback(i.device,
+                        static_cast<IOHIDReportType>(type), payload[1],
+                        request->buffer.data(), request->length,
+                        ReportTimeoutMilliseconds, reportCompleted, request);
+                }
+                if (result == kIOReturnSuccess) return; // callback now owns request
+                delete request;
+            } else result = kIOReturnBusy;
+        }
+        completion.result = result;
+        completeReport(completion);
+    }
+    void completeReport(const MacWacomAsyncResults::Completion& completion)
+    {
+        if (!active || reconnecting || interfaces.empty() ||
+            completion.generation != generation) return;
+        const auto result = static_cast<IOReturn>(completion.result);
+        std::vector<unsigned char> reply(sizeof(std::int32_t));
         const auto error = qToLittleEndian(std::int32_t(errorNumber(result)));
         std::memcpy(reply.data(), &error, sizeof(error));
-        if (c.type != PLANK_RAW_HID_OUTPUT)
-            send(c.type == PLANK_RAW_HID_GET_REPORT ? PLANK_RAW_HID_GET_REPORT_REPLY : PLANK_RAW_HID_SET_REPORT_REPLY,
-                 c.interfaceId, c.transaction, reply.data(), reply.size());
+        if (result == kIOReturnSuccess && completion.type == PLANK_RAW_HID_GET_REPORT)
+            reply.insert(reply.end(), completion.report.begin(), completion.report.end());
+        if (completion.type != PLANK_RAW_HID_OUTPUT)
+            send(completion.type == PLANK_RAW_HID_GET_REPORT ? PLANK_RAW_HID_GET_REPORT_REPLY : PLANK_RAW_HID_SET_REPORT_REPLY,
+                 completion.interfaceId, completion.transaction, reply.data(), reply.size());
         if (result != kIOReturnSuccess)
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Mac Wacom report I/O failed: interface %u type %u result 0x%x",
-                        unsigned(c.interfaceId), unsigned(c.type), unsigned(result));
+                        unsigned(completion.interfaceId), unsigned(completion.type), unsigned(result));
         if (errorNumber(result) == ENODEV) ioFailed = true;
     }
     void run()
     {
         while (!stopping) {
             std::deque<std::vector<unsigned char>> controls;
-            std::uint64_t barrierTicket;
             {
                 std::lock_guard<std::mutex> lock(mutex);
-                barrierTicket = barrierRequested;
                 controls.swap(queue);
             }
-            if (barrierTicket != barrierCompleted) {
+            const auto barrierTicket = releaseBarrier.pendingTicket();
+            if (barrierTicket) {
                 release(false);
                 controls.clear();
-                std::lock_guard<std::mutex> lock(mutex);
-                barrierCompleted = barrierTicket;
-                completed.notify_all();
+                releaseBarrier.complete(barrierTicket);
             }
             if (!active || reconnecting) release(false);
             else {
                 if (overflow.exchange(false)) { release(true); retry = Clock::now() + std::chrono::seconds(1); }
-                for (const auto& bytes : controls) process(bytes);
+                for (const auto& bytes : controls) {
+                    if (!active || reconnecting) break;
+                    process(bytes);
+                }
+                for (const auto& completion : reportResults->take()) completeReport(completion);
                 if (ioFailed) release(true);
                 if (pending && Clock::now() >= deadline) {
                     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Mac Wacom attachment timed out");
@@ -384,11 +497,13 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         release(false);
+        releaseBarrier.markExited();
     }
 };
 
-MacRawWacomInput::MacRawWacomInput(std::function<void()> activity) : m_Impl(new Impl(std::move(activity))) {}
-MacRawWacomInput::~MacRawWacomInput() = default;
+MacRawWacomInput::MacRawWacomInput(std::function<void()> activity)
+    : m_Impl(std::make_shared<Impl>(std::move(activity))) { m_Impl->start(); }
+MacRawWacomInput::~MacRawWacomInput() { m_Impl->shutdown(); }
 void MacRawWacomInput::setActive(bool active) { m_Impl->setActive(active); }
 void MacRawWacomInput::beginReconnect() { m_Impl->beginReconnect(); }
 void MacRawWacomInput::finishReconnect() { m_Impl->finishReconnect(); }
