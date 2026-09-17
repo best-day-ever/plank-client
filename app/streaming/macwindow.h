@@ -4,6 +4,7 @@
 #include <cstdint>
 
 namespace MacWindow {
+int activeDisplayCount();
 bool fullscreenTopInset(Uint32 displayId, int* top);
 void logGeometry(SDL_Window* window);
 int unobscuredToolbarLeft(SDL_Window* window, int currentLeft, int toolbarWidth);

@@ -1492,6 +1492,18 @@ void Session::clearPlankReconnectCredentials()
 
 bool Session::initialize()
 {
+#ifdef Q_OS_DARWIN
+    // SDL 3.4.2 caches allow_spaces in Cocoa_VideoInit, so use CoreGraphics
+    // before SDL video initialization. Setting the hint before window creation
+    // alone is too late. Match Client and the presenter share this policy.
+    const int macDisplayCount = MacWindow::activeDisplayCount();
+    if (macDisplayCount <= 0) {
+        emit displayLaunchError(tr("Unable to discover active Mac displays."));
+        return false;
+    }
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
+                MacDisplayGeometry::useNativeFullscreen(macDisplayCount) ? "1" : "0");
+#endif
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
                 m_PlankVideoProfile,
                 m_PlankCaptureSource)) {
@@ -1524,11 +1536,11 @@ bool Session::initialize()
     }
 
 #ifdef Q_OS_DARWIN
-    // Single-display native Spaces use the matched camera-safe viewport.
-    // Multiple connected displays retain coordinated desktop fullscreen and
-    // full-panel matching, including sessions initially opened windowed.
-    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
-                MacDisplayGeometry::useNativeFullscreen(m_ClientDisplays.size()) ? "1" : "0");
+    if (m_ClientDisplays.size() != macDisplayCount) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        emit displayLaunchError(tr("The Mac display layout changed during setup. Please connect again."));
+        return false;
+    }
 #endif
 
     LiInitializeStreamConfiguration(&m_StreamConfig);

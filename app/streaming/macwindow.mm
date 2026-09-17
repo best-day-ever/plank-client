@@ -77,6 +77,13 @@ void MacWindow::hideTabletCursor(SDL_Window* window)
     @autoreleasepool { tabletView(window, false).hidden = YES; }
 }
 
+int MacWindow::activeDisplayCount()
+{
+    uint32_t count = 0;
+    return CGGetActiveDisplayList(0, nullptr, &count) == kCGErrorSuccess ?
+                static_cast<int>(count) : 0;
+}
+
 bool MacWindow::fullscreenTopInset(Uint32 displayId, int* top)
 {
     @autoreleasepool {
