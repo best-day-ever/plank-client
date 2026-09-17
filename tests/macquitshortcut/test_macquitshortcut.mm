@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #include <QtTest>
+#include <SDL3/SDL.h>
 #include "../../app/streaming/macquitshortcut.h"
 
 // Harmless target: exercise the real native Quit selector without terminating
