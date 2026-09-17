@@ -54,6 +54,7 @@ private slots:
     void resetsGenerationAndRejectsStaleEventsOnReconnect();
     void suppressesRepeatedHostText();
     void sendsOnlyWithStreamFocus();
+    void backgroundHostOfferPreservesLocalCopy();
     void retriesAfterTransportSendFailure();
     void resendsTextAfterHostClipboardChanges();
     void rejectsHostOfferWhenEventQueueFails();
@@ -464,3 +465,33 @@ void TestMacClipboardSync::sessionReconnectPollingWiring()
 QTEST_MAIN(TestMacClipboardSync)
 
 #include "test_macclipboardsync.moc"
+
+void TestMacClipboardSync::backgroundHostOfferPreservesLocalCopy()
+{
+    bool focused = true;
+    MacClipboardSync sync(
+                [](const std::uint8_t*, std::size_t) { return true; },
+                [&] { return focused; },
+                [] { return true; },
+                [] { return true; });
+    sync.start();
+    auto initial = oneFrame("old host text", 1);
+    QVERIFY(sync.handleHostOffer(initial.data(), initial.size()));
+    QVERIFY(sync.applyPendingHostTextOnMainThread());
+
+    // A Host offer is queued before switching to another Mac app.
+    auto delayed = oneFrame("old host text", 2);
+    QVERIFY(sync.handleHostOffer(delayed.data(), delayed.size()));
+    focused = false;
+    setPasteboardText("new copy between Mac apps");
+    QVERIFY(!sync.applyPendingHostTextOnMainThread());
+    QCOMPARE(QString::fromNSString([plankClipboardTestPasteboard()
+                  stringForType:NSPasteboardTypeString]),
+             QStringLiteral("new copy between Mac apps"));
+    // Returning to the stream must not replay the discarded background offer.
+    focused = true;
+    QVERIFY(!sync.applyPendingHostTextOnMainThread());
+    QCOMPARE(QString::fromNSString([plankClipboardTestPasteboard()
+                  stringForType:NSPasteboardTypeString]),
+             QStringLiteral("new copy between Mac apps"));
+}
