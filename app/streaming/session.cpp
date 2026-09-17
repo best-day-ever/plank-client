@@ -2367,7 +2367,11 @@ bool Session::configurePlankLaunchGeometry()
     {
         QReadLocker lock(&m_Computer->lock);
         const int hostOutputs = m_Computer->outputTopology.outputCountForLayout(m_ResolvedHostLayout);
-        m_UseMultiDisplayPresentation = m_MultiDisplayPresentationAvailable && hostOutputs > 1;
+        m_UseMultiDisplayPresentation = m_MultiDisplayPresentationAvailable;
+#ifdef Q_OS_DARWIN
+        // The Mac single-output policy is qualified independently of Wayland.
+        m_UseMultiDisplayPresentation = m_UseMultiDisplayPresentation && hostOutputs > 1;
+#endif
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "PLANK presentation selection: host-outputs=%d client-multi=%d selected-outputs=%d",
                     hostOutputs, m_MultiDisplayPresentationAvailable,
