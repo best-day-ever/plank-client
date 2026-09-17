@@ -545,7 +545,7 @@ void TestOutputTopology::rejectsUnsupportedClientLayouts()
     };
     QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
                 unsupportedDisplay, layout, modes, &error));
-    QVERIFY(error.contains(QStringLiteral("not a qualified")));
+    QVERIFY(error.contains(QStringLiteral("not supported")));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)
