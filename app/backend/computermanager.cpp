@@ -1025,7 +1025,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString hostLayout, QString virtualMode1,
                                          QString virtualMode2,
                                          int videoProfile, int captureSource,
-                                         const QVariantList& profileBitrates)
+                                         const QVariantList& profileBitrates, int retinaSize)
 {
     NvAddress manualAddress;
     QVector<int> profileBitratesKbps;
@@ -1033,7 +1033,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     if (captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayout != NvOutputTopology::MatchClientHostLayout) {
         hostLayout = QStringLiteral("fixed");
     }
-    if (computer == nullptr || nickname.isEmpty() ||
+    if (computer == nullptr || nickname.isEmpty() || retinaSize < 0 || retinaSize > 1 ||
             !StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
             !parseProfileBitrates(profileBitrates, false,
@@ -1086,7 +1086,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                            hostLayout,
                                            virtualMode1, virtualMode2,
                                            videoProfile, captureSource,
-                                           profileBitratesKbps);
+                                           profileBitratesKbps, retinaSize);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -1107,7 +1107,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                        hostLayout,
                                        virtualMode1, virtualMode2, videoProfile,
                                        captureSource,
-                                       profileBitratesKbps);
+                                       profileBitratesKbps, retinaSize);
     }
 
     handleComputerStateChanged(computer);

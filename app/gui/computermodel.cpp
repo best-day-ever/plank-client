@@ -127,6 +127,14 @@ Session* ComputerModel::createSessionForPlankDesktop(int computerIndex)
     return nullptr;
 }
 
+int ComputerModel::plankRetinaSizeChoice(int computerIndex) const
+{
+    Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
+    NvComputer* computer = m_Computers[computerIndex];
+    QReadLocker lock(&computer->lock);
+    return computer->plankRetinaSize;
+}
+
 int ComputerModel::plankScalingChoice(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
@@ -219,7 +227,7 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                          int virtualMode1Choice,
                                          int virtualMode2Choice,
                                          int videoProfile, int captureSource,
-                                         const QVariantList& profileBitratesKbps)
+                                         const QVariantList& profileBitratesKbps, int retinaSize)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         return false;
@@ -244,7 +252,7 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                                   hostLayout,
                                                   virtualMode1, virtualMode2,
                                                   videoProfile, captureSource,
-                                                  profileBitratesKbps);
+                                                  profileBitratesKbps, retinaSize);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

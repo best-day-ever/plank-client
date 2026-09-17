@@ -251,6 +251,7 @@ CenteredGridView {
                         editBookmarkDialog.pcIndex = index
                         editBookmarkDialog.originalAddress = model.address
                         editBookmarkDialog.originalNickname = model.name
+                        editBookmarkDialog.retinaSizeIndex = computerModel.plankRetinaSizeChoice(index)
                         editBookmarkDialog.scalingIndex =
                                 computerModel.plankScalingChoice(index)
                         editBookmarkDialog.hostLayoutIndex =
@@ -399,6 +400,7 @@ CenteredGridView {
         property int pcIndex: -1
         property string originalAddress: ""
         property string originalNickname: ""
+        property int retinaSizeIndex: 0
         property int scalingIndex: 1
         property int hostLayoutIndex: 0
         property int hostDisplayPolicy: -1
@@ -471,6 +473,7 @@ CenteredGridView {
             editAddressText.text = originalAddress
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
+            editRetinaSize.currentIndex = retinaSizeIndex
             hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
             editCaptureSource.selectCaptureSource(originalCaptureSource)
             editHostLayout.currentIndex = hostLayoutIndex
@@ -516,7 +519,7 @@ CenteredGridView {
                                                     editEncodingProfile.model.get(
                                                         editEncodingProfile.currentIndex).val,
                                                     editCaptureSource.captureSource,
-                                                    profileBitratesKbps)) {
+                                                    profileBitratesKbps, editRetinaSize.currentIndex)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.open()
             }
@@ -671,6 +674,27 @@ CenteredGridView {
             }
 
             Label {
+                visible: editRetinaSize.visible
+                text: qsTr("Retina size")
+                font.bold: true
+            }
+            PlankComboBox {
+                id: editRetinaSize
+                Layout.fillWidth: true
+                visible: Qt.platform.os === "osx" && editCaptureSource.captureSource !== 2 && editHostLayout.currentIndex === 0
+                model: [qsTr("macOS desktop size"), qsTr("Retina pixel detail")]
+            }
+            Label {
+                visible: editRetinaSize.visible
+                Layout.fillWidth: true
+                text: editRetinaSize.currentIndex === 0 ?
+                    qsTr("Matches your macOS workspace size. Text is larger on Retina screens, with some loss of sharpness.") :
+                    qsTr("Matches current Retina pixels. Text is smaller on Linux desktops without per-display UI scaling.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            Label {
                 Layout.fillWidth: true
                 visible: editCaptureSource.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
                 text: qsTr("This headless workstation does not provide physical displays.")
@@ -679,12 +703,14 @@ CenteredGridView {
             }
 
             Label {
+                visible: editCaptureSource.captureSource === 2 || editHostLayout.currentIndex >= 2
                 text: editCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
                 opacity: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2) ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode1
+                visible: editCaptureSource.captureSource === 2 || editHostLayout.currentIndex >= 2
                 Layout.fillWidth: true
                 enabled: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2)
                 model: editBookmarkDialog.virtualModeChoices
@@ -697,14 +723,14 @@ CenteredGridView {
             }
 
             Label {
-                visible: editCaptureSource.captureSource !== 2
+                visible: editCaptureSource.captureSource !== 2 && editHostLayout.currentIndex === 3
                 text: qsTr("Virtual display 2 resolution")
                 font.bold: true
                 opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode2
-                visible: editCaptureSource.captureSource !== 2
+                visible: editCaptureSource.captureSource !== 2 && editHostLayout.currentIndex === 3
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
                 model: editBookmarkDialog.virtualModeChoices

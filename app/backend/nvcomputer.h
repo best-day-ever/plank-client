@@ -55,7 +55,7 @@ public:
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
                          int videoProfile, int captureSource,
-                         const QVector<int>& profileBitratesKbps);
+                         const QVector<int>& profileBitratesKbps, int retinaSize = 0);
 
     bool
     update(const NvComputer& that, NvAddress expectedAddress = NvAddress());
@@ -130,6 +130,7 @@ public:
     QString uuid;
     QVector<NvApp> appList;
     QString plankScalingMode;
+    int plankRetinaSize = 0; // 0: logical desktop, 1: current backing pixels (Linux Match client).
     QString plankHostLayout;
     QString plankVirtualMode1;
     QString plankVirtualMode2;

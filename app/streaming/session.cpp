@@ -1855,10 +1855,15 @@ bool Session::snapshotClientDisplays()
     m_ClientDisplays.clear();
 #ifdef Q_OS_DARWIN
     bool matchMacDesktop;
+    bool matchLinuxDesktop;
+    bool retinaDesktopSize;
     {
         QReadLocker lock(&m_Computer->lock);
         matchMacDesktop = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
             m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout;
+        matchLinuxDesktop = m_PlankCaptureSource != StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
+            m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout;
+        retinaDesktopSize = m_Computer->plankRetinaSize == 0;
     }
 #endif
     const int targetIndex = getTargetDisplayIndex();
@@ -1881,18 +1886,26 @@ bool Session::snapshotClientDisplays()
         }
         snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
 #ifdef Q_OS_DARWIN
-        if (matchMacDesktop) {
+        if (matchMacDesktop || matchLinuxDesktop) {
             SDL_DisplayMode currentMode;
             SDL_Rect matchedBounds;
             if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
-                    &currentMode, &matchedBounds, m_IsFullScreen &&
+                    &currentMode, &matchedBounds, (matchLinuxDesktop || m_IsFullScreen) &&
                     MacDisplayGeometry::useNativeFullscreen(displayCount))) return false;
             snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
                                              matchedBounds.w, matchedBounds.h);
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
             // Presentation tiles must share the matched backing-pixel canvas,
             // not mix differently scaled panel-native pixel dimensions.
-            snapshot.nativeSize = snapshot.macBackingSize;
+            snapshot.nativeSize = matchLinuxDesktop ? NvOutputTopology::linuxMatchedDisplaySize(
+                {snapshot.macMatchedBounds, snapshot.nativeSize, snapshot.macBackingSize}, retinaDesktopSize) :
+                snapshot.macBackingSize;
+            if (!snapshot.nativeSize.isValid()) return false;
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK matched output %u: workspace=%dx%d backing=%dx%d requested=%dx%d Retina-size=%s",
+                snapshot.displayId, matchedBounds.w, matchedBounds.h,
+                currentMode.w, currentMode.h, snapshot.nativeSize.width(), snapshot.nativeSize.height(),
+                retinaDesktopSize ? "desktop" : "pixels");
         }
 #endif
         m_ClientDisplays.append(snapshot);
@@ -2178,6 +2191,7 @@ bool Session::configurePlankHostLayout()
     QSize authenticatedDesktopSize;
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
+    bool matchedModes = false;
     {
         QReadLocker lock(&m_Computer->lock);
         layoutPolicy = m_Computer->plankHostLayout;
@@ -2187,6 +2201,8 @@ bool Session::configurePlankHostLayout()
         authenticatedDesktopSize = QSize(m_Computer->outputTopology.desktopWidth,
                                          m_Computer->outputTopology.desktopHeight);
         authenticatedLogicalSize = m_Computer->outputTopology.captureLogicalBounds.size();
+        matchedModes = m_Computer->outputTopology.startupLayoutKind == NvOutputTopology::PhysicalHostLayout &&
+            (m_Computer->outputTopology.featureFlags & NvOutputTopology::MatchedDisplayModesFeature);
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
         hostRejectsRequestedLayout = hostPolicyKnown &&
                 !m_Computer->outputTopology.allowsBookmarkHostLayout(layoutPolicy);
@@ -2232,7 +2248,7 @@ bool Session::configurePlankHostLayout()
             m_ResolvedHostLayout = QStringLiteral("fixed");
         }
         else if (!NvOutputTopology::resolveClientDisplayLayout(
-                    displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error)) {
+                    displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, matchedModes)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
             emit displayLaunchError(error);
             return false;
@@ -2311,7 +2327,7 @@ QSize Session::configurePlankDisplayMode()
     if (m_ResolvedHostLayout != NvOutputTopology::PhysicalHostLayout &&
             m_ResolvedHostLayout != QStringLiteral("fixed")) {
         nativeCanvasResolution = NvOutputTopology::virtualCanvasSize(
-                    m_ResolvedHostLayout, m_ResolvedVirtualModes);
+                    m_ResolvedHostLayout, m_ResolvedVirtualModes, true);
     }
 
     QSize selectedResolution;

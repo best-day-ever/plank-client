@@ -70,7 +70,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
                                       QString hostLayout, QString virtualMode1,
                                       QString virtualMode2,
                                       int videoProfile, int captureSource,
-                                      const QVector<int>& profileBitratesKbps)
+                                      const QVector<int>& profileBitratesKbps, int retinaSize)
 {
     QWriteLocker writeLocker(&lock);
     Q_ASSERT(manualBookmark);
@@ -104,6 +104,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     name = nickname;
     hasCustomName = true;
     plankScalingMode = scalingMode;
+    plankRetinaSize = retinaSize;
     plankHostLayout = hostLayout;
     plankVirtualMode1 = virtualMode1;
     plankVirtualMode2 = virtualMode2;
@@ -127,6 +128,7 @@ NvComputer::NvComputer(QSettings& settings)
                                   settings.value(SER_IPV6PORT, QVariant(defaultPort)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(defaultPort)).toUInt());
+    this->plankRetinaSize = settings.value("plank-retina-size", 0).toInt() == 1 ? 1 : 0;
     this->plankScalingMode = settings.value(
                 SER_PLANK_SCALING_MODE, NvOutputTopology::ScaledSpanMode).toString();
     if (this->plankScalingMode != NvOutputTopology::NativeScalingMode &&
@@ -234,6 +236,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
     settings.setValue(SER_MANUALPORT, manualAddress.port());
     settings.remove("srvcert");
     settings.setValue(SER_PLANK_SCALING_MODE, plankScalingMode);
+    settings.setValue("plank-retina-size", plankRetinaSize);
     settings.setValue(SER_HOSTLAYOUT, plankHostLayout);
     settings.setValue(SER_VIRTUALMODE1, plankVirtualMode1);
     settings.setValue(SER_VIRTUALMODE2, plankVirtualMode2);
@@ -274,6 +277,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->ipv6Address == that.ipv6Address &&
            this->manualAddress == that.manualAddress &&
            this->plankScalingMode == that.plankScalingMode &&
+           this->plankRetinaSize == that.plankRetinaSize &&
            this->plankHostLayout == that.plankHostLayout &&
            this->plankVirtualMode1 == that.plankVirtualMode1 &&
            this->plankVirtualMode2 == that.plankVirtualMode2 &&

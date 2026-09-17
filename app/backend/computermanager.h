@@ -240,7 +240,7 @@ public:
                             QString hostLayout, QString virtualMode1,
                             QString virtualMode2,
                             int videoProfile, int captureSource,
-                            const QVariantList& profileBitratesKbps);
+                            const QVariantList& profileBitratesKbps, int retinaSize = 0);
 
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 

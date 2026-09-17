@@ -60,6 +60,7 @@ struct NvOutputTopology
     static const int FixedCaptureFeature = 0x80000;
     static const int MacDesktopPreparationFeature = 0x100000;
     static const int MacEncodingProfileFeature = 0x200000;
+    static const int MatchedDisplayModesFeature = 0x400000;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -82,7 +83,8 @@ struct NvOutputTopology
                                              SessionTakeoverFeature |
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
-                                             WorkerInstanceFeature;
+                                             WorkerInstanceFeature |
+                                             MatchedDisplayModesFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -102,15 +104,16 @@ struct NvOutputTopology
     static bool resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                            QString& hostLayout,
                                            QStringList& virtualModes,
-                                           QString* error = nullptr);
+                                           QString* error = nullptr, bool allowMatchedModes = false);
+    static QSize linuxMatchedDisplaySize(const NvClientDisplay& display, bool desktopSize);
     static QStringList qualifiedVirtualModes();
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
                                                QString* error = nullptr, int* scale = nullptr);
     static QJsonObject macDisplayRequest(const QString& mode, const QString& encodingMode, int scale);
-    static QSize virtualModeSize(const QString& mode);
+    static QSize virtualModeSize(const QString& mode, bool allowMatchedModes = false);
     static QSize macDisplayModeSize(const QString& mode);
     static QSize virtualCanvasSize(const QString& hostLayout,
-                                   const QStringList& virtualModes);
+                                   const QStringList& virtualModes, bool allowMatchedModes = false);
     bool displayPolicyKnown() const;
     bool allowsBookmarkHostLayout(const QString& layout) const;
     bool matchesRequestedHostLayout(const QString& layout,
