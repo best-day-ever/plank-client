@@ -24,26 +24,27 @@ private slots:
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
-    void preservesMultipleDisplayFullscreen();
+    void matchesMultipleNativeFullscreenViewports();
     void buildsMacDisplayRequest();
 };
 
-void TestOutputTopology::preservesMultipleDisplayFullscreen()
+void TestOutputTopology::matchesMultipleNativeFullscreenViewports()
 {
-    QVERIFY(MacDisplayGeometry::useNativeFullscreen(1));
-    for (int count : {0, 2, 3}) {
+    for (int count : {-1, 0}) {
         QVERIFY(!MacDisplayGeometry::useNativeFullscreen(count));
     }
 
-    // Mixed Retina/non-Retina windows keep their complete panel rectangles.
-    // A camera inset is applicable only to a native Space's content viewport.
-    for (int count : {1, 2}) {
+    // Each native Space uses its own camera inset and backing-pixel density.
+    for (int count : {1, 2, 3}) {
+        QVERIFY(MacDisplayGeometry::useNativeFullscreen(count));
         int height = 1329, pixels = 2658;
-        if (MacDisplayGeometry::useNativeFullscreen(count)) {
-            QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
-        }
-        QCOMPARE(height, count == 1 ? 1291 : 1329);
+        QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
+        QCOMPARE(height, 1291);
         QCOMPARE(pixels, height * 2);
+        height = 1440; pixels = 1440;
+        QVERIFY(MacDisplayGeometry::insetTop(2560, height, 2560, pixels, 0));
+        QCOMPARE(height, 1440);
+        QCOMPARE(pixels, height);
     }
 }
 

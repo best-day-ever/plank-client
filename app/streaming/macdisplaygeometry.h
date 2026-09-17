@@ -1,12 +1,12 @@
 #pragma once
 
 namespace MacDisplayGeometry {
-// The fork's two-output presenter owns coordinated desktop windows. Moving
-// either into its own native Space would change their focus/drag lifecycle.
-// Use the same policy before authentication and before creating SDL windows.
+// Each presentation window uses native fullscreen, including mixed-DPI
+// multi-display sessions. Match Client must use the same camera-safe viewport.
+// Set SDL's Spaces hint before video initialization, when Cocoa caches it.
 inline bool useNativeFullscreen(int connectedDisplayCount)
 {
-    return connectedDisplayCount == 1;
+    return connectedDisplayCount > 0;
 }
 
 // Match the native fullscreen viewport without changing Retina density.

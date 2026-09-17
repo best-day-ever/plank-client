@@ -1503,6 +1503,9 @@ bool Session::initialize()
     }
     SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
                 MacDisplayGeometry::useNativeFullscreen(macDisplayCount) ? "1" : "0");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK Mac fullscreen policy: native Spaces, active displays=%d",
+                macDisplayCount);
 #endif
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
                 m_PlankVideoProfile,
