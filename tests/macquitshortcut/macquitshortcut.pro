@@ -5,4 +5,4 @@ TEMPLATE = app
 PKGCONFIG += sdl3
 LIBS += -framework AppKit
 SOURCES += test_macquitshortcut.mm ../../app/streaming/macquitshortcut.mm
-HEADERS += ../../app/streaming/macquitshortcut.h ../../app/macquitbridge.h
+HEADERS += ../../app/streaming/macquitshortcut.h

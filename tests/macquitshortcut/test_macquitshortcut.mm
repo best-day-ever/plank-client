@@ -1,7 +1,6 @@
 #import <AppKit/AppKit.h>
 #include <QtTest>
 #include "../../app/streaming/macquitshortcut.h"
-#include "../../app/macquitbridge.h"
 
 // Harmless target: exercise the real native Quit selector without terminating
 // the test process. No remote session or system input injection is involved.
@@ -143,16 +142,6 @@ private slots:
             QVERIFY(!SDL_HasEvent(SDL_EVENT_KEY_DOWN));
             QCOMPARE(m_Target.calls, 0);
         }
-        SDL_Quit();
-    }
-    void explicitApplicationQuitStillWakesSdl()
-    {
-        QVERIFY(SDL_Init(SDL_INIT_EVENTS));
-        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
-        MacQuitBridge bridge(*QCoreApplication::instance());
-        QEvent quit(QEvent::Quit);
-        QCoreApplication::sendEvent(QCoreApplication::instance(), &quit);
-        QVERIFY(SDL_HasEvent(SDL_EVENT_QUIT));
         SDL_Quit();
     }
 };

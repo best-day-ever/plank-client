@@ -245,7 +245,7 @@ SOURCES += \
     backend/systemproperties.cpp \
     wm.cpp
 
-macx: HEADERS += macquitbridge.h
+macx: HEADERS += macapplication.h
 
 HEADERS += \
     streaming/video/packedbt709.h \
