@@ -9,6 +9,16 @@ inline bool useNativeFullscreen(int connectedDisplayCount)
     return connectedDisplayCount > 0;
 }
 
+// AppKit 15 reserves five additional logical points below the camera when
+// placing a native fullscreen window. NSScreen.safeAreaInsets omits this
+// margin (38-point inset, but 43-point fullscreen exclusion on a scaled panel).
+// Keep this measured compatibility correction scoped to macOS 15; do not
+// change newer systems without measuring their settled native window bounds.
+inline int nativeFullscreenTopInset(int cameraInset, int osMajor)
+{
+    return cameraInset > 0 && osMajor == 15 ? cameraInset + 5 : cameraInset;
+}
+
 // Match the native fullscreen viewport without changing Retina density.
 // AppKit supplies the inset; zero means the complete panel remains usable.
 inline bool insetTop(int logicalWidth, int& logicalHeight,

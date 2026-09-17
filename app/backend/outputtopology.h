@@ -31,6 +31,7 @@ struct NvClientDisplay
     QRect bounds;
     QSize nativeSize;
     QSize backingSize {}; // macOS current compositor pixels; absent on other platforms
+    bool primary = false;
 };
 
 struct NvOutputTopology
@@ -61,6 +62,7 @@ struct NvOutputTopology
     static const int MacDesktopPreparationFeature = 0x100000;
     static const int MacEncodingProfileFeature = 0x200000;
     static const int MatchedDisplayModesFeature = 0x400000;
+    static const int MatchedPrimaryOutputFeature = 0x800000;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -84,7 +86,8 @@ struct NvOutputTopology
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
                                              WorkerInstanceFeature |
-                                             MatchedDisplayModesFeature;
+                                             MatchedDisplayModesFeature |
+                                             MatchedPrimaryOutputFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -104,7 +107,8 @@ struct NvOutputTopology
     static bool resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                            QString& hostLayout,
                                            QStringList& virtualModes,
-                                           QString* error = nullptr, bool allowMatchedModes = false);
+                                           QString* error = nullptr, bool allowMatchedModes = false,
+                                           int* primaryOutput = nullptr);
     static QSize linuxMatchedDisplaySize(const NvClientDisplay& display, bool desktopSize);
     static QStringList qualifiedVirtualModes();
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,

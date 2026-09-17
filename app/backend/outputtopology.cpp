@@ -518,10 +518,12 @@ QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisp
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,
-                                                  QString* error, bool allowMatchedModes)
+                                                  QString* error, bool allowMatchedModes,
+                                                  int* primaryOutput)
 {
     hostLayout.clear();
     virtualModes.clear();
+    if (primaryOutput) *primaryOutput = -1;
     if (displays.size() < 1 || displays.size() > 2) {
         if (error != nullptr) {
             *error = QStringLiteral("Match client displays requires exactly one or two active client monitors.");
@@ -568,6 +570,22 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
     }
     hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
                                        QString::fromLatin1(DualHorizontalHostLayout);
+    if (primaryOutput) {
+        for (int index = 0; index < displays.size(); ++index) {
+            if (!displays[index].primary) continue;
+            if (*primaryOutput != -1) {
+                *primaryOutput = -1;
+                break;
+            }
+            *primaryOutput = index;
+        }
+        if (*primaryOutput == -1) {
+            if (error) *error = QStringLiteral("Unable to identify one primary client display. Please reconnect.");
+            hostLayout.clear();
+            virtualModes.clear();
+            return false;
+        }
+    }
     return true;
 }
 

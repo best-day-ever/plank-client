@@ -1,4 +1,5 @@
 #include "macwindow.h"
+#include "macdisplaygeometry.h"
 #include "planktoolbarlogic.h"
 
 #import <Cocoa/Cocoa.h>
@@ -91,7 +92,9 @@ bool MacWindow::fullscreenTopInset(Uint32 displayId, int* top)
             if ([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue] == displayId) {
                 // visibleFrame also excludes the Dock/menu bar: that is NOT
                 // the native fullscreen viewport. Only reserve the camera area.
-                *top = static_cast<int>(std::ceil(screen.safeAreaInsets.top));
+                *top = MacDisplayGeometry::nativeFullscreenTopInset(
+                    static_cast<int>(std::ceil(screen.safeAreaInsets.top)),
+                    static_cast<int>(NSProcessInfo.processInfo.operatingSystemVersion.majorVersion));
                 return true;
             }
         }

@@ -1872,6 +1872,7 @@ bool Session::snapshotClientDisplays()
     for (int index = 0; index < displayCount; ++index) {
         ClientDisplaySnapshot snapshot;
         snapshot.displayId = StreamUtils::getDisplayId(index);
+        snapshot.primary = snapshot.displayId == SDL_GetPrimaryDisplay();
         SDL_DisplayMode nativeMode;
         SDL_Rect safeArea;
         if (snapshot.displayId == 0 ||
@@ -2192,6 +2193,7 @@ bool Session::configurePlankHostLayout()
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
     bool matchedModes = false;
+    bool matchedPrimary = false;
     {
         QReadLocker lock(&m_Computer->lock);
         layoutPolicy = m_Computer->plankHostLayout;
@@ -2203,6 +2205,8 @@ bool Session::configurePlankHostLayout()
         authenticatedLogicalSize = m_Computer->outputTopology.captureLogicalBounds.size();
         matchedModes = m_Computer->outputTopology.startupLayoutKind == NvOutputTopology::PhysicalHostLayout &&
             (m_Computer->outputTopology.featureFlags & NvOutputTopology::MatchedDisplayModesFeature);
+        matchedPrimary = matchedModes &&
+            (m_Computer->outputTopology.featureFlags & NvOutputTopology::MatchedPrimaryOutputFeature);
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
         hostRejectsRequestedLayout = hostPolicyKnown &&
                 !m_Computer->outputTopology.allowsBookmarkHostLayout(layoutPolicy);
@@ -2217,6 +2221,7 @@ bool Session::configurePlankHostLayout()
 
     m_ResolvedHostLayout.clear();
     m_ResolvedVirtualModes.clear();
+    m_ResolvedPrimaryOutput = -1;
     if (scalingMode != NvOutputTopology::NativeScalingMode &&
             scalingMode != NvOutputTopology::ScaledSpanMode) {
         const QString error = tr("The bookmark contains an unsupported client scaling mode.");
@@ -2232,7 +2237,7 @@ bool Session::configurePlankHostLayout()
                                    display.logicalBounds.y,
                                    display.logicalBounds.w,
                                    display.logicalBounds.h),
-                             display.nativeSize, display.macBackingSize});
+                             display.nativeSize, display.macBackingSize, display.primary});
         }
 
         QString error;
@@ -2248,7 +2253,8 @@ bool Session::configurePlankHostLayout()
             m_ResolvedHostLayout = QStringLiteral("fixed");
         }
         else if (!NvOutputTopology::resolveClientDisplayLayout(
-                    displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, matchedModes)) {
+                    displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, matchedModes,
+                    matchedPrimary ? &m_ResolvedPrimaryOutput : nullptr)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
             emit displayLaunchError(error);
             return false;
@@ -2286,10 +2292,10 @@ bool Session::configurePlankHostLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s",
+                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s primary-index=%d",
                 qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
                 qPrintable(m_ResolvedVirtualModes.join(',')),
-                qPrintable(m_ResolvedScalingMode));
+                qPrintable(m_ResolvedScalingMode), m_ResolvedPrimaryOutput);
     return true;
 }
 
@@ -2759,7 +2765,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                           plankTransportToken,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
-                          acceptedEncodingMode);
+                          acceptedEncodingMode,
+                          m_ResolvedPrimaryOutput);
         };
         try {
             startApp();
