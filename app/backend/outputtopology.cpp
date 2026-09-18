@@ -411,6 +411,15 @@ bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
     return allowedLayoutKinds.contains(layout);
 }
 
+int NvOutputTopology::outputCountForLayout(const QString& resolvedLayout) const
+{
+    if (resolvedLayout == SingleHostLayout) return 1;
+    if (resolvedLayout == DualHorizontalHostLayout) return 2;
+    if (resolvedLayout == PhysicalHostLayout || resolvedLayout == QStringLiteral("fixed"))
+        return outputs.size();
+    return 0;
+}
+
 bool NvOutputTopology::matchesRequestedHostLayout(const QString& layout,
                                                   const QStringList& modes) const
 {

@@ -8,6 +8,7 @@ class TestOutputTopology : public QObject
     Q_OBJECT
 
 private slots:
+    void presentationOutputCountDuringTransitions();
     void advertisesOnlyImplementedClipboardSupport();
     void parsesQualificationVector();
     void roundTripsQualificationVector();
@@ -25,8 +26,47 @@ private slots:
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
+    void matchesMultipleNativeFullscreenViewports();
     void buildsMacDisplayRequest();
 };
+
+void TestOutputTopology::presentationOutputCountDuringTransitions()
+{
+    NvOutputTopology topology;
+    topology.outputs.resize(1);
+    QCOMPARE(topology.outputCountForLayout("physical"), 1);
+    QCOMPARE(topology.outputCountForLayout("fixed"), 1);
+    // Matching two Client displays must use the requested count even before
+    // the Host has replaced its previous single-output desktop.
+    QCOMPARE(topology.outputCountForLayout("dual-horizontal"), 2);
+    topology.outputs.resize(2);
+    QCOMPARE(topology.outputCountForLayout("physical"), 2);
+    QCOMPARE(topology.outputCountForLayout("fixed"), 2);
+    QCOMPARE(topology.outputCountForLayout("single"), 1);
+    topology.outputs.clear();
+    QCOMPARE(topology.outputCountForLayout("physical"), 0);
+    QCOMPARE(topology.outputCountForLayout("unresolved"), 0);
+}
+
+void TestOutputTopology::matchesMultipleNativeFullscreenViewports()
+{
+    for (int count : {-1, 0}) {
+        QVERIFY(!MacDisplayGeometry::useNativeFullscreen(count));
+    }
+
+    // Each native Space uses its own camera inset and backing-pixel density.
+    for (int count : {1, 2, 3}) {
+        QVERIFY(MacDisplayGeometry::useNativeFullscreen(count));
+        int height = 1329, pixels = 2658;
+        QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
+        QCOMPARE(height, 1291);
+        QCOMPARE(pixels, height * 2);
+        height = 1440; pixels = 1440;
+        QVERIFY(MacDisplayGeometry::insetTop(2560, height, 2560, pixels, 0));
+        QCOMPARE(height, 1440);
+        QCOMPARE(pixels, height);
+    }
+}
 
 void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
 {
@@ -492,7 +532,7 @@ void TestOutputTopology::rejectsUnsupportedClientLayouts()
     };
     QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
                 unsupportedDisplay, layout, modes, &error));
-    QVERIFY(error.contains(QStringLiteral("not a qualified")));
+    QVERIFY(error.contains(QStringLiteral("not a qualified PLANK virtual mode")));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)

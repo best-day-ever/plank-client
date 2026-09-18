@@ -7,6 +7,7 @@
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
+#include "streaming/input/plankmousemotion.h"
 #ifdef Q_OS_MACOS
 #include "macclipboardsync.h"
 #endif
@@ -17,6 +18,7 @@
 #endif
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
+#include "streaming/macdisplaygeometry.h"
 #endif
 
 #include <Limelight.h>
@@ -1597,11 +1599,20 @@ void Session::clearPlankReconnectCredentials()
 bool Session::initialize()
 {
 #ifdef Q_OS_DARWIN
-    // Keep native fullscreen Spaces, including trackpad app switching. Match
-    // Client uses the notch-safe viewport; never switch the desktop mode.
-    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
+    // SDL 3.4.2 caches allow_spaces in Cocoa_VideoInit, so use CoreGraphics
+    // before SDL video initialization. Setting the hint before window creation
+    // alone is too late. Match Client and the presenter share this policy.
+    const int macDisplayCount = MacWindow::activeDisplayCount();
+    if (macDisplayCount <= 0) {
+        emit displayLaunchError(tr("Unable to discover active Mac displays."));
+        return false;
+    }
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
+                MacDisplayGeometry::useNativeFullscreen(macDisplayCount) ? "1" : "0");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK Mac fullscreen policy: native Spaces, active displays=%d",
+                macDisplayCount);
 #endif
-
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
                 m_PlankVideoProfile,
                 m_PlankCaptureSource)) {
@@ -1632,6 +1643,14 @@ bool Session::initialize()
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
+
+#ifdef Q_OS_DARWIN
+    if (m_ClientDisplays.size() != macDisplayCount) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        emit displayLaunchError(tr("The Mac display layout changed during setup. Please connect again."));
+        return false;
+    }
+#endif
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
     if (!configurePlankLaunchGeometry()) {
@@ -1975,7 +1994,8 @@ bool Session::snapshotClientDisplays()
             SDL_DisplayMode currentMode;
             SDL_Rect matchedBounds;
             if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
-                    &currentMode, &matchedBounds, m_IsFullScreen)) return false;
+                    &currentMode, &matchedBounds, m_IsFullScreen &&
+                    MacDisplayGeometry::useNativeFullscreen(displayCount))) return false;
             snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
                                              matchedBounds.w, matchedBounds.h);
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
@@ -1993,10 +2013,14 @@ bool Session::snapshotClientDisplays()
                 std::make_tuple(right.logicalBounds.x,
                                 right.logicalBounds.y);
     });
-    m_UseMultiDisplayPresentation = m_IsFullScreen &&
-            strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+    // Remember multi-output capability even when the session starts windowed.
+    // Fullscreen may be entered later without reconnecting; only the active
+    // presentation layout, not display discovery, depends on that state.
+    m_MultiDisplayPresentationAvailable =
+            (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
+             strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             m_ClientDisplays.size() == 2;
-    if (m_UseMultiDisplayPresentation) {
+    if (m_MultiDisplayPresentationAvailable) {
         const auto& left = m_ClientDisplays.at(0).logicalBounds;
         const auto& right = m_ClientDisplays.at(1).logicalBounds;
         const bool horizontal = left.x + left.w <= right.x;
@@ -2005,7 +2029,7 @@ bool Session::snapshotClientDisplays()
         if (!horizontal || !overlapsVertically) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Two-output presentation requires client monitors arranged left to right; using the target output only");
-            m_UseMultiDisplayPresentation = false;
+            m_MultiDisplayPresentationAvailable = false;
         }
     }
 
@@ -2042,12 +2066,12 @@ bool Session::snapshotClientDisplays()
         m_TargetDisplayId = m_ClientDisplays.first().displayId;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK client presentation: outputs=%lld canvas=%dx%d mode=%s",
+                "PLANK client presentation capability: outputs=%lld canvas=%dx%d mode=%s",
                 static_cast<long long>(
-                    m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1),
-                m_UseMultiDisplayPresentation ? canvasX : targetNativeSize.width(),
-                m_UseMultiDisplayPresentation ? canvasHeight : targetNativeSize.height(),
-                m_UseMultiDisplayPresentation ? "multi-output" : "single-output");
+                    m_MultiDisplayPresentationAvailable ? m_ClientDisplays.size() : 1),
+                m_MultiDisplayPresentationAvailable ? canvasX : targetNativeSize.width(),
+                m_MultiDisplayPresentationAvailable ? canvasHeight : targetNativeSize.height(),
+                m_MultiDisplayPresentationAvailable ? "multi-output" : "single-output");
     return true;
 }
 
@@ -2156,7 +2180,7 @@ bool Session::placeFullscreenWindowOnDisplay(SDL_Window* window,
     actualDisplay = SDL_GetDisplayForWindow(window);
     if (actualDisplay != displayId) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Wayland compositor kept fullscreen surface on output %u instead of requested output %u",
+                    "Window system kept fullscreen surface on output %u instead of requested output %u",
                      actualDisplay, displayId);
         return false;
     }
@@ -2198,7 +2222,8 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
                     "Failed to set presentation fullscreen state: %s",
                     SDL_GetError());
     }
-    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+    if ((strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
+         strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             !SDL_SyncWindow(m_Window)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Timed out synchronizing presentation fullscreen state: %s",
@@ -2231,16 +2256,10 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
         }
     }
     for (SDL_Window* window : m_SecondaryWindows) {
-        if (fullscreen) {
-            SDL_ShowWindow(window);
-            if (!SDL_SetWindowFullscreen(window, m_FullScreenFlag)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                            "Failed to set secondary presentation fullscreen state: %s",
-                            SDL_GetError());
-            }
-        }
-        else {
-            SDL_HideWindow(window);
+        if (!PlankPresentation::setSecondaryFullscreen(window, fullscreen)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to transition secondary presentation window: %s",
+                        SDL_GetError());
         }
     }
     rebuildPresentationLayout();
@@ -2430,6 +2449,20 @@ bool Session::configurePlankLaunchGeometry()
     if (m_Computer->plankAuthentication &&
             !configurePlankHostLayout()) {
         return false;
+    }
+
+    {
+        QReadLocker lock(&m_Computer->lock);
+        const int hostOutputs = m_Computer->outputTopology.outputCountForLayout(m_ResolvedHostLayout);
+        m_UseMultiDisplayPresentation = m_MultiDisplayPresentationAvailable;
+#ifdef Q_OS_DARWIN
+        // The Mac single-output policy is qualified independently of Wayland.
+        m_UseMultiDisplayPresentation = m_UseMultiDisplayPresentation && hostOutputs > 1;
+#endif
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK presentation selection: host-outputs=%d client-multi=%d selected-outputs=%d",
+                    hostOutputs, m_MultiDisplayPresentationAvailable,
+                    m_UseMultiDisplayPresentation ? 2 : 1);
     }
 
     const QSize resolution = configurePlankDisplayMode();
@@ -3858,7 +3891,8 @@ void Session::execInternal()
 
             SDL_PropertiesID properties = SDL_CreateProperties();
             const Uint32 flags = defaultWindowFlags |
-                    StreamUtils::getPlatformWindowFlags();
+                    StreamUtils::getPlatformWindowFlags() |
+                    (m_IsFullScreen ? 0 : SDL_WINDOW_HIDDEN);
             SDL_SetStringProperty(properties,
                                   SDL_PROP_WINDOW_CREATE_TITLE_STRING,
                                   windowName.c_str());
@@ -3879,7 +3913,7 @@ void Session::execInternal()
                                   flags);
             SDL_SetBooleanProperty(properties,
                                    SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
-                                   true);
+                                   m_IsFullScreen);
             SDL_Window* secondary = SDL_CreateWindowWithProperties(properties);
             SDL_DestroyProperties(properties);
             if (secondary == nullptr) {
@@ -3902,9 +3936,9 @@ void Session::execInternal()
                 return;
             }
             SDL_SetWindowFullscreenMode(secondary, nullptr);
-            SDL_SetWindowFullscreen(secondary, true);
-            if (!placeFullscreenWindowOnDisplay(secondary,
-                                                display.displayId)) {
+            if (m_IsFullScreen &&
+                    !placeFullscreenWindowOnDisplay(secondary,
+                                                    display.displayId)) {
                 SDL_DestroyWindow(secondary);
                 emit displayLaunchError(
                     tr("Unable to place the second fullscreen surface on its client monitor."));
@@ -3923,8 +3957,8 @@ void Session::execInternal()
             }
             m_SecondaryWindows.append(secondary);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Created PLANK Wayland fullscreen surface for output %u",
-                        display.displayId);
+                        "Created PLANK presentation surface for output %u (initially %s)",
+                        display.displayId, m_IsFullScreen ? "fullscreen" : "hidden");
         }
     }
 
@@ -4756,24 +4790,7 @@ void Session::execInternal()
                 // transport. Aggregate it here when the toolbar is present so
                 // the toolbar tracker and host receive the identical delta.
                 if (event.motion.which != SDL_TOUCH_MOUSEID) {
-                    SDL_Event nextMotionEvent;
-                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
-                                          SDL_EVENT_MOUSE_MOTION,
-                                          SDL_EVENT_MOUSE_MOTION) > 0) {
-                        if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
-                            if (nextMotionEvent.motion.windowID !=
-                                    event.motion.windowID) {
-                                SDL_PushEvent(&nextMotionEvent);
-                                break;
-                            }
-                            event.motion.timestamp =
-                                    nextMotionEvent.motion.timestamp;
-                            event.motion.x = nextMotionEvent.motion.x;
-                            event.motion.y = nextMotionEvent.motion.y;
-                            event.motion.xrel += nextMotionEvent.motion.xrel;
-                            event.motion.yrel += nextMotionEvent.motion.yrel;
-                        }
-                    }
+                    PlankMouseMotion::coalescePending(event.motion);
                 }
                 // The single-window toolbar observes the same authoritative
                 // coordinates, but motion always remains remote-desktop input.

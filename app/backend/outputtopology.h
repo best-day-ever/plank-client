@@ -122,6 +122,8 @@ struct NvOutputTopology
                                    const QStringList& virtualModes);
     bool displayPolicyKnown() const;
     bool allowsBookmarkHostLayout(const QString& layout) const;
+    // Requested layouts may still be transitioning from the authenticated one.
+    int outputCountForLayout(const QString& resolvedLayout) const;
     bool matchesRequestedHostLayout(const QString& layout,
                                     const QStringList& modes) const;
     bool contains(QString outputId) const;

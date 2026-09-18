@@ -36,12 +36,30 @@ struct PlankPresentationSlice
 class PlankPresentation
 {
 public:
+    // Leave the native fullscreen Space before hiding a secondary surface.
+    static bool setSecondaryFullscreen(SDL_Window* window, bool fullscreen);
+
     static QRect videoRect(const QSize& streamSize, const QSize& canvasSize);
 
     static PlankPresentationSlice sliceForOutput(
         const QSize& streamSize,
         const QSize& canvasSize,
         const QRect& outputCanvasRect);
+
+    // Convert the shared canvas slice to an individual window's backing pixels.
+    // Input uses logical window coordinates against the same canvas rectangle.
+    static PlankPresentationSlice sliceForDrawable(
+        const QSize& streamSize,
+        const QSize& canvasSize,
+        const QRect& outputCanvasRect,
+        const QSize& drawableSize);
+
+    // Captured drag events stay relative to the window where the press began.
+    // Resolve them in desktop logical coordinates before applying per-output DPI.
+    // Outside every presentation window, retain the source for normal clamping.
+    static int resolvePointerOutput(const QVector<QRect>& windowRects,
+                                    int sourceOutput, const QPointF& sourcePoint,
+                                    QPointF& outputPoint);
 
     static bool mapWindowPointToStream(
         const QPointF& windowPoint,

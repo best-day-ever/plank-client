@@ -2,6 +2,22 @@
 
 #include <QtMath>
 
+bool PlankPresentation::setSecondaryFullscreen(SDL_Window* window, bool fullscreen)
+{
+#ifdef Q_OS_DARWIN
+    if (fullscreen && !SDL_ShowWindow(window)) return false;
+    if (!SDL_SetWindowFullscreen(window, fullscreen) || !SDL_SyncWindow(window)) return false;
+    // Hiding a Cocoa fullscreen window alone leaves its native Space behind.
+    // Wait for AppKit's exit transition before ordering the window out.
+    return fullscreen || SDL_HideWindow(window);
+#else
+    // Native Spaces need an explicit exit; retain the existing compositor
+    // lifecycle on other platforms until separately qualified there.
+    if (!fullscreen) return SDL_HideWindow(window);
+    return SDL_ShowWindow(window) && SDL_SetWindowFullscreen(window, true);
+#endif
+}
+
 QRect PlankPresentation::videoRect(const QSize& streamSize,
                                              const QSize& canvasSize)
 {
@@ -45,6 +61,52 @@ PlankPresentationSlice PlankPresentation::sliceForOutput(
     slice.destinationRect = visible.translated(-outputCanvasRect.topLeft());
     slice.visible = true;
     return slice;
+}
+
+PlankPresentationSlice PlankPresentation::sliceForDrawable(
+        const QSize& streamSize, const QSize& canvasSize,
+        const QRect& outputCanvasRect, const QSize& drawableSize)
+{
+    if (!outputCanvasRect.isValid() || !drawableSize.isValid()) {
+        return {};
+    }
+    auto slice = sliceForOutput(streamSize, canvasSize, outputCanvasRect);
+    if (slice.visible) {
+        const auto& rect = slice.destinationRect;
+        const qreal sx = qreal(drawableSize.width()) / outputCanvasRect.width();
+        const qreal sy = qreal(drawableSize.height()) / outputCanvasRect.height();
+        const int left = qRound(rect.x() * sx);
+        const int top = qRound(rect.y() * sy);
+        slice.destinationRect = QRect(left, top,
+            qRound((rect.x() + rect.width()) * sx) - left,
+            qRound((rect.y() + rect.height()) * sy) - top);
+        slice.visible = !slice.destinationRect.isEmpty();
+    }
+    return slice;
+}
+
+int PlankPresentation::resolvePointerOutput(const QVector<QRect>& windowRects,
+                                           int sourceOutput,
+                                           const QPointF& sourcePoint,
+                                           QPointF& outputPoint)
+{
+    outputPoint = sourcePoint;
+    if (sourceOutput < 0 || sourceOutput >= windowRects.size() ||
+            !windowRects.at(sourceOutput).isValid()) {
+        return -1;
+    }
+    const QPointF desktopPoint = sourcePoint + windowRects.at(sourceOutput).topLeft();
+    for (int i = 0; i < windowRects.size(); ++i) {
+        const auto& rect = windowRects.at(i);
+        if (rect.isValid() && desktopPoint.x() >= rect.x() &&
+                desktopPoint.x() < rect.x() + rect.width() &&
+                desktopPoint.y() >= rect.y() &&
+                desktopPoint.y() < rect.y() + rect.height()) {
+            outputPoint = desktopPoint - rect.topLeft();
+            return i;
+        }
+    }
+    return sourceOutput;
 }
 
 bool PlankPresentation::mapWindowPointToStream(
