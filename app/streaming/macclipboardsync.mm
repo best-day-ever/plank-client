@@ -62,7 +62,9 @@ bool writeGeneralPasteboardText(const std::vector<std::uint8_t>& bytes)
         }
         NSPasteboard* pasteboard = clipboardPasteboard();
         [pasteboard clearContents];
-        return [pasteboard setString:text forType:NSPasteboardTypeString];
+        const bool written = [pasteboard setString:text forType:NSPasteboardTypeString];
+        [text release];
+        return written;
     }
 }
 
