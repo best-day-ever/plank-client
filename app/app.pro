@@ -291,6 +291,15 @@ contains(DEFINES, HAVE_LIBINPUT_TABLET) {
     HEADERS += streaming/input/linuxrawwacom.h
 }
 
+HEADERS += streaming/input/pentiltencoding.h
+
+macx {
+    # Normalized-pen forwarding via SDL3's pen events (SDL_EVENT_PEN_*),
+    # which its Cocoa backend derives from AppKit tablet events. Header-only;
+    # see streaming/input/macpen.h.
+    HEADERS += streaming/input/macpen.h
+}
+
 # Platform-specific renderers and decoders
 ffmpeg {
     message(FFmpeg decoder selected)

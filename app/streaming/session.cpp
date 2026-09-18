@@ -4664,6 +4664,26 @@ void Session::execInternal()
             }
             m_InputHandler->handleMouseWheelEvent(&event.wheel);
             break;
+#ifdef Q_OS_MACOS
+        case SDL_EVENT_PEN_PROXIMITY_IN:
+        case SDL_EVENT_PEN_PROXIMITY_OUT:
+            m_InputHandler->handlePenProximityEvent(&event.pproximity);
+            break;
+        case SDL_EVENT_PEN_DOWN:
+        case SDL_EVENT_PEN_UP:
+            m_InputHandler->handlePenTouchEvent(&event.ptouch);
+            break;
+        case SDL_EVENT_PEN_MOTION:
+            m_InputHandler->handlePenMotionEvent(&event.pmotion);
+            break;
+        case SDL_EVENT_PEN_BUTTON_DOWN:
+        case SDL_EVENT_PEN_BUTTON_UP:
+            m_InputHandler->handlePenButtonEvent(&event.pbutton);
+            break;
+        case SDL_EVENT_PEN_AXIS:
+            m_InputHandler->handlePenAxisEvent(&event.paxis);
+            break;
+#endif
         }
     }
 

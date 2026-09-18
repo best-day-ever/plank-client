@@ -1,4 +1,5 @@
 #include "linuxwacom.h"
+#include "pentiltencoding.h"
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -29,23 +30,6 @@ bool propertyIsSet(udev_device* device, const char* name)
 {
     const char* value = udev_device_get_property_value(device, name);
     return value != nullptr && std::strcmp(value, "1") == 0;
-}
-
-void encodeTilt(double tiltX, double tiltY, unsigned short& rotation,
-                unsigned char& tilt)
-{
-    const double pi = std::acos(-1.0);
-    const double x = std::tan(tiltX * pi / 180.0);
-    const double y = std::tan(tiltY * pi / 180.0);
-    const double magnitude = std::atan(std::hypot(x, y)) * 180.0 / pi;
-    double direction = -std::atan2(x, y) * 180.0 / pi;
-    if (direction < 0.0) {
-        direction += 360.0;
-    }
-
-    tilt = static_cast<unsigned char>(std::lround(
-        std::max(0.0, std::min(90.0, magnitude))));
-    rotation = static_cast<unsigned short>(std::lround(direction)) % 360;
 }
 
 unsigned char toolType(libinput_tablet_tool* tool)
@@ -269,9 +253,9 @@ void LinuxWacomInput::handleTabletEvent(libinput_event_tablet_tool* event,
     }
     if (libinput_event_tablet_tool_tilt_x_has_changed(event) ||
             libinput_event_tablet_tool_tilt_y_has_changed(event)) {
-        encodeTilt(libinput_event_tablet_tool_get_tilt_x(event),
-                   libinput_event_tablet_tool_get_tilt_y(event),
-                   m_Rotation, m_Tilt);
+        plankEncodePenTilt(libinput_event_tablet_tool_get_tilt_x(event),
+                            libinput_event_tablet_tool_get_tilt_y(event),
+                            m_Rotation, m_Tilt);
     }
 
     unsigned char eventType = m_TipDown ? LI_TOUCH_EVENT_MOVE : LI_TOUCH_EVENT_HOVER;

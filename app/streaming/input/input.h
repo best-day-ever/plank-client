@@ -20,6 +20,7 @@ class LinuxRawWacomInput;
 class PlankWaylandCursor;
 #ifdef Q_OS_MACOS
 class MacQuitShortcut;
+class PlankMacPenInput;
 #endif
 
 class SdlInputHandler
@@ -47,6 +48,14 @@ public:
                                 bool batchPendingEvents = true);
 
     void handleMouseWheelEvent(SDL_MouseWheelEvent* event);
+
+#ifdef Q_OS_MACOS
+    void handlePenProximityEvent(SDL_PenProximityEvent* event);
+    void handlePenTouchEvent(SDL_PenTouchEvent* event);
+    void handlePenMotionEvent(SDL_PenMotionEvent* event);
+    void handlePenButtonEvent(SDL_PenButtonEvent* event);
+    void handlePenAxisEvent(SDL_PenAxisEvent* event);
+#endif
 
     void sendText(QString& string);
 
@@ -195,6 +204,13 @@ private:
     const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
 
+#ifdef Q_OS_MACOS
+    bool mapWindowPointToNormalizedStream(SDL_Window* window,
+                                          float windowX, float windowY,
+                                          float& normalizedX,
+                                          float& normalizedY) const;
+#endif
+
     struct {
         KeyCombo keyCombo;
         SDL_Keycode keyCode;
@@ -207,6 +223,9 @@ private:
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;
     std::unique_ptr<LinuxRawWacomInput> m_LinuxRawWacomInput;
+#endif
+#ifdef Q_OS_MACOS
+    std::unique_ptr<PlankMacPenInput> m_MacPenInput;
 #endif
 
     static const int k_ButtonMap[];

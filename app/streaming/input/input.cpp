@@ -9,6 +9,7 @@
 #ifdef Q_OS_MACOS
 #include "streaming/macquitshortcut.h"
 #include "streaming/macwindow.h"
+#include "streaming/input/macpen.h"
 #endif
 
 #ifdef HAVE_LIBINPUT_TABLET
@@ -146,6 +147,9 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxWacomInput.reset();
     m_LinuxRawWacomInput.reset();
 #endif
+#ifdef Q_OS_MACOS
+    m_MacPenInput.reset();
+#endif
 
     for (auto& output : m_WaylandTabletCursorOutputs) {
         output.cursor->setVisible(false);
@@ -184,12 +188,14 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         m_MouseCursorCapturedVisibilityState = false;
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "PLANK embedded host cursor enabled");
     }
-#ifdef HAVE_LIBINPUT_TABLET
+#if defined(HAVE_LIBINPUT_TABLET) || defined(Q_OS_MACOS)
     const auto requestTabletCursor = [this]() {
         if (!m_TabletCursorActivationPending.exchange(true)) {
             Session::postTabletCursorActivationEvent();
         }
     };
+#endif
+#ifdef HAVE_LIBINPUT_TABLET
     if (qEnvironmentVariableIntValue("PLANK_EXTERNAL_WACOM_BRIDGE") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                     "Normalized Wacom capture disabled for external raw-HID qualification");
@@ -226,6 +232,32 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         m_LinuxWacomInput.reset(new LinuxWacomInput(requestTabletCursor));
         m_LinuxWacomInput->setActive(
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
+#endif
+#ifdef Q_OS_MACOS
+    // Gap-closing, unqualified on real Wacom hardware: opt in explicitly.
+    // See docs/bde/gap-analysis.md and docs/bde/mac-pen-testplan.md.
+    if (qEnvironmentVariableIntValue("PLANK_MACOS_PEN_INPUT") != 0) {
+        if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                        "Using SDL3 pen events for PLANK normalized pen transport");
+            m_MacPenInput.reset(new PlankMacPenInput(
+                [](const PlankMacPenPacket& packet) {
+                    LiSendPenEvent(packet.eventType, packet.toolType,
+                                   packet.buttons, packet.x, packet.y,
+                                   packet.pressureOrDistance,
+                                   0.0f, 0.0f,
+                                   packet.rotation, packet.tilt);
+                },
+                requestTabletCursor));
+            m_MacPenInput->setActive(
+                (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+        }
+        else {
+            SDL_LogError(SDL_LOG_CATEGORY_INPUT,
+                         "Host lacks normalized pen support (LI_FF_PEN_TOUCH_EVENTS); "
+                         "macOS pen/tablet input will not be forwarded");
+        }
     }
 #endif
 }
@@ -596,6 +628,11 @@ void SdlInputHandler::notifyFocusLost()
         m_LinuxRawWacomInput->setActive(false);
     }
 #endif
+#ifdef Q_OS_MACOS
+    if (m_MacPenInput) {
+        m_MacPenInput->setActive(false);
+    }
+#endif
 
     // Raise all keys that are currently pressed. If we don't do this, certain keys
     // used in shortcuts that cause focus loss (such as Alt+Tab) may get stuck down.
@@ -613,6 +650,11 @@ void SdlInputHandler::notifyFocusGained()
     }
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->setActive(true);
+    }
+#endif
+#ifdef Q_OS_MACOS
+    if (m_MacPenInput) {
+        m_MacPenInput->setActive(true);
     }
 #endif
 }
@@ -1017,3 +1059,120 @@ void SdlInputHandler::updateTabletCursorVisibility()
         output.cursor->dispatchPending();
     }
 }
+
+#ifdef Q_OS_MACOS
+
+bool SdlInputHandler::mapWindowPointToNormalizedStream(
+        SDL_Window* window, float windowX, float windowY,
+        float& normalizedX, float& normalizedY) const
+{
+    const auto* output = presentationOutput(window);
+    if (output == nullptr) {
+        return false;
+    }
+    int windowWidth = 0;
+    int windowHeight = 0;
+    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+    if (windowWidth <= 0 || windowHeight <= 0) {
+        return false;
+    }
+
+    const QSize streamSize = streamDimensions();
+    if (streamSize.width() <= 0 || streamSize.height() <= 0) {
+        return false;
+    }
+
+    QPointF streamPoint;
+    if (!PlankPresentation::mapWindowPointToStream(
+                QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
+                streamSize,
+                m_PresentationLayout.canvasSize, output->canvasRect,
+                streamPoint, /*allowClampedPosition=*/true)) {
+        return false;
+    }
+
+    normalizedX = static_cast<float>(
+        qBound(0.0, streamPoint.x() / streamSize.width(), 1.0));
+    normalizedY = static_cast<float>(
+        qBound(0.0, streamPoint.y() / streamSize.height(), 1.0));
+    return true;
+}
+
+void SdlInputHandler::handlePenProximityEvent(SDL_PenProximityEvent* event)
+{
+    if (!m_MacPenInput) {
+        return;
+    }
+    if (event->type == SDL_EVENT_PEN_PROXIMITY_IN) {
+        m_MacPenInput->handleProximityIn(event->which);
+    }
+    else {
+        m_MacPenInput->handleProximityOut(event->which);
+    }
+}
+
+void SdlInputHandler::handlePenTouchEvent(SDL_PenTouchEvent* event)
+{
+    if (!m_MacPenInput) {
+        return;
+    }
+    SDL_Window* window = presentationWindow(event->windowID);
+    if (window == nullptr) {
+        return;
+    }
+    float normalizedX = 0.0f;
+    float normalizedY = 0.0f;
+    if (!mapWindowPointToNormalizedStream(window, event->x, event->y,
+                                          normalizedX, normalizedY)) {
+        return;
+    }
+    m_MacPenInput->handleTouch(event->which, event->down, normalizedX,
+                               normalizedY, event->pen_state);
+}
+
+void SdlInputHandler::handlePenMotionEvent(SDL_PenMotionEvent* event)
+{
+    if (!m_MacPenInput) {
+        return;
+    }
+    SDL_Window* window = presentationWindow(event->windowID);
+    if (window == nullptr) {
+        return;
+    }
+    float normalizedX = 0.0f;
+    float normalizedY = 0.0f;
+    if (!mapWindowPointToNormalizedStream(window, event->x, event->y,
+                                          normalizedX, normalizedY)) {
+        return;
+    }
+    m_MacPenInput->handlePosition(event->which, normalizedX, normalizedY,
+                                  event->pen_state);
+}
+
+void SdlInputHandler::handlePenButtonEvent(SDL_PenButtonEvent* event)
+{
+    if (!m_MacPenInput) {
+        return;
+    }
+    // x, y, pressure, tilt and rotation are ignored host-side for
+    // LI_TOUCH_EVENT_BUTTON_ONLY (see Limelight.h and macpen.h), so this
+    // does not need to map event->x/y through the presentation layout.
+    m_MacPenInput->handleButton(event->which, event->pen_state);
+}
+
+void SdlInputHandler::handlePenAxisEvent(SDL_PenAxisEvent* event)
+{
+    if (!m_MacPenInput) {
+        return;
+    }
+    if (static_cast<int>(event->axis) < 0 ||
+            static_cast<int>(event->axis) >
+                static_cast<int>(PlankMacPenAxis::TangentialPressure)) {
+        return;
+    }
+    m_MacPenInput->handleAxis(event->which,
+                              static_cast<PlankMacPenAxis>(event->axis),
+                              event->value);
+}
+
+#endif // Q_OS_MACOS
