@@ -663,20 +663,26 @@ public:
     { @autoreleasepool {
         SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
         bool overlayEnabled = Session::get()->getOverlayManager().isOverlayEnabled(type);
+        updateOverlayTexture(type, newSurface, overlayEnabled);
+    }}
+
+    // Consumes newSurface. The UI thread prepares each replacement while the
+    // render thread continues using the last complete texture.
+    void updateOverlayTexture(Overlay::OverlayType type, SDL_Surface* newSurface,
+                              bool overlayEnabled)
+    { @autoreleasepool {
         if (newSurface == nullptr && overlayEnabled) {
             // The overlay is enabled and there is no new surface. Leave the old texture alone.
             return;
         }
 
-        SDL_LockSpinlock(&m_OverlayLock);
-        auto oldTexture = m_OverlayTextures[type];
-        m_OverlayTextures[type] = nullptr;
-        SDL_UnlockSpinlock(&m_OverlayLock);
-
-        [oldTexture release];
-
-        // If the overlay is disabled, we're done
+        // Only an explicit hide may publish an empty texture slot.
         if (!overlayEnabled) {
+            SDL_LockSpinlock(&m_OverlayLock);
+            auto oldTexture = m_OverlayTextures[type];
+            m_OverlayTextures[type] = nullptr;
+            SDL_UnlockSpinlock(&m_OverlayLock);
+            [oldTexture release];
             SDL_DestroySurface(newSurface);
             return;
         }
@@ -692,6 +698,12 @@ public:
         texDesc.storageMode = MTLStorageModeManaged;
         texDesc.usage = MTLTextureUsageShaderRead;
         auto newTexture = [m_MetalLayer.device newTextureWithDescriptor:texDesc];
+        if (newTexture == nil) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Unable to allocate Metal overlay texture; retaining the previous image");
+            SDL_DestroySurface(newSurface);
+            return;
+        }
 
         // Load the pixel data into the new texture
         [newTexture replaceRegion:MTLRegionMake2D(0, 0, newSurface->w, newSurface->h)
@@ -704,8 +716,12 @@ public:
         newSurface = nullptr;
 
         SDL_LockSpinlock(&m_OverlayLock);
+        auto oldTexture = m_OverlayTextures[type];
         m_OverlayTextures[type] = newTexture;
         SDL_UnlockSpinlock(&m_OverlayLock);
+        // Readers retain under the same lock; submitted Metal commands retain
+        // their resources. Never block the render thread during allocation/upload.
+        [oldTexture release];
     }}
 
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override
