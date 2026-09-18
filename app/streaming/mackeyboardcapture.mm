@@ -27,7 +27,7 @@ constexpr Modifier modifiers[] = {
     {SDL_SCANCODE_RGUI, SDL_KMOD_RGUI, NX_DEVICERCMDKEYMASK, NX_DEVICELCMDKEYMASK, kCGEventFlagMaskCommand},
 };
 
-SDL_Keymod keyModifiers(CGEventFlags flags)
+SDL_Keymod sdlModifiersFromFlags(CGEventFlags flags)
 {
     SDL_Keymod result = SDL_KMOD_NONE;
     for (unsigned i = 0; i < SDL_arraysize(modifiers); ++i) {
@@ -118,7 +118,7 @@ struct MacKeyboardCapture::State
 
     bool queueKey(CGEventType type, CGEventRef event)
     {
-        const auto mods = keyModifiers(CGEventGetFlags(event));
+        const auto mods = sdlModifiersFromFlags(CGEventGetFlags(event));
         // Reconcile modifiers before every key, including keys held before
         // focus was gained. No parallel SDL/native path forwards the same key.
         for (const auto& m : modifiers) {
@@ -139,7 +139,7 @@ struct MacKeyboardCapture::State
         const auto raw = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
         auto code = raw;
         if (isoKeyboard && (code == 10 || code == 50)) code = 60 - code;
-        if (code < 0 || code >= SDL_arraysize(darwin_scancode_table) ||
+        if (code < 0 || static_cast<uint64_t>(code) >= SDL_arraysize(darwin_scancode_table) ||
             darwin_scancode_table[code] == SDL_SCANCODE_UNKNOWN) return false;
         return enqueue(darwin_scancode_table[code], type == kCGEventKeyDown, mods, raw);
     }
