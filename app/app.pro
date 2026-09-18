@@ -620,12 +620,16 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest
 }
 macx {
-    isEmpty(PLANK_MAC_CLIENT_MIN_MACOS): PLANK_MAC_CLIENT_MIN_MACOS = 27.0
-    !equals(PLANK_MAC_CLIENT_MIN_MACOS, 15.0):!equals(PLANK_MAC_CLIENT_MIN_MACOS, 27.0) {
-        error("PLANK_MAC_CLIENT_MIN_MACOS must be 15.0 or 27.0")
+    # One SDK27-built arm64 application for macOS15 and newer, not separate
+    # reduced-capability and modern editions. New APIs need availability guards.
+    isEmpty(PLANK_MAC_CLIENT_MIN_MACOS): PLANK_MAC_CLIENT_MIN_MACOS = 15.0
+    !equals(PLANK_MAC_CLIENT_MIN_MACOS, 15.0) {
+        error("PLANK Client deployment target must be 15.0 (build with SDK27 or newer)")
     }
     QMAKE_MACOSX_DEPLOYMENT_TARGET = $$PLANK_MAC_CLIENT_MIN_MACOS
     QMAKE_APPLE_DEVICE_ARCHS = arm64
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
     QMAKE_INFO_PLIST = $$PWD/Info.plist
 
     APP_BUNDLE_RESOURCES.files = moonlight.icns
