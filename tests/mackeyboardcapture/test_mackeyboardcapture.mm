@@ -51,9 +51,31 @@ private slots:
         state().active = true;
         state().isoKeyboard = false;
         state().isTrusted = [] { return false; };
-        state().requestTrust = [] {};
     }
     void cleanup() { m_Capture.reset(); }
+
+    void disabledCaptureDoesNotPromptOrConsumeRequest()
+    {
+        bool prompted = false;
+        QVERIFY(!accessibilityPromptNeeded(false, false, prompted));
+        QVERIFY(!prompted);
+        QVERIFY(accessibilityPromptNeeded(true, false, prompted));
+    }
+    void grantedPermissionDoesNotPrompt()
+    {
+        bool prompted = false;
+        QVERIFY(!accessibilityPromptNeeded(true, true, prompted));
+        QVERIFY(!prompted);
+    }
+    void launcherRequestsOnlyOncePerProcess()
+    {
+        bool prompted = false;
+        QVERIFY(accessibilityPromptNeeded(true, false, prompted));
+        QVERIFY(prompted);
+        QVERIFY(!accessibilityPromptNeeded(true, false, prompted));
+        QVERIFY(!accessibilityPromptNeeded(false, false, prompted));
+        QVERIFY(!accessibilityPromptNeeded(true, false, prompted));
+    }
 
     void commandTabAndSpaceAreQueuedOnce()
     {

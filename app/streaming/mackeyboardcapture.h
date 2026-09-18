@@ -9,6 +9,9 @@
 class MacKeyboardCapture
 {
 public:
+    // Call from the launcher/settings UI, never while a stream owns input.
+    static void requestPermissionIfNeeded(bool captureEnabled);
+
     MacKeyboardCapture(std::function<bool()> ownsKeyboard,
                        std::function<void()> releaseKeys);
     ~MacKeyboardCapture();

@@ -9,6 +9,13 @@
 #include <utility>
 
 namespace {
+bool accessibilityPromptNeeded(bool captureEnabled, bool trusted, bool& prompted)
+{
+    if (!captureEnabled || trusted || prompted) return false;
+    prompted = true;
+    return true;
+}
+
 struct Modifier {
     SDL_Scancode scan;
     SDL_Keymod mod;
@@ -48,9 +55,6 @@ struct MacKeyboardCapture::State
     std::function<bool()> ownsKeyboard;
     std::function<void()> releaseKeys;
     std::function<bool()> isTrusted = [] { return AXIsProcessTrusted(); };
-    std::function<void()> requestTrust = [] {
-        AXIsProcessTrustedWithOptions((CFDictionaryRef)@{(id)kAXTrustedCheckOptionPrompt: @YES});
-    };
     CFMachPortRef tap = nullptr;
     CFRunLoopSourceRef source = nullptr;
     CFRunLoopTimerRef timer = nullptr;
@@ -193,12 +197,8 @@ struct MacKeyboardCapture::State
             // A grant after revocation must create a fresh authorized tap,
             // not try to reuse a port that TCC may have permanently disabled.
             removeTap();
-            // One OS permission prompt per app run, never from the tap itself.
-            static bool prompted = false;
-            if (!prompted) {
-                prompted = true;
-                requestTrust();
-            }
+            // Permission UI belongs to the launcher/settings, never a stream
+            // whose pointer capture could make the system dialog inaccessible.
             if (!warned) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
                     "System shortcut capture needs PLANK Client Accessibility permission in System Settings > Privacy & Security. Local OS shortcuts remain active until approved.");
@@ -242,6 +242,15 @@ struct MacKeyboardCapture::State
         warned = false;
     }
 };
+
+void MacKeyboardCapture::requestPermissionIfNeeded(bool captureEnabled)
+{
+    NSCAssert(NSThread.isMainThread, @"Keyboard permission UI is main-thread only");
+    static bool prompted = false;
+    if (accessibilityPromptNeeded(captureEnabled, AXIsProcessTrusted(), prompted)) {
+        AXIsProcessTrustedWithOptions((CFDictionaryRef)@{(id)kAXTrustedCheckOptionPrompt: @YES});
+    }
+}
 
 MacKeyboardCapture::MacKeyboardCapture(std::function<bool()> ownsKeyboard,
                                        std::function<void()> releaseKeys)

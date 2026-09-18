@@ -30,6 +30,7 @@
 
 #ifdef Q_OS_MACOS
 #include "macapplication.h"
+#include "streaming/mackeyboardcapture.h"
 #endif
 
 #ifdef HAVE_FFMPEG
@@ -980,6 +981,24 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(
                 "runConfigChecks",
                 commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
+
+#ifdef Q_OS_MACOS
+    // Ask before any stream can capture the pointer. Also handle enabling the
+    // preference later in Settings, without ever prompting from a live stream.
+    auto requestKeyboardPermission = [] {
+        if (Session::get() == nullptr) {
+            MacKeyboardCapture::requestPermissionIfNeeded(
+                        StreamingPreferences::get()->captureSysKeysMode != StreamingPreferences::CSK_OFF);
+        }
+    };
+    QObject::connect(StreamingPreferences::get(), &StreamingPreferences::captureSysKeysModeChanged,
+                     &app, requestKeyboardPermission);
+    // CLI autoconnect must not put a permission dialog behind its stream.
+    // Provision permission once by opening the ordinary launcher first.
+    if (commandLineParserResult == GlobalCommandLineParser::NormalStartRequested) {
+        requestKeyboardPermission();
+    }
+#endif
 
     // Load the main.qml file
     engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
