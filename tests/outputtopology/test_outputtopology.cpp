@@ -8,6 +8,7 @@ class TestOutputTopology : public QObject
     Q_OBJECT
 
 private slots:
+    void advertisesOnlyImplementedClipboardSupport();
     void parsesQualificationVector();
     void roundTripsQualificationVector();
     void rejectsDuplicateIdentity();
@@ -26,6 +27,21 @@ private slots:
     void matchesMacFullscreenViewport();
     void buildsMacDisplayRequest();
 };
+
+void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
+{
+    const auto negotiated = NvOutputTopology::SupportedFeatureFlags &
+                            NvOutputTopology::ClipboardSyncFeature;
+#ifdef Q_OS_MACOS
+    QCOMPARE(negotiated, NvOutputTopology::ClipboardSyncFeature);
+#else
+    QCOMPARE(negotiated, 0);
+#endif
+    // A host without the feature cannot enable it on any client platform.
+    QCOMPARE(NvOutputTopology::SupportedFeatureFlags &
+             ~NvOutputTopology::ClipboardSyncFeature &
+             NvOutputTopology::ClipboardSyncFeature, 0);
+}
 
 void TestOutputTopology::matchesMacFullscreenViewport()
 {
