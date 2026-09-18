@@ -10,6 +10,11 @@ private slots:
     void malformed();
     void reportTypesAndIds();
     void stalledReportAcrossFocusReconnectAndQuit();
+    void focusReturnsAfterReleaseTimeout();
+    void reconnectFinishesAfterReleaseTimeout();
+    void newerRequestsOverrideLateCompletion();
+    void reconnectDoesNotRestoreLostFocus();
+    void stopAndExitCannotResumeForwarding();
 };
 
 static QByteArray frame(unsigned type, unsigned size)
@@ -69,14 +74,15 @@ void TestMacRawWacom::stalledReportAcrossFocusReconnectAndQuit()
 {
     auto results = std::make_shared<MacWacomAsyncResults>();
     std::weak_ptr<MacWacomAsyncResults> callbackTarget = results;
-    MacWacomReleaseBarrier release;
+    MacWacomLifecycle release;
+    release.setActive(true);
     const auto stalledFocusEpoch = results->epoch();
 
     // A physical report callback has not arrived. Focus loss must advance the
     // lease without waiting for it, and a later completion cannot reach Host.
-    const auto focusTicket = release.request();
+    const auto focusTicket = release.setActive(false);
     QVERIFY(!release.wait(focusTicket, std::chrono::milliseconds(10)));
-    QVERIFY(!release.idle());
+    QVERIFY(!release.canForward());
     results->invalidate();
     release.complete(focusTicket);
     QVERIFY(release.wait(focusTicket, std::chrono::milliseconds(0)));
@@ -87,7 +93,7 @@ void TestMacRawWacom::stalledReportAcrossFocusReconnectAndQuit()
     QVERIFY(results->take().empty());
 
     const auto stalledReconnectEpoch = results->epoch();
-    const auto reconnectTicket = release.request();
+    const auto reconnectTicket = release.beginReconnect();
     QVERIFY(!release.wait(reconnectTicket, std::chrono::milliseconds(10)));
     results->invalidate();
     release.complete(reconnectTicket);
@@ -107,13 +113,121 @@ void TestMacRawWacom::stalledReportAcrossFocusReconnectAndQuit()
 
     // Quit can destroy the mailbox while the OS still owns a request context.
     // Its eventual callback holds only a weak reference and must do nothing.
-    const auto quitTicket = release.request();
+    const auto quitTicket = release.stop();
     QVERIFY(!release.wait(quitTicket, std::chrono::milliseconds(10)));
     results.reset();
     QVERIFY(callbackTarget.expired());
     if (auto target = callbackTarget.lock()) QFAIL("Late callback reached a dead Client");
     release.markExited();
     QVERIFY(release.waitExited(std::chrono::milliseconds(0)));
+}
+
+void TestMacRawWacom::focusReturnsAfterReleaseTimeout()
+{
+    MacWacomLifecycle state;
+    QVERIFY(!state.canForward());
+    QCOMPARE(state.setActive(true), std::uint64_t(0));
+    QVERIFY(state.canForward());
+
+    const auto release = state.setActive(false);
+    // Keep the worker stalled until after the UI's wait has timed out.
+    QVERIFY(!state.wait(release, std::chrono::milliseconds(0)));
+    state.setActive(true);
+    QVERIFY(!state.canForward());
+    QCOMPARE(state.pendingTicket(), release);
+
+    // No second focus event is needed once physical release completes.
+    state.complete(release);
+    QVERIFY(state.wait(release, std::chrono::milliseconds(0)));
+    QVERIFY(state.canForward());
+}
+
+void TestMacRawWacom::reconnectFinishesAfterReleaseTimeout()
+{
+    MacWacomLifecycle state;
+    state.setActive(true);
+    const auto begin = state.beginReconnect();
+    QVERIFY(!state.canForward());
+    state.complete(begin);
+    QVERIFY(!state.canForward()); // Still waiting for a new connection.
+
+    const auto finish = state.finishReconnect();
+    QVERIFY(!state.wait(finish, std::chrono::milliseconds(0)));
+    QVERIFY(!state.canForward());
+    state.complete(finish);
+    QVERIFY(state.canForward()); // No second finishReconnect() call needed.
+}
+
+void TestMacRawWacom::newerRequestsOverrideLateCompletion()
+{
+    MacWacomLifecycle state;
+    state.setActive(true);
+    const auto focusLoss = state.setActive(false);
+    state.setActive(true);
+    const auto begin = state.beginReconnect();
+    const auto finish = state.finishReconnect();
+
+    state.complete(focusLoss);
+    QVERIFY(!state.canForward());
+    state.complete(begin);
+    QVERIFY(!state.canForward());
+    QCOMPARE(state.pendingTicket(), finish);
+
+    // A second connection change supersedes the first one's delayed release.
+    const auto nextBegin = state.beginReconnect();
+    state.complete(finish);
+    QVERIFY(!state.canForward());
+    state.complete(nextBegin);
+    QVERIFY(!state.canForward());
+    const auto nextFinish = state.finishReconnect();
+    state.complete(nextFinish);
+    QVERIFY(state.canForward());
+    state.complete(focusLoss); // Out-of-order acknowledgments cannot regress state.
+    QVERIFY(state.canForward());
+}
+
+void TestMacRawWacom::reconnectDoesNotRestoreLostFocus()
+{
+    MacWacomLifecycle state;
+    state.setActive(true);
+    const auto begin = state.beginReconnect();
+    state.complete(begin);
+    const auto finish = state.finishReconnect();
+    QVERIFY(!state.wait(finish, std::chrono::milliseconds(0)));
+
+    const auto lostFocus = state.setActive(false);
+    state.complete(finish);
+    QVERIFY(!state.canForward());
+    state.complete(lostFocus);
+    QVERIFY(!state.canForward());
+    state.setActive(true);
+    QVERIFY(state.canForward());
+}
+
+void TestMacRawWacom::stopAndExitCannotResumeForwarding()
+{
+    MacWacomLifecycle state;
+    state.setActive(true);
+    const auto reconnect = state.finishReconnect();
+    const auto quit = state.stop();
+    QVERIFY(!state.wait(quit, std::chrono::milliseconds(0)));
+    QCOMPARE(state.setActive(true), std::uint64_t(0));
+    QCOMPARE(state.finishReconnect(), std::uint64_t(0));
+    state.complete(reconnect);
+    QVERIFY(!state.canForward());
+    state.complete(quit);
+    QVERIFY(!state.canForward());
+    state.markExited();
+    QVERIFY(state.waitExited(std::chrono::milliseconds(0)));
+    state.setActive(true);
+    QVERIFY(!state.canForward());
+
+    MacWacomLifecycle exited;
+    exited.setActive(true);
+    exited.markExited();
+    exited.setActive(true);
+    exited.finishReconnect();
+    QVERIFY(!exited.canForward());
 }
 QTEST_APPLESS_MAIN(TestMacRawWacom)
 #include "test_macrawwacom.moc"

@@ -119,11 +119,10 @@ public:
             activity->enabled = false;
             activity->callback = nullptr;
         }
-        active = false;
-        const bool released = barrier();
+        const bool released = barrier(lifecycle.stop());
         shutdownRequested = true;
         stopping = true;
-        const bool exited = releaseBarrier.waitExited(std::chrono::seconds(2));
+        const bool exited = lifecycle.waitExited(std::chrono::seconds(2));
         if (worker.joinable()) {
             if (exited) worker.join();
             else worker.detach(); // self-owned state remains until the worker exits
@@ -133,11 +132,10 @@ public:
     }
     void setActive(bool value)
     {
-        if (!value) { active = false; barrier(); }
-        else if (releaseBarrier.idle() && !stopping) active = true;
+        barrier(lifecycle.setActive(value));
     }
-    void beginReconnect() { reconnecting = true; barrier(); }
-    void finishReconnect() { if (barrier()) reconnecting = false; }
+    void beginReconnect() { barrier(lifecycle.beginReconnect()); }
+    void finishReconnect() { barrier(lifecycle.finishReconnect()); }
     void control(const unsigned char* data, unsigned length)
     {
         MacWacomWire::Control parsed;
@@ -172,9 +170,8 @@ private:
     };
     std::shared_ptr<ActivityGuard> activity;
     std::shared_ptr<MacWacomAsyncResults> reportResults = std::make_shared<MacWacomAsyncResults>();
-    MacWacomReleaseBarrier releaseBarrier;
-    std::atomic<bool> active{false}, reconnecting{false}, stopping{false},
-        shutdownRequested{false}, overflow{false};
+    MacWacomLifecycle lifecycle;
+    std::atomic<bool> stopping{false}, shutdownRequested{false}, overflow{false};
     std::mutex mutex;
     std::deque<std::vector<unsigned char>> queue;
     std::thread worker;
@@ -184,10 +181,9 @@ private:
     bool pending = false, attached = false, ioFailed = false;
     Clock::time_point retry{}, deadline{};
 
-    bool barrier()
+    bool barrier(std::uint64_t ticket)
     {
-        const auto ticket = releaseBarrier.request();
-        if (releaseBarrier.wait(ticket, std::chrono::seconds(2))) return true;
+        if (lifecycle.wait(ticket, std::chrono::seconds(2))) return true;
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Mac Wacom release barrier timed out");
         return false;
     }
@@ -215,7 +211,7 @@ private:
         if (result != kIOReturnSuccess || size <= 0 || size > PLANK_RAW_HID_MAX_REPORT_SIZE) {
             self.ioFailed = true; return;
         }
-        if (!self.attached || !self.active || self.reconnecting) return;
+        if (!self.attached || !self.lifecycle.canForward()) return;
         if (!self.send(PLANK_RAW_HID_INPUT, interface.index, ++self.sequence, bytes, size)) {
             self.ioFailed = true; return;
         }
@@ -377,7 +373,7 @@ private:
     {
         MacWacomWire::Control c;
         if (!MacWacomWire::parse(bytes.data(), bytes.size(), c) || c.generation != generation ||
-            interfaces.empty() || !active || reconnecting) return;
+            interfaces.empty() || !lifecycle.canForward()) return;
         const auto* payload = bytes.data() + sizeof(PLANK_RAW_HID_WIRE_HEADER);
         if (c.type == PLANK_RAW_HID_ATTACH_RESULT) {
             if (!pending) return;
@@ -445,7 +441,7 @@ private:
     }
     void completeReport(const MacWacomAsyncResults::Completion& completion)
     {
-        if (!active || reconnecting || interfaces.empty() ||
+        if (!lifecycle.canForward() || interfaces.empty() ||
             completion.generation != generation) return;
         const auto result = static_cast<IOReturn>(completion.result);
         std::vector<unsigned char> reply(sizeof(std::int32_t));
@@ -469,17 +465,17 @@ private:
                 std::lock_guard<std::mutex> lock(mutex);
                 controls.swap(queue);
             }
-            const auto barrierTicket = releaseBarrier.pendingTicket();
+            const auto barrierTicket = lifecycle.pendingTicket();
             if (barrierTicket) {
                 release(false);
                 controls.clear();
-                releaseBarrier.complete(barrierTicket);
+                lifecycle.complete(barrierTicket);
             }
-            if (!active || reconnecting) release(false);
+            if (!lifecycle.canForward()) release(false);
             else {
                 if (overflow.exchange(false)) { release(true); retry = Clock::now() + std::chrono::seconds(1); }
                 for (const auto& bytes : controls) {
-                    if (!active || reconnecting) break;
+                    if (!lifecycle.canForward()) break;
                     process(bytes);
                 }
                 for (const auto& completion : reportResults->take()) completeReport(completion);
@@ -489,7 +485,10 @@ private:
                     release(false); retry = Clock::now() + std::chrono::seconds(1);
                 }
                 if (interfaces.empty() && Clock::now() >= retry) {
-                    if (discover() && !attach()) release(false);
+                    // Discovery/open can outlive a focus or reconnect request.
+                    // Do not advertise that lease after forwarding was revoked.
+                    if (lifecycle.canForward() && discover() &&
+                        (!lifecycle.canForward() || !attach())) release(false);
                     retry = Clock::now() + std::chrono::seconds(1);
                 }
             }
@@ -497,7 +496,7 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         release(false);
-        releaseBarrier.markExited();
+        lifecycle.markExited();
     }
 };
 

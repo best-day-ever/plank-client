@@ -55,14 +55,42 @@ private:
     std::deque<Completion> m_Ready;
 };
 
-// The Client waits for physical release, but a wedged device must not hold the
-// event loop forever. The worker owns its state after a timed-out Quit.
-class MacWacomReleaseBarrier
+// Requested state survives a bounded UI wait. Only the worker acknowledges
+// physical release; no input may resume before every requested release is done.
+// State and release tickets share a lock so a late completion cannot override
+// newer focus/reconnect/shutdown requests.
+class MacWacomLifecycle
 {
 public:
-    std::uint64_t request()
+    std::uint64_t setActive(bool active)
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
+        if (m_Stopping || m_Exited) return 0;
+        m_ActiveRequested = active;
+        return active ? 0 : ++m_Requested;
+    }
+
+    std::uint64_t beginReconnect()
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        if (m_Stopping || m_Exited) return 0;
+        m_Reconnecting = true;
+        return ++m_Requested;
+    }
+
+    std::uint64_t finishReconnect()
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        if (m_Stopping || m_Exited) return 0;
+        m_Reconnecting = false;
+        return ++m_Requested;
+    }
+
+    std::uint64_t stop()
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_Stopping = true;
+        m_ActiveRequested = false;
         return ++m_Requested;
     }
 
@@ -72,10 +100,11 @@ public:
         return m_Requested > m_Completed ? m_Requested : 0;
     }
 
-    bool idle() const
+    bool canForward() const
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Requested == m_Completed && !m_Exited;
+        return m_ActiveRequested && !m_Reconnecting && !m_Stopping &&
+            !m_Exited && m_Requested == m_Completed;
     }
 
     bool wait(std::uint64_t ticket, std::chrono::milliseconds deadline)
@@ -111,5 +140,6 @@ private:
     mutable std::mutex m_Mutex;
     std::condition_variable m_Changed;
     std::uint64_t m_Requested = 0, m_Completed = 0;
-    bool m_Exited = false;
+    bool m_ActiveRequested = false, m_Reconnecting = false,
+        m_Stopping = false, m_Exited = false;
 };
