@@ -181,9 +181,9 @@ bool SdlInputHandler::sendAbsoluteMousePosition(
     }
     return LiSendMousePositionEvent(
                 static_cast<short>(qBound(0, qRound(streamPoint.x()),
-                                          streamSize.width())),
+                                          streamSize.width() - 1)),
                 static_cast<short>(qBound(0, qRound(streamPoint.y()),
-                                          streamSize.height())),
+                                          streamSize.height() - 1)),
                 static_cast<short>(streamSize.width()),
                 static_cast<short>(streamSize.height())) == 0;
 }
