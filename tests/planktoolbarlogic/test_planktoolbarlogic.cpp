@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "planktoolbarlogic.h"
+#include "planktoolbarstats.h"
 #include "input/plankpointerlogic.h"
 #include "videopacketlosswindow.h"
 
@@ -28,6 +29,8 @@ private slots:
     void rejectsInconsistentFecCounters();
     void retainsTenSecondPeakForBothStatsViews();
     void sharesPacketLossDisplayPrecision();
+    void formatsSharedNetworkRtt();
+    void sizesEncoderSegmentWithoutMovingSlider();
 };
 
 void TestPlankToolbarLogic::avoidsCameraHousingWithoutChangingSafePositions()
@@ -247,6 +250,36 @@ void TestPlankToolbarLogic::sharesPacketLossDisplayPrecision()
     QCOMPARE(VideoPacketLossDisplayDecimalPlaces, 2);
 }
 
-QTEST_APPLESS_MAIN(TestPlankToolbarLogic)
+void TestPlankToolbarLogic::formatsSharedNetworkRtt()
+{
+    QCOMPARE(PlankToolbarStats::networkRttText(0), QStringLiteral("—"));
+    QCOMPARE(PlankToolbarStats::networkRttText(1), QStringLiteral("1 ms"));
+    QCOMPARE(PlankToolbarStats::networkRttText(12), QStringLiteral("12 ms"));
+    QCOMPARE(PlankToolbarStats::networkRttText(150), QStringLiteral("150 ms"));
+    QCOMPARE(PlankToolbarStats::networkRttText(1234), QStringLiteral("1234 ms"));
+}
+
+void TestPlankToolbarLogic::sizesEncoderSegmentWithoutMovingSlider()
+{
+    using namespace PlankToolbarStats;
+    const int width = encoderTargetWidth(10000, 150000, 500);
+    const QFontMetrics metrics(encoderTargetFont());
+    int widest = 0;
+    for (int target = 10000; target <= 150000; target += 500) {
+        const int textWidth = metrics.horizontalAdvance(encoderTargetText(target));
+        QVERIFY(textWidth <= width);
+        widest = std::max(widest, textWidth);
+    }
+    QCOMPARE(width, widest);
+    QCOMPARE(encoderTargetText(42500), QStringLiteral("Encoder target  42.5 Mbps"));
+    QVERIFY(EncoderTargetLeft > RttLeft + RttWidth);
+    const int toolbarWidth = EncoderTargetLeft + width + WindowControlsWidth;
+    const int sliderRight = toolbarWidth - WindowControlsWidth;
+    QCOMPARE(sliderRight - EncoderTargetLeft, width);
+    // The knob's seven-point hit extension must stop before Fullscreen.
+    QVERIFY(sliderRight + 7 < toolbarWidth - 102);
+}
+
+QTEST_MAIN(TestPlankToolbarLogic)
 
 #include "test_planktoolbarlogic.moc"

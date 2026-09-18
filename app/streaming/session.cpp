@@ -4218,7 +4218,8 @@ void Session::execInternal()
             m_PlankToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
-                        currentVideoFecLoss().before);
+                        currentVideoFecLoss().before,
+                        currentNetworkRttMs());
             const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
             if (action == PlankToolbar::Action::Disconnect) {

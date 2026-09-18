@@ -3,6 +3,7 @@
 #include "applevideoprofile.h"
 #include "applevideo-test-frame.h"
 #include "streaming/session.h"
+#include "streaming/planktoolbarstats.h"
 
 #include <h264_stream.h>
 
@@ -1119,24 +1120,17 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
     }
 
     if (stats.renderedFrames != 0) {
-        char rttString[32];
-
-        if (stats.lastRtt != 0) {
-            snprintf(rttString, sizeof(rttString), "%u ms", stats.lastRtt);
-        }
-        else {
-            snprintf(rttString, sizeof(rttString), "N/A");
-        }
+        const auto rttString = PlankToolbarStats::networkRttText(stats.lastRtt).toUtf8();
 
         ret = snprintf(&output[offset],
                        length - offset,
                        "Client frame queue drops (%%/render/overflow): %.2f%%/%u/%u\n"
-                       "Average network latency: %s\n"
+                       "Network RTT: %s\n"
                        "Frame time (decode/queue/render incl. V-sync): %.2f/%.2f/%.2f ms\n",
                        (float)stats.pacerDroppedFrames / stats.decodedFrames * 100,
                        stats.renderQueueDroppedFrames,
                        stats.queueOverflowDroppedFrames,
-                       rttString,
+                       rttString.constData(),
                        (float)stats.totalDecodeTime / stats.decodedFrames,
                        (float)stats.totalPacerTime / stats.renderedFrames,
                        (float)stats.totalRenderTime / stats.renderedFrames);
