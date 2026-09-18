@@ -8,6 +8,7 @@ class TestMacKeyboardCapture : public QObject
 {
     Q_OBJECT
     bool m_Focus = true;
+    bool m_CaptureEnabled = true;
     int m_Releases = 0;
     std::unique_ptr<MacKeyboardCapture> m_Capture;
 
@@ -45,8 +46,9 @@ private slots:
     void init()
     {
         m_Focus = true;
+        m_CaptureEnabled = true;
         m_Releases = 0;
-        m_Capture.reset(new MacKeyboardCapture([this] { return m_Focus; },
+        m_Capture.reset(new MacKeyboardCapture([this] { return m_Focus && m_CaptureEnabled; },
                                                [this] { ++m_Releases; }, false));
         state().active = true;
         state().isoKeyboard = false;
@@ -163,6 +165,70 @@ private slots:
         QVERIFY(!capture(kVK_ANSI_A));
         QCOMPARE(m_Releases, 1);
         QVERIFY(state().pending.empty());
+    }
+    void repeatedSpaceReturnsCaptureFirstShortcutWithoutRefresh()
+    {
+        state().isTrusted = [] { return true; };
+        for (int i = 0; i < 5; ++i) {
+            QVERIFY(capture(kVK_ANSI_A)); // Pending input must not cross Spaces.
+            m_Focus = false;
+            m_Capture->refresh();
+            QVERIFY(!state().active);
+            QVERIFY(drain().empty());
+            QVERIFY(!capture(kVK_Tab, kCGEventKeyDown, kCGEventFlagMaskCommand));
+            QVERIFY(!capture(kVK_Tab, kCGEventKeyUp, kCGEventFlagMaskCommand));
+            QVERIFY(drain().empty());
+
+            // No SDL notification, explicit refresh or timer on return.
+            m_Focus = true;
+            QVERIFY(capture(kVK_Tab, kCGEventKeyDown, kCGEventFlagMaskCommand));
+            QVERIFY(capture(kVK_Tab, kCGEventKeyUp, kCGEventFlagMaskCommand));
+            QVERIFY(capture(kVK_Command, kCGEventFlagsChanged));
+            const auto keys = drain();
+            QCOMPARE(keys.size(), size_t(4));
+            QCOMPARE(keys[0].scancode, SDL_SCANCODE_LGUI);
+            QCOMPARE(keys[1].scancode, SDL_SCANCODE_TAB);
+            QVERIFY(keys[1].down && !keys[2].down && !keys[3].down);
+            QVERIFY(m_Capture->suppressSdlKeyEvent());
+        }
+        QCOMPARE(m_Releases, 10); // One release on departure and on re-arm.
+    }
+    void focusReturnDoesNotOverrideExplicitCaptureRelease()
+    {
+        state().isTrusted = [] { return true; };
+        m_CaptureEnabled = false;
+        m_Capture->refresh();
+        m_Focus = false;
+        QVERIFY(!capture(kVK_ANSI_A));
+        m_Focus = true;
+        QVERIFY(!capture(kVK_Tab, kCGEventKeyDown, kCGEventFlagMaskCommand));
+        QVERIFY(!state().active);
+        QVERIFY(drain().empty());
+        m_CaptureEnabled = true;
+        QVERIFY(capture(kVK_Space, kCGEventKeyDown, kCGEventFlagMaskCommand));
+        QCOMPARE(drain().back().scancode, SDL_SCANCODE_SPACE);
+    }
+    void focusReturnDoesNotOverridePermissionRevocation()
+    {
+        m_Focus = false;
+        m_Capture->refresh();
+        m_Focus = true;
+        QVERIFY(!capture(kVK_Tab, kCGEventKeyDown, kCGEventFlagMaskCommand));
+        QVERIFY(!state().active);
+        QVERIFY(drain().empty());
+    }
+    void backgroundKeysNeverEnterTheRemoteQueue()
+    {
+        state().isTrusted = [] { return true; };
+        m_Focus = false;
+        for (int i = 0; i < 10; ++i) {
+            QVERIFY(!capture(kVK_ANSI_A));
+            QVERIFY(!capture(kVK_Command, kCGEventFlagsChanged, kCGEventFlagMaskCommand));
+        }
+        QCOMPARE(m_Releases, 1);
+        QVERIFY(!state().active);
+        QVERIFY(drain().empty());
+        QVERIFY(!m_Capture->suppressSdlKeyEvent());
     }
     void releaseDuringDispatchDropsRemainingKeys()
     {

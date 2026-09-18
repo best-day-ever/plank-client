@@ -89,7 +89,8 @@ bool MacWindow::hasKeyboardFocus(SDL_Window* window)
 {
     NSWindow* nativeWindow = (__bridge NSWindow*)SDL_GetPointerProperty(
         SDL_GetWindowProperties(window), SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
-    return nativeWindow && NSApp.isActive && NSApp.keyWindow == nativeWindow;
+    return nativeWindow && NSApp.isActive && NSApp.keyWindow == nativeWindow &&
+           nativeWindow.isOnActiveSpace;
 }
 
 bool MacWindow::fullscreenTopInset(Uint32 displayId, int* top)

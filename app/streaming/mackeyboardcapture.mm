@@ -75,7 +75,10 @@ struct MacKeyboardCapture::State
 
     void deactivate()
     {
-        if (tap) CGEventTapEnable(tap, false);
+        // Stop forwarding, not the session's native event source. A disabled
+        // tap cannot see the first key after a Spaces transition, leaving
+        // recovery dependent on queued SDL focus events or the polling timer.
+        // handle() passes every background event through unchanged.
         const bool wasActive = std::exchange(active, false);
         pending.clear();
         wakeQueued = false;
@@ -87,6 +90,7 @@ struct MacKeyboardCapture::State
     void removeTap()
     {
         deactivate();
+        if (tap) CGEventTapEnable(tap, false);
         if (source) {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
             CFRelease(source);
@@ -97,6 +101,14 @@ struct MacKeyboardCapture::State
             CFRelease(tap);
             tap = nullptr;
         }
+    }
+
+    void activate()
+    {
+        releaseKeys();
+        lastModifiers = SDL_KMOD_NONE;
+        active = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "macOS system shortcut capture enabled");
     }
 
     bool enqueue(SDL_Scancode scan, bool down, SDL_Keymod mods, Uint32 raw = 0)
@@ -157,7 +169,6 @@ struct MacKeyboardCapture::State
             SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "macOS shortcut capture interrupted; remote keys released");
             return event;
         }
-        if (!active) return event;
         if (!ownsKeyboard()) {
             deactivate();
             return event;
@@ -177,6 +188,13 @@ struct MacKeyboardCapture::State
         }
         if (raw == kVK_Function || raw == kVK_VolumeUp || raw == kVK_VolumeDown || raw == kVK_Mute)
             return event;
+        // Native focus and the user's capture policy are authoritative. Resume
+        // on the first returned key, even without an SDL focus notification or
+        // a timer tick. Permission revocation must never re-arm forwarding.
+        if (!active) {
+            if (!isTrusted()) return event;
+            activate();
+        }
         if (!queueKey(type, event)) {
             deactivate();
             SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Unable to queue macOS shortcut; capture released");
@@ -227,8 +245,6 @@ struct MacKeyboardCapture::State
             return;
         }
         if (!active) {
-            releaseKeys();
-            lastModifiers = SDL_KMOD_NONE;
             CGEventTapEnable(tap, true);
             if (!CGEventTapIsEnabled(tap)) {
                 removeTap();
@@ -236,8 +252,7 @@ struct MacKeyboardCapture::State
                 warned = true;
                 return;
             }
-            active = true;
-            SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "macOS system shortcut capture enabled");
+            activate();
         }
         warned = false;
     }

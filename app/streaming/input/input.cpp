@@ -110,9 +110,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
             WMUtils::isRunningDesktopEnvironment();
 #ifdef Q_OS_MACOS
-    auto ownsKeyboard = [this] {
-        return isSystemKeyCaptureActive() && hasMacStreamKeyboardFocus();
-    };
+    auto ownsKeyboard = [this] { return isSystemKeyCaptureActive(); };
     m_MacQuitShortcut = std::make_unique<MacQuitShortcut>(ownsKeyboard);
     m_MacKeyboardCapture = std::make_unique<MacKeyboardCapture>(
         ownsKeyboard, [this] { raiseAllKeys(); });
@@ -801,7 +799,13 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
     bool fullscreen = false;
     for (const auto& output : m_PresentationLayout.outputs) {
         const Uint32 windowFlags = SDL_GetWindowFlags(output.window);
+#ifdef Q_OS_MACOS
+        // AppKit can return to a fullscreen Space before SDL's cached focus
+        // flags recover. Do not require both native and cached focus to agree.
+        focused = focused || MacWindow::hasKeyboardFocus(output.window);
+#else
         focused = focused || (windowFlags & SDL_WINDOW_INPUT_FOCUS);
+#endif
         fullscreen = fullscreen || (windowFlags & SDL_WINDOW_FULLSCREEN);
     }
     if (!focused || !m_KeyboardCaptureActive) {
