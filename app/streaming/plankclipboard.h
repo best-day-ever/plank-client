@@ -43,35 +43,16 @@ struct Assembly {
         bytes.clear();
     }
 
-    AppendResult appendChunk(const PLANK_CLIPBOARD_WIRE_HEADER& wire,
-                             const std::uint8_t* chunkData)
+    // chunk has already passed the shared wire decoder (including total and
+    // payload length limits); this class owns only contiguous assembly state.
+    AppendResult appendChunk(const PlankClipboardChunk& chunk)
     {
-        const auto magic = qFromLittleEndian(wire.magic);
-        const auto version = qFromLittleEndian(wire.version);
-        const auto reserved = qFromLittleEndian(wire.reserved);
-        const auto flags = qFromLittleEndian(wire.flags);
-        const auto generationValue = qFromLittleEndian(wire.generation);
-        const auto totalSizeValue = qFromLittleEndian(wire.totalSize);
-        const auto chunkOffset = qFromLittleEndian(wire.chunkOffset);
-        const auto chunkSize = qFromLittleEndian(wire.chunkSize);
-        constexpr std::uint32_t knownFlags =
-            PLANK_CLIPBOARD_FLAG_FIRST_CHUNK | PLANK_CLIPBOARD_FLAG_LAST_CHUNK;
-
-        if (magic != PLANK_CLIPBOARD_WIRE_MAGIC ||
-                version != PLANK_CLIPBOARD_WIRE_VERSION ||
-                reserved != 0 ||
-                generationValue == 0 ||
-                (flags & ~knownFlags) != 0 ||
-                totalSizeValue == 0 ||
-                totalSizeValue > PLANK_CLIPBOARD_MAX_TEXT_SIZE ||
-                chunkSize == 0 ||
-                chunkSize > PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE ||
-                chunkOffset > totalSizeValue ||
-                chunkSize > totalSizeValue - chunkOffset ||
-                chunkData == nullptr) {
-            reset();
-            return AppendResult::Rejected;
-        }
+        const auto flags = chunk.flags;
+        const auto generationValue = chunk.generation;
+        const auto totalSizeValue = chunk.total;
+        const auto chunkOffset = chunk.offset;
+        const auto chunkSize = chunk.size;
+        const auto chunkData = chunk.bytes;
 
         if ((flags & PLANK_CLIPBOARD_FLAG_FIRST_CHUNK) != 0) {
             if (chunkOffset != 0) {
@@ -113,22 +94,6 @@ struct Assembly {
     }
 };
 
-inline void writeHeader(PLANK_CLIPBOARD_WIRE_HEADER& header,
-                        std::uint32_t flags,
-                        std::uint64_t generation,
-                        std::uint32_t totalSize,
-                        std::uint32_t chunkOffset,
-                        std::uint32_t chunkSize)
-{
-    header.magic = qToLittleEndian(static_cast<std::uint32_t>(PLANK_CLIPBOARD_WIRE_MAGIC));
-    header.version = qToLittleEndian(static_cast<std::uint16_t>(PLANK_CLIPBOARD_WIRE_VERSION));
-    header.reserved = 0;
-    header.flags = qToLittleEndian(flags);
-    header.generation = qToLittleEndian(generation);
-    header.totalSize = qToLittleEndian(totalSize);
-    header.chunkOffset = qToLittleEndian(chunkOffset);
-    header.chunkSize = qToLittleEndian(chunkSize);
-}
 
 inline std::vector<std::vector<std::uint8_t>> buildEventFrames(
         const std::uint8_t* text, std::size_t textSize, std::uint64_t generation,
@@ -146,17 +111,8 @@ inline std::vector<std::vector<std::uint8_t>> buildEventFrames(
     for (std::uint32_t offset = 0; offset < totalSize;) {
         const auto chunkSize = std::min(maxChunkSize, totalSize - offset);
         std::vector<std::uint8_t> frame(sizeof(PLANK_CLIPBOARD_WIRE_HEADER) + chunkSize);
-        PLANK_CLIPBOARD_WIRE_HEADER header {};
-        std::uint32_t flags = 0;
-        if (offset == 0) {
-            flags |= PLANK_CLIPBOARD_FLAG_FIRST_CHUNK;
-        }
-        if (offset + chunkSize == totalSize) {
-            flags |= PLANK_CLIPBOARD_FLAG_LAST_CHUNK;
-        }
-        writeHeader(header, flags, generation, totalSize, offset, chunkSize);
-        std::memcpy(frame.data(), &header, sizeof(header));
-        std::memcpy(frame.data() + sizeof(header), text + offset, chunkSize);
+        plank_clipboard_header(frame.data(), generation, totalSize, offset, chunkSize);
+        std::memcpy(frame.data() + PLANK_CLIPBOARD_HEADER_BYTES, text + offset, chunkSize);
         frames.push_back(std::move(frame));
         offset += chunkSize;
     }
