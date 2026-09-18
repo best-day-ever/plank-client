@@ -255,7 +255,7 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
         if (generation <= m_LastAppliedHostGeneration) {
             return true;
         }
-        const auto result = m_Assembly.appendChunk(wire, data + sizeof(wire));
+        const auto result = m_Assembly.appendChunk(chunk);
         if (result == plank::clipboard::AppendResult::Rejected) {
             return false;
         }
