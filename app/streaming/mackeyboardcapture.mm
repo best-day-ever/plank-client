@@ -80,6 +80,21 @@ struct MacKeyboardCapture::State
         if (wasActive) releaseKeys();
     }
 
+    void removeTap()
+    {
+        deactivate();
+        if (source) {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+            CFRelease(source);
+            source = nullptr;
+        }
+        if (tap) {
+            CFMachPortInvalidate(tap);
+            CFRelease(tap);
+            tap = nullptr;
+        }
+    }
+
     bool enqueue(SDL_Scancode scan, bool down, SDL_Keymod mods, Uint32 raw = 0)
     {
         if (pending.size() == QueueLimit) return false;
@@ -175,7 +190,9 @@ struct MacKeyboardCapture::State
     {
         if (!ownsKeyboard()) { deactivate(); return; }
         if (!isTrusted()) {
-            deactivate();
+            // A grant after revocation must create a fresh authorized tap,
+            // not try to reuse a port that TCC may have permanently disabled.
+            removeTap();
             // One OS permission prompt per app run, never from the tap itself.
             static bool prompted = false;
             if (!prompted) {
@@ -190,14 +207,7 @@ struct MacKeyboardCapture::State
             return;
         }
         if (tap && !CFMachPortIsValid(tap)) {
-            deactivate();
-            if (source) {
-                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
-                CFRelease(source);
-                source = nullptr;
-            }
-            CFRelease(tap);
-            tap = nullptr;
+            removeTap();
         }
         if (active && tap && !CGEventTapIsEnabled(tap)) deactivate();
         if (!tap && eventType) {
@@ -219,8 +229,14 @@ struct MacKeyboardCapture::State
         if (!active) {
             releaseKeys();
             lastModifiers = SDL_KMOD_NONE;
-            active = true;
             CGEventTapEnable(tap, true);
+            if (!CGEventTapIsEnabled(tap)) {
+                removeTap();
+                if (!warned) SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "macOS system shortcut capture could not be enabled");
+                warned = true;
+                return;
+            }
+            active = true;
             SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "macOS system shortcut capture enabled");
         }
         warned = false;
@@ -251,12 +267,7 @@ MacKeyboardCapture::~MacKeyboardCapture()
 {
     NSCAssert(NSThread.isMainThread, @"Keyboard capture is main-thread only");
     if (m_State->timer) { CFRunLoopTimerInvalidate(m_State->timer); CFRelease(m_State->timer); }
-    m_State->deactivate();
-    if (m_State->source) {
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), m_State->source, kCFRunLoopCommonModes);
-        CFRelease(m_State->source);
-    }
-    if (m_State->tap) { CFMachPortInvalidate(m_State->tap); CFRelease(m_State->tap); }
+    m_State->removeTap();
 }
 
 void MacKeyboardCapture::refresh()
