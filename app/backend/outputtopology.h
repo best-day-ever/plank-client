@@ -70,7 +70,7 @@ struct NvOutputTopology
 #endif
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
-            MacDesktopPreparationFeature | MacEncodingProfileFeature;
+            MacDesktopPreparationFeature | MacEncodingProfileFeature | ClipboardSyncFeature;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |

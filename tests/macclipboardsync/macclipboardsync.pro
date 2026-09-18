@@ -7,6 +7,7 @@ PKGCONFIG += sdl3
 LIBS += -framework AppKit
 
 INCLUDEPATH += \
+    ../../../../protocol/plank-transport/include \
     ../../app/streaming \
     ../../moonlight-common-c/moonlight-common-c/src
 

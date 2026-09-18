@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtEndian>
+#include <plank_clipboard_wire.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -12,59 +13,12 @@ extern "C" {
 }
 
 namespace plank::clipboard {
+static_assert(PLANK_CLIPBOARD_MAX_TEXT_SIZE == PLANK_CLIPBOARD_TEXT_LIMIT);
+static_assert(sizeof(PLANK_CLIPBOARD_WIRE_HEADER) == PLANK_CLIPBOARD_HEADER_BYTES);
 
 inline bool validUtf8(const char* data, std::size_t size)
 {
-    if (data == nullptr) {
-        return false;
-    }
-    for (std::size_t index = 0; index < size;) {
-        const auto byte = static_cast<unsigned char>(data[index]);
-        if (byte <= 0x7F) {
-            if (byte == 0) {
-                return false;
-            }
-            ++index;
-            continue;
-        }
-        const auto continuation = [&](std::size_t offset) {
-            return index + offset < size &&
-                    (static_cast<unsigned char>(data[index + offset]) & 0xC0) == 0x80;
-        };
-        if (byte >= 0xC2 && byte <= 0xDF) {
-            if (!continuation(1)) {
-                return false;
-            }
-            index += 2;
-            continue;
-        }
-        if (byte >= 0xE0 && byte <= 0xEF) {
-            if (!continuation(1) || !continuation(2)) {
-                return false;
-            }
-            const auto second = static_cast<unsigned char>(data[index + 1]);
-            if ((byte == 0xE0 && second < 0xA0) ||
-                    (byte == 0xED && second > 0x9F)) {
-                return false;
-            }
-            index += 3;
-            continue;
-        }
-        if (byte >= 0xF0 && byte <= 0xF4) {
-            if (!continuation(1) || !continuation(2) || !continuation(3)) {
-                return false;
-            }
-            const auto second = static_cast<unsigned char>(data[index + 1]);
-            if ((byte == 0xF0 && second < 0x90) ||
-                    (byte == 0xF4 && second > 0x8F)) {
-                return false;
-            }
-            index += 4;
-            continue;
-        }
-        return false;
-    }
-    return true;
+    return plank_clipboard_valid_text(reinterpret_cast<const uint8_t*>(data), size);
 }
 
 enum class AppendResult {
@@ -183,7 +137,8 @@ inline std::vector<std::vector<std::uint8_t>> buildEventFrames(
     std::vector<std::vector<std::uint8_t>> frames;
     if (text == nullptr || textSize == 0 ||
             textSize > PLANK_CLIPBOARD_MAX_TEXT_SIZE ||
-            maxChunkSize == 0) {
+            maxChunkSize == 0 || maxChunkSize > PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE ||
+            generation == 0 || !validUtf8(reinterpret_cast<const char*>(text), textSize)) {
         return frames;
     }
 

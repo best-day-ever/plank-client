@@ -38,10 +38,15 @@ std::string readGeneralPasteboardText()
         for (NSString* type in pasteboardTextTypes()) {
             NSString* text = [pasteboard stringForType:type];
             if (text != nil && text.length > 0) {
-                const char* utf8 = [text UTF8String];
-                if (utf8 != nullptr && utf8[0] != '\0') {
-                    return std::string {utf8};
+                const auto size = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+                if (size > PLANK_CLIPBOARD_MAX_TEXT_SIZE) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Clipboard text exceeds 512 KiB; not shared");
+                    return {};
                 }
+                NSData* utf8 = [text dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
+                if (plank_clipboard_valid_text(static_cast<const uint8_t*>(utf8.bytes), utf8.length))
+                    return std::string(static_cast<const char*>(utf8.bytes), utf8.length);
+                return {};
             }
         }
     }
@@ -149,6 +154,7 @@ void MacClipboardSync::start()
     m_PendingHostText.reset();
     m_LastPasteboardChangeCount = -1;
     m_OutboundGeneration = 0;
+    m_OutgoingText.clear(); m_OutgoingFrames.clear(); m_NextOutgoingFrame = 0;
     m_LastAppliedHostGeneration = 0;
     m_LastAppliedHostText.clear();
     m_RemotePasteboardChangeCount = -1;
@@ -173,6 +179,7 @@ void MacClipboardSync::stop()
         m_LastPasteboardChangeCount = -1;
         m_RemotePasteboardChangeCount = -1;
         m_OutboundGeneration = 0;
+        m_OutgoingText.clear(); m_OutgoingFrames.clear(); m_NextOutgoingFrame = 0;
         m_LastAppliedHostGeneration = 0;
         m_LastAppliedHostText.clear();
     }
@@ -214,6 +221,7 @@ void MacClipboardSync::pollLocalClipboardOnMainThread()
     if (text.empty() || sendLocalClipboard(text, epoch)) {
         std::lock_guard<std::mutex> lock(m_StateMutex);
         if (m_Running && m_SessionEpoch == epoch) {
+            if (text.empty()) { m_OutgoingText.clear(); m_OutgoingFrames.clear(); m_NextOutgoingFrame = 0; }
             m_LastPasteboardChangeCount = changeCount;
         }
     }
@@ -235,7 +243,9 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
         return false;
     }
 
-    const auto generation = qFromLittleEndian(wire.generation);
+    PlankClipboardChunk chunk {};
+    if (!plank_clipboard_decode(data, length, PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE, &chunk)) return false;
+    const auto generation = chunk.generation;
     std::uint64_t epoch = 0;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
@@ -284,43 +294,28 @@ bool MacClipboardSync::handleHostOffer(const std::uint8_t* data, std::size_t len
 
 bool MacClipboardSync::sendLocalClipboard(const std::string& text, std::uint64_t expectedEpoch)
 {
-    if (!m_IsEnabled() || !m_HasStreamFocus() || text.empty()) {
-        return false;
+    if (!m_IsEnabled() || !m_HasStreamFocus() ||
+            !plank::clipboard::validUtf8(text.data(), text.size())) return false;
+    std::lock_guard<std::mutex> lock(m_StateMutex);
+    if (!m_Running || m_SessionEpoch != expectedEpoch) return false;
+    if (m_OutgoingFrames.empty() || m_OutgoingText != text) {
+        m_OutgoingFrames = plank::clipboard::buildEventFrames(
+            reinterpret_cast<const std::uint8_t*>(text.data()), text.size(),
+            ++m_OutboundGeneration, PLANK_CLIPBOARD_MAX_INPUT_CHUNK_SIZE);
+        if (m_OutgoingFrames.empty()) return false;
+        m_OutgoingText = text;
+        m_NextOutgoingFrame = 0;
     }
-    std::uint64_t generation = 0;
-    std::uint64_t sessionEpoch = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (!m_Running || m_SessionEpoch != expectedEpoch) {
-            return false;
-        }
-        generation = ++m_OutboundGeneration;
-        sessionEpoch = m_SessionEpoch;
+    // One bounded copy (at most 65 input chunks), using only nonblocking queue
+    // operations. Do not deliberately interleave a following paste keystroke
+    // with this transfer. Queue pressure resumes at precisely the unsent chunk.
+    while (m_NextOutgoingFrame < m_OutgoingFrames.size()) {
+        const auto& frame = m_OutgoingFrames[m_NextOutgoingFrame];
+        if (!m_SendInputFrame(frame.data(), frame.size())) return false;
+        ++m_NextOutgoingFrame;
     }
-
-    const auto frames = plank::clipboard::buildEventFrames(
-            reinterpret_cast<const std::uint8_t*>(text.data()),
-            text.size(),
-            generation,
-            PLANK_CLIPBOARD_MAX_INPUT_CHUNK_SIZE);
-    for (const auto& frame : frames) {
-        if (!m_SendInputFrame(frame.data(), frame.size())) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Failed to send clipboard offer to host");
-            return false;
-        }
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_StateMutex);
-        if (!m_Running || m_SessionEpoch != sessionEpoch) {
-            return false;
-        }
-    }
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Sent clipboard offer to host (%zu bytes, generation %llu)",
-                text.size(),
-                static_cast<unsigned long long>(generation));
+    if (m_NextOutgoingFrame != m_OutgoingFrames.size()) return false;
+    m_OutgoingFrames.clear(); m_OutgoingText.clear(); m_NextOutgoingFrame = 0;
     return true;
 }
 
@@ -353,6 +348,7 @@ bool MacClipboardSync::applyPendingHostTextOnMainThread()
         return false;
     }
     m_LastAppliedHostText = incoming;
+    m_OutgoingFrames.clear(); m_OutgoingText.clear(); m_NextOutgoingFrame = 0;
     m_LastPasteboardChangeCount = currentPasteboardChangeCount();
     m_RemotePasteboardChangeCount = m_LastPasteboardChangeCount;
     m_ApplyingRemote = false;
