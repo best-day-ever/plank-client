@@ -56,6 +56,9 @@ private slots:
     void sendsOnlyWithStreamFocus();
     void backgroundHostOfferPreservesLocalCopy();
     void retriesAfterTransportSendFailure();
+    void resumesPartialCopyWithoutRestartingGeneration();
+    void enforces512KiBAndRejectsEmbeddedNul();
+    void replacesUnsentCopyWithNewGeneration();
     void resendsTextAfterHostClipboardChanges();
     void rejectsHostOfferWhenEventQueueFails();
     void ignoresOffersWhileStopped();
@@ -460,6 +463,77 @@ void TestMacClipboardSync::sessionReconnectPollingWiring()
     const auto teardownEnd = code.indexOf("\n}\n", teardown);
     QVERIFY(teardown >= 0 && teardownEnd > teardown);
     QVERIFY(code.mid(teardown, teardownEnd - teardown).contains("stopClipboardPollTimer();"));
+}
+
+void TestMacClipboardSync::resumesPartialCopyWithoutRestartingGeneration()
+{
+    bool congested = true;
+    std::vector<std::vector<std::uint8_t>> sent;
+    MacClipboardSync sync([&](const std::uint8_t* data, std::size_t size) {
+        if (congested && sent.size() == 2) return false;
+        sent.emplace_back(data, data + size); return true;
+    }, [] { return true; }, [] { return true; }, [] { return true; });
+    sync.start();
+    const std::string text(PLANK_CLIPBOARD_MAX_TEXT_SIZE, 'x');
+    setPasteboardText(text.c_str());
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t(2));
+    congested = false;
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t(65));
+    std::uint32_t offset = 0;
+    for (const auto& frame : sent) {
+        PlankClipboardChunk chunk {};
+        QVERIFY(plank_clipboard_decode(frame.data(), frame.size(), PLANK_CLIPBOARD_INPUT_BYTES, &chunk));
+        QCOMPARE(chunk.generation, std::uint64_t(1));
+        QCOMPARE(chunk.offset, offset); offset += chunk.size;
+    }
+    QCOMPARE(offset, std::uint32_t(text.size()));
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t(65));
+}
+
+void TestMacClipboardSync::enforces512KiBAndRejectsEmbeddedNul()
+{
+    unsigned sent = 0;
+    MacClipboardSync sync([&](const std::uint8_t*, std::size_t) { ++sent; return true; },
+        [] { return true; }, [] { return true; }, [] { return true; });
+    sync.start();
+    setPasteboardText(std::string(PLANK_CLIPBOARD_MAX_TEXT_SIZE + 1, 'x').c_str());
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent, 0u);
+    const char bytes[] = {'a', 0, 'b'};
+    NSString* text = [[NSString alloc] initWithBytes:bytes length:sizeof(bytes) encoding:NSUTF8StringEncoding];
+    [plankClipboardTestPasteboard() clearContents];
+    [plankClipboardTestPasteboard() setString:text forType:NSPasteboardTypeString];
+    [text release];
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent, 0u);
+    setPasteboardText("valid next copy");
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent, 1u);
+}
+
+void TestMacClipboardSync::replacesUnsentCopyWithNewGeneration()
+{
+    bool congested = true;
+    std::vector<std::vector<std::uint8_t>> sent;
+    MacClipboardSync sync([&](const std::uint8_t* data, std::size_t size) {
+        if (congested && !sent.empty()) return false;
+        sent.emplace_back(data, data + size); return true;
+    }, [] { return true; }, [] { return true; }, [] { return true; });
+    sync.start();
+    setPasteboardText(std::string(20000, 'x').c_str());
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t(1));
+    setPasteboardText("replacement"); congested = false;
+    sync.pollLocalClipboardOnMainThread();
+    QCOMPARE(sent.size(), std::size_t(2));
+    PlankClipboardChunk chunk {};
+    QVERIFY(plank_clipboard_decode(sent.back().data(), sent.back().size(), PLANK_CLIPBOARD_INPUT_BYTES, &chunk));
+    QCOMPARE(chunk.generation, std::uint64_t(2));
+    QCOMPARE(chunk.offset, 0u);
+    QCOMPARE(chunk.flags, 3u);
 }
 
 QTEST_MAIN(TestMacClipboardSync)

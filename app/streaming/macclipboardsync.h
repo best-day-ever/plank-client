@@ -57,4 +57,7 @@ private:
     std::uint64_t m_OutboundGeneration = 0;
     std::uint64_t m_LastAppliedHostGeneration = 0;
     std::string m_LastAppliedHostText;
+    std::string m_OutgoingText;
+    std::vector<std::vector<std::uint8_t>> m_OutgoingFrames;
+    std::size_t m_NextOutgoingFrame = 0;
 };
