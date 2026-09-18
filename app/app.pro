@@ -460,16 +460,19 @@ macx {
     DEFINES += HAVE_MAC_RAW_WACOM
     SOURCES += streaming/input/macrawwacom.cpp
     HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h
-    LIBS += -framework IOKit -framework CoreFoundation
+    LIBS += -framework IOKit -framework CoreFoundation -framework ApplicationServices -framework Carbon
 
     SOURCES += \
         streaming/macquitshortcut.mm \
+        streaming/mackeyboardcapture.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
 
     HEADERS += \
         streaming/macquitshortcut.h \
+        streaming/mackeyboardcapture.h \
+        streaming/input/sdl-darwin-scancodes.h \
         streaming/macwindow.h \
         streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h \

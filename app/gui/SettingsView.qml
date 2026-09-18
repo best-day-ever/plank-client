@@ -763,7 +763,9 @@ Flickable {
                         ToolTip.timeout: 10000
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("This enables the capture of system-wide keyboard shortcuts like Alt+Tab that would normally be handled by the client OS while streaming.") + "\n\n" +
-                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including PLANK Client.")
+                                      (Qt.platform.os === "osx" ?
+                                       qsTr("Requires Accessibility permission for PLANK Client in System Settings > Privacy & Security. Capture applies only to the focused stream. Ctrl+Alt+Shift+Z releases capture; trackpad Spaces gestures stay local.") :
+                                       qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including PLANK Client."))
                     }
 
                     AutoResizingComboBox {

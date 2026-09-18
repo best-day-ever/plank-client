@@ -4302,6 +4302,11 @@ void Session::execInternal()
         const bool reconnectCompletion =
                 event.type == SDL_EVENT_USER &&
                 event.user.code == SDL_CODE_PLANK_REPLANK_COMPLETE;
+#ifdef Q_OS_MACOS
+        if (m_InputHandler->handleCapturedMacKeyEvent(event)) {
+            continue;
+        }
+#endif
         if (m_Reconnecting.load() &&
                 event.type != SDL_EVENT_QUIT && !reconnectCompletion) {
             // Cursor shapes, host-authoritative Wacom positions, and toolbar

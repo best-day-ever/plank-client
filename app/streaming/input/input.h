@@ -20,6 +20,7 @@ class LinuxRawWacomInput;
 class PlankWaylandCursor;
 #ifdef Q_OS_MACOS
 class MacQuitShortcut;
+class MacKeyboardCapture;
 #endif
 #ifdef HAVE_MAC_RAW_WACOM
 class MacRawWacomInput;
@@ -43,6 +44,9 @@ public:
     void refreshWaylandTabletCursorParents();
 
     void handleKeyEvent(SDL_KeyboardEvent* event);
+#ifdef Q_OS_MACOS
+    bool handleCapturedMacKeyEvent(const SDL_Event& event);
+#endif
 
     void handleMouseButtonEvent(SDL_MouseButtonEvent* event);
 
@@ -100,6 +104,8 @@ public:
 private:
 #ifdef Q_OS_MACOS
     std::unique_ptr<MacQuitShortcut> m_MacQuitShortcut;
+    std::unique_ptr<MacKeyboardCapture> m_MacKeyboardCapture;
+    bool hasMacStreamKeyboardFocus() const;
 #endif
     enum KeyCombo {
         KeyComboQuit,
