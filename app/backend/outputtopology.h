@@ -60,6 +60,14 @@ struct NvOutputTopology
     static const int FixedCaptureFeature = 0x80000;
     static const int MacDesktopPreparationFeature = 0x100000;
     static const int MacEncodingProfileFeature = 0x200000;
+    static const int ClipboardSyncFeature = 0x400000;
+    // Only advertise a clipboard receiver/sender when this client implements
+    // it. Linux must not cause the host to read or transmit unused clipboard data.
+#ifdef Q_OS_MACOS
+    static const int PlatformClipboardSyncFeature = ClipboardSyncFeature;
+#else
+    static const int PlatformClipboardSyncFeature = 0;
+#endif
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -82,7 +90,8 @@ struct NvOutputTopology
                                              SessionTakeoverFeature |
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
-                                             WorkerInstanceFeature;
+                                             WorkerInstanceFeature |
+                                             PlatformClipboardSyncFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;

@@ -9,6 +9,7 @@ class TestOutputTopology : public QObject
 
 private slots:
     void presentationOutputCountDuringTransitions();
+    void advertisesOnlyImplementedClipboardSupport();
     void parsesQualificationVector();
     void roundTripsQualificationVector();
     void rejectsDuplicateIdentity();
@@ -65,6 +66,21 @@ void TestOutputTopology::matchesMultipleNativeFullscreenViewports()
         QCOMPARE(height, 1440);
         QCOMPARE(pixels, height);
     }
+}
+
+void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
+{
+    const auto negotiated = NvOutputTopology::SupportedFeatureFlags &
+                            NvOutputTopology::ClipboardSyncFeature;
+#ifdef Q_OS_MACOS
+    QCOMPARE(negotiated, NvOutputTopology::ClipboardSyncFeature);
+#else
+    QCOMPARE(negotiated, 0);
+#endif
+    // A host without the feature cannot enable it on any client platform.
+    QCOMPARE(NvOutputTopology::SupportedFeatureFlags &
+             ~NvOutputTopology::ClipboardSyncFeature &
+             NvOutputTopology::ClipboardSyncFeature, 0);
 }
 
 void TestOutputTopology::matchesMacFullscreenViewport()

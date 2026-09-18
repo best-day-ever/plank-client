@@ -1,0 +1,11 @@
+# Product updates only. Packaging/qualification is owned by instinctual/plank.
+version: 2
+updates:
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
