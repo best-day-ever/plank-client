@@ -1,8 +1,12 @@
-## This build
+## 1.0.146
 
 ### Client
 
 - Click the version number to see what's new, even when offline.
+
+### Host
+
+- macOS: retry failed desktop-service startup after login or user switching.
 
 ## 1.0.143
 
