@@ -83,8 +83,12 @@ private slots:
         QTRY_VERIFY(text->property("contentWidth").toReal() <= text->width());
         flickable->setProperty("contentY", 100);
         QVERIFY(flickable->property("contentY").toReal() > 0);
+        // TextEdit normalizes Markdown when serializing its document. Compare
+        // the rendered document before/after input, not its original bytes.
+        const QString renderedNotes = text->property("text").toString();
+        QVERIFY(renderedNotes.contains("### Client") && renderedNotes.contains("### Host"));
         QTest::keyClick(window, Qt::Key_X);
-        QCOMPARE(text->property("text").toString(), notes);
+        QCOMPARE(text->property("text").toString(), renderedNotes);
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QTRY_VERIFY(button->hasActiveFocus());
