@@ -237,14 +237,9 @@ ApplicationWindow {
                 }
             }
 
-            Label {
-                id: plankVersionLabel
-                text: SystemProperties.plankVersionString
-                color: theme.textSecondary
-                font.pointSize: 9
-                font.weight: Font.Medium
-                horizontalAlignment: Qt.AlignLeft
-                verticalAlignment: Qt.AlignVCenter
+            PlankVersionButton {
+                version: SystemProperties.plankVersionString
+                changelog: SystemProperties.plankChangelog
             }
 
             // This label will appear when the window gets too small and

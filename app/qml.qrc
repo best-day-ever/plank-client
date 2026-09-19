@@ -16,6 +16,7 @@
         <file>gui/NavigableDialog.qml</file>
         <file>gui/CenteredGridView.qml</file>
         <file>gui/PlankTheme.qml</file>
+        <file>gui/PlankVersionButton.qml</file>
         <file>gui/PlankSection.qml</file>
         <file>gui/PlankSettingsGrid.qml</file>
         <file>gui/PlankSettingLabel.qml</file>
