@@ -1,5 +1,6 @@
 #include "streamingpreferences.h"
 #include "backend/planknetwork.h"
+#include "backend/plankbroker.h"
 #include "plankclientpolicy.h"
 #include <QSettings>
 #include <QTranslator>
@@ -25,6 +26,9 @@
 #define SER_CAPTURESYSKEYS "capturesyskeys"
 #define SER_KEEPAWAKE "keepawake"
 #define SER_LANGUAGE "language"
+#define SER_BROKER_HOST "plank-broker-host"
+#define SER_BROKER_PORT "plank-broker-port"
+#define SER_BROKER_PINS "plank-broker-spki-pins"
 
 static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
@@ -120,6 +124,19 @@ void StreamingPreferences::reload()
                                                         static_cast<int>(recommendedFullScreenMode)).toInt());
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
+    brokerHost = settings.value(SER_BROKER_HOST, PlankBroker::defaultHost()).toString().trimmed();
+    if (brokerHost.isEmpty()) {
+        brokerHost = PlankBroker::defaultHost();
+    }
+    brokerPort = settings.value(SER_BROKER_PORT, PlankBroker::DefaultPort).toInt();
+    if (brokerPort < 1 || brokerPort > 65535) {
+        brokerPort = PlankBroker::DefaultPort;
+    }
+    // An explicitly stored (possibly empty) list overrides the shipped pins;
+    // an empty list makes Remote mode refuse to connect.
+    brokerPins = settings.contains(SER_BROKER_PINS) ?
+                PlankBroker::normalizePins(settings.value(SER_BROKER_PINS).toStringList()) :
+                PlankBroker::defaultPins();
 
 }
 
@@ -265,4 +282,31 @@ void StreamingPreferences::save()
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
+    settings.setValue(SER_BROKER_HOST, brokerHost.trimmed());
+    settings.setValue(SER_BROKER_PORT, brokerPort);
+    if (brokerPins == PlankBroker::defaultPins()) {
+        // Keep following shipped pin updates unless the user overrode them.
+        settings.remove(SER_BROKER_PINS);
+    } else {
+        settings.setValue(SER_BROKER_PINS, PlankBroker::normalizePins(brokerPins));
+    }
+}
+
+QStringList StreamingPreferences::setBrokerPinsFromText(const QString& text)
+{
+    QStringList rejected;
+    const QStringList pins = PlankBroker::parsePinList(text, &rejected);
+    if (pins != brokerPins) {
+        brokerPins = pins;
+        emit brokerChanged();
+    }
+    return rejected;
+}
+
+void StreamingPreferences::resetBrokerDefaults()
+{
+    brokerHost = PlankBroker::defaultHost();
+    brokerPort = PlankBroker::DefaultPort;
+    brokerPins = PlankBroker::defaultPins();
+    emit brokerChanged();
 }

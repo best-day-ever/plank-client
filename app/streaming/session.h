@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -133,6 +134,15 @@ public:
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
+    // Remote (broker) mode: obtains a fresh one-use host admission from the
+    // broker (a new POST /v1/hosts/{id}/connect), updates this computer's
+    // leased address and pin, and returns the username + GSSAPI token for
+    // /plank/auth/start. Throws GfeHttpResponseException/QtNetworkReplyException.
+    // Replaces password re-authentication for reconnects and display
+    // transitions; tokens are one-use, so every re-auth goes back to the broker.
+    using PlankBrokerAdmission = std::function<void(QString& username, QString& gssapiToken)>;
+    void setPlankBrokerAdmission(PlankBrokerAdmission admission);
+
     Q_INVOKABLE void cancelConnectionStart();
 
     Q_INVOKABLE void respondToActiveSessionTakeover(bool takeOver);
@@ -224,6 +234,9 @@ private:
                                        const PlankReconnectState& state);
 
     void clearPlankReconnectCredentials();
+    bool isPlankBrokered() const;
+    bool hasPlankCredentials() const;
+    QString authenticatePlank(NvHTTP& http, bool* greeterConfirmed);
 
     bool startPlankTransportDataPlane(quint16 port,
                                  const QString& certificateSha256,
@@ -413,6 +426,7 @@ private:
     std::atomic_int m_ActiveSessionTakeoverDecision {0};
     QString m_PlankUsername;
     QString m_PlankPassword;
+    PlankBrokerAdmission m_PlankBrokerAdmission;
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;

@@ -2,6 +2,7 @@
 #include "streaming/clientframeflowtrace.h"
 #include "backend/hostrecovery.h"
 #include "backend/planknetwork.h"
+#include "backend/plankbroker.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/avsynccontroller.h"
 #include "streaming/plankdisplaymode.h"
@@ -1489,6 +1490,55 @@ void Session::clearPlankReconnectCredentials()
     m_PlankPassword.fill(QChar('\0'));
     m_PlankPassword.clear();
     m_PlankUsername.clear();
+    m_PlankBrokerAdmission = nullptr;
+}
+
+void Session::setPlankBrokerAdmission(PlankBrokerAdmission admission)
+{
+    m_PlankBrokerAdmission = std::move(admission);
+    if (m_Computer->plankAuthentication && m_PlankBrokerAdmission) {
+        m_CanReconnect.store(true);
+    }
+}
+
+bool Session::isPlankBrokered() const
+{
+    QReadLocker lock(&m_Computer->lock);
+    return !m_Computer->brokerHostCertSha256.isEmpty();
+}
+
+bool Session::hasPlankCredentials() const
+{
+    if (isPlankBrokered()) {
+        return static_cast<bool>(m_PlankBrokerAdmission);
+    }
+    return !m_PlankUsername.isEmpty() && !m_PlankPassword.isEmpty();
+}
+
+QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
+{
+    if (!isPlankBrokered()) {
+        return http.authenticate(m_PlankUsername, m_PlankPassword, greeterConfirmed);
+    }
+    if (!m_PlankBrokerAdmission) {
+        throw GfeHttpResponseException(401, "Reconnect to the remote workstation from the Remote list");
+    }
+
+    // Never reuse a broker token: each admission is a new broker connect,
+    // which may also lease a different session port.
+    QString username;
+    QString gssapiToken;
+    m_PlankBrokerAdmission(username, gssapiToken);
+    NvAddress address;
+    QString pin;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        address = m_Computer->activeAddress;
+        pin = m_Computer->brokerHostCertSha256;
+    }
+    http.setAddress(address);
+    http.setPinnedCertificateSha256(pin);
+    return http.authenticateGssapi(username, gssapiToken, greeterConfirmed);
 }
 
 bool Session::initialize()
@@ -2751,8 +2801,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 constexpr int CancellationPollMs = 50;
                 bool started = false;
 
-                if (m_PlankUsername.isEmpty() ||
-                        m_PlankPassword.isEmpty()) {
+                if (!hasPlankCredentials()) {
                     throw;
                 }
                 m_WaitingForSessionCleanup.store(true);
@@ -2785,9 +2834,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                             }
                             http = std::make_unique<NvHTTP>(m_Computer);
                             if (reconnecting) http->setRequestGate([this](bool auth) { return waitForPlankReconnectRequest(auth); });
-                            const QString token = http->authenticate(
-                                        m_PlankUsername,
-                                        m_PlankPassword);
+                            const QString token = authenticatePlank(*http, nullptr);
                             {
                                 QWriteLocker lock(&m_Computer->lock);
                                 m_Computer->sessionToken = token;
@@ -2958,6 +3005,31 @@ bool Session::startConnectionAsync(bool reconnecting,
                         << topology.generation << m_StreamConfig.width
                         << m_StreamConfig.height;
                 startApp();
+            }
+        }
+
+        // Remote (broker) mode, section 10.2 step 3: QUIC goes to the leased
+        // endpoint:port; the host's advertised transport port is ignored and
+        // its transport certificate must be the broker-pinned leaf.
+        {
+            QString brokerPin;
+            quint16 leasedPort;
+            {
+                QReadLocker lock(&m_Computer->lock);
+                brokerPin = m_Computer->brokerHostCertSha256;
+                leasedPort = m_Computer->activeAddress.port();
+            }
+            if (!brokerPin.isEmpty()) {
+                PlankBroker::TransportTarget target;
+                if (!PlankBroker::resolveTransportTarget(brokerPin, leasedPort, plankTransportPort,
+                                                         plankTransportCertificateSha256, target)) {
+                    throw GfeHttpResponseException(
+                                400, "Remote workstation launch did not match the broker admission");
+                }
+                qInfo() << "PLANK brokered transport: using leased port" << target.port
+                        << "instead of host-advertised port" << plankTransportPort;
+                plankTransportPort = target.port;
+                plankTransportCertificateSha256 = target.certificateSha256;
             }
         }
 
@@ -3138,8 +3210,7 @@ void Session::setPlankReconnectStatus(const char* text, bool warning)
 bool Session::beginPlankReconnect(
         PlankReconnectState& state)
 {
-    if (m_PlankUsername.isEmpty() ||
-            m_PlankPassword.isEmpty()) {
+    if (!hasPlankCredentials()) {
         return false;
     }
 
@@ -3201,8 +3272,7 @@ bool Session::waitForPlankReconnectRequest(bool restartAuthenticationAfterWait)
 
 bool Session::runPlankReconnect()
 {
-    if (m_PlankUsername.isEmpty() ||
-            m_PlankPassword.isEmpty()) {
+    if (!hasPlankCredentials()) {
         return false;
     }
 
@@ -3226,7 +3296,9 @@ bool Session::runPlankReconnect()
             if (token.isEmpty()) {
                 authenticating = true;
                 bool greeterConfirmed = false;
-                token = http.authenticate(m_PlankUsername, m_PlankPassword, &greeterConfirmed);
+                // Brokered hosts re-admit through the broker (one-use tokens).
+                token = isPlankBrokered() ? authenticatePlank(http, &greeterConfirmed) :
+                        http.authenticate(m_PlankUsername, m_PlankPassword, &greeterConfirmed);
                 authenticating = false;
                 {
                     QWriteLocker lock(&m_Computer->lock);
@@ -3386,8 +3458,10 @@ bool Session::finishPlankReconnect(
 class PlankWorkerProbeThread : public QThread
 {
 public:
-    PlankWorkerProbeThread(NvAddress address, QString instance, QString certificate) :
-        m_Address(address), m_Instance(instance), m_Certificate(certificate) { }
+    PlankWorkerProbeThread(NvAddress address, QString instance, QString certificate,
+                           bool brokered = false) :
+        m_Address(address), m_Instance(instance), m_Certificate(certificate),
+        m_Brokered(brokered) { }
 
     bool replacement() const { return m_Replacement; }
     const QString& instance() const { return m_Instance; }
@@ -3396,6 +3470,7 @@ public:
     {
         try {
             NvHTTP http(m_Address);
+            if (m_Brokered) http.setPinnedCertificateSha256(m_Certificate);
             m_Replacement = http.probeWorkerReplacement(m_Instance, m_Certificate);
         } catch (const GfeHttpResponseException&) {
             // Failure is not proof of a replacement; preserve the live stream.
@@ -3407,6 +3482,7 @@ private:
     NvAddress m_Address;
     QString m_Instance;
     QString m_Certificate;
+    bool m_Brokered = false;
     bool m_Replacement = false;
 };
 
@@ -4044,7 +4120,8 @@ void Session::execInternal()
                 }
                 if (workerProbe == nullptr && now >= nextWorkerProbe) {
                     workerProbe = new PlankWorkerProbeThread(m_Computer->activeAddress,
-                                    m_PlankWorkerInstance, m_PlankHostCertificateSha256);
+                                    m_PlankWorkerInstance, m_PlankHostCertificateSha256,
+                                    !m_Computer->brokerHostCertSha256.isEmpty());
                     workerProbe->start();
                 }
             } else if (earlyWaitingVisible) {

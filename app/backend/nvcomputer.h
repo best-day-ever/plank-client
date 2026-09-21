@@ -119,6 +119,10 @@ public:
     int plankTopologyVersion = 0;
     int plankFeatureFlags = 0;
     NvOutputTopology outputTopology;
+    // Remote (broker) mode, never persisted: non-empty means every connection
+    // to this host must present exactly this leaf (section 10.2).
+    QString brokerHostCertSha256;
+    QString brokerHostId;
 
     // Persisted traits
     NvAddress localAddress;

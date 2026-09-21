@@ -329,7 +329,9 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     }
 
     const QString advertisedControlPort = NvHTTP::getXmlString(serverInfo, "HttpsPort");
-    if (!advertisedControlPort.isEmpty() &&
+    // Behind the broker the control port is the leased session port, while
+    // the host still advertises its own (28989); the pin binds the identity.
+    if (!http.isBrokered() && !advertisedControlPort.isEmpty() &&
             advertisedControlPort.toUShort() != http.controlPort()) {
         throw GfeHttpResponseException(
                     400, "Host advertised a different PLANK control port");

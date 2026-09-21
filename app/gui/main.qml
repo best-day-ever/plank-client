@@ -264,6 +264,24 @@ ApplicationWindow {
             }
 
             NavigableToolButton {
+                id: remoteButton
+                visible: qmltypeof(stackView.currentItem, "PcView")
+
+                iconSource: "qrc:/res/remote.svg"
+
+                ToolTip.delay: 1000
+                ToolTip.timeout: 3000
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Remote access")
+
+                onClicked: navigateTo("qrc:/gui/RemoteView.qml", "RemoteView")
+
+                Keys.onDownPressed: {
+                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                }
+            }
+
+            NavigableToolButton {
                 id: addPcButton
                 visible: qmltypeof(stackView.currentItem, "PcView")
 
