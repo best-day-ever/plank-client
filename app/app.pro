@@ -260,6 +260,7 @@ HEADERS += \
     backend/planknetwork.h \
     backend/nvhttp.h \
     backend/plankhttp.h \
+    backend/remotedisplaysetup.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \
     backend/computermanager.h \

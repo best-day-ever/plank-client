@@ -528,7 +528,12 @@ inline bool resolveTransportTarget(const QString& brokerPin, quint16 controlPort
         return true;
     }
     if (!isCanonicalSha256Hex(brokerPin) || controlPort == 0) return false;
-    if (!launchCertificate.isEmpty() && launchCertificate != brokerPin) return false;
+    // The host reports its transport leaf digest in upper-case hex (Sunshine's
+    // util::hex_vec); the broker pin is lower-case. Same digest, same leaf.
+    if (!launchCertificate.isEmpty() &&
+            launchCertificate.compare(brokerPin, Qt::CaseInsensitive) != 0) {
+        return false;
+    }
     target.port = controlPort;
     target.certificateSha256 = brokerPin;
     return true;

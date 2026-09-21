@@ -46,6 +46,153 @@ Item {
                                                })
             stackView.push(segue)
         }
+        function onDisplaySetupRequired(hostId, hostName, reason) {
+            displaySetupDialog.openFor(hostId, hostName, true, reason)
+        }
+    }
+
+    // Per-workstation display setup, asked on first connect and editable from
+    // each row; kept locally (RemoteBroker.displaySetup / saveDisplaySetup).
+    NavigableDialog {
+        id: displaySetupDialog
+        property string hostId: ""
+        property string hostName: ""
+        property bool connectAfter: false
+        property string reason: ""
+        property var setup: ({})
+        property var modes: []
+        title: qsTr("Display setup for %1").arg(hostName)
+        width: Math.min(560, remoteView.width - 40)
+        height: Math.min(implicitHeight, remoteView.height - 20)
+        dim: false
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        function modeLabel(mode) {
+            return mode.replace("x", "×")
+        }
+
+        function openFor(hostId, hostName, connectAfter, reason) {
+            displaySetupDialog.hostId = hostId
+            displaySetupDialog.hostName = hostName
+            displaySetupDialog.connectAfter = connectAfter
+            displaySetupDialog.reason = reason
+            displaySetupDialog.setup = RemoteBroker.displaySetup(hostId)
+            displaySetupDialog.modes = displaySetupDialog.setup.virtualModes
+            setupLayout.currentIndex = displaySetupDialog.setup.layoutChoice
+            setupMode1.currentIndex = Math.max(0, displaySetupDialog.modes.indexOf(displaySetupDialog.setup.virtualMode1))
+            setupMode2.currentIndex = Math.max(0, displaySetupDialog.modes.indexOf(displaySetupDialog.setup.virtualMode2))
+            setupScaling.currentIndex = displaySetupDialog.setup.scalingChoice
+            displaySetupDialog.open()
+        }
+
+        onAccepted: {
+            var saved = RemoteBroker.saveDisplaySetup(hostId, setupLayout.currentIndex,
+                                                      modes[setupMode1.currentIndex],
+                                                      modes[setupMode2.currentIndex],
+                                                      setupScaling.currentIndex)
+            if (!saved) {
+                remoteView.errorText = qsTr("That display setup is not supported.")
+                return
+            }
+            if (connectAfter) {
+                remoteView.errorText = ""
+                RemoteBroker.connectToHost(hostId)
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                Layout.fillWidth: true
+                visible: displaySetupDialog.connectAfter && !displaySetupDialog.setup.configured
+                text: qsTr("Choose how %1 should present its desktop to this computer. You can change it later with Display….").arg(displaySetupDialog.hostName)
+                wrapMode: Text.Wrap
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: displaySetupDialog.reason !== ""
+                text: qsTr("Your saved setup no longer fits this computer's screens: %1").arg(displaySetupDialog.reason)
+                color: theme.warning
+                wrapMode: Text.Wrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("This computer: %1").arg(displaySetupDialog.setup.clientResolution || "")
+                opacity: 0.72
+            }
+
+            Label {
+                text: qsTr("Layout")
+                font.bold: true
+            }
+            PlankComboBox {
+                id: setupLayout
+                Layout.fillWidth: true
+                model: [
+                    qsTr("Match my display(s)"),
+                    qsTr("Workstation's physical displays"),
+                    qsTr("One virtual display"),
+                    qsTr("Two virtual displays (side by side)")
+                ]
+                delegate: ItemDelegate {
+                    width: setupLayout.width
+                    text: modelData
+                    enabled: index !== 0 || displaySetupDialog.setup.canMatchClient === true
+                    highlighted: setupLayout.highlightedIndex === index
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: displaySetupDialog.setup.canMatchClient !== true
+                text: qsTr("Matching is unavailable: %1").arg(displaySetupDialog.setup.matchClientReason || "")
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            Label {
+                text: setupLayout.currentIndex === 3 ? qsTr("Virtual display 1 resolution") : qsTr("Virtual display resolution")
+                font.bold: true
+                opacity: setupLayout.currentIndex >= 2 ? 1.0 : 0.5
+            }
+            PlankComboBox {
+                id: setupMode1
+                Layout.fillWidth: true
+                enabled: setupLayout.currentIndex >= 2
+                model: displaySetupDialog.modes.map(displaySetupDialog.modeLabel)
+            }
+
+            Label {
+                visible: setupLayout.currentIndex === 3
+                text: qsTr("Virtual display 2 resolution")
+                font.bold: true
+            }
+            PlankComboBox {
+                id: setupMode2
+                visible: setupLayout.currentIndex === 3
+                Layout.fillWidth: true
+                model: displaySetupDialog.modes.map(displaySetupDialog.modeLabel)
+            }
+
+            Label {
+                text: qsTr("Scaling")
+                font.bold: true
+            }
+            PlankComboBox {
+                id: setupScaling
+                Layout.fillWidth: true
+                model: [qsTr("Native (1:1 pixels)"), qsTr("Scale to fit my screen")]
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Native shows one workstation pixel per screen pixel. Scale to fit shows the whole workstation desktop on this screen.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+        }
     }
 
     function submitSignIn() {
@@ -326,6 +473,13 @@ Item {
                             elide: Label.ElideRight
                             Layout.fillWidth: true
                         }
+                    }
+
+                    Button {
+                        text: qsTr("Display…")
+                        flat: true
+                        enabled: !RemoteBroker.busy
+                        onClicked: displaySetupDialog.openFor(modelData.id, modelData.name, false, "")
                     }
 
                     Button {
