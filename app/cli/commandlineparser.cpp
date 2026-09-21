@@ -280,7 +280,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
     parser.addToggleOption("audio-on-host", "audio on host PC");
-    parser.addToggleOption("mute-on-focus-loss", "mute audio when PLANK Client window loses focus");
+    parser.addToggleOption("mute-on-focus-loss", "mute audio when BDE Fernweh Client window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());

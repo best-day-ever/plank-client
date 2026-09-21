@@ -1,0 +1,109 @@
+#include "brokersessionstore.h"
+
+#ifdef Q_OS_DARWIN
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
+#endif
+
+namespace BrokerSessionStore {
+
+#ifdef Q_OS_DARWIN
+
+namespace {
+
+// Internal identifier; unchanged by product renames so saved sessions survive.
+const char* const Service = "la.instinctual.PLANK.Client.broker-session";
+
+struct CfRelease
+{
+    CFTypeRef ref = nullptr;
+    ~CfRelease() { if (ref != nullptr) CFRelease(ref); }
+};
+
+CFStringRef cfString(const QString& value)
+{
+    const QByteArray utf8 = value.toUtf8();
+    return CFStringCreateWithBytes(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(utf8.constData()),
+                                   utf8.size(), kCFStringEncodingUTF8, false);
+}
+
+CFMutableDictionaryRef baseQuery(const QString& brokerAddress, CfRelease& service, CfRelease& account)
+{
+    service.ref = cfString(QString::fromLatin1(Service));
+    account.ref = cfString(brokerAddress);
+    CFMutableDictionaryRef query = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                                                             &kCFTypeDictionaryKeyCallBacks,
+                                                             &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword);
+    CFDictionarySetValue(query, kSecAttrService, service.ref);
+    CFDictionarySetValue(query, kSecAttrAccount, account.ref);
+    return query;
+}
+
+}
+
+bool isAvailable()
+{
+    return true;
+}
+
+bool save(const QString& brokerAddress, const QString& username, const QString& token)
+{
+    if (brokerAddress.isEmpty()) return false;
+    QByteArray payload = encode(username, token);
+    CfRelease service, account, query, data, attributes;
+    query.ref = baseQuery(brokerAddress, service, account);
+    data.ref = CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(payload.constData()), payload.size());
+    payload.fill('\0');
+
+    // Replace any previous session for this broker.
+    SecItemDelete(static_cast<CFDictionaryRef>(query.ref));
+    CFMutableDictionaryRef add = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0,
+                                                               static_cast<CFDictionaryRef>(query.ref));
+    attributes.ref = add;
+    CFDictionarySetValue(add, kSecValueData, data.ref);
+    CFDictionarySetValue(add, kSecAttrAccessible, kSecAttrAccessibleWhenUnlockedThisDeviceOnly);
+    CFDictionarySetValue(add, kSecAttrSynchronizable, kCFBooleanFalse);
+    CFDictionarySetValue(add, kSecAttrLabel, CFSTR("Remote access session"));
+    return SecItemAdd(add, nullptr) == errSecSuccess;
+}
+
+bool load(const QString& brokerAddress, Saved& saved)
+{
+    saved = Saved();
+    if (brokerAddress.isEmpty()) return false;
+    CfRelease service, account, query, result;
+    query.ref = baseQuery(brokerAddress, service, account);
+    CFMutableDictionaryRef q = static_cast<CFMutableDictionaryRef>(const_cast<void*>(query.ref));
+    CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
+    CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitOne);
+    if (SecItemCopyMatching(q, &result.ref) != errSecSuccess || result.ref == nullptr ||
+            CFGetTypeID(result.ref) != CFDataGetTypeID()) {
+        return false;
+    }
+    CFDataRef data = static_cast<CFDataRef>(result.ref);
+    QByteArray payload(reinterpret_cast<const char*>(CFDataGetBytePtr(data)), int(CFDataGetLength(data)));
+    const bool ok = decode(payload, saved);
+    payload.fill('\0');
+    if (!ok) clear(brokerAddress);
+    return ok;
+}
+
+void clear(const QString& brokerAddress)
+{
+    if (brokerAddress.isEmpty()) return;
+    CfRelease service, account, query;
+    query.ref = baseQuery(brokerAddress, service, account);
+    SecItemDelete(static_cast<CFDictionaryRef>(query.ref));
+}
+
+#else
+
+bool isAvailable() { return false; }
+bool save(const QString&, const QString&, const QString&) { return false; }
+bool load(const QString&, Saved& saved) { saved = Saved(); return false; }
+void clear(const QString&) {}
+
+#endif
+
+}

@@ -352,7 +352,7 @@ func assertWithSecureEnclave(rpId: String, username: String) throws -> [String: 
         throw HelperError(.failure, "the local key file is damaged")
     }
     let context = LAContext()
-    context.localizedReason = "Sign in to PLANK remote as \(username)"
+    context.localizedReason = "Sign in to BDE Fernweh as \(username)"
     let key: SecureEnclave.P256.Signing.PrivateKey
     do {
         key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob, authenticationContext: context)
