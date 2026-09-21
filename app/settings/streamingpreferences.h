@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QRect>
+#include <QStringList>
 #include <QQmlEngine>
 #include <QVariantList>
 #include <QVector>
@@ -282,8 +283,16 @@ public:
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
+    // Remote (broker) mode, bde-linux docs/plank-broker.md section 10.1
+    Q_PROPERTY(QString brokerHost MEMBER brokerHost NOTIFY brokerChanged)
+    Q_PROPERTY(int brokerPort MEMBER brokerPort NOTIFY brokerChanged)
+    Q_PROPERTY(QStringList brokerPins MEMBER brokerPins NOTIFY brokerChanged)
 
     Q_INVOKABLE bool retranslate();
+    // Replaces the broker SPKI pin list from user text (one pin per line or
+    // comma separated); returns the entries that were rejected as invalid.
+    Q_INVOKABLE QStringList setBrokerPinsFromText(const QString& text);
+    Q_INVOKABLE void resetBrokerDefaults();
     Q_INVOKABLE int plankDefaultBitrateKbps(int profile) const
     {
         return plankDefaultBitrateForProfile(profile);
@@ -331,6 +340,9 @@ public:
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
     Language language;
+    QString brokerHost;
+    int brokerPort;
+    QStringList brokerPins;
     CaptureSysKeysMode captureSysKeysMode;
 
 signals:
@@ -351,6 +363,7 @@ signals:
     void captureSysKeysModeChanged();
     void keepAwakeChanged();
     void languageChanged();
+    void brokerChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);

@@ -953,6 +953,114 @@ Flickable {
         }
 
         PlankSection {
+            id: remoteAccessGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            title: qsTr("Remote Access")
+
+            PlankSettingsGrid {
+
+                PlankSettingLabel {
+                    text: qsTr("Broker server")
+                }
+
+                PlankTextField {
+                    id: brokerHostField
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: StreamingPreferences.brokerHost
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
+                    onEditingFinished: {
+                        if (text.trim() !== "" && text.trim() !== StreamingPreferences.brokerHost) {
+                            StreamingPreferences.brokerHost = text.trim()
+                        }
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Broker port")
+                }
+
+                SpinBox {
+                    id: brokerPortSpinBox
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    from: 1
+                    to: 65535
+                    editable: true
+                    value: StreamingPreferences.brokerPort
+                    textFromValue: function(value) { return value.toString() }
+                    valueFromText: function(text) { return parseInt(text) }
+                    onValueModified: {
+                        StreamingPreferences.brokerPort = value
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Broker key pins (SPKI SHA-256)")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 4
+
+                    TextArea {
+                        id: brokerPinsArea
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        wrapMode: TextEdit.WrapAnywhere
+                        font.family: "Menlo"
+                        font.pointSize: 9
+                        color: theme.textPrimary
+                        text: StreamingPreferences.brokerPins.join("\n")
+                        background: Rectangle {
+                            color: theme.surfaceRaised
+                            radius: theme.radiusSmall
+                            border.width: 1
+                            border.color: brokerPinsArea.activeFocus ? theme.accent : theme.border
+                        }
+                        onActiveFocusChanged: {
+                            if (!activeFocus) {
+                                var rejected = StreamingPreferences.setBrokerPinsFromText(text)
+                                brokerPinsHelp.rejectedCount = rejected.length
+                                text = StreamingPreferences.brokerPins.join("\n")
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("Restore defaults")
+                            onClicked: {
+                                StreamingPreferences.resetBrokerDefaults()
+                                brokerHostField.text = StreamingPreferences.brokerHost
+                                brokerPortSpinBox.value = StreamingPreferences.brokerPort
+                                brokerPinsArea.text = StreamingPreferences.brokerPins.join("\n")
+                                brokerPinsHelp.rejectedCount = 0
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    id: brokerPinsHelp
+                    property int rejectedCount: 0
+                    text: (rejectedCount > 0 ? qsTr("%1 invalid entries were ignored. ").arg(rejectedCount) : "") +
+                          (StreamingPreferences.brokerPins.length === 0 ?
+                               qsTr("No pins: remote access will refuse to connect. ") : "") +
+                          qsTr("One SHA-256 of the broker's public key per line (current and spare). The broker is trusted only if its key matches a pin; public certificate authorities are not used.")
+                }
+            }
+        }
+
+        PlankSection {
             id: advancedSettingsGroupBox
             width: (parent.width - (parent.leftPadding + parent.rightPadding))
             title: qsTr("Advanced Settings")

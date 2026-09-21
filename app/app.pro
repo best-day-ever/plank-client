@@ -221,6 +221,7 @@ SOURCES += \
     backend/nvhttp.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
+    backend/plankbrokerclient.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
     settings/plankclientpolicy.cpp \
@@ -238,6 +239,7 @@ SOURCES += \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
+    gui/remotebroker.cpp \
     streaming/bandwidth.cpp \
     streaming/streamutils.cpp \
     path.cpp \
@@ -261,6 +263,8 @@ HEADERS += \
     backend/hostrecovery.h \
     backend/computermanager.h \
     backend/relaywakeclient.h \
+    backend/plankbroker.h \
+    backend/plankbrokerclient.h \
     cli/commandlineparser.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
@@ -277,6 +281,7 @@ HEADERS += \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
+    gui/remotebroker.h \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \

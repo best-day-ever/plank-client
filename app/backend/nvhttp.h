@@ -148,11 +148,21 @@ public:
 
     void setPlankSessionToken(QString sessionToken);
 
+    // Brokered (remote) mode: every HTTPS connection to this host must present
+    // exactly this leaf (SHA-256 over DER, lower-case hex), replacing the
+    // profile-only acceptance. The RSA-3072/TLS 1.3 profile check still applies.
+    void setPinnedCertificateSha256(QString certificateSha256);
+    bool isBrokered() const { return !m_PinnedCertificateSha256.isEmpty(); }
+    QString pinnedCertificateSha256() const { return m_PinnedCertificateSha256; }
+
     // Used only by the session recovery worker; ordinary discovery/login has
     // no gate. False cancels, while the callback may wait for a local decision.
     void setRequestGate(std::function<bool(bool)> gate) { m_RequestGate = std::move(gate); }
 
     QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
+    // Brokered admission: /plank/auth/start with a one-use GSSAPI token minted
+    // by the broker. Never answers a password challenge.
+    QString authenticateGssapi(QString username, QString gssapiToken, bool* greeterConfirmed = nullptr);
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
@@ -223,7 +233,11 @@ private:
                                  const QString& certificateSha256);
 
     NvAddress m_Address;
+    bool acceptsPlankCertificate(const QSslCertificate& certificate) const;
+    QMetaObject::Connection enforcePinnedCertificate(QNetworkAccessManager* manager);
+
     QNetworkAccessManager* m_Nam;
+    QString m_PinnedCertificateSha256;
     QString m_SessionToken;
     QString m_WorkerInstance;
     std::function<bool(bool)> m_RequestGate;

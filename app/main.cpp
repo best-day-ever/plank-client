@@ -51,6 +51,7 @@
 #include "path.h"
 #include "utils.h"
 #include "gui/computermodel.h"
+#include "gui/remotebroker.h"
 #include "backend/computermanager.h"
 #include <QSslSocket>
 #include "backend/systemproperties.h"
@@ -917,6 +918,11 @@ int main(int argc, char *argv[])
                                               [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                   return new ComputerManager(StreamingPreferences::get(qmlEngine));
                                               });
+    qmlRegisterSingletonType<RemoteBroker>("RemoteBroker", 1, 0,
+                                           "RemoteBroker",
+                                           [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
+                                               return new RemoteBroker(StreamingPreferences::get(qmlEngine));
+                                           });
     qmlRegisterSingletonType<SystemProperties>("SystemProperties", 1, 0,
                                                "SystemProperties",
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {

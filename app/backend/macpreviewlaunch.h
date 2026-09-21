@@ -28,8 +28,13 @@ struct Reply {
     PLANK_NATIVE_SESSION_CONFIGURATION configuration {};
 };
 
+// In brokered mode (bde-linux docs/plank-broker.md section 10.2) the host
+// still reports its own port (28989) as udp_port, but QUIC must go to the
+// broker's leased port, which is the approved control port. The advertised
+// value is then only range-checked and otherwise ignored.
 inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topology,
-                       int approvedControlPort, int udpPayloadSize, Reply& reply)
+                       int approvedControlPort, int udpPayloadSize, Reply& reply,
+                       bool brokered = false)
 {
     // Always clear an earlier successful result before parsing a new response.
     reply.transportToken.fill('\0');
@@ -38,7 +43,11 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
             approvedControlPort < 1 || approvedControlPort > 65535 ||
             object.size() != 7 || object.value("schema_version") != QJsonValue(2) ||
             object.value("state") != QJsonValue("connecting") ||
-            object.value("udp_port") != QJsonValue(approvedControlPort) ||
+            (brokered ? (!object.value("udp_port").isDouble() ||
+                         object.value("udp_port").toInt() < 1 ||
+                         object.value("udp_port").toInt() > 65535 ||
+                         object.value("udp_port").toDouble() != object.value("udp_port").toInt())
+                      : object.value("udp_port") != QJsonValue(approvedControlPort)) ||
             object.value("max_udp_payload_size") != QJsonValue(udpPayloadSize) ||
             object.value("capture") != topology.toJson().value("capture") ||
             object.value("services") != QJsonValue(QJsonObject {
