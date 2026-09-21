@@ -1,3 +1,4 @@
+#include <memory>
 #include <QtTest>
 #include <QSslCertificate>
 #include <QSslKey>
@@ -5,6 +6,12 @@
 #include <QSslSocket>
 
 #include "plankbroker.h"
+#include "plankhttp.h"
+#include <QNetworkProxy>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QEventLoop>
+#include <QTimer>
 #include "plankbrokerclient.h"
 #include "macpreviewlaunch.h"
 #include "outputtopology.h"
@@ -80,20 +87,28 @@ public:
         m_Server.setSslConfiguration(configuration);
         QObject::connect(&m_Server, &QSslServer::pendingConnectionAvailable, this, [this]() {
             while (QTcpSocket* socket = m_Server.nextPendingConnection()) {
-                QObject::connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
-                    request += socket->readAll();
-                    const int headerEnd = request.indexOf("\r\n\r\n");
+                ++connections;
+                auto pending = std::make_shared<QByteArray>();
+                QObject::connect(socket, &QTcpSocket::readyRead, this, [this, socket, pending]() {
+                    const QByteArray chunk = socket->readAll();
+                    request += chunk;
+                    *pending += chunk;
+                    const int headerEnd = pending->indexOf("\r\n\r\n");
                     if (headerEnd < 0) return;
                     int contentLength = 0;
-                    for (const QByteArray& line : request.left(headerEnd).split('\n')) {
+                    for (const QByteArray& line : pending->left(headerEnd).split('\n')) {
                         if (line.toLower().startsWith("content-length:")) {
                             contentLength = line.mid(15).trimmed().toInt();
                         }
                     }
-                    if (request.size() < headerEnd + 4 + contentLength) return;
+                    if (pending->size() < headerEnd + 4 + contentLength) return;
+                    ++requests;
+                    // announceClose=false mimics the PLANK host: HTTP/1.1 without
+                    // "Connection: close", yet the socket is closed after the reply.
                     socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n"
-                                  "Cache-Control: no-store\r\nConnection: close\r\nContent-Length: " +
-                                  QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                                  "Cache-Control: no-store\r\n" +
+                                  QByteArray(announceClose ? "Connection: close\r\n" : "") +
+                                  "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body);
                     socket->disconnectFromHost();
                 });
                 QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
@@ -107,6 +122,9 @@ public:
     QByteArray status = "200 OK";
     QByteArray body;
     QByteArray request;
+    bool announceClose = true;
+    int connections = 0;
+    int requests = 0;
 
 private:
     QSslServer m_Server;
@@ -187,6 +205,7 @@ private slots:
     void tlsRateLimitOnBearerCall();
     void tlsRequiresTls13();
     void tlsConnectReturnsDirectRoute();
+    void oneShotRequestsSurviveHostClosingEachConnection();
 
     // Keepalive
     void keepaliveCadence();
@@ -791,6 +810,41 @@ void TestPlankBroker::tlsConnectReturnsDirectRoute()
     QCOMPARE(lease.port, quint16(28989));
     QVERIFY(server.request.startsWith("POST /v1/hosts/ws01.example.test/connect HTTP/1.1\r\n"));
     QVERIFY(server.request.endsWith("{}"));
+}
+
+void TestPlankBroker::oneShotRequestsSurviveHostClosingEachConnection()
+{
+    // The PLANK host closes every TLS connection after its reply without saying so.
+    // Back-to-back requests (brokered flow: /serverinfo, then /plank/auth/start a few
+    // milliseconds later) must each get their own connection, never a closing one.
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    server.announceClose = false;
+    server.body = R"({"state":"ok"})";
+    QVERIFY(server.listen());
+    QNetworkAccessManager manager;
+    manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    QObject::connect(&manager, &QNetworkAccessManager::sslErrors, &manager,
+                     [](QNetworkReply* reply, const QList<QSslError>& errors) { reply->ignoreSslErrors(errors); });
+    constexpr int Requests = 10;
+    for (int i = 0; i < Requests; ++i) {
+        QNetworkRequest request(QUrl(QStringLiteral("https://127.0.0.1:%1/plank/auth/start").arg(server.port())));
+        QSslConfiguration tls = QSslConfiguration::defaultConfiguration();
+        tls.setProtocol(QSsl::TlsV1_3OrLater);
+        request.setSslConfiguration(tls);
+        request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        PlankHttp::prepareOneShotRequest(request);
+        QScopedPointer<QNetworkReply> reply(i % 2 ? manager.post(request, QByteArray("{}")) : manager.get(request));
+        QEventLoop loop;
+        QObject::connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        QTimer::singleShot(5000, &loop, &QEventLoop::quit);
+        if (!reply->isFinished()) loop.exec();
+        QVERIFY2(reply->isFinished(), qPrintable(QStringLiteral("request %1 timed out").arg(i)));
+        QCOMPARE(reply->error(), QNetworkReply::NoError);
+        QCOMPARE(reply->readAll(), server.body);
+    }
+    QCOMPARE(server.requests, Requests);
+    QCOMPARE(server.connections, Requests);
+    QCOMPARE(server.request.count("Connection: close\r\n"), Requests);
 }
 
 void TestPlankBroker::tlsRequiresTls13()

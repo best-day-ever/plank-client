@@ -259,6 +259,7 @@ HEADERS += \
     backend/nvcomputer.h \
     backend/planknetwork.h \
     backend/nvhttp.h \
+    backend/plankhttp.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \
     backend/computermanager.h \
