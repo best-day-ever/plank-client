@@ -4,6 +4,9 @@
 #include <QSslKey>
 #include <QSslServer>
 #include <QSslSocket>
+#include <QTemporaryDir>
+
+#include <memory>
 
 #include "plankbroker.h"
 #include "plankhttp.h"
@@ -15,6 +18,7 @@
 #include <QEventLoop>
 #include <QTimer>
 #include "plankbrokerclient.h"
+#include "plankpasskey.h"
 #include "macpreviewlaunch.h"
 #include "outputtopology.h"
 
@@ -76,6 +80,8 @@ QByteArray json(const char* text) { return QByteArray(text); }
 
 // Minimal HTTPS/1.1 responder: one canned reply per connection, records the
 // raw request bytes it received (to prove nothing is sent to a wrong peer).
+// Queued replies (`replies`, status + body) are served first, one per
+// request, then `status`/`body`; every complete request is kept in `requestLog`.
 class TestBrokerServer : public QObject
 {
 public:
@@ -105,12 +111,21 @@ public:
                     }
                     if (pending->size() < headerEnd + 4 + contentLength) return;
                     ++requests;
+                    requestLog.append(*pending);
+                    pending->clear();
+                    QByteArray replyStatus = status;
+                    QByteArray replyBody = body;
+                    if (!replies.isEmpty()) {
+                        const auto next = replies.takeFirst();
+                        replyStatus = next.first;
+                        replyBody = next.second;
+                    }
                     // announceClose=false mimics the PLANK host: HTTP/1.1 without
                     // "Connection: close", yet the socket is closed after the reply.
-                    socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n"
+                    socket->write("HTTP/1.1 " + replyStatus + "\r\nContent-Type: application/json\r\n"
                                   "Cache-Control: no-store\r\n" +
                                   QByteArray(announceClose ? "Connection: close\r\n" : "") +
-                                  "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                                  "Content-Length: " + QByteArray::number(replyBody.size()) + "\r\n\r\n" + replyBody);
                     socket->disconnectFromHost();
                 });
                 QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
@@ -127,6 +142,15 @@ public:
     bool announceClose = true;
     int connections = 0;
     int requests = 0;
+    // Queued replies (status, body) are served first, one per request;
+    // every complete request is kept in requestLog.
+    QList<QPair<QByteArray, QByteArray>> replies;
+    QList<QByteArray> requestLog;
+
+    void queue(const QByteArray& replyStatus, const QByteArray& replyBody)
+    {
+        replies.append(qMakePair(replyStatus, replyBody));
+    }
 
 private:
     QSslServer m_Server;
@@ -142,6 +166,68 @@ PlankBrokerClient::Config localConfig(quint16 port, const QStringList& pins)
 }
 
 const QString HostPin = QStringLiteral("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+
+// Section 13.3 fixtures: a 32-byte challenge and two credential ids.
+const QString PasskeyChallenge = QString::fromLatin1(QByteArray(32, '\x5a').toBase64());
+const QString PasskeyCredential = QString::fromLatin1(QByteArray(32, '\x11').toBase64());
+const QString PasskeyOtherCredential = QString::fromLatin1(QByteArray(32, '\x22').toBase64());
+
+QByteArray passkeyChallengeReply(const QString& rpId = QStringLiteral("ipa.bde.run"))
+{
+    return QString::fromUtf8(R"({"state":"challenge","conversation_id":"pk-1","prompts":[{"id":"passkey",)"
+                          R"("style":"passkey","text":"Passkey","passkey":{"rp_id":"%1","credential_ids":["%2","%3"],)"
+                          R"("user_verification":true,"challenge":"%4"}}]})")
+            .arg(rpId, PasskeyOtherCredential, PasskeyCredential, PasskeyChallenge).toUtf8();
+}
+
+// authData = SHA-256(rp_id) || flags || counter, built independently here.
+QByteArray passkeyAuthData(const QString& rpId, quint8 flags = 0x05)
+{
+    QByteArray data = QCryptographicHash::hash(rpId.toUtf8(), QCryptographicHash::Sha256);
+    data.append(char(flags));
+    data.append(QByteArray(4, '\0'));
+    return data;
+}
+
+PlankBroker::PasskeyRequest passkeyRequest()
+{
+    PlankBroker::PasskeyRequest request;
+    request.rpId = QStringLiteral("ipa.bde.run");
+    request.credentialIds = {PasskeyOtherCredential, PasskeyCredential};
+    request.challenge = PasskeyChallenge;
+    return request;
+}
+
+QByteArray assertionJson(const QString& credentialId, const QByteArray& authData, const QByteArray& signature)
+{
+    return QJsonDocument(QJsonObject {
+        {QStringLiteral("credential_id"), credentialId},
+        {QStringLiteral("authenticator_data"), QString::fromLatin1(authData.toBase64())},
+        {QStringLiteral("signature"), QString::fromLatin1(signature.toBase64())},
+    }).toJson(QJsonDocument::Compact);
+}
+
+// A stand-in for plank-passkey: records argv and stdin, prints `output`, exits `code`.
+QString fakeHelper(const QTemporaryDir& directory, int code, const QByteArray& output)
+{
+    const QString path = directory.filePath(QStringLiteral("plank-passkey-%1").arg(code));
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return QString();
+    QFile outputFile(path + QStringLiteral(".out"));
+    if (!outputFile.open(QIODevice::WriteOnly)) return QString();
+    outputFile.write(output);
+    file.write(QStringLiteral("#!/bin/sh\nprintf '%s\\n' \"$@\" > '%1.args'\ncat > '%1.stdin'\n"
+                              "cat '%1.out'\nexit %2\n").arg(path).arg(code).toUtf8());
+    file.close();
+    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    return path;
+}
+
+QByteArray readFile(const QString& path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
 
 QJsonObject fixedCaptureTopology()
 {
@@ -216,6 +302,26 @@ private slots:
     // Keepalive
     void keepaliveCadence();
     void keepaliveRetriesThenGivesUp();
+
+    // Passkey (Touch ID) sign-in, section 13.3 / 13.4
+    void parsesPasskeyChallenge();
+    void rejectsMalformedPasskeyChallenges();
+    void passwordAnswersNeverSatisfyPasskeyPrompt();
+    void validatesPasskeyRpIdsAndUsernames();
+    void buildsPasskeyHelperInput();
+    void validatesPasskeyAssertion();
+    void tlsPasskeyStartAndRespond();
+    void tlsPasswordStartIsUnchanged();
+    void tlsPasskeyFallsBackWithoutLocalKey();
+    void tlsPasskeyFallsBackOnDenial();
+    void tlsPasskeyFallsBackOnStartDenial();
+    void tlsPasskeyFallsBackWithoutPasskeyPrompt();
+    void tlsPasskeyRefusesOtherRelyingParty();
+    void tlsPasskeyNotConfirmed();
+    void tlsPasskeyRateLimitThrows();
+    void helperExitCodesMapToOutcomes();
+    void helperListAndCreateParsing();
+    void realHelperWithoutKeyFallsBack();
 };
 
 void TestPlankBroker::initTestCase()
@@ -964,6 +1070,426 @@ void TestPlankBroker::tlsRequiresTls13()
         QVERIFY(error.kind() == PlankBrokerError::Tls || error.kind() == PlankBrokerError::Network);
     }
     QVERIFY(!server.request.contains("Authorization"));
+}
+
+void TestPlankBroker::parsesPasskeyChallenge()
+{
+    const auto reply = PlankBroker::parseAuthReply(200, passkeyChallengeReply());
+    QCOMPARE(reply.kind, PlankBroker::ReplyKind::Challenge);
+    QCOMPARE(reply.conversationId, QStringLiteral("pk-1"));
+    const PlankBroker::Prompt* prompt = PlankBroker::passkeyPrompt(reply.prompts);
+    QVERIFY(prompt != nullptr);
+    QCOMPARE(prompt->id, QStringLiteral("passkey"));
+    QCOMPARE(prompt->passkey.rpId, QStringLiteral("ipa.bde.run"));
+    QCOMPARE(prompt->passkey.credentialIds, QStringList({PasskeyOtherCredential, PasskeyCredential}));
+    QCOMPARE(prompt->passkey.challenge, PasskeyChallenge);
+    QVERIFY(prompt->passkey.userVerification);
+    // Password + code challenges carry no passkey prompt.
+    const auto password = PlankBroker::parseAuthReply(200, json(R"({"state":"challenge","conversation_id":"c",
+        "prompts":[{"id":"password","style":"secret","text":"Password"},{"id":"otp","style":"otp","text":"Code"}]})"));
+    QCOMPARE(password.kind, PlankBroker::ReplyKind::Challenge);
+    QVERIFY(PlankBroker::passkeyPrompt(password.prompts) == nullptr);
+}
+
+void TestPlankBroker::rejectsMalformedPasskeyChallenges()
+{
+    const QString c31 = QString::fromLatin1(QByteArray(31, 'a').toBase64());
+    const QString c33 = QString::fromLatin1(QByteArray(33, 'a').toBase64());
+    QString unpadded = PasskeyChallenge;
+    unpadded.remove(QLatin1Char('='));
+    const QString template_ = QString::fromUtf8(R"({"state":"challenge","conversation_id":"c","prompts":[{"id":"passkey",)"
+                                             R"("style":"passkey","text":"Passkey","passkey":%1}]})");
+    const QString good = QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["%1"],"challenge":"%2"})")
+            .arg(PasskeyCredential, PasskeyChallenge);
+    QCOMPARE(PlankBroker::parseAuthReply(200, template_.arg(good).toUtf8()).kind, PlankBroker::ReplyKind::Challenge);
+    const QStringList bad = {
+        QStringLiteral("null"),
+        QString::fromUtf8(R"("x")"),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["%1"],"challenge":"%2"})").arg(PasskeyCredential, c31),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["%1"],"challenge":"%2"})").arg(PasskeyCredential, c33),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["%1"],"challenge":"%2"})").arg(PasskeyCredential, unpadded),
+        QString::fromUtf8(R"({"rp_id":"IPA.BDE.RUN","credential_ids":["%1"],"challenge":"%2"})").arg(PasskeyCredential, PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"192.168.10.240","credential_ids":["%1"],"challenge":"%2"})").arg(PasskeyCredential, PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"https://ipa.bde.run","credential_ids":["%1"],"challenge":"%2"})").arg(PasskeyCredential, PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":[],"challenge":"%1"})").arg(PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":"%1","challenge":"%2"})").arg(PasskeyCredential, PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["not base64!"],"challenge":"%1"})").arg(PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":[7],"challenge":"%1"})").arg(PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["%1"],"challenge":"%2","user_verification":"yes"})")
+                .arg(PasskeyCredential, PasskeyChallenge),
+        QString::fromUtf8(R"({"rp_id":"ipa.bde.run","credential_ids":["%1"],"challenge":"%2"})")
+                .arg(QString::fromLatin1(QByteArray(1025, 'a').toBase64()), PasskeyChallenge),
+    };
+    for (const QString& passkey : bad) {
+        QCOMPARE(PlankBroker::parseAuthReply(200, template_.arg(passkey).toUtf8()).kind,
+                 PlankBroker::ReplyKind::Malformed);
+    }
+    // A passkey prompt without its request object is malformed too.
+    const QByteArray withoutRequest = R"({"state":"challenge","conversation_id":"c",
+        "prompts":[{"id":"passkey","style":"passkey","text":"Passkey"}]})";
+    QCOMPARE(PlankBroker::parseAuthReply(200, withoutRequest).kind, PlankBroker::ReplyKind::Malformed);
+}
+
+void TestPlankBroker::passwordAnswersNeverSatisfyPasskeyPrompt()
+{
+    const auto reply = PlankBroker::parseAuthReply(200, passkeyChallengeReply());
+    QJsonArray responses;
+    QVERIFY(!PlankBroker::buildResponses(reply.prompts, QStringLiteral("anna"), QStringLiteral("pw"),
+                                         QStringLiteral("123456"), responses));
+    QVERIFY(responses.isEmpty());
+    // A mixed challenge is not a passkey challenge either.
+    QVector<PlankBroker::Prompt> mixed = reply.prompts;
+    mixed.append({QStringLiteral("otp"), QStringLiteral("otp"), QStringLiteral("Code"), {}});
+    QVERIFY(PlankBroker::passkeyPrompt(mixed) == nullptr);
+}
+
+void TestPlankBroker::validatesPasskeyRpIdsAndUsernames()
+{
+    QVERIFY(PlankBroker::isPasskeyRpId(QStringLiteral("ipa.bde.run")));
+    QVERIFY(PlankBroker::isPasskeyRpId(QStringLiteral("ipa-1.example.test")));
+    QVERIFY(PlankBroker::isPasskeyRpId(PlankBroker::defaultPasskeyRpId()));
+    for (const char* bad : {"", "IPA.bde.run", "ipa.bde.run.", ".ipa", "ipa..run", "-ipa.run", "ipa-.run",
+                            "10.0.0.1", "ipa.bde.run:443", "ipa bde", "ipa/bde"}) {
+        QVERIFY2(!PlankBroker::isPasskeyRpId(QString::fromLatin1(bad)), bad);
+    }
+    QCOMPARE(PlankBroker::normalizePasskeyUsername(QStringLiteral("  Anna ")), QStringLiteral("anna"));
+    QVERIFY(PlankBroker::isPasskeyUsername(QStringLiteral("anna")));
+    QVERIFY(PlankBroker::isPasskeyUsername(QStringLiteral("anna.m-b_2")));
+    for (const char* bad : {"", "Anna", ".anna", "-anna", "../x", "a/b", "anna smith"}) {
+        QVERIFY2(!PlankBroker::isPasskeyUsername(QString::fromLatin1(bad)), bad);
+    }
+}
+
+void TestPlankBroker::buildsPasskeyHelperInput()
+{
+    const QJsonObject input = QJsonDocument::fromJson(PlankBroker::passkeyHelperInput(passkeyRequest())).object();
+    QCOMPARE(input.value(QStringLiteral("rp_id")).toString(), QStringLiteral("ipa.bde.run"));
+    QCOMPARE(input.value(QStringLiteral("challenge")).toString(), PasskeyChallenge);
+    QCOMPARE(input.value(QStringLiteral("credential_ids")).toArray(),
+             QJsonArray({PasskeyOtherCredential, PasskeyCredential}));
+    QCOMPARE(input.value(QStringLiteral("user_verification")).toBool(), true);
+    QCOMPARE(input.size(), 4);
+}
+
+void TestPlankBroker::validatesPasskeyAssertion()
+{
+    const PlankBroker::PasskeyRequest request = passkeyRequest();
+    const QByteArray authData = passkeyAuthData(request.rpId);
+    const QByteArray signature(71, '\x30');
+    PlankBroker::PasskeyAssertion assertion;
+    QVERIFY(PlankBroker::parsePasskeyAssertion(assertionJson(PasskeyCredential, authData, signature) + "\n",
+                                               request, assertion));
+    QCOMPARE(assertion.credentialId, PasskeyCredential);
+    QCOMPARE(assertion.authenticatorData, QString::fromLatin1(authData.toBase64()));
+    QCOMPARE(assertion.signature, QString::fromLatin1(signature.toBase64()));
+
+    const QString unknown = QString::fromLatin1(QByteArray(32, '\x33').toBase64());
+    const QByteArray rejected[] = {
+        assertionJson(unknown, authData, signature),                                    // not an allowed id
+        assertionJson(PasskeyCredential, passkeyAuthData(QStringLiteral("evil.example")), signature),
+        assertionJson(PasskeyCredential, passkeyAuthData(request.rpId, 0x04), signature), // UP clear
+        assertionJson(PasskeyCredential, authData.left(36), signature),
+        assertionJson(PasskeyCredential, authData + QByteArray(1024, 'x'), signature),
+        assertionJson(PasskeyCredential, authData, QByteArray()),
+        assertionJson(PasskeyCredential, authData, QByteArray(257, '\x30')),
+        QByteArray("{}"),
+        QByteArray("not json"),
+        QByteArray("{\"credential_id\":\"") + PasskeyCredential.toLatin1() +
+                "\",\"authenticator_data\":\"***\",\"signature\":\"MEUC\"}",
+    };
+    for (const QByteArray& output : rejected) {
+        QVERIFY2(!PlankBroker::parsePasskeyAssertion(output, request, assertion), output.constData());
+        QVERIFY(assertion.credentialId.isEmpty());
+    }
+}
+
+void TestPlankBroker::tlsPasskeyStartAndRespond()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", passkeyChallengeReply());
+    server.queue("200 OK", R"({"state":"authenticated","session_token":"tok-pk","expires_in":36000,"username":"anna"})");
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const QByteArray authData = passkeyAuthData(QStringLiteral("ipa.bde.run"));
+    const QByteArray signature = QByteArray::fromHex("3044022001020304050607080910111213141516171819202122232425262728293031"
+                                                     "3202200102030405060708091011121314151617181920212223242526272829303132");
+    int assertions = 0;
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [&](const PlankBroker::PasskeyRequest& request, PlankBroker::PasskeyAssertion& assertion) {
+        ++assertions;
+        [&] { QCOMPARE(request.challenge, PasskeyChallenge); }();
+        return PlankBroker::parsePasskeyAssertion(assertionJson(PasskeyCredential, authData, signature), request, assertion) ?
+                    PlankBrokerClient::PasskeyAssertResult::Signed : PlankBrokerClient::PasskeyAssertResult::Failed;
+    });
+    QCOMPARE(assertions, 1);
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Authenticated);
+    QCOMPARE(outcome.reply.sessionToken, QStringLiteral("tok-pk"));
+    QCOMPARE(outcome.reply.username, QStringLiteral("anna"));
+
+    QCOMPARE(server.requestLog.size(), 2);
+    QVERIFY(server.requestLog.at(0).startsWith("POST /v1/auth/start HTTP/1.1\r\n"));
+    QVERIFY(server.requestLog.at(0).endsWith(R"({"method":"passkey","username":"anna"})"));
+    QVERIFY(server.requestLog.at(1).startsWith("POST /v1/auth/respond HTTP/1.1\r\n"));
+    const QByteArray respondBody = server.requestLog.at(1).mid(server.requestLog.at(1).indexOf("\r\n\r\n") + 4);
+    const QJsonObject respond = QJsonDocument::fromJson(respondBody).object();
+    QCOMPARE(respond.size(), 2);
+    QCOMPARE(respond.value(QStringLiteral("conversation_id")).toString(), QStringLiteral("pk-1"));
+    QVERIFY(!respond.contains(QStringLiteral("responses")));
+    const QJsonObject passkey = respond.value(QStringLiteral("passkey")).toObject();
+    QCOMPARE(passkey.size(), 3);
+    QCOMPARE(passkey.value(QStringLiteral("credential_id")).toString(), PasskeyCredential);
+    QCOMPARE(QByteArray::fromBase64(passkey.value(QStringLiteral("authenticator_data")).toString().toLatin1()), authData);
+    QCOMPARE(QByteArray::fromBase64(passkey.value(QStringLiteral("signature")).toString().toLatin1()), signature);
+    QVERIFY(!server.requestLog.at(1).contains("Authorization:"));
+}
+
+void TestPlankBroker::tlsPasswordStartIsUnchanged()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", R"({"state":"challenge","conversation_id":"c1","prompts":[)"
+                                     R"({"id":"password","style":"secret","text":"Password"},)"
+                                     R"({"id":"otp","style":"otp","text":"Authenticator code"}]})");
+    server.queue("200 OK", R"({"state":"authenticated","session_token":"tok","username":"anna"})");
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const auto challenge = client.start(QStringLiteral("anna"));
+    QJsonArray responses;
+    QVERIFY(PlankBroker::buildResponses(challenge.prompts, QStringLiteral("anna"), QStringLiteral("pw"),
+                                        QStringLiteral("123456"), responses));
+    QCOMPARE(client.respond(challenge.conversationId, responses).kind, PlankBroker::ReplyKind::Authenticated);
+    QCOMPARE(server.requestLog.size(), 2);
+    QVERIFY(server.requestLog.at(0).endsWith("\r\n\r\n{\"username\":\"anna\"}"));
+    QVERIFY(server.requestLog.at(1).endsWith("\r\n\r\n{\"conversation_id\":\"c1\",\"responses\":[\"pw\",\"123456\"]}"));
+}
+
+void TestPlankBroker::tlsPasskeyFallsBackWithoutLocalKey()
+{
+    // The broker answers unknown users with a synthetic challenge of the same
+    // shape; the helper finds no matching key (exit 3) and nothing is sent back.
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = passkeyChallengeReply();
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+        return PlankBrokerClient::PasskeyAssertResult::NoMatchingKey;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Fallback);
+    QVERIFY(outcome.reply.sessionToken.isEmpty());
+    QCOMPARE(server.requestLog.size(), 1);
+
+    // A broken or missing helper falls back the same way.
+    server.requestLog.clear();
+    QCOMPARE(client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+        return PlankBrokerClient::PasskeyAssertResult::Failed;
+    }).result, PlankBrokerClient::PasskeySignIn::Fallback);
+    QCOMPARE(server.requestLog.size(), 1);
+}
+
+void TestPlankBroker::tlsPasskeyFallsBackOnDenial()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", passkeyChallengeReply());
+    server.queue("200 OK", R"({"state":"denied"})");
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [](const PlankBroker::PasskeyRequest& request, PlankBroker::PasskeyAssertion& assertion) {
+        PlankBroker::parsePasskeyAssertion(assertionJson(PasskeyCredential, passkeyAuthData(request.rpId),
+                                                         QByteArray(70, '\x30')), request, assertion);
+        return PlankBrokerClient::PasskeyAssertResult::Signed;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Fallback);
+    QCOMPARE(server.requestLog.size(), 2);
+}
+
+void TestPlankBroker::tlsPasskeyFallsBackOnStartDenial()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = R"({"state":"denied"})";
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    bool called = false;
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [&](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+        called = true;
+        return PlankBrokerClient::PasskeyAssertResult::Signed;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Fallback);
+    QVERIFY(!called);
+}
+
+void TestPlankBroker::tlsPasskeyFallsBackWithoutPasskeyPrompt()
+{
+    // A broker without section 13.3 ignores "method" and asks for password + code.
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = R"({"state":"challenge","conversation_id":"c1","prompts":[)"
+                  R"({"id":"password","style":"secret","text":"Password"},)"
+                  R"({"id":"otp","style":"otp","text":"Authenticator code"}]})";
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    bool called = false;
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [&](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+        called = true;
+        return PlankBrokerClient::PasskeyAssertResult::Signed;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Fallback);
+    QVERIFY(!called);
+    QCOMPARE(server.requestLog.size(), 1);
+}
+
+void TestPlankBroker::tlsPasskeyRefusesOtherRelyingParty()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = passkeyChallengeReply(QStringLiteral("evil.example"));
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    bool called = false;
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [&](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+        called = true;
+        return PlankBrokerClient::PasskeyAssertResult::Signed;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Fallback);
+    QVERIFY(!called);
+}
+
+void TestPlankBroker::tlsPasskeyNotConfirmed()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = passkeyChallengeReply();
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+        return PlankBrokerClient::PasskeyAssertResult::NotConfirmed;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::NotConfirmed);
+    QCOMPARE(server.requestLog.size(), 1);
+}
+
+void TestPlankBroker::tlsPasskeyRateLimitThrows()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.status = "429 Too Many Requests";
+    server.body = R"({"state":"denied","retry_after":60})";
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    try {
+        client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+                [](const PlankBroker::PasskeyRequest&, PlankBroker::PasskeyAssertion&) {
+            return PlankBrokerClient::PasskeyAssertResult::Signed;
+        });
+        QFAIL("429 must throw, not fall back");
+    } catch (const PlankBrokerError& error) {
+        QCOMPARE(error.kind(), PlankBrokerError::RateLimited);
+        QCOMPARE(error.retryAfter(), 60);
+    }
+}
+
+void TestPlankBroker::helperExitCodesMapToOutcomes()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const PlankBroker::PasskeyRequest request = passkeyRequest();
+    PlankBroker::PasskeyAssertion assertion;
+    using R = PlankBrokerClient::PasskeyAssertResult;
+
+    const QString good = fakeHelper(directory, 0, assertionJson(PasskeyCredential, passkeyAuthData(request.rpId),
+                                                                QByteArray(70, '\x30')));
+    QCOMPARE(PlankPasskeyHelper(good).assertion(request, QStringLiteral("anna"), assertion), R::Signed);
+    QCOMPARE(assertion.credentialId, PasskeyCredential);
+    QCOMPARE(readFile(good + QStringLiteral(".args")), QByteArray("assert\n--rp\nipa.bde.run\n--user\nanna\n"));
+    QCOMPARE(QJsonDocument::fromJson(readFile(good + QStringLiteral(".stdin"))).object(),
+             QJsonDocument::fromJson(PlankBroker::passkeyHelperInput(request)).object());
+
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(directory, 3, QByteArray())).assertion(request, QStringLiteral("anna"), assertion),
+             R::NoMatchingKey);
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(directory, 4, QByteArray())).assertion(request, QStringLiteral("anna"), assertion),
+             R::NotConfirmed);
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(directory, 1, QByteArray())).assertion(request, QStringLiteral("anna"), assertion),
+             R::Failed);
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(directory, 2, QByteArray())).assertion(request, QStringLiteral("anna"), assertion),
+             R::Failed);
+    // Exit 0 with an assertion for a credential the broker did not allow.
+    const QString wrong = QString::fromLatin1(QByteArray(32, '\x44').toBase64());
+    QTemporaryDir other;
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(other, 0, assertionJson(wrong, passkeyAuthData(request.rpId),
+                                                                   QByteArray(70, '\x30'))))
+             .assertion(request, QStringLiteral("anna"), assertion), R::Failed);
+    QVERIFY(assertion.credentialId.isEmpty());
+    // No helper at all (Linux, or a damaged bundle).
+    QVERIFY(!PlankPasskeyHelper(directory.filePath(QStringLiteral("missing"))).available());
+    QCOMPARE(PlankPasskeyHelper(directory.filePath(QStringLiteral("missing"))).assertion(request, QStringLiteral("anna"), assertion),
+             R::Failed);
+    QVERIFY(!PlankPasskeyHelper(QString()).available());
+    // Invalid user names never reach the helper.
+    QCOMPARE(PlankPasskeyHelper(good).assertion(request, QStringLiteral("../anna"), assertion), R::NoMatchingKey);
+}
+
+void TestPlankBroker::helperListAndCreateParsing()
+{
+    const QString spki = QString::fromLatin1(QByteArray(91, '\x04').toBase64());
+    const QString mapping = QStringLiteral("passkey:%1,%2").arg(PasskeyCredential, spki);
+    PlankPasskeyHelper::CreatedKey created;
+    QVERIFY(PlankPasskeyHelper::parseCreated(QJsonDocument(QJsonObject {
+        {QStringLiteral("credential_id"), PasskeyCredential}, {QStringLiteral("public_key"), spki},
+        {QStringLiteral("mapping"), mapping}}).toJson(), created));
+    QCOMPARE(created.mapping, mapping);
+    QVERIFY(!PlankPasskeyHelper::parseCreated(QJsonDocument(QJsonObject {
+        {QStringLiteral("credential_id"), PasskeyCredential}, {QStringLiteral("public_key"), spki},
+        {QStringLiteral("mapping"), QStringLiteral("passkey:%1,%2").arg(PasskeyOtherCredential, spki)}}).toJson(), created));
+
+    QVector<PlankPasskeyHelper::LocalKey> keys;
+    const QJsonObject entry {
+        {QStringLiteral("rp_id"), QStringLiteral("ipa.bde.run")}, {QStringLiteral("username"), QStringLiteral("anna")},
+        {QStringLiteral("credential_id"), PasskeyCredential}, {QStringLiteral("public_key"), spki},
+        {QStringLiteral("mapping"), mapping}, {QStringLiteral("created"), QStringLiteral("2026-09-21T20:00:00Z")}};
+    QVERIFY(PlankPasskeyHelper::parseList(QJsonDocument(QJsonArray {entry}).toJson(), keys));
+    QCOMPARE(keys.size(), 1);
+    QCOMPARE(keys.at(0).username, QStringLiteral("anna"));
+    QVERIFY(PlankPasskeyHelper::parseList("[]\n", keys));
+    QVERIFY(keys.isEmpty());
+    QJsonObject badUser = entry;
+    badUser.insert(QStringLiteral("username"), QStringLiteral("../x"));
+    QVERIFY(!PlankPasskeyHelper::parseList(QJsonDocument(QJsonArray {badUser}).toJson(), keys));
+    QVERIFY(!PlankPasskeyHelper::parseList("{}", keys));
+
+    QTemporaryDir directory;
+    const QString fake = fakeHelper(directory, 0, QJsonDocument(QJsonArray {entry}).toJson());
+    QVERIFY(PlankPasskeyHelper(fake).list(QStringLiteral("ipa.bde.run"), keys));
+    QCOMPARE(keys.size(), 1);
+    QCOMPARE(readFile(fake + QStringLiteral(".args")), QByteArray("list\n--rp\nipa.bde.run\n"));
+}
+
+void TestPlankBroker::realHelperWithoutKeyFallsBack()
+{
+    // The real helper, when the build provides it: an empty key store gives
+    // exit 3 (fallback), and its software-key self-test output passes the
+    // same validation as a Touch ID assertion.
+    const QString program = qEnvironmentVariable("PLANK_PASSKEY_HELPER");
+    if (program.isEmpty()) QSKIP("PLANK_PASSKEY_HELPER not set");
+    QVERIFY(QFileInfo(program).isExecutable());
+    QTemporaryDir store;
+    QVERIFY(store.isValid());
+    qputenv("PLANK_PASSKEY_STORE", store.path().toUtf8());
+    const PlankPasskeyHelper helper(program);
+    const PlankBroker::PasskeyRequest request = passkeyRequest();
+    PlankBroker::PasskeyAssertion assertion;
+    QCOMPARE(helper.assertion(request, QStringLiteral("anna"), assertion),
+             PlankBrokerClient::PasskeyAssertResult::NoMatchingKey);
+    QVector<PlankPasskeyHelper::LocalKey> keys;
+    QVERIFY(helper.list(QStringLiteral("ipa.bde.run"), keys));
+    QVERIFY(keys.isEmpty());
+    const PlankPasskeyHelper::Result selfTest = helper.run({QStringLiteral("self-test")},
+                                                           PlankBroker::passkeyHelperInput(request),
+                                                           PlankPasskeyHelper::QuickTimeoutMs);
+    QVERIFY(selfTest.ok());
+    QVERIFY(PlankBroker::parsePasskeyAssertion(selfTest.output, request, assertion));
+    QCOMPARE(QByteArray::fromBase64(assertion.authenticatorData.toLatin1()), passkeyAuthData(request.rpId));
+    qunsetenv("PLANK_PASSKEY_STORE");
 }
 
 QTEST_GUILESS_MAIN(TestPlankBroker)

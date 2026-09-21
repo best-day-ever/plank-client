@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include <exception>
+#include <functional>
 
 // Blocking HTTPS client for the PLANK broker public API (bde-linux
 // docs/plank-broker.md section 10.1). Each request uses a fresh
@@ -61,9 +62,31 @@ public:
     void checkConfigured() const;
 
     // Sign-in conversation. Challenge/Authenticated are returned; Denied,
-    // RateLimited and malformed replies throw.
-    PlankBroker::AuthReply start(const QString& username) const;
+    // RateLimited and malformed replies throw. PasswordOtp sends exactly
+    // {"username"}; Passkey adds "method":"passkey" (section 13.3).
+    PlankBroker::AuthReply start(const QString& username,
+                                 PlankBroker::AuthMethod method = PlankBroker::AuthMethod::PasswordOtp) const;
     PlankBroker::AuthReply respond(const QString& conversationId, const QJsonArray& responses) const;
+    PlankBroker::AuthReply respondPasskey(const QString& conversationId,
+                                          const PlankBroker::PasskeyAssertion& assertion) const;
+
+    // Passkey sign-in (section 13.3/13.4): start with method "passkey", let
+    // `assertor` sign the challenge (the plank-passkey helper; Touch ID), then
+    // respond. Anything that means "this Mac cannot sign in with a passkey for
+    // this user" - no matching local key, a broker denial, a broker that
+    // offers no passkey prompt, a helper failure - yields Fallback, and the
+    // caller asks for password + code instead. Network, TLS, rate limiting and
+    // malformed replies throw as for start()/respond().
+    enum class PasskeyAssertResult { Signed, NoMatchingKey, NotConfirmed, Failed };
+    using PasskeyAssertor = std::function<PasskeyAssertResult(const PlankBroker::PasskeyRequest& request,
+                                                              PlankBroker::PasskeyAssertion& assertion)>;
+    struct PasskeySignIn {
+        enum Result { Authenticated, Fallback, NotConfirmed };
+        Result result = Fallback;
+        PlankBroker::AuthReply reply;
+    };
+    PasskeySignIn signInWithPasskey(const QString& username, const QString& rpId,
+                                    const PasskeyAssertor& assertor) const;
 
     QVector<PlankBroker::Host> hosts(const QString& sessionToken) const;
     PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId) const;
@@ -79,6 +102,7 @@ private:
     Response request(const QByteArray& method, const QString& path,
                      const QJsonObject* body, const QString& sessionToken) const;
     static void throwForBearerStatus(int status, const QByteArray& body);
+    PlankBroker::AuthReply sendRespond(const QJsonObject& body) const;
 
     Config m_Config;
 };

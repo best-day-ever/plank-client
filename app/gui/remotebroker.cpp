@@ -89,6 +89,9 @@ RemoteBroker::RemoteBroker(StreamingPreferences* preferences, QObject* parent)
     connect(&m_KeepaliveTimer, &QTimer::timeout, this, &RemoteBroker::sendKeepalive);
     connect(m_Preferences, &StreamingPreferences::brokerChanged,
             this, &RemoteBroker::configurationChanged);
+    // The relying party is a broker setting; its keys are listed per rp.
+    connect(m_Preferences, &StreamingPreferences::brokerChanged,
+            this, &RemoteBroker::refreshPasskeys);
 }
 
 RemoteBroker::~RemoteBroker()
@@ -225,6 +228,184 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
             self->setBusy(QString());
             emit self->stateChanged();
             self->refreshHosts();
+        }, Qt::QueuedConnection);
+    });
+}
+
+QString RemoteBroker::passkeyRpId() const
+{
+    const QString rpId = m_Preferences->passkeyRpId.trimmed().toLower();
+    return PlankBroker::isPasskeyRpId(rpId) ? rpId : PlankBroker::defaultPasskeyRpId();
+}
+
+void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser)
+{
+    m_Token->set(token);
+    token.fill(QChar('\0'));
+    m_Username = confirmedUser;
+    setBusy(QString());
+    emit stateChanged();
+    refreshHosts();
+}
+
+void RemoteBroker::signInWithPasskey(const QString& username)
+{
+    const QString user = PlankBroker::normalizePasskeyUsername(username);
+    if (busy()) return;
+    if (!configured()) {
+        emit errorOccurred(PlankBrokerError(PlankBrokerError::NotConfigured).userMessage());
+        return;
+    }
+    if (!PlankBroker::isPasskeyUsername(user) || !m_PasskeyHelper.available()) {
+        emit passkeyFallback(tr("Sign in with your password and authenticator code."));
+        return;
+    }
+
+    setBusy(tr("Signing in..."));
+    const PlankBrokerClient::Config config = clientConfig();
+    const QString rpId = passkeyRpId();
+    const QString program = m_PasskeyHelper.program();
+    const quint64 generation = ++m_Generation;
+    QPointer<RemoteBroker> self(this);
+    QThreadPool::globalInstance()->start([self, config, rpId, program, generation, user]() {
+        PlankBrokerClient::PasskeySignIn outcome;
+        std::shared_ptr<PlankBrokerError> failure;
+        try {
+            const PlankPasskeyHelper helper(program);
+            outcome = PlankBrokerClient(config).signInWithPasskey(user, rpId,
+                    [&](const PlankBroker::PasskeyRequest& request, PlankBroker::PasskeyAssertion& assertion) {
+                QMetaObject::invokeMethod(qApp, [self, generation]() {
+                    if (self && generation == self->m_Generation) {
+                        self->setBusy(tr("Confirm with Touch ID..."));
+                    }
+                }, Qt::QueuedConnection);
+                return helper.assertion(request, user, assertion);
+            });
+        } catch (const PlankBrokerError& error) {
+            failure = std::make_shared<PlankBrokerError>(error);
+        }
+        QString token = outcome.reply.sessionToken;
+        outcome.reply.sessionToken.fill(QChar('\0'));
+        const QString confirmedUser = outcome.reply.username.isEmpty() ? user : outcome.reply.username;
+        const auto result = outcome.result;
+        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, result, failure]() mutable {
+            if (!self || generation != self->m_Generation) {
+                token.fill(QChar('\0'));
+                return;
+            }
+            if (failure) {
+                self->handleBrokerError(*failure, false);
+                return;
+            }
+            switch (result) {
+            case PlankBrokerClient::PasskeySignIn::Authenticated:
+                self->finishSignIn(token, confirmedUser);
+                return;
+            case PlankBrokerClient::PasskeySignIn::NotConfirmed:
+                self->setBusy(QString());
+                emit self->errorOccurred(tr("Touch ID was not confirmed. Try again, or sign in with your password and authenticator code."));
+                return;
+            case PlankBrokerClient::PasskeySignIn::Fallback:
+            default:
+                self->setBusy(QString());
+                emit self->passkeyFallback(tr("Touch ID sign-in did not work for this account. Sign in with your password and authenticator code."));
+                return;
+            }
+        }, Qt::QueuedConnection);
+    });
+}
+
+QStringList RemoteBroker::passkeyUsers() const
+{
+    QStringList users;
+    for (const QVariant& value : m_Passkeys) {
+        const QString user = value.toMap().value(QStringLiteral("username")).toString();
+        if (!users.contains(user)) users.append(user);
+    }
+    return users;
+}
+
+void RemoteBroker::refreshPasskeys()
+{
+    if (!m_PasskeyHelper.available()) return;
+    const QString rpId = passkeyRpId();
+    const QString program = m_PasskeyHelper.program();
+    const quint64 generation = ++m_PasskeyGeneration;
+    QPointer<RemoteBroker> self(this);
+    QThreadPool::globalInstance()->start([self, rpId, program, generation]() {
+        QVector<PlankPasskeyHelper::LocalKey> keys;
+        if (!PlankPasskeyHelper(program).list(rpId, keys)) {
+            qWarning() << "plank-passkey could not list the local passkeys";
+        }
+        QMetaObject::invokeMethod(qApp, [self, generation, keys]() {
+            if (!self || generation != self->m_PasskeyGeneration) return;
+            QVariantList list;
+            for (const PlankPasskeyHelper::LocalKey& key : keys) {
+                QVariantMap entry;
+                entry.insert(QStringLiteral("username"), key.username);
+                entry.insert(QStringLiteral("credentialId"), key.credentialId);
+                entry.insert(QStringLiteral("mapping"), key.mapping);
+                entry.insert(QStringLiteral("created"), key.created);
+                list.append(entry);
+            }
+            self->m_Passkeys = list;
+            emit self->passkeysChanged();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void RemoteBroker::createPasskey(const QString& username)
+{
+    const QString user = PlankBroker::normalizePasskeyUsername(username);
+    if (m_PasskeyBusy || !m_PasskeyHelper.available()) return;
+    if (!PlankBroker::isPasskeyUsername(user)) {
+        emit passkeyError(tr("Enter your studio user name."));
+        return;
+    }
+    m_PasskeyBusy = true;
+    emit passkeysChanged();
+    const QString rpId = passkeyRpId();
+    const QString program = m_PasskeyHelper.program();
+    QPointer<RemoteBroker> self(this);
+    QThreadPool::globalInstance()->start([self, rpId, program, user]() {
+        PlankPasskeyHelper::CreatedKey key;
+        const bool created = PlankPasskeyHelper(program).create(rpId, user, key);
+        QMetaObject::invokeMethod(qApp, [self, user, created, key]() {
+            if (!self) return;
+            self->m_PasskeyBusy = false;
+            emit self->passkeysChanged();
+            if (created) {
+                emit self->passkeyCreated(user, key.mapping);
+            } else {
+                emit self->passkeyError(tr("Touch ID sign-in could not be set up on this Mac."));
+            }
+            self->refreshPasskeys();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void RemoteBroker::removePasskey(const QString& username)
+{
+    const QString user = PlankBroker::normalizePasskeyUsername(username);
+    if (m_PasskeyBusy || !m_PasskeyHelper.available() || !PlankBroker::isPasskeyUsername(user)) return;
+    m_PasskeyBusy = true;
+    emit passkeysChanged();
+    const QString rpId = passkeyRpId();
+    const QString program = m_PasskeyHelper.program();
+    QPointer<RemoteBroker> self(this);
+    QThreadPool::globalInstance()->start([self, rpId, program, user]() {
+        const PlankPasskeyHelper::Result result = PlankPasskeyHelper(program).remove(rpId, user);
+        // Exit 3: nothing left to remove, which is the requested state.
+        const bool removed = result.ran &&
+                (result.exitCode == PlankPasskeyHelper::Ok || result.exitCode == PlankPasskeyHelper::NoMatchingKey);
+        QMetaObject::invokeMethod(qApp, [self, removed]() {
+            if (!self) return;
+            self->m_PasskeyBusy = false;
+            emit self->passkeysChanged();
+            if (!removed) {
+                emit self->passkeyError(tr("Touch ID sign-in could not be removed."));
+            }
+            self->refreshPasskeys();
         }, Qt::QueuedConnection);
     });
 }

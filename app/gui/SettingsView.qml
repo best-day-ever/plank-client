@@ -6,6 +6,7 @@ import QtQuick.Window 2.2
 import StreamingPreferences 1.0
 import ComputerManager 1.0
 import SystemProperties 1.0
+import RemoteBroker 1.0
 
 Flickable {
     id: settingsPage
@@ -1039,6 +1040,7 @@ Flickable {
                                 brokerPortSpinBox.value = StreamingPreferences.brokerPort
                                 brokerPinsArea.text = StreamingPreferences.brokerPins.join("\n")
                                 brokerPinsHelp.rejectedCount = 0
+                                passkeyRpIdField.text = StreamingPreferences.passkeyRpId
                             }
                         }
                     }
@@ -1056,6 +1058,194 @@ Flickable {
                           (StreamingPreferences.brokerPins.length === 0 ?
                                qsTr("No pins: remote access will refuse to connect. ") : "") +
                           qsTr("One SHA-256 of the broker's public key per line (current and spare). The broker is trusted only if its key matches a pin; public certificate authorities are not used.")
+                }
+
+                // Touch ID sign-in (bde-linux docs/plank-broker.md 13.4): a
+                // Secure Enclave key on this Mac replaces the authenticator code.
+                PlankSettingLabel {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Touch ID sign-in")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    id: passkeySettings
+                    visible: RemoteBroker.passkeySupported
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 6
+
+                    property string createdUser: ""
+                    property string mapping: ""
+                    property string errorText: ""
+                    property bool copied: false
+                    property string removeUser: ""
+
+                    Component.onCompleted: RemoteBroker.refreshPasskeys()
+
+                    Connections {
+                        target: RemoteBroker
+                        function onPasskeyCreated(username, mapping) {
+                            passkeySettings.createdUser = username
+                            passkeySettings.mapping = mapping
+                            passkeySettings.errorText = ""
+                            passkeySettings.copied = false
+                        }
+                        function onPasskeyError(message) {
+                            passkeySettings.errorText = message
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        PlankTextField {
+                            id: passkeyUserField
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            placeholderText: qsTr("Studio user name")
+                            enabled: !RemoteBroker.passkeyBusy
+                            inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+                        }
+                        Button {
+                            text: qsTr("Set up Touch ID sign-in")
+                            enabled: !RemoteBroker.passkeyBusy && passkeyUserField.text.trim() !== ""
+                            onClicked: {
+                                passkeySettings.mapping = ""
+                                passkeySettings.errorText = ""
+                                RemoteBroker.createPasskey(passkeyUserField.text)
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        visible: passkeySettings.mapping !== ""
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        spacing: 4
+
+                        Label {
+                            text: qsTr("Touch ID sign-in key for %1 on this Mac:").arg(passkeySettings.createdUser)
+                            color: theme.textPrimary
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        TextArea {
+                            id: passkeyMappingArea
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            readOnly: true
+                            selectByMouse: true
+                            wrapMode: TextEdit.WrapAnywhere
+                            font.family: "Menlo"
+                            font.pointSize: 9
+                            color: theme.textPrimary
+                            text: passkeySettings.mapping
+                            background: Rectangle {
+                                color: theme.surfaceRaised
+                                radius: theme.radiusSmall
+                                border.width: 1
+                                border.color: theme.border
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Button {
+                                text: passkeySettings.copied ? qsTr("Copied") : qsTr("Copy")
+                                onClicked: {
+                                    passkeyMappingArea.selectAll()
+                                    passkeyMappingArea.copy()
+                                    passkeyMappingArea.deselect()
+                                    passkeySettings.copied = true
+                                }
+                            }
+                            PlankSettingHelp {
+                                text: qsTr("Send this to your admin; it is not secret.")
+                            }
+                        }
+                    }
+
+                    Label {
+                        visible: passkeySettings.errorText !== ""
+                        text: passkeySettings.errorText
+                        color: theme.danger
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+
+                    Repeater {
+                        model: RemoteBroker.passkeys
+                        delegate: RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: modelData.username
+                                color: theme.textPrimary
+                                elide: Label.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Button {
+                                text: qsTr("Show key")
+                                flat: true
+                                onClicked: {
+                                    passkeySettings.createdUser = modelData.username
+                                    passkeySettings.mapping = modelData.mapping
+                                    passkeySettings.copied = false
+                                }
+                            }
+                            Button {
+                                text: qsTr("Remove Touch ID sign-in")
+                                enabled: !RemoteBroker.passkeyBusy
+                                onClicked: {
+                                    passkeySettings.removeUser = modelData.username
+                                    removePasskeyDialog.open()
+                                }
+                            }
+                        }
+                    }
+
+                    NavigableMessageDialog {
+                        id: removePasskeyDialog
+                        text: qsTr("Remove Touch ID sign-in for '%1' from this Mac? You will sign in with your password and authenticator code until you set it up again and your admin adds the new key.").arg(passkeySettings.removeUser)
+                        standardButtons: Dialog.Yes | Dialog.No
+                        onAccepted: {
+                            if (passkeySettings.mapping !== "" && passkeySettings.createdUser === passkeySettings.removeUser) {
+                                passkeySettings.mapping = ""
+                            }
+                            RemoteBroker.removePasskey(passkeySettings.removeUser)
+                        }
+                    }
+                }
+
+                PlankSettingLabel {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Touch ID sign-in domain")
+                }
+
+                PlankTextField {
+                    id: passkeyRpIdField
+                    visible: RemoteBroker.passkeySupported
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: StreamingPreferences.passkeyRpId
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
+                    onEditingFinished: {
+                        var value = text.trim().toLowerCase()
+                        if (/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9-]*[a-z][a-z0-9-]*$/.test(value) &&
+                                value !== StreamingPreferences.passkeyRpId) {
+                            StreamingPreferences.passkeyRpId = value
+                        }
+                        text = StreamingPreferences.passkeyRpId
+                    }
+                }
+
+                Item {
+                    visible: RemoteBroker.passkeySupported
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Sign in to remote access with Touch ID instead of the authenticator code. The key never leaves this Mac; your admin enables it for your account. The domain is your studio's identity domain (default ipa.bde.run).")
                 }
             }
         }

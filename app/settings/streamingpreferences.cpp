@@ -29,6 +29,7 @@
 #define SER_BROKER_HOST "plank-broker-host"
 #define SER_BROKER_PORT "plank-broker-port"
 #define SER_BROKER_PINS "plank-broker-spki-pins"
+#define SER_PASSKEY_RP_ID "plank-passkey-rp-id"
 
 static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
@@ -137,6 +138,10 @@ void StreamingPreferences::reload()
     brokerPins = settings.contains(SER_BROKER_PINS) ?
                 PlankBroker::normalizePins(settings.value(SER_BROKER_PINS).toStringList()) :
                 PlankBroker::defaultPins();
+    passkeyRpId = settings.value(SER_PASSKEY_RP_ID, PlankBroker::defaultPasskeyRpId()).toString().trimmed().toLower();
+    if (!PlankBroker::isPasskeyRpId(passkeyRpId)) {
+        passkeyRpId = PlankBroker::defaultPasskeyRpId();
+    }
 
 }
 
@@ -290,6 +295,12 @@ void StreamingPreferences::save()
     } else {
         settings.setValue(SER_BROKER_PINS, PlankBroker::normalizePins(brokerPins));
     }
+    const QString rpId = passkeyRpId.trimmed().toLower();
+    if (rpId == PlankBroker::defaultPasskeyRpId() || !PlankBroker::isPasskeyRpId(rpId)) {
+        settings.remove(SER_PASSKEY_RP_ID);
+    } else {
+        settings.setValue(SER_PASSKEY_RP_ID, rpId);
+    }
 }
 
 QStringList StreamingPreferences::setBrokerPinsFromText(const QString& text)
@@ -308,5 +319,6 @@ void StreamingPreferences::resetBrokerDefaults()
     brokerHost = PlankBroker::defaultHost();
     brokerPort = PlankBroker::DefaultPort;
     brokerPins = PlankBroker::defaultPins();
+    passkeyRpId = PlankBroker::defaultPasskeyRpId();
     emit brokerChanged();
 }

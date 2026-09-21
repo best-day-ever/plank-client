@@ -2,6 +2,7 @@
 
 #include "backend/plankbroker.h"
 #include "backend/plankbrokerclient.h"
+#include "backend/plankpasskey.h"
 
 #include <QMutex>
 #include <QObject>
@@ -20,7 +21,8 @@ class StreamingPreferences;
 // "Remote (broker)" mode controller exposed to QML as a singleton. Owns the
 // in-memory broker session token (never persisted), the host list, brokered
 // connects (bde-linux docs/plank-broker.md section 10.2) and the lease
-// keepalive while a brokered stream runs.
+// keepalive while a brokered stream runs. On macOS it also drives Touch ID
+// sign-in through the bundled plank-passkey helper (section 13.4).
 class RemoteBroker : public QObject
 {
     Q_OBJECT
@@ -31,6 +33,13 @@ class RemoteBroker : public QObject
     Q_PROPERTY(QString busyText READ busyText NOTIFY stateChanged)
     Q_PROPERTY(QString username READ username NOTIFY stateChanged)
     Q_PROPERTY(QVariantList hosts READ hosts NOTIFY hostsChanged)
+    // Touch ID sign-in: helper present (macOS), local keys for the
+    // configured relying party ({username, credentialId, mapping, created}),
+    // and the user names that have one.
+    Q_PROPERTY(bool passkeySupported READ passkeySupported CONSTANT)
+    Q_PROPERTY(QVariantList passkeys READ passkeys NOTIFY passkeysChanged)
+    Q_PROPERTY(QStringList passkeyUsers READ passkeyUsers NOTIFY passkeysChanged)
+    Q_PROPERTY(bool passkeyBusy READ passkeyBusy NOTIFY passkeysChanged)
 
 public:
     explicit RemoteBroker(StreamingPreferences* preferences, QObject* parent = nullptr);
@@ -38,6 +47,11 @@ public:
 
     Q_INVOKABLE void initialize(ComputerManager* computerManager);
     Q_INVOKABLE void signIn(const QString& username, QString password, QString otp);
+    // Passkey sign-in; emits passkeyFallback() when password + code is needed.
+    Q_INVOKABLE void signInWithPasskey(const QString& username);
+    Q_INVOKABLE void refreshPasskeys();
+    Q_INVOKABLE void createPasskey(const QString& username);
+    Q_INVOKABLE void removePasskey(const QString& username);
     Q_INVOKABLE void refreshHosts();
     // Connects with the saved display setup; without one (or when the saved
     // "match my displays" no longer fits the current screens) it emits
@@ -61,6 +75,10 @@ public:
     QString busyText() const { return m_BusyText; }
     QString username() const { return m_Username; }
     QVariantList hosts() const { return m_Hosts; }
+    bool passkeySupported() const { return m_PasskeyHelper.available(); }
+    QVariantList passkeys() const { return m_Passkeys; }
+    QStringList passkeyUsers() const;
+    bool passkeyBusy() const { return m_PasskeyBusy; }
 
 signals:
     void configurationChanged();
@@ -70,6 +88,12 @@ signals:
     void errorOccurred(QString message);
     void connectReady(QString hostName);
     void displaySetupRequired(QString hostId, QString hostName, QString reason);
+    void passkeysChanged();
+    // No usable passkey for this sign-in: ask for password + code instead.
+    void passkeyFallback(QString message);
+    // Mapping line for the administrator ("passkey:<id>,<SPKI>"; not secret).
+    void passkeyCreated(QString username, QString mapping);
+    void passkeyError(QString message);
 
 private:
     // Shared with Session worker threads (re-admission) and keepalive tasks.
@@ -97,6 +121,8 @@ private:
     };
 
     PlankBrokerClient::Config clientConfig() const;
+    QString passkeyRpId() const;
+    void finishSignIn(QString token, const QString& confirmedUser);
     void setBusy(const QString& text);
     void handleBrokerError(const PlankBrokerError& error, bool connecting);
     void signOutLocally(const QString& message = QString());
@@ -113,6 +139,10 @@ private:
     QString m_Username;
     QString m_BusyText;
     QVariantList m_Hosts;
+    PlankPasskeyHelper m_PasskeyHelper;
+    QVariantList m_Passkeys;
+    bool m_PasskeyBusy = false;
+    quint64 m_PasskeyGeneration = 0;
     QPointer<Session> m_PendingSession;
     // Brokered computers are never persisted; they must outlive their Session.
     QVector<NvComputer*> m_Computers;
