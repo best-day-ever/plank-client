@@ -183,12 +183,15 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
     return result;
 }
 
-PlankBroker::AuthReply PlankBrokerClient::start(const QString& username) const
+PlankBroker::AuthReply PlankBrokerClient::start(const QString& username, PlankBroker::AuthMethod method) const
 {
     if (username.isEmpty() || username.size() > 255) {
         throw PlankBrokerError(PlankBrokerError::Denied);
     }
-    const QJsonObject body {{QStringLiteral("username"), username}};
+    QJsonObject body {{QStringLiteral("username"), username}};
+    if (method == PlankBroker::AuthMethod::Passkey) {
+        body.insert(QStringLiteral("method"), QStringLiteral("passkey"));
+    }
     Response response = request("POST", QStringLiteral("/v1/auth/start"), &body, QString());
     const PlankBroker::AuthReply reply = PlankBroker::parseAuthReply(response.status, response.body);
     response.body.fill('\0');
@@ -211,6 +214,25 @@ PlankBroker::AuthReply PlankBrokerClient::respond(const QString& conversationId,
         {QStringLiteral("conversation_id"), conversationId},
         {QStringLiteral("responses"), responses},
     };
+    return sendRespond(body);
+}
+
+PlankBroker::AuthReply PlankBrokerClient::respondPasskey(const QString& conversationId,
+                                                         const PlankBroker::PasskeyAssertion& assertion) const
+{
+    const QJsonObject body {
+        {QStringLiteral("conversation_id"), conversationId},
+        {QStringLiteral("passkey"), QJsonObject {
+             {QStringLiteral("credential_id"), assertion.credentialId},
+             {QStringLiteral("authenticator_data"), assertion.authenticatorData},
+             {QStringLiteral("signature"), assertion.signature},
+         }},
+    };
+    return sendRespond(body);
+}
+
+PlankBroker::AuthReply PlankBrokerClient::sendRespond(const QJsonObject& body) const
+{
     Response response = request("POST", QStringLiteral("/v1/auth/respond"), &body, QString());
     const PlankBroker::AuthReply reply = PlankBroker::parseAuthReply(response.status, response.body);
     response.body.fill('\0');
@@ -225,6 +247,45 @@ PlankBroker::AuthReply PlankBrokerClient::respond(const QString& conversationId,
     default:
         throw PlankBrokerError(PlankBrokerError::Protocol);
     }
+}
+
+PlankBrokerClient::PasskeySignIn PlankBrokerClient::signInWithPasskey(const QString& username, const QString& rpId,
+                                                                      const PasskeyAssertor& assertor) const
+{
+    PasskeySignIn outcome;
+    PlankBroker::AuthReply challenge;
+    try {
+        challenge = start(username, PlankBroker::AuthMethod::Passkey);
+    } catch (const PlankBrokerError& error) {
+        if (error.kind() != PlankBrokerError::Denied) throw;
+        return outcome;
+    }
+    const PlankBroker::Prompt* prompt = PlankBroker::passkeyPrompt(challenge.prompts);
+    // The key on this Mac belongs to the configured relying party only.
+    if (prompt == nullptr || prompt->passkey.rpId != rpId) return outcome;
+
+    PlankBroker::PasskeyAssertion assertion;
+    switch (assertor(prompt->passkey, assertion)) {
+    case PasskeyAssertResult::Signed:
+        break;
+    case PasskeyAssertResult::NotConfirmed:
+        outcome.result = PasskeySignIn::NotConfirmed;
+        return outcome;
+    case PasskeyAssertResult::NoMatchingKey:
+    case PasskeyAssertResult::Failed:
+    default:
+        return outcome;
+    }
+    try {
+        PlankBroker::AuthReply reply = respondPasskey(challenge.conversationId, assertion);
+        if (reply.kind == PlankBroker::ReplyKind::Authenticated) {
+            outcome.result = PasskeySignIn::Authenticated;
+            outcome.reply = reply;
+        }
+    } catch (const PlankBrokerError& error) {
+        if (error.kind() != PlankBrokerError::Denied) throw;
+    }
+    return outcome;
 }
 
 void PlankBrokerClient::throwForBearerStatus(int status, const QByteArray& body)

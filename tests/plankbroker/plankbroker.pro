@@ -6,6 +6,7 @@ TEMPLATE = app
 SOURCES += \
     test_plankbroker.cpp \
     ../../app/backend/plankbrokerclient.cpp \
+    ../../app/backend/plankpasskey.cpp \
     ../../app/backend/outputtopology.cpp
 
 HEADERS += \
@@ -13,6 +14,7 @@ HEADERS += \
     ../../app/backend/plankbrokerclient.h \
     ../../app/backend/plankhttp.h \
     ../../app/backend/remotedisplaysetup.h \
+    ../../app/backend/plankpasskey.h \
     ../../app/backend/macpreviewlaunch.h \
     ../../app/backend/outputtopology.h
 

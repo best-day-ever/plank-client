@@ -6,8 +6,9 @@
 // it is unit-testable without a broker, host or window (tests/plankbroker).
 //
 // Contract: bde-linux docs/plank-broker.md section 10.1 (broker API, client to
-// broker over HTTPS/TLS 1.3 with a pinned SPKI SHA-256) and section 10.2
-// (brokered connect to a host through the broker's per-session lease).
+// broker over HTTPS/TLS 1.3 with a pinned SPKI SHA-256), section 10.2
+// (brokered connect to a host through the broker's per-session lease) and
+// section 13.3 (passkey sign-in: method "passkey", prompt style "passkey").
 
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -46,6 +47,14 @@ constexpr int MaximumPrompts = 8;
 constexpr int DefaultRetryAfterSeconds = 30;
 constexpr int MaximumRetryAfterSeconds = 3600;
 constexpr int DefaultLeaseSeconds = 30;
+// Passkey limits (section 13.3; the broker enforces the same caps).
+constexpr int PasskeyChallengeBytes = 32;
+constexpr int MaximumPasskeyCredentialIds = 64;
+constexpr int MaximumPasskeyCredentialIdBytes = 1024;
+constexpr int MinimumPasskeyAuthenticatorDataBytes = 37;
+constexpr int MaximumPasskeyAuthenticatorDataBytes = 1024;
+constexpr int MaximumPasskeySignatureBytes = 256;
+inline QString defaultPasskeyRpId() { return QStringLiteral("ipa.bde.run"); }
 
 // ---------------------------------------------------------------------------
 // SHA-256 hex values (broker SPKI pins, host leaf certificate pins)
@@ -217,11 +226,32 @@ enum class ReplyKind {
     Malformed,
 };
 
+// Section 13.3: the "passkey" prompt's WebAuthn-style request. Values are
+// kept exactly as sent (standard base64); they are validated on parse.
+struct PasskeyRequest {
+    QString rpId;
+    QStringList credentialIds;
+    bool userVerification = true;
+    QString challenge;
+};
+
 struct Prompt {
     QString id;
-    QString style; // "secret", "otp", "text" or "info"
+    QString style; // "secret", "otp", "text", "info" or "passkey"
     QString text;
+    PasskeyRequest passkey {}; // style "passkey" only
 };
+
+// What the helper returns and /v1/auth/respond carries (standard base64).
+struct PasskeyAssertion {
+    QString credentialId;
+    QString authenticatorData;
+    QString signature;
+};
+
+// Sign-in method sent with /v1/auth/start. PasswordOtp sends no "method"
+// member at all, so the password + code request is unchanged.
+enum class AuthMethod { PasswordOtp, Passkey };
 
 struct AuthReply {
     ReplyKind kind = ReplyKind::Malformed;
@@ -306,6 +336,143 @@ inline bool parseObject(const QByteArray& body, QJsonObject& object)
     return true;
 }
 
+// Strict standard base64 (padding required, canonical, no whitespace).
+inline bool decodeStandardBase64(const QString& value, QByteArray& decoded)
+{
+    decoded.clear();
+    if (value.isEmpty() || value.size() % 4 != 0) return false;
+    for (const QChar c : value) {
+        const ushort u = c.unicode();
+        if (!((u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') ||
+              u == '+' || u == '/' || u == '=')) {
+            return false;
+        }
+    }
+    const auto result = QByteArray::fromBase64Encoding(value.toLatin1(),
+                                                       QByteArray::AbortOnBase64DecodingErrors);
+    if (!result || result.decoded.toBase64() != value.toLatin1()) return false;
+    decoded = result.decoded;
+    return true;
+}
+
+// Relying party id: a plain lower-case DNS host name (not an IP literal);
+// the same rule as the plank-passkey helper.
+inline bool isPasskeyRpId(const QString& value)
+{
+    if (value.isEmpty() || value.size() > 253) return false;
+    const QStringList labels = value.split(QLatin1Char('.'));
+    for (const QString& label : labels) {
+        if (label.isEmpty() || label.size() > 63) return false;
+        for (int i = 0; i < label.size(); ++i) {
+            const ushort u = label.at(i).unicode();
+            const bool alnum = (u >= 'a' && u <= 'z') || (u >= '0' && u <= '9');
+            const bool hyphen = u == '-' && i != 0 && i != label.size() - 1;
+            if (!alnum && !hyphen) return false;
+        }
+    }
+    for (const QChar c : labels.last()) {
+        if (c.unicode() >= 'a' && c.unicode() <= 'z') return true;
+    }
+    return false;
+}
+
+// User names the passkey helper stores keys under (FreeIPA: lower case).
+inline QString normalizePasskeyUsername(const QString& username)
+{
+    return username.trimmed().toLower();
+}
+
+inline bool isPasskeyUsername(const QString& value)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9_][a-z0-9_.-]{0,63}$"));
+    return pattern.match(value).hasMatch();
+}
+
+inline bool parsePasskeyRequest(const QJsonValue& value, PasskeyRequest& request)
+{
+    request = PasskeyRequest();
+    if (!value.isObject()) return false;
+    const QJsonObject object = value.toObject();
+    PasskeyRequest parsed;
+    parsed.rpId = object.value(QStringLiteral("rp_id")).toString();
+    parsed.challenge = object.value(QStringLiteral("challenge")).toString();
+    const QJsonValue ids = object.value(QStringLiteral("credential_ids"));
+    const QJsonValue verification = object.value(QStringLiteral("user_verification"));
+    if (!isPasskeyRpId(parsed.rpId) || !ids.isArray() ||
+            !(verification.isBool() || verification.isUndefined())) {
+        return false;
+    }
+    QByteArray decoded;
+    if (!decodeStandardBase64(parsed.challenge, decoded) || decoded.size() != PasskeyChallengeBytes) return false;
+    const QJsonArray idArray = ids.toArray();
+    if (idArray.isEmpty() || idArray.size() > MaximumPasskeyCredentialIds) return false;
+    for (const QJsonValue& id : idArray) {
+        const QString text = id.toString();
+        if (!id.isString() || !decodeStandardBase64(text, decoded) ||
+                decoded.size() > MaximumPasskeyCredentialIdBytes) {
+            return false;
+        }
+        parsed.credentialIds.append(text);
+    }
+    parsed.userVerification = verification.isUndefined() || verification.toBool();
+    request = parsed;
+    return true;
+}
+
+// The object handed to `plank-passkey assert` on stdin.
+inline QByteArray passkeyHelperInput(const PasskeyRequest& request)
+{
+    const QJsonObject object {
+        {QStringLiteral("rp_id"), request.rpId},
+        {QStringLiteral("credential_ids"), QJsonArray::fromStringList(request.credentialIds)},
+        {QStringLiteral("challenge"), request.challenge},
+        {QStringLiteral("user_verification"), request.userVerification},
+    };
+    return QJsonDocument(object).toJson(QJsonDocument::Compact);
+}
+
+// Validates the helper's stdout against the request before anything is sent:
+// an allowed credential id, authData for this rp with UP set, bounded sizes.
+inline bool parsePasskeyAssertion(const QByteArray& output, const PasskeyRequest& request,
+                                  PasskeyAssertion& assertion)
+{
+    assertion = PasskeyAssertion();
+    QJsonObject object;
+    if (output.size() > 16 * 1024) return false;
+    QJsonParseError error {};
+    const QJsonDocument document = QJsonDocument::fromJson(output.trimmed(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
+    object = document.object();
+    PasskeyAssertion parsed;
+    parsed.credentialId = object.value(QStringLiteral("credential_id")).toString();
+    parsed.authenticatorData = object.value(QStringLiteral("authenticator_data")).toString();
+    parsed.signature = object.value(QStringLiteral("signature")).toString();
+    QByteArray credentialId;
+    QByteArray authData;
+    QByteArray signature;
+    if (!request.credentialIds.contains(parsed.credentialId) ||
+            !decodeStandardBase64(parsed.credentialId, credentialId) ||
+            !decodeStandardBase64(parsed.authenticatorData, authData) ||
+            !decodeStandardBase64(parsed.signature, signature) ||
+            authData.size() < MinimumPasskeyAuthenticatorDataBytes ||
+            authData.size() > MaximumPasskeyAuthenticatorDataBytes ||
+            signature.isEmpty() || signature.size() > MaximumPasskeySignatureBytes ||
+            authData.left(32) != QCryptographicHash::hash(request.rpId.toUtf8(), QCryptographicHash::Sha256) ||
+            (static_cast<quint8>(authData.at(32)) & 0x01) == 0) {
+        return false;
+    }
+    assertion = parsed;
+    return true;
+}
+
+// The single passkey prompt of a challenge, or nullptr (e.g. an older broker
+// that ignored "method" and asked for password + code).
+inline const Prompt* passkeyPrompt(const QVector<Prompt>& prompts)
+{
+    if (prompts.size() != 1 || prompts.at(0).style != QLatin1String("passkey")) return nullptr;
+    return &prompts.at(0);
+}
+
 // Maps HTTP status + body of /v1/auth/start and /v1/auth/respond. Every auth
 // failure is HTTP 200 {"state":"denied"}; rate limiting is HTTP 429.
 inline AuthReply parseAuthReply(int httpStatus, const QByteArray& body)
@@ -340,7 +507,12 @@ inline AuthReply parseAuthReply(int httpStatus, const QByteArray& body)
             prompt.text = promptObject.value(QStringLiteral("text")).toString();
             if (!isPrintableAscii(prompt.id, 64) || !isDisplayText(prompt.text, 200) ||
                     (prompt.style != QLatin1String("secret") && prompt.style != QLatin1String("otp") &&
-                     prompt.style != QLatin1String("text") && prompt.style != QLatin1String("info"))) {
+                     prompt.style != QLatin1String("text") && prompt.style != QLatin1String("info") &&
+                     prompt.style != QLatin1String("passkey"))) {
+                return reply;
+            }
+            if (prompt.style == QLatin1String("passkey") &&
+                    !parsePasskeyRequest(promptObject.value(QStringLiteral("passkey")), prompt.passkey)) {
                 return reply;
             }
             reply.prompts.append(prompt);

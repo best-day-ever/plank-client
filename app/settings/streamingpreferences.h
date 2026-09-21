@@ -287,6 +287,8 @@ public:
     Q_PROPERTY(QString brokerHost MEMBER brokerHost NOTIFY brokerChanged)
     Q_PROPERTY(int brokerPort MEMBER brokerPort NOTIFY brokerChanged)
     Q_PROPERTY(QStringList brokerPins MEMBER brokerPins NOTIFY brokerChanged)
+    // Passkey relying party (FreeIPA domain), section 13.4
+    Q_PROPERTY(QString passkeyRpId MEMBER passkeyRpId NOTIFY brokerChanged)
 
     Q_INVOKABLE bool retranslate();
     // Replaces the broker SPKI pin list from user text (one pin per line or
@@ -343,6 +345,7 @@ public:
     QString brokerHost;
     int brokerPort;
     QStringList brokerPins;
+    QString passkeyRpId;
     CaptureSysKeysMode captureSysKeysMode;
 
 signals:

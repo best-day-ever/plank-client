@@ -8,6 +8,8 @@ import ComputerManager 1.0
 // Remote (broker) mode: sign in once with username, password and
 // authenticator code, pick an assigned workstation, stream through the
 // broker's lease (bde-linux docs/plank-broker.md sections 10.1/10.2).
+// A user with a Touch ID key on this Mac (section 13.4) signs in with it
+// instead; without one, or when it does not work, password + code is asked.
 Item {
     id: remoteView
     objectName: qsTr("Remote")
@@ -17,9 +19,14 @@ Item {
     }
 
     property string errorText: ""
+    // Set after a Touch ID fallback or by "Use password instead".
+    property bool usePassword: false
+    readonly property bool passkeyReady: !usePassword &&
+        RemoteBroker.passkeyUsers.indexOf(usernameField.text.trim().toLowerCase()) >= 0
 
     StackView.onActivated: {
         RemoteBroker.initialize(ComputerManager)
+        RemoteBroker.refreshPasskeys()
         if (RemoteBroker.signedIn) {
             RemoteBroker.refreshHosts()
         } else {
@@ -31,6 +38,11 @@ Item {
         target: RemoteBroker
         function onErrorOccurred(message) {
             remoteView.errorText = message
+        }
+        function onPasskeyFallback(message) {
+            remoteView.usePassword = true
+            remoteView.errorText = message
+            passwordField.forceActiveFocus()
         }
         function onConnectReady(hostName) {
             remoteView.errorText = ""
@@ -200,6 +212,10 @@ Item {
             return
         }
         remoteView.errorText = ""
+        if (remoteView.passkeyReady) {
+            RemoteBroker.signInWithPasskey(usernameField.text)
+            return
+        }
         RemoteBroker.signIn(usernameField.text, passwordField.text, otpField.text)
         passwordField.clear()
         otpField.clear()
@@ -231,7 +247,9 @@ Item {
                 Layout.fillWidth: true
             }
             Label {
-                text: qsTr("Sign in with your studio account and the code from your authenticator app.")
+                text: remoteView.passkeyReady ?
+                          qsTr("Sign in with Touch ID. This Mac holds your sign-in key.") :
+                          qsTr("Sign in with your studio account and the code from your authenticator app.")
                 color: theme.textSecondary
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -254,11 +272,13 @@ Item {
                 Layout.fillWidth: true
                 enabled: !RemoteBroker.busy
                 inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                Keys.onReturnPressed: passwordField.forceActiveFocus()
-                Keys.onEnterPressed: passwordField.forceActiveFocus()
+                onTextChanged: remoteView.usePassword = false
+                Keys.onReturnPressed: remoteView.passkeyReady ? remoteView.submitSignIn() : passwordField.forceActiveFocus()
+                Keys.onEnterPressed: remoteView.passkeyReady ? remoteView.submitSignIn() : passwordField.forceActiveFocus()
             }
 
             Label {
+                visible: !remoteView.passkeyReady
                 text: qsTr("Password")
                 color: theme.textSecondary
                 Layout.fillWidth: true
@@ -266,6 +286,7 @@ Item {
             }
             PlankTextField {
                 id: passwordField
+                visible: !remoteView.passkeyReady
                 Layout.fillWidth: true
                 enabled: !RemoteBroker.busy
                 echoMode: TextInput.Password
@@ -275,6 +296,7 @@ Item {
             }
 
             Label {
+                visible: !remoteView.passkeyReady
                 text: qsTr("Authenticator code")
                 color: theme.textSecondary
                 Layout.fillWidth: true
@@ -282,6 +304,7 @@ Item {
             }
             PlankTextField {
                 id: otpField
+                visible: !remoteView.passkeyReady
                 Layout.fillWidth: true
                 enabled: !RemoteBroker.busy
                 placeholderText: qsTr("6 digits")
@@ -329,12 +352,23 @@ Item {
                     Layout.fillWidth: true
                 }
                 Button {
+                    visible: remoteView.passkeyReady
+                    text: qsTr("Use password instead")
+                    flat: true
+                    enabled: !RemoteBroker.busy
+                    onClicked: {
+                        remoteView.usePassword = true
+                        passwordField.forceActiveFocus()
+                    }
+                }
+                Button {
                     id: signInButton
-                    text: qsTr("Sign in")
+                    text: remoteView.passkeyReady ? qsTr("Sign in with Touch ID") : qsTr("Sign in")
                     highlighted: true
                     enabled: !RemoteBroker.busy && RemoteBroker.configured &&
-                             usernameField.text.length > 0 && passwordField.text.length > 0 &&
-                             otpField.text.length === 6
+                             usernameField.text.length > 0 &&
+                             (remoteView.passkeyReady ||
+                              (passwordField.text.length > 0 && otpField.text.length === 6))
                     onClicked: remoteView.submitSignIn()
                 }
             }

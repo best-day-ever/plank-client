@@ -222,6 +222,7 @@ SOURCES += \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
+    backend/plankpasskey.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
     settings/plankclientpolicy.cpp \
@@ -267,6 +268,7 @@ HEADERS += \
     backend/relaywakeclient.h \
     backend/plankbroker.h \
     backend/plankbrokerclient.h \
+    backend/plankpasskey.h \
     cli/commandlineparser.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
@@ -645,6 +647,26 @@ macx {
 
         QMAKE_RPATHDIR += @executable_path/../Frameworks
     }
+
+    # Touch ID sign-in helper (bde-linux docs/plank-broker.md 13.4), built
+    # with the app's deployment target and architecture into
+    # Contents/MacOS/plank-passkey so it is signed together with the app.
+    # It uses only system frameworks (CryptoKit Secure Enclave keys whose
+    # wrapped blob is stored in a file) and needs no entitlement.
+    PLANK_PASSKEY_SOURCE = $$PWD/passkey/plank-passkey.swift
+    PLANK_PASSKEY_BINARY = $$OUT_PWD/$${TARGET}.app/Contents/MacOS/plank-passkey
+    plank_passkey.target = $$PLANK_PASSKEY_BINARY
+    plank_passkey.depends = $$PLANK_PASSKEY_SOURCE
+    plank_passkey.commands = \
+        mkdir -p $$shell_quote($$OUT_PWD/$${TARGET}.app/Contents/MacOS) && \
+        xcrun --sdk macosx swiftc -O -whole-module-optimization \
+            -target $$first(QMAKE_APPLE_DEVICE_ARCHS)-apple-macos$$PLANK_MACOS_DEPLOYMENT_TARGET \
+            -file-prefix-map $$shell_quote($$PWD)=/build/plank/source/apps/client/app \
+            -module-cache-path $$shell_quote($$OUT_PWD/plank-passkey-module-cache) \
+            -o $$shell_quote($$PLANK_PASSKEY_BINARY) $$shell_quote($$PLANK_PASSKEY_SOURCE)
+    QMAKE_EXTRA_TARGETS += plank_passkey
+    PRE_TARGETDEPS += $$PLANK_PASSKEY_BINARY
+    QMAKE_CLEAN += $$PLANK_PASSKEY_BINARY
 }
 
 isEmpty(PLANK_VERSION) {
