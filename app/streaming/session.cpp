@@ -2724,6 +2724,7 @@ bool Session::startConnectionAsync(bool reconnecting,
             emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));
             return false;
         }
+        QString desktopSignOutOwner;
         const auto startApp = [&]() {
             if (macCapture) {
                 QString pin;
@@ -2763,6 +2764,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                           m_Computer->plankFeatureFlags &
                               NvOutputTopology::SupportedFeatureFlags,
                           takeOverActiveSession,
+                          desktopSignOutOwner,
                           m_ResolvedHostLayout,
                           m_ResolvedVirtualModes.value(0),
                           m_ResolvedVirtualModes.value(1),
@@ -2795,7 +2797,16 @@ bool Session::startConnectionAsync(bool reconnecting,
                     e.getStatusCode() == 409 &&
                     QString::fromUtf8(e.getStatusMessage()) ==
                         QStringLiteral("PLANK workstation session is active");
-            if (displayTransitionStarted) {
+            const PlankDesktopSignOut desktopConflict =
+                    m_Computer->plankAuthentication ? http->desktopSignOut() :
+                                                      PlankDesktopSignOut();
+            if (desktopConflict.state != PlankDesktopSignOut::State::None) {
+                if (!resolvePlankDesktopConflict(http, startApp, desktopConflict, e,
+                                                 reconnecting, desktopSignOutOwner)) {
+                    return false;
+                }
+            }
+            else if (displayTransitionStarted) {
                 constexpr int RetryIntervalMs = 500;
                 constexpr int MaximumWaitMs = 45000;
                 constexpr int CancellationPollMs = 50;
@@ -3184,6 +3195,228 @@ void Session::respondToActiveSessionTakeover(bool takeOver)
                 expected, takeOver ? 1 : -1)) {
         qInfo() << "PLANK active-session takeover decision:"
                 << (takeOver ? "take over" : "cancel");
+    }
+}
+
+void Session::respondToDesktopSignOut(bool signOut)
+{
+    // Shares the pending-decision state with the takeover prompt; only one
+    // of them can be open during a connection start.
+    int expected = 0;
+    if (m_ActiveSessionTakeoverDecision.compare_exchange_strong(
+                expected, signOut ? 1 : -1)) {
+        qInfo() << "PLANK desktop sign-out decision:"
+                << (signOut ? "sign out" : "cancel");
+    }
+}
+
+bool Session::waitForPlankDecision()
+{
+    constexpr int DecisionPollMs = 50;
+    while (m_ActiveSessionTakeoverDecision.load() == 0 &&
+           !m_ConnectionStartCancelled.load()) {
+        SDL_Delay(DecisionPollMs);
+    }
+    m_WaitingForActiveSessionTakeoverDecision.store(false);
+    return m_ActiveSessionTakeoverDecision.exchange(0) == 1 &&
+            !m_ConnectionStartCancelled.load();
+}
+
+// Single-user desktop policy: another account owns the workstation desktop.
+// Either report who is using it, or (after explicit consent) ask the host to
+// sign that account out and then connect from scratch to the sign-in screen,
+// where the host signs this user in and the usual desktop handoff follows.
+// Returns true once a launch succeeded; false after reporting the outcome.
+bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
+                                          const std::function<void()>& startApp,
+                                          PlankDesktopSignOut conflict,
+                                          const GfeHttpResponseException& refusal,
+                                          bool reconnecting,
+                                          QString& signOutOwner)
+{
+    using Step = PlankDesktopSignOut::Step;
+    const auto clearSessionToken = [this]() {
+        QWriteLocker lock(&m_Computer->lock);
+        m_Computer->sessionToken.fill(QChar('\0'));
+        m_Computer->sessionToken.clear();
+        m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+    };
+    const auto endWait = [this]() {
+        m_WaitingForSessionCleanup.store(false);
+        emit sessionCleanupWaitChanged(false, QString());
+    };
+    QString hostName;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        hostName = m_Computer->name;
+    }
+    QString requestedOwner;
+    int lastStatus = refusal.getStatusCode();
+    QString lastMessage = QString::fromUtf8(refusal.getStatusMessage());
+
+    for (;;) {
+        switch (PlankDesktopSignOut::nextStep(conflict, reconnecting,
+                                              hasPlankCredentials(), requestedOwner)) {
+        case Step::NotApplicable:
+        case Step::Unexpected:
+            clearSessionToken();
+            throw GfeHttpResponseException(lastStatus, lastMessage);
+
+        case Step::InUse:
+            clearSessionToken();
+            if (reconnecting) {
+                m_CanReconnect.store(false);
+                m_ReconnectCancelled.store(true);
+            }
+            emit displayLaunchError(
+                        conflict.state == PlankDesktopSignOut::State::Connected ?
+                            tr("%1 is connected to %2. Only one person can use a workstation at a time.")
+                                .arg(conflict.owner, hostName) :
+                            tr("%1 is signed in on %2. Only one person can use a workstation at a time.")
+                                .arg(conflict.owner, hostName));
+            qInfo() << "PLANK workstation desktop belongs to another account";
+            return false;
+
+        case Step::Confirm:
+            m_ActiveSessionTakeoverDecision.store(0);
+            m_WaitingForActiveSessionTakeoverDecision.store(true);
+            emit desktopSignOutRequested(
+                        tr("%1 is signed in on %2 but not connected. Sign %1 out and open your desktop? Anything unsaved in %1's session will be lost.")
+                            .arg(conflict.owner, hostName));
+            if (!waitForPlankDecision()) {
+                qInfo() << "PLANK desktop sign-out was cancelled";
+                clearSessionToken();
+                return false;
+            }
+            // The same token stays valid for this one retry.
+            requestedOwner = conflict.owner;
+            signOutOwner = requestedOwner;
+            try {
+                startApp();
+                signOutOwner.clear();
+                return true;
+            } catch (const GfeHttpResponseException& retryError) {
+                signOutOwner.clear();
+                conflict = http->desktopSignOut();
+                lastStatus = retryError.getStatusCode();
+                lastMessage = QString::fromUtf8(retryError.getStatusMessage());
+            } catch (...) {
+                signOutOwner.clear();
+                throw;
+            }
+            continue;
+
+        case Step::AwaitGreeter: {
+            constexpr int RetryIntervalMs = 2000;
+            constexpr int MaximumWaitMs = 60000;
+            constexpr int CancellationPollMs = 50;
+            bool authenticated = false;
+            bool newConflict = false;
+
+            // The token was consumed. Broker admissions are single-use, so
+            // every authentication below is a fresh one.
+            clearSessionToken();
+            {
+                // The signed-out session's apps are gone; launch afresh.
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->currentGameId = 0;
+            }
+            m_WaitingForSessionCleanup.store(true);
+            emit sessionCleanupWaitChanged(true, tr("Signing out %1...").arg(requestedOwner));
+            qInfo() << "PLANK host is signing out the desktop owner; waiting up to"
+                    << MaximumWaitMs << "ms for the sign-in screen";
+
+            for (int elapsedMs = 0; elapsedMs < MaximumWaitMs && !newConflict;
+                 elapsedMs += RetryIntervalMs) {
+                for (int delayMs = 0; delayMs < RetryIntervalMs; delayMs += CancellationPollMs) {
+                    if (m_ConnectionStartCancelled.load()) break;
+                    SDL_Delay(CancellationPollMs);
+                }
+                if (m_ConnectionStartCancelled.load()) break;
+
+                bool authenticating = false;
+                bool launching = false;
+                try {
+                    if (!authenticated) {
+                        clearSessionToken();
+                        http = std::make_unique<NvHTTP>(m_Computer);
+                        authenticating = true;
+                        const QString token = authenticatePlank(*http, nullptr);
+                        authenticating = false;
+                        {
+                            QWriteLocker lock(&m_Computer->lock);
+                            m_Computer->sessionToken = token;
+                            m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
+                        }
+                        authenticated = true;
+                        emit sessionCleanupWaitChanged(true, tr("Opening your desktop..."));
+                    }
+                    const NvOutputTopology topology = http->getOutputTopology();
+                    {
+                        QWriteLocker lock(&m_Computer->lock);
+                        m_Computer->outputTopology = topology;
+                    }
+                    if (m_ComputerManager != nullptr) {
+                        m_ComputerManager->clientSideAttributeUpdated(m_Computer);
+                    }
+                    if (!configurePlankLaunchGeometry()) {
+                        endWait();
+                        return false;
+                    }
+                    launching = true;
+                    startApp();
+                    endWait();
+                    qInfo() << "PLANK desktop sign-out completed; launch succeeded";
+                    return true;
+                } catch (const GfeHttpResponseException& retryError) {
+                    const PlankDesktopSignOut reply =
+                            launching ? http->desktopSignOut() : PlankDesktopSignOut();
+                    if (reply.state != PlankDesktopSignOut::State::None) {
+                        if (PlankDesktopSignOut::stillSigningOut(reply, requestedOwner)) {
+                            qInfo() << "PLANK desktop owner is still being signed out";
+                            continue;
+                        }
+                        conflict = reply;
+                        lastStatus = retryError.getStatusCode();
+                        lastMessage = QString::fromUtf8(retryError.getStatusMessage());
+                        newConflict = true;
+                        continue;
+                    }
+                    if (!authenticating && retryError.getStatusCode() == 401) {
+                        authenticated = false;
+                        qInfo() << "PLANK sign-in screen worker changed; authentication will be refreshed";
+                        continue;
+                    }
+                    if (PlankReconnectPolicy::terminalStatus(retryError.getStatusCode(), authenticating)) {
+                        endWait();
+                        throw;
+                    }
+                    qInfo() << "PLANK sign-in screen is not ready:" << retryError.toQString();
+                } catch (const QtNetworkReplyException& retryError) {
+                    if (retryError.getError() == QNetworkReply::SslHandshakeFailedError) {
+                        endWait();
+                        throw;
+                    }
+                    qInfo() << "PLANK sign-in screen worker is not reachable yet:"
+                            << retryError.toQString();
+                }
+            }
+
+            endWait();
+            if (newConflict) {
+                continue;
+            }
+            clearSessionToken();
+            if (m_ConnectionStartCancelled.load()) {
+                qInfo() << "PLANK connection cancelled while signing out the desktop owner";
+                return false;
+            }
+            emit displayLaunchError(
+                        tr("The workstation did not become ready within 60 seconds after signing out %1.")
+                            .arg(requestedOwner));
+            return false;
+        }
+        }
     }
 }
 

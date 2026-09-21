@@ -172,6 +172,8 @@ void TestOutputTopology::parsesFixedCapture()
     QVERIFY(!(topology.featureFlags & NvOutputTopology::UnifiedAbsoluteInputFeature));
     QVERIFY(!(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature));
     QVERIFY(!(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::FixedCaptureFeature));
+    // Linux-only launch features must never alias a Mac fixed-capture bit.
+    QVERIFY(!(NvOutputTopology::FixedCaptureFlags & NvOutputTopology::DesktopSignOutFeature));
     // Reuse is atomic, including failures; never retain stale logical bounds.
     QVERIFY(!NvOutputTopology::fromJson({}, topology));
     QCOMPARE(topology.toJson(), fixture);
