@@ -52,10 +52,18 @@ public:
     // the requesting thread; on macOS they run the plank-passkey helper.
     // devicePublicKey: the base64 SPKI of this device's key for the broker
     //   (created on first use), or empty to sign in unbound.
-    // deviceSigner: the base64 DER signature over a proof message, or empty
-    //   (no key / failure): the request then goes out without proof headers.
+    // deviceSigner: a signature over a proof message. NoKey (this device has
+    //   no key for the broker, so the session is unbound) sends the request
+    //   without proof headers; Failed (Mac locked, helper error) sends nothing
+    //   and throws a retryable Network error, so a bound session is never
+    //   signed out just because signing was briefly impossible.
+    struct DeviceSignature {
+        enum Status { Signed, NoKey, Failed };
+        Status status = Failed;
+        QString signature;
+    };
     using DevicePublicKeyProvider = std::function<QString()>;
-    using DeviceSigner = std::function<QString(const QByteArray& message)>;
+    using DeviceSigner = std::function<DeviceSignature(const QByteArray& message)>;
 
     struct Config {
         QString host;

@@ -1727,7 +1727,7 @@ void TestPlankBroker::tlsBearerCallsCarryDeviceProof()
     config.deviceSigner = [&](const QByteArray& message) {
         signedMessages.append(message);
         signatures.append(fakeDeviceSignature(signedMessages.size()));
-        return signatures.last();
+        return PlankBrokerClient::DeviceSignature {PlankBrokerClient::DeviceSignature::Signed, signatures.last()};
     };
     const QString token = QStringLiteral("bound-session-token");
     const qint64 before = QDateTime::currentSecsSinceEpoch();
@@ -1789,20 +1789,41 @@ void TestPlankBroker::tlsBearerCallsWithoutSignerAreUnchanged()
 
 void TestPlankBroker::tlsDeviceSigningFailureSendsNoProof()
 {
-    // The helper failed (empty) or printed something that is not a signature:
-    // the request still goes out, without proof headers.
-    for (const QString& signature : {QString(), QStringLiteral("garbage"), QString::fromLatin1(QByteArray(90, '\x30').toBase64())}) {
+    using Signature = PlankBrokerClient::DeviceSignature;
+    // No device key for this broker: the session is unbound, the request goes
+    // out as before, without proof headers.
+    {
         TestBrokerServer server(QSsl::TlsV1_3OrLater);
         QVERIFY(server.listen());
         server.body = R"({"hosts":[]})";
         PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
         int calls = 0;
-        config.deviceSigner = [&](const QByteArray&) { ++calls; return signature; };
+        config.deviceSigner = [&](const QByteArray&) { ++calls; return Signature {Signature::NoKey, QString()}; };
         QVERIFY(PlankBrokerClient(config).hosts(QStringLiteral("t")).isEmpty());
         QCOMPARE(calls, 1);
         QCOMPARE(server.requestLog.size(), 1);
         QVERIFY(!server.requestLog.at(0).toLower().contains("x-plank-device"));
         QVERIFY(server.requestLog.at(0).contains("Authorization: Bearer t\r\n"));
+    }
+    // Signing impossible right now (locked Mac, helper error) or a malformed
+    // signature: nothing is sent and the error is a retryable Network one, so
+    // a bound session is never signed out for it.
+    for (const Signature& signature : {Signature {Signature::Failed, QString()},
+                                       Signature {Signature::Signed, QStringLiteral("garbage")},
+                                       Signature {Signature::Signed, QString::fromLatin1(QByteArray(90, '\x30').toBase64())}}) {
+        TestBrokerServer server(QSsl::TlsV1_3OrLater);
+        QVERIFY(server.listen());
+        server.body = R"({"hosts":[]})";
+        PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+        config.deviceSigner = [&](const QByteArray&) { return signature; };
+        try {
+            PlankBrokerClient(config).hosts(QStringLiteral("t"));
+            QFAIL("a failed device signature must not send the request");
+        } catch (const PlankBrokerError& error) {
+            QCOMPARE(error.kind(), PlankBrokerError::Network);
+        }
+        QCoreApplication::processEvents();
+        QVERIFY(server.requestLog.isEmpty());
     }
 }
 
@@ -1814,7 +1835,9 @@ void TestPlankBroker::tlsDeviceBoundSessionRejectionSignsOut()
     server.status = "401 Unauthorized";
     server.body = R"({"state":"denied"})";
     PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
-    config.deviceSigner = [](const QByteArray&) { return QString(); };
+    config.deviceSigner = [](const QByteArray&) {
+        return PlankBrokerClient::DeviceSignature {PlankBrokerClient::DeviceSignature::NoKey, QString()};
+    };
     try {
         PlankBrokerClient(config).hosts(QStringLiteral("t"));
         QFAIL("401 must throw");
@@ -1846,20 +1869,27 @@ void TestPlankBroker::helperDeviceKeyCommands()
     QTemporaryDir signDirectory;
     const QString signHelper = fakeHelper(signDirectory, 0, QStringLiteral(R"({"signature":"%1"})").arg(signature).toUtf8());
     const QByteArray message = PlankBroker::deviceProofMessage("GET", "/v1/hosts", 1790000000, QStringLiteral("t"), QByteArray());
-    QCOMPARE(PlankPasskeyHelper(signHelper).deviceSign(QStringLiteral("remote.bde.run"), message), signature);
+    const PlankBrokerClient::DeviceSignature signedResult = PlankPasskeyHelper(signHelper).deviceSign(QStringLiteral("remote.bde.run"), message);
+    QCOMPARE(signedResult.status, PlankBrokerClient::DeviceSignature::Signed);
+    QCOMPARE(signedResult.signature, signature);
     QCOMPARE(readFile(signHelper + QStringLiteral(".args")), QByteArray("device-key\nsign\n--broker\nremote.bde.run\n"));
     const QJsonObject input = QJsonDocument::fromJson(readFile(signHelper + QStringLiteral(".stdin"))).object();
     QCOMPARE(input.size(), 1);
     QCOMPARE(QByteArray::fromBase64(input.value(QStringLiteral("message")).toString().toLatin1()), message);
 
-    // No key (exit 3), other failures, missing helper: empty (unbound / no proof).
+    // No key (exit 3): NoKey (unbound). Any other failure: Failed (not sent).
     QTemporaryDir noKey;
-    QVERIFY(PlankPasskeyHelper(fakeHelper(noKey, 3, QByteArray())).deviceSign(QStringLiteral("remote.bde.run"), message).isEmpty());
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(noKey, 3, QByteArray())).deviceSign(QStringLiteral("remote.bde.run"), message).status,
+             PlankBrokerClient::DeviceSignature::NoKey);
+    QTemporaryDir signFailing;
+    QCOMPARE(PlankPasskeyHelper(fakeHelper(signFailing, 1, QByteArray())).deviceSign(QStringLiteral("remote.bde.run"), message).status,
+             PlankBrokerClient::DeviceSignature::Failed);
     QTemporaryDir failing;
     const QString failingHelper = fakeHelper(failing, 1, QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8());
     QVERIFY(PlankPasskeyHelper(failingHelper).devicePublicKey(QStringLiteral("remote.bde.run")).isEmpty());
     QVERIFY(PlankPasskeyHelper(directory.filePath(QStringLiteral("missing"))).devicePublicKey(QStringLiteral("remote.bde.run")).isEmpty());
-    QVERIFY(PlankPasskeyHelper(QString()).deviceSign(QStringLiteral("remote.bde.run"), message).isEmpty());
+    QCOMPARE(PlankPasskeyHelper(QString()).deviceSign(QStringLiteral("remote.bde.run"), message).status,
+             PlankBrokerClient::DeviceSignature::NoKey);
 
     // IP literals, upper case, ports and paths never reach the helper.
     QTemporaryDir untouched;
@@ -1867,7 +1897,8 @@ void TestPlankBroker::helperDeviceKeyCommands()
     for (const QString& host : {QStringLiteral("192.168.10.229"), QStringLiteral("Remote.BDE.run"),
                                 QStringLiteral("remote.bde.run:29000"), QStringLiteral("../x"), QString()}) {
         QVERIFY(PlankPasskeyHelper(untouchedHelper).devicePublicKey(host).isEmpty());
-        QVERIFY(PlankPasskeyHelper(untouchedHelper).deviceSign(host, message).isEmpty());
+        QCOMPARE(PlankPasskeyHelper(untouchedHelper).deviceSign(host, message).status,
+                 PlankBrokerClient::DeviceSignature::NoKey);
     }
     QVERIFY(!QFileInfo::exists(untouchedHelper + QStringLiteral(".args")));
 }
@@ -1886,7 +1917,7 @@ void TestPlankBroker::realHelperDeviceKeyWithoutKey()
     qputenv("PLANK_DEVICE_KEY_STORE", storePath.toUtf8());
     const PlankPasskeyHelper helper(program);
     const QByteArray message = PlankBroker::deviceProofMessage("GET", "/v1/hosts", 1790000000, QStringLiteral("t"), QByteArray());
-    QVERIFY(helper.deviceSign(QStringLiteral("remote.bde.run"), message).isEmpty());
+    QCOMPARE(helper.deviceSign(QStringLiteral("remote.bde.run"), message).status, PlankBrokerClient::DeviceSignature::NoKey);
     const QByteArray input = QJsonDocument(QJsonObject {{QStringLiteral("message"), QString::fromLatin1(message.toBase64())}})
             .toJson(QJsonDocument::Compact);
     const PlankPasskeyHelper::Result noKey = helper.run({QStringLiteral("device-key"), QStringLiteral("sign"),

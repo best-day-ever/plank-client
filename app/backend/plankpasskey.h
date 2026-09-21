@@ -81,7 +81,7 @@ public:
     // one. Both return an empty string on any failure (the Client then runs
     // unbound / sends no proof).
     QString devicePublicKey(const QString& brokerHost) const;
-    QString deviceSign(const QString& brokerHost, const QByteArray& message) const;
+    PlankBrokerClient::DeviceSignature deviceSign(const QString& brokerHost, const QByteArray& message) const;
 
     static QString parseDevicePublicKey(const QByteArray& output);
     static QString parseDeviceSignature(const QByteArray& output);

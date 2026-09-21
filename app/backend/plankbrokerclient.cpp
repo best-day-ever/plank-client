@@ -108,15 +108,19 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
         request.setRawHeader("Authorization", "Bearer " + sessionToken.toLatin1());
         if (m_Config.deviceSigner) {
             // Section 14.2: prove possession of the device key the session is
-            // bound to. Without a proof (no key, helper failure) the request
-            // goes out as before; a bound session then gets 401 (SessionExpired).
+            // bound to. No key on this device: unbound, send as before. Signing
+            // impossible right now (locked, helper error): do not send an
+            // unsigned request that a bound session would answer with 401.
             const qint64 now = QDateTime::currentSecsSinceEpoch();
             const QByteArray message = PlankBroker::deviceProofMessage(
                         method, url.path(QUrl::FullyEncoded).toUtf8(), now, sessionToken, payload);
-            const QString signature = m_Config.deviceSigner(message);
-            if (PlankBroker::isDeviceSignature(signature)) {
+            const DeviceSignature signature = m_Config.deviceSigner(message);
+            if (signature.status == DeviceSignature::Signed && PlankBroker::isDeviceSignature(signature.signature)) {
                 request.setRawHeader(PlankBroker::deviceTimeHeader(), QByteArray::number(now));
-                request.setRawHeader(PlankBroker::deviceProofHeader(), signature.toLatin1());
+                request.setRawHeader(PlankBroker::deviceProofHeader(), signature.signature.toLatin1());
+            } else if (signature.status != DeviceSignature::NoKey) {
+                qWarning() << "Remote access: the device key could not sign this request; not sending it";
+                throw PlankBrokerError(PlankBrokerError::Network);
             }
         }
     }

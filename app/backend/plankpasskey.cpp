@@ -187,15 +187,22 @@ QString PlankPasskeyHelper::devicePublicKey(const QString& brokerHost) const
     return result.ok() ? parseDevicePublicKey(result.output) : QString();
 }
 
-QString PlankPasskeyHelper::deviceSign(const QString& brokerHost, const QByteArray& message) const
+PlankBrokerClient::DeviceSignature PlankPasskeyHelper::deviceSign(const QString& brokerHost,
+                                                                  const QByteArray& message) const
 {
-    if (!PlankBroker::isPasskeyRpId(brokerHost) || message.isEmpty()) return QString();
+    using Signature = PlankBrokerClient::DeviceSignature;
+    // No helper or no usable broker host: this device never binds (unbound).
+    if (m_Program.isEmpty() || !PlankBroker::isPasskeyRpId(brokerHost)) return {Signature::NoKey, QString()};
+    if (message.isEmpty()) return {Signature::Failed, QString()};
     const QByteArray input = QJsonDocument(QJsonObject {
         {QStringLiteral("message"), QString::fromLatin1(message.toBase64())},
     }).toJson(QJsonDocument::Compact);
     const Result result = run({QStringLiteral("device-key"), QStringLiteral("sign"),
                                QStringLiteral("--broker"), brokerHost}, input, DeviceKeyTimeoutMs);
-    return result.ok() ? parseDeviceSignature(result.output) : QString();
+    if (result.ran && result.exitCode == NoMatchingKey) return {Signature::NoKey, QString()};
+    const QString signature = result.ok() ? parseDeviceSignature(result.output) : QString();
+    if (signature.isEmpty()) return {Signature::Failed, QString()};
+    return {Signature::Signed, signature};
 }
 
 PlankBrokerClient::PasskeyAssertResult PlankPasskeyHelper::assertion(const PlankBroker::PasskeyRequest& request,
