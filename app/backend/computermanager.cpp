@@ -686,7 +686,7 @@ public:
           m_Password(std::move(password)),
           m_MatchedDesktopMode(std::move(matchedDesktopMode)),
           m_MatchedDesktopScale(matchedDesktopScale),
-          m_AllowTakeoverPrompt(allowTakeoverPrompt)
+          m_TakeoverDecision(allowTakeoverPrompt ? AuthenticationTakeover::create() : AuthenticationTakeover())
     {
         connect(this, &PendingAuthenticationTask::authenticationCompleted,
                 computerManager, &ComputerManager::authenticationCompleted);
@@ -695,6 +695,12 @@ public:
                 computerManager, &ComputerManager::authenticationTakeoverRequested);
         connect(this, &PendingAuthenticationTask::authenticationCancelled,
                 computerManager, &ComputerManager::authenticationCancelled);
+        // Register before starting the worker. Shutdown may occur while TLS
+        // authentication is still in progress, before a conflict is received.
+        if (m_TakeoverDecision) {
+            connect(qApp, &QCoreApplication::aboutToQuit, this,
+                    [decision = m_TakeoverDecision] { decision->respond(false); }, Qt::DirectConnection);
+        }
     }
 
     ~PendingAuthenticationTask()
@@ -741,13 +747,9 @@ private:
                 } catch (const MacSessionActiveException& conflict) {
                     // Only a fresh user-initiated GUI connection may request
                     // consent. CLI and automatic reconnect never evict a peer.
-                    if (!m_AllowTakeoverPrompt) throw;
-                    const auto decision = AuthenticationTakeover::create();
-                    const auto quitting = connect(qApp, &QCoreApplication::aboutToQuit,
-                        m_ComputerManager, [decision] { decision->respond(false); }, Qt::DirectConnection);
-                    emit authenticationTakeoverRequested(m_Computer, decision);
-                    const bool accepted = decision->wait();
-                    disconnect(quitting);
+                    if (!m_TakeoverDecision) throw;
+                    emit authenticationTakeoverRequested(m_Computer, m_TakeoverDecision);
+                    const bool accepted = m_TakeoverDecision->wait();
                     if (!accepted) {
                         emit authenticationCancelled(m_Computer);
                         return;
@@ -792,7 +794,7 @@ private:
     QString m_Password;
     QString m_MatchedDesktopMode;
     int m_MatchedDesktopScale;
-    bool m_AllowTakeoverPrompt;
+    AuthenticationTakeover m_TakeoverDecision;
 };
 
 void ComputerManager::authenticateHost(NvComputer* computer, QString username,
