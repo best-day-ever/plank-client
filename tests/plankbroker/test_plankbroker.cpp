@@ -7,6 +7,8 @@
 
 #include "plankbroker.h"
 #include "plankhttp.h"
+#include "remotedisplaysetup.h"
+#include <QTemporaryDir>
 #include <QNetworkProxy>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -206,6 +208,10 @@ private slots:
     void tlsRequiresTls13();
     void tlsConnectReturnsDirectRoute();
     void oneShotRequestsSurviveHostClosingEachConnection();
+    void remoteDisplaySetupPersistsPerHost();
+    void remoteDisplaySetupRejectsInvalidEntries();
+    void remoteDisplaySetupSuggestsFittingMode();
+    void remoteDisplaySetupMatchesOnlyQualifiedScreens();
 
     // Keepalive
     void keepaliveCadence();
@@ -845,6 +851,99 @@ void TestPlankBroker::oneShotRequestsSurviveHostClosingEachConnection()
     QCOMPARE(server.requests, Requests);
     QCOMPARE(server.connections, Requests);
     QCOMPARE(server.request.count("Connection: close\r\n"), Requests);
+}
+
+namespace {
+NvClientDisplay screen(int x, int width, int height)
+{
+    return NvClientDisplay { QRect(x, 0, width, height), QSize(width, height) };
+}
+}
+
+void TestPlankBroker::remoteDisplaySetupPersistsPerHost()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    QVERIFY(!RemoteDisplaySetup::load(settings, QStringLiteral("ws01.example.test")).configured);
+
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = RemoteDisplaySetup::layoutForChoice(RemoteDisplaySetup::SingleVirtual);
+    setup.virtualMode1 = QStringLiteral("2560x1600");
+    setup.virtualMode2 = QStringLiteral("1920x1080");
+    setup.scalingMode = RemoteDisplaySetup::scalingForChoice(RemoteDisplaySetup::ScaledSpan);
+    QVERIFY(RemoteDisplaySetup::save(settings, QStringLiteral("WS01.example.test"), setup));
+
+    const RemoteDisplaySetup::Setup loaded = RemoteDisplaySetup::load(settings, QStringLiteral("ws01.example.test"));
+    QVERIFY(loaded.configured);
+    QCOMPARE(loaded.hostLayout, QStringLiteral("single"));
+    QCOMPARE(loaded.virtualMode1, QStringLiteral("2560x1600"));
+    QCOMPARE(loaded.virtualMode2, QStringLiteral("1920x1080"));
+    QCOMPARE(loaded.scalingMode, QStringLiteral("scaled-span"));
+    QCOMPARE(RemoteDisplaySetup::choiceForLayout(loaded.hostLayout), int(RemoteDisplaySetup::SingleVirtual));
+    // Other workstations are independent.
+    QVERIFY(!RemoteDisplaySetup::load(settings, QStringLiteral("ws02.example.test")).configured);
+}
+
+void TestPlankBroker::remoteDisplaySetupRejectsInvalidEntries()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QStringLiteral("single");
+    setup.virtualMode1 = QStringLiteral("3024x1964"); // a MacBook panel, not a qualified mode
+    setup.virtualMode2 = QStringLiteral("1920x1080");
+    setup.scalingMode = QStringLiteral("native");
+    QVERIFY(!RemoteDisplaySetup::isValid(setup));
+    setup.virtualMode1 = QStringLiteral("2560x1600");
+    QVERIFY(RemoteDisplaySetup::isValid(setup));
+    setup.hostLayout = QStringLiteral("fixed");       // Mac-only internal layout, never stored
+    QVERIFY(!RemoteDisplaySetup::isValid(setup));
+    setup.hostLayout = QStringLiteral("physical");
+    setup.scalingMode = QStringLiteral("stretch");
+    QVERIFY(!RemoteDisplaySetup::isValid(setup));
+
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    QVERIFY(!RemoteDisplaySetup::save(settings, QStringLiteral("ws01.example.test"), setup));
+    // A hand-edited or outdated entry is asked again rather than used.
+    settings.setValue(QStringLiteral("remote-hosts/ws01.example.test/host-layout"), QStringLiteral("single"));
+    settings.setValue(QStringLiteral("remote-hosts/ws01.example.test/virtual-mode-1"), QStringLiteral("9999x9999"));
+    settings.setValue(QStringLiteral("remote-hosts/ws01.example.test/virtual-mode-2"), QStringLiteral("1920x1080"));
+    settings.setValue(QStringLiteral("remote-hosts/ws01.example.test/scaling-mode"), QStringLiteral("native"));
+    QVERIFY(!RemoteDisplaySetup::load(settings, QStringLiteral("ws01.example.test")).configured);
+}
+
+void TestPlankBroker::remoteDisplaySetupSuggestsFittingMode()
+{
+    // MacBook Pro 14" (3024x1964) and MacBook Air 13" (2560x1664) panels.
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964)), QStringLiteral("2560x1600"));
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(2560, 1664)), QStringLiteral("2560x1600"));
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3840, 2160)), QStringLiteral("3840x2160"));
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(5120, 2880)), QStringLiteral("5120x2160"));
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(1920, 1080)), QStringLiteral("1920x1080"));
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(1440, 900)), QStringLiteral("1920x1080"));
+    for (const QSize size : {QSize(3024, 1964), QSize(1920, 1200), QSize(1024, 768)}) {
+        QVERIFY(RemoteDisplaySetup::isQualifiedMode(RemoteDisplaySetup::suggestedMode(size)));
+    }
+}
+
+void TestPlankBroker::remoteDisplaySetupMatchesOnlyQualifiedScreens()
+{
+    QString reason;
+    QVERIFY(!RemoteDisplaySetup::canMatchClient({screen(0, 3024, 1964)}, &reason));
+    QVERIFY(reason.contains(QStringLiteral("3024x1964")));
+    QVERIFY(RemoteDisplaySetup::canMatchClient({screen(0, 2560, 1440)}));
+    QVERIFY(RemoteDisplaySetup::canMatchClient({screen(0, 3840, 2160), screen(3840, 2560, 1440)}));
+
+    // First connect on a laptop panel: one virtual display that fits, scaled.
+    RemoteDisplaySetup::Setup proposal = RemoteDisplaySetup::proposal({screen(0, 3024, 1964)});
+    QCOMPARE(proposal.hostLayout, QStringLiteral("single"));
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("2560x1600"));
+    QCOMPARE(proposal.scalingMode, QStringLiteral("scaled-span"));
+    QVERIFY(RemoteDisplaySetup::isValid(proposal));
+    // A qualified monitor is matched.
+    proposal = RemoteDisplaySetup::proposal({screen(0, 3840, 2160)});
+    QCOMPARE(proposal.hostLayout, QStringLiteral("match-client"));
+    QVERIFY(RemoteDisplaySetup::isValid(proposal));
 }
 
 void TestPlankBroker::tlsRequiresTls13()

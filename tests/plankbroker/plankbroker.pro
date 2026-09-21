@@ -12,6 +12,7 @@ HEADERS += \
     ../../app/backend/plankbroker.h \
     ../../app/backend/plankbrokerclient.h \
     ../../app/backend/plankhttp.h \
+    ../../app/backend/remotedisplaysetup.h \
     ../../app/backend/macpreviewlaunch.h \
     ../../app/backend/outputtopology.h
 

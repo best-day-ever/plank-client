@@ -4,15 +4,20 @@
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
 #include "backend/outputtopology.h"
+#include "backend/remotedisplaysetup.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/session.h"
 
 #include <QDebug>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QSettings>
 #include <QElapsedTimer>
 #include <QQmlEngine>
 #include <QThreadPool>
 #include <QCoreApplication>
 
+#include <algorithm>
 #include <memory>
 
 namespace {
@@ -24,6 +29,24 @@ QElapsedTimer& monotonicClock()
 }
 
 qint64 nowMs() { return monotonicClock().elapsed(); }
+
+// GUI thread: the client's screens in native pixels, left to right, as the
+// Session will see them at stream start (an approximation for the dialog).
+QVector<NvClientDisplay> clientDisplaySnapshot()
+{
+    QVector<NvClientDisplay> displays;
+    for (QScreen* screen : QGuiApplication::screens()) {
+        NvClientDisplay display;
+        display.bounds = screen->geometry();
+        display.nativeSize = QSize(qRound(screen->geometry().width() * screen->devicePixelRatio()),
+                                   qRound(screen->geometry().height() * screen->devicePixelRatio()));
+        displays.append(display);
+    }
+    std::sort(displays.begin(), displays.end(), [](const NvClientDisplay& a, const NvClientDisplay& b) {
+        return a.bounds.x() < b.bounds.x();
+    });
+    return displays;
+}
 
 // Maps broker failures onto the exception types the Session re-auth paths
 // already classify (401 while authenticating is terminal, TLS is terminal,
@@ -281,7 +304,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
                                     const QString& hostName, bool defaultsFound, int profile, int capture,
                                     const QString& scalingMode, const QString& hostLayout,
                                     const QString& virtualMode1, const QString& virtualMode2,
-                                    const QVector<int>& bitrates)
+                                    const QVector<int>& bitrates, const RemoteDisplaySetup::Setup& display)
 {
     const NvAddress address(lease.endpoint, lease.port);
     NvHTTP http(address);
@@ -313,9 +336,17 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
             computer->plankVirtualMode1 = virtualMode1;
             computer->plankVirtualMode2 = virtualMode2;
         }
+        // The display setup chosen for this remote workstation wins over a
+        // same-named LAN bookmark: it is what the user picked for remote use.
+        if (display.configured) {
+            computer->plankScalingMode = display.scalingMode;
+            computer->plankHostLayout = display.hostLayout;
+            computer->plankVirtualMode1 = display.virtualMode1;
+            computer->plankVirtualMode2 = display.virtualMode2;
+        }
         if (macHost) {
             // Match Client needs a GUI-thread display snapshot; remote Mac
-            // hosts use the bookmark's fixed virtual display instead.
+            // hosts use virtual display 1 as their fixed desktop instead.
             computer->plankHostLayout = QStringLiteral("fixed");
         }
     }
@@ -358,15 +389,85 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
 
 }
 
-void RemoteBroker::connectToHost(const QString& hostId)
+QString RemoteBroker::hostNameFor(const QString& hostId) const
 {
-    if (!signedIn() || busy() || !PlankBroker::isHostId(hostId)) return;
-    QString hostName = hostId;
     for (const QVariant& value : std::as_const(m_Hosts)) {
         const QVariantMap entry = value.toMap();
         if (entry.value(QStringLiteral("id")).toString() == hostId) {
-            hostName = entry.value(QStringLiteral("name")).toString();
+            return entry.value(QStringLiteral("name")).toString();
         }
+    }
+    return hostId;
+}
+
+QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
+{
+    QVariantMap result;
+    if (!PlankBroker::isHostId(hostId)) return result;
+    QSettings settings;
+    RemoteDisplaySetup::Setup setup = RemoteDisplaySetup::load(settings, hostId);
+    const QVector<NvClientDisplay> displays = clientDisplaySnapshot();
+    QString matchReason;
+    const bool canMatch = RemoteDisplaySetup::canMatchClient(displays, &matchReason);
+    QSize primary(1920, 1080);
+    if (QScreen* screen = QGuiApplication::primaryScreen()) {
+        primary = QSize(qRound(screen->geometry().width() * screen->devicePixelRatio()),
+                        qRound(screen->geometry().height() * screen->devicePixelRatio()));
+    }
+    const bool configured = setup.configured;
+    if (!configured) {
+        QVector<NvClientDisplay> primaryFirst;
+        primaryFirst.append(NvClientDisplay { QRect(QPoint(), primary), primary });
+        setup = RemoteDisplaySetup::proposal(canMatch ? displays : primaryFirst);
+        if (!canMatch) setup.hostLayout = RemoteDisplaySetup::layoutForChoice(RemoteDisplaySetup::SingleVirtual);
+    }
+    QStringList resolutions;
+    for (const NvClientDisplay& display : displays) {
+        resolutions.append(QStringLiteral("%1×%2").arg(display.nativeSize.width()).arg(display.nativeSize.height()));
+    }
+    result.insert(QStringLiteral("configured"), configured);
+    result.insert(QStringLiteral("layoutChoice"), RemoteDisplaySetup::choiceForLayout(setup.hostLayout));
+    result.insert(QStringLiteral("virtualMode1"), setup.virtualMode1);
+    result.insert(QStringLiteral("virtualMode2"), setup.virtualMode2);
+    result.insert(QStringLiteral("scalingChoice"), RemoteDisplaySetup::choiceForScaling(setup.scalingMode));
+    result.insert(QStringLiteral("canMatchClient"), canMatch);
+    result.insert(QStringLiteral("matchClientReason"), matchReason);
+    result.insert(QStringLiteral("clientResolution"), resolutions.join(QStringLiteral(" + ")));
+    result.insert(QStringLiteral("virtualModes"), NvOutputTopology::qualifiedVirtualModes());
+    return result;
+}
+
+bool RemoteBroker::saveDisplaySetup(const QString& hostId, int layoutChoice, const QString& virtualMode1,
+                                    const QString& virtualMode2, int scalingChoice)
+{
+    if (!PlankBroker::isHostId(hostId)) return false;
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = RemoteDisplaySetup::layoutForChoice(layoutChoice);
+    setup.virtualMode1 = virtualMode1;
+    setup.virtualMode2 = virtualMode2;
+    setup.scalingMode = RemoteDisplaySetup::scalingForChoice(scalingChoice);
+    QSettings settings;
+    const bool saved = RemoteDisplaySetup::save(settings, hostId, setup);
+    if (saved) settings.sync();
+    return saved;
+}
+
+void RemoteBroker::connectToHost(const QString& hostId)
+{
+    if (!signedIn() || busy() || !PlankBroker::isHostId(hostId)) return;
+    const QString hostName = hostNameFor(hostId);
+    QSettings settings;
+    const RemoteDisplaySetup::Setup display = RemoteDisplaySetup::load(settings, hostId);
+    if (!display.configured) {
+        emit displaySetupRequired(hostId, hostName, QString());
+        return;
+    }
+    QString matchReason;
+    if (display.hostLayout == QLatin1String(NvOutputTopology::MatchClientHostLayout) &&
+            !RemoteDisplaySetup::canMatchClient(clientDisplaySnapshot(), &matchReason)) {
+        // Screens changed since the setup was saved (e.g. an external monitor).
+        emit displaySetupRequired(hostId, hostName, matchReason);
+        return;
     }
     const HostDefaults defaults = bookmarkDefaultsFor(hostName);
 
@@ -375,7 +476,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
     const auto token = m_Token;
     const quint64 generation = m_Generation;
     QPointer<RemoteBroker> self(this);
-    QThreadPool::globalInstance()->start([self, config, token, generation, hostId, hostName, defaults]() {
+    QThreadPool::globalInstance()->start([self, config, token, generation, hostId, hostName, defaults, display]() {
         NvComputer* computer = nullptr;
         std::shared_ptr<PlankBrokerError> brokerFailure;
         QString hostFailure;
@@ -388,7 +489,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
                                                defaults.videoProfile, defaults.captureSource,
                                                defaults.scalingMode, defaults.hostLayout,
                                                defaults.virtualMode1, defaults.virtualMode2,
-                                               defaults.profileBitratesKbps);
+                                               defaults.profileBitratesKbps, display);
             lease.gssapiToken.fill(QChar('\0'));
         } catch (const PlankBrokerError& error) {
             brokerFailure = std::make_shared<PlankBrokerError>(error);

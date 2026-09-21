@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include <memory>
 
@@ -38,7 +39,16 @@ public:
     Q_INVOKABLE void initialize(ComputerManager* computerManager);
     Q_INVOKABLE void signIn(const QString& username, QString password, QString otp);
     Q_INVOKABLE void refreshHosts();
+    // Connects with the saved display setup; without one (or when the saved
+    // "match my displays" no longer fits the current screens) it emits
+    // displaySetupRequired instead, and QML asks before connecting.
     Q_INVOKABLE void connectToHost(const QString& hostId);
+    // Per-workstation display setup kept in the Client's local settings.
+    // Keys: configured, layoutChoice, virtualMode1, virtualMode2, scalingChoice,
+    // canMatchClient, matchClientReason, clientResolution, virtualModes.
+    Q_INVOKABLE QVariantMap displaySetup(const QString& hostId) const;
+    Q_INVOKABLE bool saveDisplaySetup(const QString& hostId, int layoutChoice, const QString& virtualMode1,
+                                      const QString& virtualMode2, int scalingChoice);
     Q_INVOKABLE void logout();
     // Hands the prepared brokered Session to QML (JavaScript ownership),
     // once, after connectReady().
@@ -59,6 +69,7 @@ signals:
     // Generic, user-facing message (never broker- or host-supplied text).
     void errorOccurred(QString message);
     void connectReady(QString hostName);
+    void displaySetupRequired(QString hostId, QString hostName, QString reason);
 
 private:
     // Shared with Session worker threads (re-admission) and keepalive tasks.
@@ -90,6 +101,7 @@ private:
     void handleBrokerError(const PlankBrokerError& error, bool connecting);
     void signOutLocally(const QString& message = QString());
     HostDefaults bookmarkDefaultsFor(const QString& hostName) const;
+    QString hostNameFor(const QString& hostId) const;
     void startKeepalive(const QString& hostId, Session* session);
     void stopKeepalive();
     void scheduleKeepalive();
