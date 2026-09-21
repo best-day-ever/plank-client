@@ -3,6 +3,7 @@
 #include "nvapp.h"
 #include "nvaddress.h"
 #include "outputtopology.h"
+#include "desktopstage.h"
 #include "macpreviewlaunch.h"
 
 #include <Limelight.h>
@@ -165,6 +166,8 @@ public:
     QString authenticateGssapi(QString username, QString gssapiToken, bool* greeterConfirmed = nullptr);
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
+    // Owner and sign-out offer from the last refused launch or resume.
+    PlankDesktopSignOut desktopSignOut() const { return m_DesktopSignOut; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
     NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1);
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
@@ -191,6 +194,7 @@ public:
              int plankProtocolVersion,
              int plankFeatureFlags,
              bool takeOverActiveSession,
+             QString desktopSignOutOwner,
              QString hostLayout,
              QString virtualMode1,
              QString virtualMode2,
@@ -240,5 +244,6 @@ private:
     QString m_PinnedCertificateSha256;
     QString m_SessionToken;
     QString m_WorkerInstance;
+    PlankDesktopSignOut m_DesktopSignOut;
     std::function<bool(bool)> m_RequestGate;
 };

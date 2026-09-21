@@ -54,6 +54,12 @@ Item {
         activeSessionTakeoverDialog.open()
     }
 
+    function desktopSignOutRequested(text)
+    {
+        desktopSignOutDialog.text = text
+        desktopSignOutDialog.open()
+    }
+
     function displayLaunchError(text)
     {
         // Display the error dialog after Session::exec() returns
@@ -76,6 +82,7 @@ Item {
     function sessionFinished()
     {
         activeSessionTakeoverDialog.close()
+        desktopSignOutDialog.close()
         if (quitAfter) {
             if (streamSegueErrorDialog.text) {
                 // Quit when the error dialog is acknowledged
@@ -126,6 +133,7 @@ Item {
         session.connectionStarted.connect(connectionStarted)
         session.sessionCleanupWaitChanged.connect(sessionCleanupWaitChanged)
         session.activeSessionTakeoverRequested.connect(activeSessionTakeoverRequested)
+        session.desktopSignOutRequested.connect(desktopSignOutRequested)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
         session.sessionFinished.connect(sessionFinished)
@@ -145,6 +153,18 @@ Item {
 
         onAccepted: session.respondToActiveSessionTakeover(true)
         onRejected: session.respondToActiveSessionTakeover(false)
+    }
+
+    NavigableMessageDialog {
+        id: desktopSignOutDialog
+        title: qsTr("Workstation in use")
+        standardButtons: Dialog.Yes | Dialog.No
+        acceptButtonText: qsTr("Sign out and continue")
+        acceptButtonDestructive: true
+        rejectButtonText: qsTr("Cancel")
+
+        onAccepted: session.respondToDesktopSignOut(true)
+        onRejected: session.respondToDesktopSignOut(false)
     }
 
     Timer {

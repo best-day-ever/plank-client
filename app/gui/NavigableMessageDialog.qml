@@ -1,5 +1,6 @@
 import QtQuick 2.0
 import QtQuick.Controls 2.2
+import QtQuick.Controls.Material 2.2
 import QtQuick.Layouts 1.2
 
 NavigableDialog {
@@ -14,12 +15,17 @@ NavigableDialog {
     property alias imageSrc: dialogImage.source
     property string acceptButtonText
     property string rejectButtonText
+    // Colours the accept button for actions that discard someone's work.
+    property bool acceptButtonDestructive: false
 
     onOpened: {
         var acceptButton = standardButton(Dialog.Yes)
         var rejectButton = standardButton(Dialog.No)
         if (acceptButton && acceptButtonText !== "") {
             acceptButton.text = acceptButtonText
+        }
+        if (acceptButton && acceptButtonDestructive) {
+            acceptButton.Material.foreground = messageTheme.danger
         }
         if (rejectButton && rejectButtonText !== "") {
             rejectButton.text = rejectButtonText

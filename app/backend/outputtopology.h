@@ -60,6 +60,9 @@ struct NvOutputTopology
     static const int FixedCaptureFeature = 0x80000;
     static const int MacDesktopPreparationFeature = 0x100000;
     static const int MacEncodingProfileFeature = 0x200000;
+    // Single-user Linux desktop: a launch refused because another account
+    // owns the desktop names that owner and may offer to sign it out.
+    static const int DesktopSignOutFeature = 0x400000;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -82,7 +85,8 @@ struct NvOutputTopology
                                              SessionTakeoverFeature |
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
-                                             WorkerInstanceFeature;
+                                             WorkerInstanceFeature |
+                                             DesktopSignOutFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
