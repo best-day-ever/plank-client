@@ -143,6 +143,8 @@ class TestPlankBroker : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+
     // Pins and certificates
     void normalizesPins();
     void parsesPinLists();
@@ -189,6 +191,18 @@ private slots:
     void keepaliveRetriesThenGivesUp();
 };
 
+void TestPlankBroker::initTestCase()
+{
+#ifdef Q_OS_MACOS
+    // Mirror main.cpp: the broker requires TLS 1.3, which Qt's default
+    // SecureTransport backend cannot negotiate. Select the bundled OpenSSL
+    // backend exactly as the Client does rather than weakening the policy.
+    QVERIFY2(QSslSocket::setActiveBackend(QStringLiteral("openssl")),
+             qPrintable(QSslSocket::availableBackends().join(u", ")));
+    QVERIFY(QSslSocket::supportedProtocols().contains(QSsl::TlsV1_3));
+#endif
+}
+
 void TestPlankBroker::normalizesPins()
 {
     const QString canonical = QString::fromLatin1(EcSpkiSha256);
@@ -227,7 +241,7 @@ void TestPlankBroker::shipsCanonicalDefaultPins()
     QCOMPARE(pins.size(), 2); // current + spare
     for (const QString& pin : pins) QVERIFY(PlankBroker::isCanonicalSha256Hex(pin));
     QCOMPARE(PlankBroker::normalizePins(pins), pins);
-    QCOMPARE(PlankBroker::defaultHost(), QStringLiteral("remote.finn.wtf"));
+    QCOMPARE(PlankBroker::defaultHost(), QStringLiteral("remote.bde.run"));
     QCOMPARE(PlankBroker::DefaultPort, quint16(29000));
 }
 
@@ -452,10 +466,10 @@ void TestPlankBroker::rejectsMalformedHosts()
 void TestPlankBroker::parsesLease()
 {
     PlankBroker::Lease lease;
-    QVERIFY(PlankBroker::parseLease(json(R"({"endpoint":"remote.finn.wtf","port":29042,
+    QVERIFY(PlankBroker::parseLease(json(R"({"endpoint":"remote.bde.run","port":29042,
         "host_cert_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "username":"anna","gssapi_token":"YIIBAgYJKoZIhvcSAQICAQBuggE=","expires_in":30})"), lease));
-    QCOMPARE(lease.endpoint, QStringLiteral("remote.finn.wtf"));
+    QCOMPARE(lease.endpoint, QStringLiteral("remote.bde.run"));
     QCOMPARE(lease.port, quint16(29042));
     QCOMPARE(lease.hostCertSha256, HostPin);
     QCOMPARE(lease.username, QStringLiteral("anna"));
@@ -465,7 +479,7 @@ void TestPlankBroker::parsesLease()
 
 void TestPlankBroker::rejectsMalformedLeases()
 {
-    const QString good = QStringLiteral(R"({"endpoint":"remote.finn.wtf","port":29042,
+    const QString good = QStringLiteral(R"({"endpoint":"remote.bde.run","port":29042,
         "host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj","expires_in":30})").arg(HostPin);
     PlankBroker::Lease lease;
     QVERIFY(PlankBroker::parseLease(good.toUtf8(), lease));
@@ -478,8 +492,8 @@ void TestPlankBroker::rejectsMalformedLeases()
         {HostPin, HostPin.left(62)},
         {QStringLiteral("\"YWJj\""), QStringLiteral("\"not base64!\"")},
         {QStringLiteral("\"YWJj\""), QStringLiteral("\"\"")},
-        {QStringLiteral("remote.finn.wtf"), QStringLiteral("remote.finn.wtf/evil")},
-        {QStringLiteral("remote.finn.wtf"), QStringLiteral("")},
+        {QStringLiteral("remote.bde.run"), QStringLiteral("remote.bde.run/evil")},
+        {QStringLiteral("remote.bde.run"), QStringLiteral("")},
         {QStringLiteral("\"anna\""), QStringLiteral("\"\"")},
         {QStringLiteral("\"expires_in\":30"), QStringLiteral("\"expires_in\":0")},
     };

@@ -17,3 +17,10 @@ HEADERS += \
 INCLUDEPATH += \
     ../../app/backend \
     ../../moonlight-common-c/moonlight-common-c/src
+
+# Qt's OpenSSL TLS backend (selected in initTestCase, as in main.cpp) dlopens
+# libssl/libcrypto through the executable's rpaths. Give the test the same
+# bundled-OpenSSL rpath the Client has.
+macx {
+    QMAKE_RPATHDIR += $$system(pkg-config --variable=libdir openssl)
+}
