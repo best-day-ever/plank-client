@@ -11,6 +11,7 @@
 #include "plankbroker.h"
 #include "plankhttp.h"
 #include "remotedisplaysetup.h"
+#include "brokersessionstore.h"
 #include <QTemporaryDir>
 #include <QNetworkProxy>
 #include <QNetworkAccessManager>
@@ -295,6 +296,7 @@ private slots:
     void tlsConnectReturnsDirectRoute();
     void oneShotRequestsSurviveHostClosingEachConnection();
     void remoteDisplaySetupPersistsPerHost();
+    void brokerSessionStoreEncodesOnlyUserAndToken();
     void remoteDisplaySetupRejectsInvalidEntries();
     void remoteDisplaySetupSuggestsFittingMode();
     void remoteDisplaySetupMatchesOnlyQualifiedScreens();
@@ -969,6 +971,30 @@ NvClientDisplay screen(int x, int width, int height)
 {
     return NvClientDisplay { QRect(x, 0, width, height), QSize(width, height) };
 }
+}
+
+void TestPlankBroker::brokerSessionStoreEncodesOnlyUserAndToken()
+{
+    const QString token = QStringLiteral("aB3-_xYz0123456789aB3-_xYz0123456789aB3-_xY");
+    const QByteArray encoded = BrokerSessionStore::encode(QStringLiteral("finn"), token);
+    const QJsonObject object = QJsonDocument::fromJson(encoded).object();
+    QCOMPARE(object.keys(), QStringList({QStringLiteral("token"), QStringLiteral("user"), QStringLiteral("v")}));
+    BrokerSessionStore::Saved saved;
+    QVERIFY(BrokerSessionStore::decode(encoded, saved));
+    QCOMPARE(saved.username, QStringLiteral("finn"));
+    QCOMPARE(saved.token, token);
+    // Anything unexpected is treated as "no saved session".
+    for (const QByteArray& bad : {QByteArray(), QByteArray("not json"), QByteArray("[]"),
+                                  QByteArray(R"({"v":2,"user":"finn","token":"abc"})"),
+                                  QByteArray(R"({"v":1,"user":"","token":"abc"})"),
+                                  QByteArray(R"({"v":1,"user":"finn","token":""})"),
+                                  QByteArray(R"({"v":1,"user":"finn","token":"has space"})"),
+                                  QByteArray(R"({"v":1,"user":"finn","token":"é"})"),
+                                  QByteArray(5000, 'x')}) {
+        QVERIFY2(!BrokerSessionStore::decode(bad, saved), bad.left(60).constData());
+        QVERIFY(saved.token.isEmpty());
+        QVERIFY(saved.username.isEmpty());
+    }
 }
 
 void TestPlankBroker::remoteDisplaySetupPersistsPerHost()

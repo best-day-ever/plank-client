@@ -219,6 +219,7 @@ SOURCES += \
     backend/computerseeker.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
+    backend/brokersessionstore.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
@@ -261,6 +262,7 @@ HEADERS += \
     backend/planknetwork.h \
     backend/nvhttp.h \
     backend/plankhttp.h \
+    backend/brokersessionstore.h \
     backend/remotedisplaysetup.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \

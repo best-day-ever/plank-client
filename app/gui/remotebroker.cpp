@@ -1,5 +1,6 @@
 #include "remotebroker.h"
 
+#include "backend/brokersessionstore.h"
 #include "backend/computermanager.h"
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
@@ -104,6 +105,17 @@ RemoteBroker::~RemoteBroker()
 void RemoteBroker::initialize(ComputerManager* computerManager)
 {
     m_ComputerManager = computerManager;
+    // Resume a remembered session (macOS Keychain). If the broker has since
+    // expired it, the first host list returns 401 and signOutLocally drops it.
+    if (!signedIn() && configured()) {
+        BrokerSessionStore::Saved saved;
+        if (BrokerSessionStore::load(brokerAddress(), saved)) {
+            m_Token->set(saved.token);
+            saved.token.fill(QChar('\0'));
+            m_Username = saved.username;
+            emit stateChanged();
+        }
+    }
 }
 
 PlankBrokerClient::Config RemoteBroker::clientConfig() const
@@ -140,6 +152,7 @@ void RemoteBroker::signOutLocally(const QString& message)
     ++m_Generation;
     stopKeepalive();
     m_Token->clear();
+    BrokerSessionStore::clear(brokerAddress());
     m_Username.clear();
     m_Hosts.clear();
     m_BusyText.clear();
@@ -222,12 +235,8 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
                 self->handleBrokerError(*failure, false);
                 return;
             }
-            self->m_Token->set(token);
+            self->finishSignIn(token, confirmedUser);
             token.fill(QChar('\0'));
-            self->m_Username = confirmedUser;
-            self->setBusy(QString());
-            emit self->stateChanged();
-            self->refreshHosts();
         }, Qt::QueuedConnection);
     });
 }
@@ -241,6 +250,8 @@ QString RemoteBroker::passkeyRpId() const
 void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser)
 {
     m_Token->set(token);
+    // Password + code and Touch ID both end here: remember the session.
+    BrokerSessionStore::save(brokerAddress(), confirmedUser, token);
     token.fill(QChar('\0'));
     m_Username = confirmedUser;
     setBusy(QString());
