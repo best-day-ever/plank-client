@@ -226,7 +226,7 @@ void TestOutputTopology::parsesFixedCapture()
     QCOMPARE(topology.outputs.size(), 1);
     QCOMPARE(topology.toJson(), fixture);
     QVERIFY(!(topology.featureFlags & NvOutputTopology::UnifiedAbsoluteInputFeature));
-    QVERIFY(!(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature));
+    QVERIFY(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature);
     QVERIFY(!(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::FixedCaptureFeature));
     // Reuse is atomic, including failures; never retain stale logical bounds.
     QVERIFY(!NvOutputTopology::fromJson({}, topology));
