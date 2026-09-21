@@ -143,6 +143,8 @@ class TestPlankBroker : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+
     // Pins and certificates
     void normalizesPins();
     void parsesPinLists();
@@ -188,6 +190,18 @@ private slots:
     void keepaliveCadence();
     void keepaliveRetriesThenGivesUp();
 };
+
+void TestPlankBroker::initTestCase()
+{
+#ifdef Q_OS_MACOS
+    // Mirror main.cpp: the broker requires TLS 1.3, which Qt's default
+    // SecureTransport backend cannot negotiate. Select the bundled OpenSSL
+    // backend exactly as the Client does rather than weakening the policy.
+    QVERIFY2(QSslSocket::setActiveBackend(QStringLiteral("openssl")),
+             qPrintable(QSslSocket::availableBackends().join(u", ")));
+    QVERIFY(QSslSocket::supportedProtocols().contains(QSsl::TlsV1_3));
+#endif
+}
 
 void TestPlankBroker::normalizesPins()
 {
