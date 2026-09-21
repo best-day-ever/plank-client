@@ -26,7 +26,7 @@ namespace PlankBroker
 {
 
 constexpr quint16 DefaultPort = 29000;
-inline QString defaultHost() { return QStringLiteral("remote.finn.wtf"); }
+inline QString defaultHost() { return QStringLiteral("remote.bde.run"); }
 
 // SPKI SHA-256 of the default broker's TLS keys: current + pre-generated
 // spare for rotation (self-signed ECDSA P-256). Public-key hashes only.
