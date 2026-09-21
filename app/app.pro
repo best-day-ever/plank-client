@@ -248,6 +248,7 @@ SOURCES += \
 macx: HEADERS += macapplication.h
 
 HEADERS += \
+    backend/authenticationtakeover.h \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \

@@ -5,6 +5,7 @@
         <file>gui/PlankCaptureSourceBox.qml</file>
         <file>gui/SettingsView.qml</file>
         <file>gui/StreamSegue.qml</file>
+        <file>gui/SessionTakeoverDialog.qml</file>
         <file>gui/NavigableToolButton.qml</file>
         <file>gui/NavigableItemDelegate.qml</file>
         <file>gui/NavigableMenuItem.qml</file>

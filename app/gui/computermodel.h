@@ -34,6 +34,8 @@ public:
     Q_INVOKABLE void deleteComputer(int computerIndex);
 
     Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
+    Q_INVOKABLE void respondToAuthenticationTakeover(bool accepted);
+    ~ComputerModel() override;
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
@@ -71,6 +73,8 @@ public:
 
 signals:
     void authenticationCompleted(QVariant error);
+    void authenticationTakeoverRequested();
+    void authenticationCancelled();
 
     void relayWakeCompleted(QVariant error);
 
@@ -82,4 +86,6 @@ private slots:
 private:
     QVector<NvComputer*> m_Computers;
     ComputerManager* m_ComputerManager;
+    NvComputer* m_AuthenticatingComputer = nullptr;
+    AuthenticationTakeover m_AuthenticationTakeover;
 };

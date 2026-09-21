@@ -101,6 +101,17 @@ private:
     QByteArray m_ErrorText;
 };
 
+class MacSessionActiveException : public GfeHttpResponseException
+{
+public:
+    explicit MacSessionActiveException(const QString& sessionId) :
+        GfeHttpResponseException(409, "PLANK workstation session is active"),
+        m_SessionId(sessionId) {}
+    const QString& sessionId() const { return m_SessionId; }
+private:
+    QString m_SessionId;
+};
+
 class NvHTTP : public QObject
 {
     Q_OBJECT
@@ -156,7 +167,8 @@ public:
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
-    NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1);
+    NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1,
+                                      const QString& takeoverSessionId = QString());
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
                                            const QString& certificateSha256,
                                            int bitrateKbps, int udpPayloadSize);

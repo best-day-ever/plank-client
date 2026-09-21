@@ -136,12 +136,8 @@ Item {
         streamLoader.active = true
     }
 
-    NavigableMessageDialog {
+    SessionTakeoverDialog {
         id: activeSessionTakeoverDialog
-        title: qsTr("Active PLANK session")
-        standardButtons: Dialog.Yes | Dialog.No
-        acceptButtonText: qsTr("Take Over")
-        rejectButtonText: qsTr("Cancel")
 
         onAccepted: session.respondToActiveSessionTakeover(true)
         onRejected: session.respondToActiveSessionTakeover(false)

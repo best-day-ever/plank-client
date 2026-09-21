@@ -678,16 +678,23 @@ class PendingAuthenticationTask : public QObject, public QRunnable
 
 public:
     PendingAuthenticationTask(ComputerManager* computerManager, NvComputer* computer,
-                              QString username, QString password, QString matchedDesktopMode, int matchedDesktopScale)
+                              QString username, QString password, QString matchedDesktopMode, int matchedDesktopScale,
+                              bool allowTakeoverPrompt)
         : m_ComputerManager(computerManager),
           m_Computer(computer),
           m_Username(std::move(username)),
           m_Password(std::move(password)),
           m_MatchedDesktopMode(std::move(matchedDesktopMode)),
-          m_MatchedDesktopScale(matchedDesktopScale)
+          m_MatchedDesktopScale(matchedDesktopScale),
+          m_AllowTakeoverPrompt(allowTakeoverPrompt)
     {
         connect(this, &PendingAuthenticationTask::authenticationCompleted,
                 computerManager, &ComputerManager::authenticationCompleted);
+        qRegisterMetaType<AuthenticationTakeover>();
+        connect(this, &PendingAuthenticationTask::authenticationTakeoverRequested,
+                computerManager, &ComputerManager::authenticationTakeoverRequested);
+        connect(this, &PendingAuthenticationTask::authenticationCancelled,
+                computerManager, &ComputerManager::authenticationCancelled);
     }
 
     ~PendingAuthenticationTask()
@@ -698,6 +705,8 @@ public:
 
 signals:
     void authenticationCompleted(NvComputer* computer, QString error);
+    void authenticationTakeoverRequested(NvComputer* computer, AuthenticationTakeover decision);
+    void authenticationCancelled(NvComputer* computer);
 
 private:
     void run()
@@ -727,7 +736,25 @@ private:
                 appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(m_Computer->plankVideoProfile);
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode, m_MatchedDesktopScale) : http.getOutputTopology();
+                try {
+                    topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode, m_MatchedDesktopScale) : http.getOutputTopology();
+                } catch (const MacSessionActiveException& conflict) {
+                    // Only a fresh user-initiated GUI connection may request
+                    // consent. CLI and automatic reconnect never evict a peer.
+                    if (!m_AllowTakeoverPrompt) throw;
+                    const auto decision = AuthenticationTakeover::create();
+                    const auto quitting = connect(qApp, &QCoreApplication::aboutToQuit,
+                        m_ComputerManager, [decision] { decision->respond(false); }, Qt::DirectConnection);
+                    emit authenticationTakeoverRequested(m_Computer, decision);
+                    const bool accepted = decision->wait();
+                    disconnect(quitting);
+                    if (!accepted) {
+                        emit authenticationCancelled(m_Computer);
+                        return;
+                    }
+                    topology = http.prepareMacDisplay(desktopMode, appleEncodingMode,
+                                                      m_MatchedDesktopScale, conflict.sessionId());
+                }
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(
@@ -765,10 +792,11 @@ private:
     QString m_Password;
     QString m_MatchedDesktopMode;
     int m_MatchedDesktopScale;
+    bool m_AllowTakeoverPrompt;
 };
 
 void ComputerManager::authenticateHost(NvComputer* computer, QString username,
-                                       QString password)
+                                       QString password, bool allowTakeoverPrompt)
 {
     QString matchedMode;
     int matchedScale = 1;
@@ -821,7 +849,7 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         }
     }
     PendingAuthenticationTask* authentication = new PendingAuthenticationTask(
-        this, computer, std::move(username), std::move(password), matchedMode, matchedScale);
+        this, computer, std::move(username), std::move(password), matchedMode, matchedScale, allowTakeoverPrompt);
     QThreadPool::globalInstance()->start(authentication);
 }
 

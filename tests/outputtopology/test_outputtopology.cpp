@@ -266,7 +266,7 @@ void TestOutputTopology::rejectsInvalidFixedCapture()
         QVERIFY(!NvOutputTopology::fromJson(object, topology));
     }
     auto object = fixture;
-    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::SessionTakeoverFeature;
+    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::DynamicHostLayoutFeature;
     QVERIFY(!NvOutputTopology::fromJson(object, topology));
     object = fixture; object["generation"] = "not-a-generation";
     QVERIFY(!NvOutputTopology::fromJson(object, topology));

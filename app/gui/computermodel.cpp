@@ -25,6 +25,11 @@ QString virtualModeFromChoice(int choice)
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
 
+ComputerModel::~ComputerModel()
+{
+    if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(false);
+}
+
 void ComputerModel::initialize(ComputerManager* computerManager)
 {
     m_ComputerManager = computerManager;
@@ -32,6 +37,20 @@ void ComputerModel::initialize(ComputerManager* computerManager)
             this, &ComputerModel::handleComputerStateChanged);
     connect(m_ComputerManager, &ComputerManager::authenticationCompleted,
             this, &ComputerModel::handleAuthenticationCompleted);
+    connect(m_ComputerManager, &ComputerManager::authenticationTakeoverRequested,
+            this, [this](NvComputer* computer, AuthenticationTakeover decision) {
+        if (computer != m_AuthenticatingComputer) return;
+        if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(false);
+        m_AuthenticationTakeover = decision;
+        emit authenticationTakeoverRequested();
+    });
+    connect(m_ComputerManager, &ComputerManager::authenticationCancelled,
+            this, [this](NvComputer* computer) {
+        if (computer != m_AuthenticatingComputer) return;
+        m_AuthenticatingComputer = nullptr;
+        m_AuthenticationTakeover.clear();
+        emit authenticationCancelled();
+    });
 
     m_Computers = m_ComputerManager->getComputers();
 }
@@ -313,13 +332,23 @@ void ComputerModel::authenticateComputer(int computerIndex, QString username,
                                          QString password)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
+    if (m_AuthenticatingComputer) return;
+    m_AuthenticatingComputer = m_Computers[computerIndex];
     m_ComputerManager->authenticateHost(m_Computers[computerIndex],
-                                        std::move(username), std::move(password));
+                                        std::move(username), std::move(password), true);
 }
 
-void ComputerModel::handleAuthenticationCompleted(NvComputer*, QString error)
+void ComputerModel::handleAuthenticationCompleted(NvComputer* computer, QString error)
 {
+    if (computer != m_AuthenticatingComputer) return;
+    m_AuthenticatingComputer = nullptr;
+    m_AuthenticationTakeover.clear();
     emit authenticationCompleted(error.isEmpty() ? QVariant() : error);
+}
+
+void ComputerModel::respondToAuthenticationTakeover(bool accepted)
+{
+    if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(accepted);
 }
 
 void ComputerModel::handleComputerStateChanged(NvComputer* computer)

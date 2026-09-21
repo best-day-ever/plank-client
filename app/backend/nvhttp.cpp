@@ -1,6 +1,7 @@
 #include "nvcomputer.h"
 #include "desktopstage.h"
 #include "hostrecovery.h"
+#include "authenticationtakeover.h"
 #include <QCryptographicHash>
 #include <QScopedPointer>
 #include <Limelight.h>
@@ -722,13 +723,15 @@ MacPreviewLaunch::Reply NvHTTP::startMacPreview(const NvOutputTopology& topology
     return parsed;
 }
 
-NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale)
+NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale,
+                                         const QString& takeoverSessionId)
 {
     const QSize size = NvOutputTopology::macDisplayModeSize(mode);
-    const auto request = NvOutputTopology::macDisplayRequest(mode, encodingMode, scale);
+    auto request = NvOutputTopology::macDisplayRequest(mode, encodingMode, scale);
     if (request.isEmpty()) {
         throw GfeHttpResponseException(400, "Unsupported Mac desktop resolution");
     }
+    if (!takeoverSessionId.isEmpty()) request.insert(QStringLiteral("takeover_session_id"), takeoverSessionId);
     QString pin;
     const auto current = getOutputTopology(&pin);
     if (current.featureFlags != NvOutputTopology::FixedCaptureFlags) {
@@ -836,6 +839,11 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
         // Do not expose arbitrary server text, redirect URLs, or response tokens.
         const auto failure = QJsonDocument::fromJson(response).object();
         response.fill('\0');
+        const QString activeSession = macActiveSessionId(status, failure);
+        if (!activeSession.isEmpty()) throw MacSessionActiveException(activeSession);
+        if (status == 409 && failure.value(QStringLiteral("error")) == QLatin1String("session_changed")) {
+            throw GfeHttpResponseException(status, "The active PLANK session changed. Connect again to confirm takeover.");
+        }
         if (status == 403 && failure.value(QStringLiteral("state")) == QLatin1String("denied") &&
                 failure.value(QStringLiteral("error")) == QLatin1String("host_permissions_required")) {
             throw GfeHttpResponseException(status,

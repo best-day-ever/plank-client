@@ -1,3 +1,17 @@
+## 1.0.149
+
+### Client
+
+- Offer Take Over or Cancel when another client is connected to the same Mac account.
+- Use the new client's display size after an approved takeover.
+- Preserve valid packets when the connection adjusts its network packet size.
+
+### Host
+
+- macOS: transfer an active session to another client after explicit confirmation, including while locked.
+- Preserve valid packets during network packet-size recovery on Linux and macOS.
+- Reduce diagnostic logging overhead during streaming.
+
 ## 1.0.146
 
 ### Client

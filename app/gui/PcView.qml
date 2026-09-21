@@ -47,6 +47,7 @@ CenteredGridView {
 
     function authenticationComplete(error)
     {
+        authenticationTakeoverDialog.close()
         var pcIndex = loginDialog.pcIndex
         loginDialog.close()
         if (error !== undefined) {
@@ -89,6 +90,11 @@ CenteredGridView {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
         model.authenticationCompleted.connect(authenticationComplete)
+        model.authenticationTakeoverRequested.connect(function() { authenticationTakeoverDialog.open() })
+        model.authenticationCancelled.connect(function() {
+            authenticationTakeoverDialog.close()
+            loginDialog.close()
+        })
         model.relayWakeCompleted.connect(function(error) {
             if (error !== undefined) {
                 errorDialog.text = error
@@ -338,6 +344,12 @@ CenteredGridView {
 
     ErrorMessageDialog {
         id: errorDialog
+    }
+
+    SessionTakeoverDialog {
+        id: authenticationTakeoverDialog
+        onAccepted: computerModel.respondToAuthenticationTakeover(true)
+        onRejected: computerModel.respondToAuthenticationTakeover(false)
     }
 
     NavigableDialog {
