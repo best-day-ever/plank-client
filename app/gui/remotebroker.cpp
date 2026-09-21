@@ -52,8 +52,6 @@ struct AdmissionContext {
     std::function<QString()> currentToken;
     QString hostId;
     NvComputer* computer = nullptr;
-    // The direct route failed at connect time: re-admissions stay on the relay.
-    bool forceRelay = false;
 };
 
 }
@@ -288,9 +286,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
     const NvAddress address(lease.endpoint, lease.port);
     NvHTTP http(address);
     http.setPinnedCertificateSha256(lease.hostCertSha256);
-    // Direct route: fail fast so an unreachable workstation falls back to the relay quickly.
-    const QString serverInfo = http.getServerInfo(NvHTTP::NVLL_ERROR,
-                                                  lease.route == PlankBroker::Route::Direct);
+    const QString serverInfo = http.getServerInfo(NvHTTP::NVLL_ERROR);
     NvComputer probed(http, serverInfo);
     if (!probed.plankAuthentication) {
         throw GfeHttpResponseException(400, "The remote workstation does not offer PLANK authentication");
@@ -383,34 +379,17 @@ void RemoteBroker::connectToHost(const QString& hostId)
         NvComputer* computer = nullptr;
         std::shared_ptr<PlankBrokerError> brokerFailure;
         QString hostFailure;
-        bool forceRelay = false;
-        auto prepare = [&](PlankBroker::Lease& lease) {
-            NvComputer* prepared = prepareBrokeredComputer(lease, hostId, hostName, defaults.found,
-                                                           defaults.videoProfile, defaults.captureSource,
-                                                           defaults.scalingMode, defaults.hostLayout,
-                                                           defaults.virtualMode1, defaults.virtualMode2,
-                                                           defaults.profileBitratesKbps);
-            lease.gssapiToken.fill(QChar('\0'));
-            return prepared;
-        };
         try {
             PlankBroker::Lease lease = PlankBrokerClient(config).connect(token->get(), hostId);
-            if (lease.route == PlankBroker::Route::Direct) {
-                qInfo() << "Remote access: direct route to" << hostId;
-                try {
-                    computer = prepare(lease);
-                } catch (const QtNetworkReplyException& error) {
-                    // A pin mismatch is an identity failure, never a routing one.
-                    if (error.getError() == QNetworkReply::SslHandshakeFailedError) throw;
-                    qWarning() << "Direct route to" << hostId << "failed, using the relay:" << error.toQString();
-                    lease.gssapiToken.fill(QChar('\0'));
-                    forceRelay = true;
-                }
-            }
-            if (computer == nullptr) {
-                if (forceRelay) lease = PlankBrokerClient(config).connect(token->get(), hostId, true);
-                computer = prepare(lease);
-            }
+            // Office LAN: the broker hands out the workstation itself; the flow is identical.
+            qInfo() << "Remote access route to" << hostId << ":"
+                    << (lease.route == PlankBroker::Route::Direct ? "direct" : "relay");
+            computer = prepareBrokeredComputer(lease, hostId, hostName, defaults.found,
+                                               defaults.videoProfile, defaults.captureSource,
+                                               defaults.scalingMode, defaults.hostLayout,
+                                               defaults.virtualMode1, defaults.virtualMode2,
+                                               defaults.profileBitratesKbps);
+            lease.gssapiToken.fill(QChar('\0'));
         } catch (const PlankBrokerError& error) {
             brokerFailure = std::make_shared<PlankBrokerError>(error);
         } catch (const GfeHttpResponseException& error) {
@@ -425,7 +404,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
                         tr("The workstation could not be reached through the remote access server.");
         }
         QMetaObject::invokeMethod(qApp, [self, generation, hostId, hostName, computer,
-                                         brokerFailure, hostFailure, forceRelay]() {
+                                         brokerFailure, hostFailure]() {
             if (!self || generation != self->m_Generation) {
                 // Signed out meanwhile; the one-use host token is abandoned.
                 delete computer;
@@ -466,11 +445,10 @@ void RemoteBroker::connectToHost(const QString& hostId)
             context->currentToken = [sharedToken]() { return sharedToken->get(); };
             context->hostId = hostId;
             context->computer = computer;
-            context->forceRelay = forceRelay;
             session->setPlankBrokerAdmission([context](QString& username, QString& gssapiToken) {
                 try {
                     PlankBroker::Lease lease = PlankBrokerClient(context->config)
-                            .connect(context->currentToken(), context->hostId, context->forceRelay);
+                            .connect(context->currentToken(), context->hostId);
                     {
                         QWriteLocker lock(&context->computer->lock);
                         const NvAddress leased(lease.endpoint, lease.port);

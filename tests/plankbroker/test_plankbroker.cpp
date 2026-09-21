@@ -186,7 +186,7 @@ private slots:
     void tlsWrongPinSendsNothing();
     void tlsRateLimitOnBearerCall();
     void tlsRequiresTls13();
-    void tlsConnectAsksForRelayOnlyWhenForced();
+    void tlsConnectReturnsDirectRoute();
 
     // Keepalive
     void keepaliveCadence();
@@ -777,7 +777,7 @@ void TestPlankBroker::tlsRateLimitOnBearerCall()
     }
 }
 
-void TestPlankBroker::tlsConnectAsksForRelayOnlyWhenForced()
+void TestPlankBroker::tlsConnectReturnsDirectRoute()
 {
     TestBrokerServer server(QSsl::TlsV1_3OrLater);
     QVERIFY(server.listen());
@@ -785,19 +785,12 @@ void TestPlankBroker::tlsConnectAsksForRelayOnlyWhenForced()
                                  R"("host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj",)"
                                  R"("expires_in":30})").arg(HostPin).toUtf8();
     const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
-    const PlankBroker::Lease direct = client.connect(QStringLiteral("t"), QStringLiteral("ws01.example.test"));
-    QCOMPARE(direct.route, PlankBroker::Route::Direct);
+    const PlankBroker::Lease lease = client.connect(QStringLiteral("t"), QStringLiteral("ws01.example.test"));
+    QCOMPARE(lease.route, PlankBroker::Route::Direct);
+    QCOMPARE(lease.endpoint, QStringLiteral("192.168.10.57"));
+    QCOMPARE(lease.port, quint16(28989));
     QVERIFY(server.request.startsWith("POST /v1/hosts/ws01.example.test/connect HTTP/1.1\r\n"));
     QVERIFY(server.request.endsWith("{}"));
-
-    server.request.clear();
-    server.body = QStringLiteral(R"({"route":"relay","endpoint":"remote.bde.run","port":29042,)"
-                                 R"("host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj",)"
-                                 R"("expires_in":30})").arg(HostPin).toUtf8();
-    const PlankBroker::Lease relayed = client.connect(QStringLiteral("t"), QStringLiteral("ws01.example.test"), true);
-    QCOMPARE(relayed.route, PlankBroker::Route::Relay);
-    QCOMPARE(relayed.port, quint16(29042));
-    QVERIFY(server.request.endsWith("{\"route\":\"relay\"}"));
 }
 
 void TestPlankBroker::tlsRequiresTls13()

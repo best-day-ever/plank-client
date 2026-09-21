@@ -66,10 +66,7 @@ public:
     PlankBroker::AuthReply respond(const QString& conversationId, const QJsonArray& responses) const;
 
     QVector<PlankBroker::Host> hosts(const QString& sessionToken) const;
-    // forceRelay asks for a relay lease even where the broker would route
-    // directly (the workstation was unreachable on the direct route).
-    PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId,
-                               bool forceRelay = false) const;
+    PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId) const;
     void keepalive(const QString& sessionToken, const QString& hostId) const;
     void logout(const QString& sessionToken) const;
 
