@@ -49,6 +49,8 @@ public:
     };
 
     static constexpr int QuickTimeoutMs = 15000;
+    // Device-key calls sit in front of broker requests (section 14.1).
+    static constexpr int DeviceKeyTimeoutMs = 10000;
     // Below the broker's 120 s conversation expiry.
     static constexpr int AssertTimeoutMs = 110000;
     static constexpr int MaximumOutputBytes = 256 * 1024;
@@ -72,6 +74,17 @@ public:
     PlankBrokerClient::PasskeyAssertResult assertion(const PlankBroker::PasskeyRequest& request,
                                                      const QString& username,
                                                      PlankBroker::PasskeyAssertion& assertion) const;
+
+    // Section 14.1 device key (no Touch ID; signed silently). brokerHost must
+    // be a plain lower-case DNS host name (no IP literal), else nothing runs.
+    // devicePublicKey creates the key on first use; deviceSign never creates
+    // one. Both return an empty string on any failure (the Client then runs
+    // unbound / sends no proof).
+    QString devicePublicKey(const QString& brokerHost) const;
+    PlankBrokerClient::DeviceSignature deviceSign(const QString& brokerHost, const QByteArray& message) const;
+
+    static QString parseDevicePublicKey(const QByteArray& output);
+    static QString parseDeviceSignature(const QByteArray& output);
 
     static bool parseList(const QByteArray& output, QVector<LocalKey>& keys);
     static bool parseCreated(const QByteArray& output, CreatedKey& key);

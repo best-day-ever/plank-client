@@ -48,10 +48,29 @@ private:
 class PlankBrokerClient
 {
 public:
+    // Device-bound sessions (section 14.2). Both are optional and called on
+    // the requesting thread; on macOS they run the plank-passkey helper.
+    // devicePublicKey: the base64 SPKI of this device's key for the broker
+    //   (created on first use), or empty to sign in unbound.
+    // deviceSigner: a signature over a proof message. NoKey (this device has
+    //   no key for the broker, so the session is unbound) sends the request
+    //   without proof headers; Failed (Mac locked, helper error) sends nothing
+    //   and throws a retryable Network error, so a bound session is never
+    //   signed out just because signing was briefly impossible.
+    struct DeviceSignature {
+        enum Status { Signed, NoKey, Failed };
+        Status status = Failed;
+        QString signature;
+    };
+    using DevicePublicKeyProvider = std::function<QString()>;
+    using DeviceSigner = std::function<DeviceSignature(const QByteArray& message)>;
+
     struct Config {
         QString host;
         quint16 port = PlankBroker::DefaultPort;
         QStringList pins;
+        DevicePublicKeyProvider devicePublicKey;
+        DeviceSigner deviceSigner;
     };
 
     explicit PlankBrokerClient(Config config);
@@ -63,7 +82,8 @@ public:
 
     // Sign-in conversation. Challenge/Authenticated are returned; Denied,
     // RateLimited and malformed replies throw. PasswordOtp sends exactly
-    // {"username"}; Passkey adds "method":"passkey" (section 13.3).
+    // {"username"}; Passkey adds "method":"passkey" (section 13.3). Either
+    // adds "device_key" when config().devicePublicKey yields one (14.2).
     PlankBroker::AuthReply start(const QString& username,
                                  PlankBroker::AuthMethod method = PlankBroker::AuthMethod::PasswordOtp) const;
     PlankBroker::AuthReply respond(const QString& conversationId, const QJsonArray& responses) const;
@@ -88,6 +108,8 @@ public:
     PasskeySignIn signInWithPasskey(const QString& username, const QString& rpId,
                                     const PasskeyAssertor& assertor) const;
 
+    // Bearer calls. With a deviceSigner each carries X-Plank-Device-Time and
+    // X-Plank-Device-Proof (section 14.2) when the signer produces a proof.
     QVector<PlankBroker::Host> hosts(const QString& sessionToken) const;
     PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId) const;
     void keepalive(const QString& sessionToken, const QString& hostId) const;

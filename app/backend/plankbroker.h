@@ -8,7 +8,8 @@
 // Contract: bde-linux docs/plank-broker.md section 10.1 (broker API, client to
 // broker over HTTPS/TLS 1.3 with a pinned SPKI SHA-256), section 10.2
 // (brokered connect to a host through the broker's per-session lease) and
-// section 13.3 (passkey sign-in: method "passkey", prompt style "passkey").
+// section 13.3 (passkey sign-in: method "passkey", prompt style "passkey")
+// and section 14.2 (device-bound sessions: "device_key", proof headers).
 
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -261,6 +262,7 @@ struct AuthReply {
     int expiresIn = 0;
     QString username;
     int retryAfter = 0;
+    bool deviceBound = false; // section 14.2; absent means an unbound session
 };
 
 struct Host {
@@ -534,6 +536,8 @@ inline AuthReply parseAuthReply(int httpStatus, const QByteArray& body)
         reply.sessionToken = token;
         reply.expiresIn = expires.isUndefined() ? 0 : expires.toInt();
         reply.username = username;
+        // Informational only: tolerated when absent or not a boolean.
+        reply.deviceBound = object.value(QStringLiteral("device_bound")).toBool(false);
         reply.kind = ReplyKind::Authenticated;
         return reply;
     }
@@ -672,6 +676,55 @@ inline QString hostActionPath(const QString& hostId, const QString& action)
 {
     return QStringLiteral("/v1/hosts/") + QString::fromLatin1(QUrl::toPercentEncoding(hostId)) +
             QLatin1Char('/') + action;
+}
+
+// ---------------------------------------------------------------------------
+// Device-bound sessions (section 14.2)
+// ---------------------------------------------------------------------------
+
+// The broker accepts P-256 SPKI DER keys of at most 200 bytes (91 in practice).
+constexpr int MaximumDevicePublicKeyBytes = 200;
+// A DER ECDSA P-256 signature is at most 72 bytes.
+constexpr int MaximumDeviceSignatureBytes = 72;
+constexpr int MinimumDeviceSignatureBytes = 8;
+inline QByteArray deviceTimeHeader() { return QByteArrayLiteral("X-Plank-Device-Time"); }
+inline QByteArray deviceProofHeader() { return QByteArrayLiteral("X-Plank-Device-Proof"); }
+
+// "device_key" for /v1/auth/start: standard base64 of a DER SubjectPublicKeyInfo.
+inline bool isDevicePublicKey(const QString& value)
+{
+    QByteArray decoded;
+    return decodeStandardBase64(value, decoded) && !decoded.isEmpty() &&
+            decoded.size() <= MaximumDevicePublicKeyBytes && decoded.at(0) == '\x30';
+}
+
+// X-Plank-Device-Proof value: standard base64 of a DER ECDSA signature.
+inline bool isDeviceSignature(const QString& value)
+{
+    QByteArray decoded;
+    return decodeStandardBase64(value, decoded) && decoded.size() >= MinimumDeviceSignatureBytes &&
+            decoded.size() <= MaximumDeviceSignatureBytes && decoded.at(0) == '\x30';
+}
+
+// The UTF-8 message a device proof signs:
+//   plank-device-proof-v1\n<METHOD>\n<path>\n<time>\n<hex sha256(token)>\n<hex sha256(body)>
+// METHOD upper case, path exactly as sent without the query, time in unix
+// seconds, body the exact request bytes (empty for GET), hex lower case.
+inline QByteArray deviceProofMessage(const QByteArray& method, const QByteArray& path, qint64 unixTime,
+                                     const QString& sessionToken, const QByteArray& body)
+{
+    const int query = path.indexOf('?');
+    QByteArray message("plank-device-proof-v1\n");
+    message += method.toUpper();
+    message += '\n';
+    message += query < 0 ? path : path.left(query);
+    message += '\n';
+    message += QByteArray::number(unixTime);
+    message += '\n';
+    message += QCryptographicHash::hash(sessionToken.toUtf8(), QCryptographicHash::Sha256).toHex();
+    message += '\n';
+    message += QCryptographicHash::hash(body, QCryptographicHash::Sha256).toHex();
+    return message;
 }
 
 // ---------------------------------------------------------------------------

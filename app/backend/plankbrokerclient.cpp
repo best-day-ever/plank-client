@@ -1,6 +1,7 @@
 #include "plankbrokerclient.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QEventLoop>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
@@ -98,13 +99,30 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
     request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("Cache-Control", "no-store");
-    if (!sessionToken.isEmpty()) {
-        request.setRawHeader("Authorization", "Bearer " + sessionToken.toLatin1());
-    }
     QByteArray payload;
     if (body != nullptr) {
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         payload = QJsonDocument(*body).toJson(QJsonDocument::Compact);
+    }
+    if (!sessionToken.isEmpty()) {
+        request.setRawHeader("Authorization", "Bearer " + sessionToken.toLatin1());
+        if (m_Config.deviceSigner) {
+            // Section 14.2: prove possession of the device key the session is
+            // bound to. No key on this device: unbound, send as before. Signing
+            // impossible right now (locked, helper error): do not send an
+            // unsigned request that a bound session would answer with 401.
+            const qint64 now = QDateTime::currentSecsSinceEpoch();
+            const QByteArray message = PlankBroker::deviceProofMessage(
+                        method, url.path(QUrl::FullyEncoded).toUtf8(), now, sessionToken, payload);
+            const DeviceSignature signature = m_Config.deviceSigner(message);
+            if (signature.status == DeviceSignature::Signed && PlankBroker::isDeviceSignature(signature.signature)) {
+                request.setRawHeader(PlankBroker::deviceTimeHeader(), QByteArray::number(now));
+                request.setRawHeader(PlankBroker::deviceProofHeader(), signature.signature.toLatin1());
+            } else if (signature.status != DeviceSignature::NoKey) {
+                qWarning() << "Remote access: the device key could not sign this request; not sending it";
+                throw PlankBrokerError(PlankBrokerError::Network);
+            }
+        }
     }
 
     // A fresh manager per request guarantees the encrypted() signal (the pin
@@ -191,6 +209,14 @@ PlankBroker::AuthReply PlankBrokerClient::start(const QString& username, PlankBr
     QJsonObject body {{QStringLiteral("username"), username}};
     if (method == PlankBroker::AuthMethod::Passkey) {
         body.insert(QStringLiteral("method"), QStringLiteral("passkey"));
+    }
+    if (m_Config.devicePublicKey) {
+        // Section 14.2: bind the session to this device when a key is at
+        // hand; otherwise sign in unbound (never fail because of the key).
+        const QString deviceKey = m_Config.devicePublicKey();
+        if (PlankBroker::isDevicePublicKey(deviceKey)) {
+            body.insert(QStringLiteral("device_key"), deviceKey);
+        }
     }
     Response response = request("POST", QStringLiteral("/v1/auth/start"), &body, QString());
     const PlankBroker::AuthReply reply = PlankBroker::parseAuthReply(response.status, response.body);
