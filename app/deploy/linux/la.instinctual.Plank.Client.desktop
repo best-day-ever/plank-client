@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=PLANK Client
+Name=BDE Fernweh Client
 Comment=Connect to a PLANK workstation
 Exec=plank-client
 Icon=plank-client

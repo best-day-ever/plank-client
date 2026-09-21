@@ -623,7 +623,7 @@ unix:!macx: {
 win32 {
     RC_ICONS = moonlight.ico
     QMAKE_TARGET_COMPANY = Instinctual
-    QMAKE_TARGET_DESCRIPTION = PLANK Client
+    QMAKE_TARGET_DESCRIPTION = BDE Fernweh Client
     QMAKE_TARGET_PRODUCT = PLANK
 
     CONFIG -= embed_manifest_exe

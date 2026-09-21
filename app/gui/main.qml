@@ -12,7 +12,7 @@ ApplicationWindow {
     property bool pollingActive: false
 
     id: window
-    title: qsTr("PLANK Client")
+    title: qsTr("BDE Fernweh Client")
     width: 1280
     height: 1200
     minimumHeight: 900
@@ -261,6 +261,24 @@ ApplicationWindow {
                 // the remaining space in the RowLayout. To "hide" it, we
                 // just set the text to empty string.
                 text: !titleLabel.visible && stackView.currentItem ? stackView.currentItem.objectName : ""
+            }
+
+            NavigableToolButton {
+                id: localButton
+                visible: qmltypeof(stackView.currentItem, "RemoteView")
+
+                iconSource: "qrc:/res/workstations.svg"
+
+                ToolTip.delay: 1000
+                ToolTip.timeout: 3000
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Local workstations")
+
+                onClicked: navigateTo("qrc:/gui/PcView.qml", "PcView")
+
+                Keys.onDownPressed: {
+                    stackView.currentItem.forceActiveFocus(Qt.TabFocus)
+                }
             }
 
             NavigableToolButton {

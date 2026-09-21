@@ -40,7 +40,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>@VERSION@</string>
 	<key>CFBundleDisplayName</key>
-	<string>PLANK Client</string>
+	<string>BDE Fernweh Client</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 </dict>

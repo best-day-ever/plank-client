@@ -402,7 +402,7 @@ int main(int argc, char *argv[])
     // Set the SDL3 application identity before any subsystem can initialize.
     // On Wayland, GNOME uses this ID to match the stream window to our desktop
     // entry and persist the user's keyboard-shortcut inhibitor decision.
-    SDL_SetAppMetadata("PLANK Client",
+    SDL_SetAppMetadata("BDE Fernweh Client",
                        PLANK_VERSION_STR,
                        "la.instinctual.Plank.Client");
 
@@ -567,7 +567,7 @@ int main(int argc, char *argv[])
 
             if (!QFile("/dev/dri").exists()) {
                 qWarning() << "Unable to find a KMSDRM display device!";
-                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use PLANK Client outside of the GUI environment.";
+                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use BDE Fernweh Client outside of the GUI environment.";
             }
             else if (!qEnvironmentVariableIsSet("QT_QPA_EGLFS_KMS_CONFIG")) {
                 // HACK: Remove this when Qt is fixed to properly check for display support before picking a card
@@ -773,7 +773,7 @@ int main(int argc, char *argv[])
     qInfo() << "PLANK TLS backend:" << QSslSocket::activeBackend()
             << QSslSocket::sslLibraryVersionString();
 #endif
-    QGuiApplication::setApplicationDisplayName("PLANK Client");
+    QGuiApplication::setApplicationDisplayName("BDE Fernweh Client");
 
 #ifdef Q_OS_DARWIN
     // macOS defaults "Keyboard navigation" to text fields and lists only, which
@@ -955,7 +955,9 @@ int main(int argc, char *argv[])
     QString initialView;
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::NormalStartRequested:
-        initialView = "qrc:/gui/PcView.qml";
+        // BDE build: people sign in through the studio broker (remote.bde.run);
+        // LAN bookmarks stay one click away ("Local workstations").
+        initialView = "qrc:/gui/RemoteView.qml";
         break;
     case GlobalCommandLineParser::StreamRequested:
         {
