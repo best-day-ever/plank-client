@@ -168,6 +168,7 @@ private slots:
     void rejectsMalformedHosts();
     void parsesLease();
     void rejectsMalformedLeases();
+    void parsesLeaseRoute();
     void classifiesBearerStatus();
     void encodesHostActionPath();
     void parsesHostAdmission();
@@ -185,6 +186,7 @@ private slots:
     void tlsWrongPinSendsNothing();
     void tlsRateLimitOnBearerCall();
     void tlsRequiresTls13();
+    void tlsConnectAsksForRelayOnlyWhenForced();
 
     // Keepalive
     void keepaliveCadence();
@@ -506,6 +508,32 @@ void TestPlankBroker::rejectsMalformedLeases()
     }
 }
 
+void TestPlankBroker::parsesLeaseRoute()
+{
+    const QString body = QStringLiteral(R"({%1"endpoint":"%2","port":%3,
+        "host_cert_sha256":"%4","username":"anna","gssapi_token":"YWJj","expires_in":30})");
+    PlankBroker::Lease lease;
+    // Older brokers send no route: relayed.
+    QVERIFY(PlankBroker::parseLease(body.arg(QString(), QStringLiteral("remote.bde.run"),
+                                             QStringLiteral("29042"), HostPin).toUtf8(), lease));
+    QCOMPARE(lease.route, PlankBroker::Route::Relay);
+    QVERIFY(PlankBroker::parseLease(body.arg(QStringLiteral(R"("route":"relay",)"), QStringLiteral("remote.bde.run"),
+                                             QStringLiteral("29042"), HostPin).toUtf8(), lease));
+    QCOMPARE(lease.route, PlankBroker::Route::Relay);
+    // Direct: the workstation's own IPv4 address and PLANK port.
+    QVERIFY(PlankBroker::parseLease(body.arg(QStringLiteral(R"("route":"direct",)"), QStringLiteral("192.168.10.57"),
+                                             QStringLiteral("28989"), HostPin).toUtf8(), lease));
+    QCOMPARE(lease.route, PlankBroker::Route::Direct);
+    QCOMPARE(lease.endpoint, QStringLiteral("192.168.10.57"));
+    QCOMPARE(lease.port, quint16(28989));
+    for (const char* route : {R"("route":"tunnel",)", R"("route":1,)", R"("route":null,)"}) {
+        QVERIFY2(!PlankBroker::parseLease(body.arg(QString::fromLatin1(route), QStringLiteral("remote.bde.run"),
+                                                   QStringLiteral("29042"), HostPin).toUtf8(), lease), route);
+        QCOMPARE(lease.route, PlankBroker::Route::Relay);
+        QVERIFY(lease.gssapiToken.isEmpty());
+    }
+}
+
 void TestPlankBroker::classifiesBearerStatus()
 {
     using PlankBroker::BearerStatus;
@@ -747,6 +775,29 @@ void TestPlankBroker::tlsRateLimitOnBearerCall()
     } catch (const PlankBrokerError& error) {
         QCOMPARE(error.kind(), PlankBrokerError::SessionExpired);
     }
+}
+
+void TestPlankBroker::tlsConnectAsksForRelayOnlyWhenForced()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = QStringLiteral(R"({"route":"direct","endpoint":"192.168.10.57","port":28989,)"
+                                 R"("host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj",)"
+                                 R"("expires_in":30})").arg(HostPin).toUtf8();
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const PlankBroker::Lease direct = client.connect(QStringLiteral("t"), QStringLiteral("ws01.example.test"));
+    QCOMPARE(direct.route, PlankBroker::Route::Direct);
+    QVERIFY(server.request.startsWith("POST /v1/hosts/ws01.example.test/connect HTTP/1.1\r\n"));
+    QVERIFY(server.request.endsWith("{}"));
+
+    server.request.clear();
+    server.body = QStringLiteral(R"({"route":"relay","endpoint":"remote.bde.run","port":29042,)"
+                                 R"("host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj",)"
+                                 R"("expires_in":30})").arg(HostPin).toUtf8();
+    const PlankBroker::Lease relayed = client.connect(QStringLiteral("t"), QStringLiteral("ws01.example.test"), true);
+    QCOMPARE(relayed.route, PlankBroker::Route::Relay);
+    QCOMPARE(relayed.port, quint16(29042));
+    QVERIFY(server.request.endsWith("{\"route\":\"relay\"}"));
 }
 
 void TestPlankBroker::tlsRequiresTls13()

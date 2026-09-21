@@ -259,13 +259,15 @@ QVector<PlankBroker::Host> PlankBrokerClient::hosts(const QString& sessionToken)
     return hosts;
 }
 
-PlankBroker::Lease PlankBrokerClient::connect(const QString& sessionToken, const QString& hostId) const
+PlankBroker::Lease PlankBrokerClient::connect(const QString& sessionToken, const QString& hostId,
+                                              bool forceRelay) const
 {
     if (sessionToken.isEmpty()) throw PlankBrokerError(PlankBrokerError::SessionExpired);
     if (!PlankBroker::isHostId(hostId)) throw PlankBrokerError(PlankBrokerError::Denied);
-    const QJsonObject empty;
+    QJsonObject body;
+    if (forceRelay) body.insert(QStringLiteral("route"), QStringLiteral("relay"));
     Response response = request("POST", PlankBroker::hostActionPath(hostId, QStringLiteral("connect")),
-                                &empty, sessionToken);
+                                &body, sessionToken);
     throwForBearerStatus(response.status, response.body);
     PlankBroker::Lease lease;
     const bool parsed = PlankBroker::parseLease(response.body, lease);
