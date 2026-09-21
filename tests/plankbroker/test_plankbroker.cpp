@@ -650,6 +650,10 @@ void TestPlankBroker::brokeredTransportUsesLeasedPort()
     QVERIFY(PlankBroker::resolveTransportTarget(HostPin, 29042, 0, QString(), target));
     QCOMPARE(target.port, quint16(29042));
     QCOMPARE(target.certificateSha256, HostPin);
+    // Real hosts report the digest in upper-case hex (Sunshine util::hex_vec).
+    QVERIFY(PlankBroker::resolveTransportTarget(HostPin, 29042, 28989, QString(HostPin).toUpper(), target));
+    QCOMPARE(target.port, quint16(29042));
+    QCOMPARE(target.certificateSha256, HostPin);
 }
 
 void TestPlankBroker::brokeredTransportRequiresPinnedCertificate()
@@ -658,6 +662,7 @@ void TestPlankBroker::brokeredTransportRequiresPinnedCertificate()
     const QString other = QString(HostPin).replace(0, 1, QStringLiteral("f"));
     QVERIFY(!PlankBroker::resolveTransportTarget(HostPin, 29042, 28989, other, target));
     QCOMPARE(target.port, quint16(0));
+    QVERIFY(!PlankBroker::resolveTransportTarget(HostPin, 29042, 28989, other.toUpper(), target));
     QVERIFY(!PlankBroker::resolveTransportTarget(QStringLiteral("not-a-pin"), 29042, 28989, HostPin, target));
     QVERIFY(!PlankBroker::resolveTransportTarget(HostPin, 0, 28989, HostPin, target));
 }
