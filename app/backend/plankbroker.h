@@ -242,7 +242,12 @@ struct Host {
     QString reason;
 };
 
+// Route of a brokered connect: Relay = endpoint:port is a broker lease,
+// Direct = endpoint:port is the workstation itself (client on the office LAN).
+enum class Route { Relay, Direct };
+
 struct Lease {
+    Route route = Route::Relay;
     QString endpoint;
     quint16 port = 0;
     QString hostCertSha256;
@@ -453,6 +458,13 @@ inline bool parseLease(const QByteArray& body, Lease& lease)
     parsed.username = object.value(QStringLiteral("username")).toString();
     parsed.gssapiToken = object.value(QStringLiteral("gssapi_token")).toString();
     const QJsonValue expires = object.value(QStringLiteral("expires_in"));
+    // Brokers before the direct route omit "route": everything was relayed.
+    const QJsonValue route = object.value(QStringLiteral("route"));
+    if (route == QJsonValue(QStringLiteral("direct"))) {
+        parsed.route = Route::Direct;
+    } else if (!route.isUndefined() && route != QJsonValue(QStringLiteral("relay"))) {
+        return false;
+    }
     if (!isEndpointName(parsed.endpoint) || !port.isDouble() ||
             port.toDouble() != static_cast<double>(port.toInt()) ||
             port.toInt() < 1 || port.toInt() > 65535 ||

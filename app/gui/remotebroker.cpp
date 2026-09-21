@@ -381,6 +381,9 @@ void RemoteBroker::connectToHost(const QString& hostId)
         QString hostFailure;
         try {
             PlankBroker::Lease lease = PlankBrokerClient(config).connect(token->get(), hostId);
+            // Office LAN: the broker hands out the workstation itself; the flow is identical.
+            qInfo() << "Remote access route to" << hostId << ":"
+                    << (lease.route == PlankBroker::Route::Direct ? "direct" : "relay");
             computer = prepareBrokeredComputer(lease, hostId, hostName, defaults.found,
                                                defaults.videoProfile, defaults.captureSource,
                                                defaults.scalingMode, defaults.hostLayout,
