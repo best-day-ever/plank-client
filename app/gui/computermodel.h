@@ -72,7 +72,7 @@ public:
                                           const QVariantList& profileBitratesKbps);
 
 signals:
-    void authenticationCompleted(QVariant error);
+    void authenticationCompleted(QVariant error, int computerIndex);
     void authenticationTakeoverRequested();
     void authenticationCancelled();
 

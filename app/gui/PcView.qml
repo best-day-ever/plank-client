@@ -45,10 +45,9 @@ CenteredGridView {
         ComputerManager.computerAddCompleted.disconnect(addComplete)
     }
 
-    function authenticationComplete(error)
+    function authenticationComplete(error, pcIndex)
     {
         authenticationTakeoverDialog.close()
-        var pcIndex = loginDialog.pcIndex
         loginDialog.close()
         if (error !== undefined) {
             errorDialog.text = error

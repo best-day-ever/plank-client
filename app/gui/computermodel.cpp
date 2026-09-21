@@ -343,7 +343,9 @@ void ComputerModel::handleAuthenticationCompleted(NvComputer* computer, QString 
     if (computer != m_AuthenticatingComputer) return;
     m_AuthenticatingComputer = nullptr;
     m_AuthenticationTakeover.clear();
-    emit authenticationCompleted(error.isEmpty() ? QVariant() : error);
+    const int index = m_Computers.indexOf(computer);
+    if (index < 0 && error.isEmpty()) error = tr("The bookmark was removed during sign-in.");
+    emit authenticationCompleted(error.isEmpty() ? QVariant() : error, index);
 }
 
 void ComputerModel::respondToAuthenticationTakeover(bool accepted)
