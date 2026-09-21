@@ -1,6 +1,7 @@
 // plank-passkey: Secure Enclave passkey helper for the PLANK Client's
 // Remote (broker) mode. Contract: bde-linux docs/plank-broker.md section 13
-// (13.1 signature format verified by FreeIPA, 13.4 helper interface).
+// (13.1 signature format verified by FreeIPA, 13.4 helper interface) and
+// section 14.1 (device key that binds a remote session to this Mac).
 //
 // The key is a CryptoKit Secure Enclave P-256 key that requires user
 // presence (Touch ID or the Mac password) for every signature. Only its
@@ -16,8 +17,18 @@
 //   delete --rp <rp_id> --user <name> [--credential-id <b64>] -> {"deleted":n}
 //   self-test                           stdin as for assert; signs with a throwaway software key through
 //                                       the same code path -> assert output plus "public_key"
+//   device-key public --broker <host>   -> {"public_key"}; creates the broker's device key on first use
+//   device-key sign --broker <host>     stdin {"message":"<b64>"} -> {"signature"}; exit 3 without a key
+//   device-key self-test                stdin as for sign; throwaway software key through the same
+//                                       signing code -> {"public_key","signature"}
 // Exit codes: 0 ok, 1 failure, 2 invalid input, 3 no matching local key,
 //             4 user presence not confirmed (cancelled or failed).
+//
+// Device keys (14.1) are Secure Enclave P-256 keys WITHOUT user presence: the
+// Client signs every bearer request silently, and the key still cannot leave
+// this Mac or be used while it is locked. One key per broker host, stored as
+//   ~/Library/Application Support/PLANK/device-keys/<broker-host>.json
+// a sibling of passkeys/, so list/assert/delete never see a device key.
 //
 // Signature format (13.1): authData = SHA-256(rp_id) || 0x05 (UP|UV) || counter 00 00 00 00,
 // signature = DER ECDSA-P256-SHA256(authData || challenge), challenge = the raw 32 bytes.
@@ -212,6 +223,39 @@ func ensurePrivateDirectory(_ url: URL, ownedLevels: [URL]) throws {
     }
 }
 
+enum PrivateWrite {
+    case written
+    case exists   // replace == false and the final name was taken meanwhile
+}
+
+// Writes `data` owner-only to `temporary` (O_EXCL|O_NOFOLLOW, fsync), then
+// renames it over `final` (replace) or hard-links it to `final` without ever
+// overwriting an existing file (!replace).
+func writeOwnerOnlyFile(_ data: Data, temporary: URL, final: URL, replace: Bool) throws -> PrivateWrite {
+    let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+    guard descriptor >= 0 else { throw HelperError(.failure, "cannot write the key file") }
+    let written = data.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+    let synced = fsync(descriptor) == 0
+    close(descriptor)
+    guard written == data.count, synced else {
+        unlink(temporary.path)
+        throw HelperError(.failure, "cannot write the key file")
+    }
+    if replace {
+        guard rename(temporary.path, final.path) == 0 else {
+            unlink(temporary.path)
+            throw HelperError(.failure, "cannot write the key file")
+        }
+        return .written
+    }
+    let linked = link(temporary.path, final.path) == 0
+    let linkError = errno
+    unlink(temporary.path)
+    if linked { return .written }
+    if linkError == EEXIST { return .exists }
+    throw HelperError(.failure, "cannot write the key file")
+}
+
 func isOwnerOnlyFile(_ path: String) -> Bool {
     var info = stat()
     guard lstat(path, &info) == 0 else { return false }
@@ -301,15 +345,7 @@ func create(rpId: String, username: String) throws -> [String: Any] {
     let data = try encoder.encode(stored)
     let final = userDirectory.appendingPathComponent(hex(credentialId) + ".json")
     let temporary = userDirectory.appendingPathComponent(".\(hex(credentialId)).tmp")
-    let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-    guard descriptor >= 0 else { throw HelperError(.failure, "cannot write the key file") }
-    let written = data.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
-    let synced = fsync(descriptor) == 0
-    close(descriptor)
-    guard written == data.count, synced, rename(temporary.path, final.path) == 0 else {
-        unlink(temporary.path)
-        throw HelperError(.failure, "cannot write the key file")
-    }
+    _ = try writeOwnerOnlyFile(data, temporary: temporary, final: final, replace: true)
     return [
         "credential_id": credentialId.base64EncodedString(),
         "public_key": stored.public_key,
@@ -420,6 +456,197 @@ func delete(rpId: String, username: String, credentialId: String?) throws -> [St
     return ["deleted": deleted]
 }
 
+// MARK: - Device key (section 14.1)
+
+struct StoredDeviceKey: Codable {
+    var version: Int
+    var broker: String
+    var public_key: String
+    var key: String
+    var created: String
+}
+
+func deviceKeyStoreRoot() throws -> URL {
+    if let override = ProcessInfo.processInfo.environment["PLANK_DEVICE_KEY_STORE"], !override.isEmpty {
+        guard override.hasPrefix("/") else { throw HelperError(.invalidInput, "PLANK_DEVICE_KEY_STORE must be absolute") }
+        return URL(fileURLWithPath: override, isDirectory: true)
+    }
+    guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        throw HelperError(.failure, "no Application Support directory")
+    }
+    return support.appendingPathComponent("PLANK", isDirectory: true)
+        .appendingPathComponent("device-keys", isDirectory: true)
+}
+
+enum DeviceKeyFile {
+    case missing
+    case damaged                      // a private regular file that is not a valid key record
+    case found(StoredDeviceKey, P256.Signing.PublicKey)
+}
+
+func deviceKeyURL(root: URL, broker: String) -> URL {
+    root.appendingPathComponent(broker + ".json", isDirectory: false)
+}
+
+func loadDeviceKey(root: URL, broker: String) throws -> DeviceKeyFile {
+    let file = deviceKeyURL(root: root, broker: broker)
+    var info = stat()
+    guard lstat(file.path, &info) == 0 else {
+        if errno == ENOENT { return .missing }
+        throw HelperError(.failure, "cannot read the device key")
+    }
+    // A symlink, another owner's file or a readable file is never used or replaced.
+    guard isOwnerOnlyFile(file.path) else {
+        throw HelperError(.failure, "the device key file is not a private regular file")
+    }
+    guard let data = try? Data(contentsOf: file),
+          let key = try? JSONDecoder().decode(StoredDeviceKey.self, from: data),
+          key.version == 1, key.broker == broker, decodeBase64(key.key) != nil,
+          let der = decodeBase64(key.public_key),
+          let publicKey = try? P256.Signing.PublicKey(derRepresentation: der) else {
+        return .damaged
+    }
+    return .found(key, publicKey)
+}
+
+// Unwraps the Secure Enclave key (no user presence, so no prompt).
+func openDeviceKey(_ stored: StoredDeviceKey, publicKey: P256.Signing.PublicKey) throws
+    -> SecureEnclave.P256.Signing.PrivateKey {
+    guard let blob = decodeBase64(stored.key) else {
+        throw HelperError(.failure, "the device key file is damaged")
+    }
+    let key: SecureEnclave.P256.Signing.PrivateKey
+    do {
+        key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob)
+    } catch {
+        throw HelperError(.failure, "the device key cannot be used on this Mac: \(error)")
+    }
+    guard key.publicKey.derRepresentation == publicKey.derRepresentation else {
+        throw HelperError(.failure, "the device key file is inconsistent")
+    }
+    return key
+}
+
+func devicePublicKey(broker: String) throws -> [String: Any] {
+    guard SecureEnclave.isAvailable else {
+        throw HelperError(.failure, "this Mac has no Secure Enclave")
+    }
+    let root = try deviceKeyStoreRoot()
+    try ensurePrivateDirectory(root, ownedLevels: [root])
+    let file = deviceKeyURL(root: root, broker: broker)
+    // Two rounds: a concurrent first use may create the key between our check
+    // and our write; a new key never overwrites one, the first key wins.
+    for _ in 0..<2 {
+        var replace = false
+        switch try loadDeviceKey(root: root, broker: broker) {
+        case let .found(stored, publicKey):
+            if (try? openDeviceKey(stored, publicKey: publicKey)) != nil {
+                return ["public_key": stored.public_key]
+            }
+            // Not usable here (e.g. copied from another Mac): replaced below,
+            // but only once a new key exists (never left without a key).
+            replace = true
+        case .damaged:
+            replace = true
+        case .missing:
+            break
+        }
+
+        var error: Unmanaged<CFError>?
+        guard let access = SecAccessControlCreateWithFlags(kCFAllocatorDefault,
+                                                           kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                                                           [.privateKeyUsage], &error) else {
+            throw HelperError(.failure, "cannot create the access control: \(String(describing: error?.takeRetainedValue()))")
+        }
+        let key: SecureEnclave.P256.Signing.PrivateKey
+        do {
+            key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: access)
+        } catch {
+            throw HelperError(.failure, "Secure Enclave key creation failed: \(error)")
+        }
+        let stored = StoredDeviceKey(version: 1, broker: broker,
+                                     public_key: key.publicKey.derRepresentation.base64EncodedString(),
+                                     key: key.dataRepresentation.base64EncodedString(),
+                                     created: ISO8601DateFormatter().string(from: Date()))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = try encoder.encode(stored)
+        var suffix = [UInt8](repeating: 0, count: 8)
+        guard SecRandomCopyBytes(kSecRandomDefault, suffix.count, &suffix) == errSecSuccess else {
+            throw HelperError(.failure, "no randomness for the temporary file")
+        }
+        let temporary = root.appendingPathComponent(".\(broker).\(hex(Data(suffix))).tmp")
+        if try writeOwnerOnlyFile(data, temporary: temporary, final: file, replace: replace) == .written {
+            return ["public_key": stored.public_key]
+        }
+    }
+    throw HelperError(.failure, "cannot create the device key")
+}
+
+func parseDeviceSignRequest(_ input: Data) throws -> Data {
+    guard input.count <= maximumInputBytes,
+          let object = try? JSONSerialization.jsonObject(with: input),
+          let dictionary = object as? [String: Any],
+          let text = dictionary["message"] as? String,
+          let message = decodeBase64(text), !message.isEmpty else {
+        throw HelperError(.invalidInput, "stdin must be {\"message\":\"<standard base64>\"}")
+    }
+    return message
+}
+
+// Shared by the Secure Enclave and self-test paths: DER ECDSA-P256-SHA256
+// over the message, checked against the public key before it is handed out.
+func deviceSignature(message: Data, publicKey: P256.Signing.PublicKey,
+                     sign: (Data) throws -> P256.Signing.ECDSASignature) throws -> [String: Any] {
+    let signature: P256.Signing.ECDSASignature
+    do {
+        signature = try sign(message)
+    } catch {
+        throw HelperError(.failure, "device key signing failed: \(error)")
+    }
+    guard publicKey.isValidSignature(signature, for: message) else {
+        throw HelperError(.failure, "signature self-check failed")
+    }
+    return ["signature": signature.derRepresentation.base64EncodedString()]
+}
+
+func deviceSign(broker: String) throws -> [String: Any] {
+    let message = try parseDeviceSignRequest(try readStandardInput())
+    // `sign` never creates a key: without one the Client stays unbound.
+    guard case let .found(stored, publicKey) = try loadDeviceKey(root: try deviceKeyStoreRoot(), broker: broker) else {
+        throw HelperError(.noMatchingKey, "no device key for this broker")
+    }
+    guard SecureEnclave.isAvailable else {
+        throw HelperError(.failure, "this Mac has no Secure Enclave")
+    }
+    let key = try openDeviceKey(stored, publicKey: publicKey)
+    return try deviceSignature(message: message, publicKey: publicKey) { try key.signature(for: $0) }
+}
+
+func deviceSelfTest() throws -> [String: Any] {
+    let message = try parseDeviceSignRequest(try readStandardInput())
+    let key = P256.Signing.PrivateKey()
+    var output = try deviceSignature(message: message, publicKey: key.publicKey) { try key.signature(for: $0) }
+    output["public_key"] = key.publicKey.derRepresentation.base64EncodedString()
+    return output
+}
+
+func deviceKeyCommand(_ arguments: ArraySlice<String>) throws -> [String: Any] {
+    guard let subcommand = arguments.first else { throw HelperError(.invalidInput, usage) }
+    let rest = arguments.dropFirst()
+    if subcommand == "self-test" {
+        guard rest.isEmpty else { throw HelperError(.invalidInput, usage) }
+        return try deviceSelfTest()
+    }
+    guard subcommand == "public" || subcommand == "sign" else { throw HelperError(.invalidInput, usage) }
+    let options = try parseOptions(rest, allowed: ["broker"])
+    try requireOptions(options, ["broker"])
+    guard let broker = options["broker"], isPlainHostname(broker) else {
+        throw HelperError(.invalidInput, "--broker must be a plain lower-case host name")
+    }
+    return subcommand == "public" ? try devicePublicKey(broker: broker) : try deviceSign(broker: broker)
+}
+
 // MARK: - Main
 
 func emit(_ object: Any) throws {
@@ -447,6 +674,9 @@ usage: plank-passkey create --rp <rp_id> --user <name>
        plank-passkey list [--rp <rp_id>] [--user <name>]
        plank-passkey delete --rp <rp_id> --user <name> [--credential-id <b64>]
        plank-passkey self-test                           (stdin: passkey prompt JSON)
+       plank-passkey device-key public --broker <host>
+       plank-passkey device-key sign --broker <host>     (stdin: {"message":"<b64>"})
+       plank-passkey device-key self-test                (stdin: {"message":"<b64>"})
 """
 
 do {
@@ -476,6 +706,8 @@ do {
     case "self-test":
         guard rest.isEmpty else { throw HelperError(.invalidInput, usage) }
         try emit(try selfTest())
+    case "device-key":
+        try emit(try deviceKeyCommand(rest))
     default:
         throw HelperError(.invalidInput, usage)
     }

@@ -163,6 +163,41 @@ PlankPasskeyHelper::Result PlankPasskeyHelper::remove(const QString& rpId, const
                QByteArray(), QuickTimeoutMs);
 }
 
+QString PlankPasskeyHelper::parseDevicePublicKey(const QByteArray& output)
+{
+    QJsonObject object;
+    if (!PlankBroker::parseObject(output.trimmed(), object) || object.size() != 1) return QString();
+    const QString key = object.value(QStringLiteral("public_key")).toString();
+    return PlankBroker::isDevicePublicKey(key) ? key : QString();
+}
+
+QString PlankPasskeyHelper::parseDeviceSignature(const QByteArray& output)
+{
+    QJsonObject object;
+    if (!PlankBroker::parseObject(output.trimmed(), object) || object.size() != 1) return QString();
+    const QString signature = object.value(QStringLiteral("signature")).toString();
+    return PlankBroker::isDeviceSignature(signature) ? signature : QString();
+}
+
+QString PlankPasskeyHelper::devicePublicKey(const QString& brokerHost) const
+{
+    if (!PlankBroker::isPasskeyRpId(brokerHost)) return QString();
+    const Result result = run({QStringLiteral("device-key"), QStringLiteral("public"),
+                               QStringLiteral("--broker"), brokerHost}, QByteArray(), DeviceKeyTimeoutMs);
+    return result.ok() ? parseDevicePublicKey(result.output) : QString();
+}
+
+QString PlankPasskeyHelper::deviceSign(const QString& brokerHost, const QByteArray& message) const
+{
+    if (!PlankBroker::isPasskeyRpId(brokerHost) || message.isEmpty()) return QString();
+    const QByteArray input = QJsonDocument(QJsonObject {
+        {QStringLiteral("message"), QString::fromLatin1(message.toBase64())},
+    }).toJson(QJsonDocument::Compact);
+    const Result result = run({QStringLiteral("device-key"), QStringLiteral("sign"),
+                               QStringLiteral("--broker"), brokerHost}, input, DeviceKeyTimeoutMs);
+    return result.ok() ? parseDeviceSignature(result.output) : QString();
+}
+
 PlankBrokerClient::PasskeyAssertResult PlankPasskeyHelper::assertion(const PlankBroker::PasskeyRequest& request,
                                                                      const QString& username,
                                                                      PlankBroker::PasskeyAssertion& assertion) const

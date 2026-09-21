@@ -124,6 +124,18 @@ PlankBrokerClient::Config RemoteBroker::clientConfig() const
     config.host = m_Preferences->brokerHost;
     config.port = static_cast<quint16>(qBound(0, m_Preferences->brokerPort, 65535));
     config.pins = m_Preferences->brokerPins;
+    // Device-bound sessions (bde-linux docs/plank-broker.md 14): with the
+    // bundled helper (macOS) the session is bound to a Secure Enclave key
+    // for this broker host and every bearer call carries a proof. No helper,
+    // an IP-literal broker or any helper failure: unbound, exactly as before.
+    const QString deviceHost = m_Preferences->brokerHost.trimmed().toLower();
+    if (m_PasskeyHelper.available() && PlankBroker::isPasskeyRpId(deviceHost)) {
+        const PlankPasskeyHelper helper(m_PasskeyHelper.program());
+        config.devicePublicKey = [helper, deviceHost]() { return helper.devicePublicKey(deviceHost); };
+        config.deviceSigner = [helper, deviceHost](const QByteArray& message) {
+            return helper.deviceSign(deviceHost, message);
+        };
+    }
     return config;
 }
 
@@ -220,6 +232,7 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
             }
             token = reply.sessionToken;
             confirmedUser = reply.username.isEmpty() ? user : reply.username;
+            qInfo() << "Remote access session device-bound:" << reply.deviceBound;
         } catch (const PlankBrokerError& error) {
             failure = std::make_unique<PlankBrokerError>(error);
         }
@@ -297,6 +310,9 @@ void RemoteBroker::signInWithPasskey(const QString& username)
         }
         QString token = outcome.reply.sessionToken;
         outcome.reply.sessionToken.fill(QChar('\0'));
+        if (outcome.result == PlankBrokerClient::PasskeySignIn::Authenticated) {
+            qInfo() << "Remote access session device-bound:" << outcome.reply.deviceBound;
+        }
         const QString confirmedUser = outcome.reply.username.isEmpty() ? user : outcome.reply.username;
         const auto result = outcome.result;
         QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, result, failure]() mutable {

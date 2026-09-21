@@ -230,6 +230,44 @@ QByteArray readFile(const QString& path)
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
+// A raw HTTP/1.1 request as TestBrokerServer recorded it.
+struct RecordedRequest {
+    QByteArray method;
+    QByteArray target;
+    QMap<QByteArray, QByteArray> headers; // lower-case names
+    QByteArray body;
+};
+
+RecordedRequest parseRecordedRequest(const QByteArray& raw)
+{
+    RecordedRequest parsed;
+    const int headerEnd = raw.indexOf("\r\n\r\n");
+    if (headerEnd < 0) return parsed;
+    const QList<QByteArray> lines = raw.left(headerEnd).split('\n');
+    const QList<QByteArray> requestLine = lines.value(0).trimmed().split(' ');
+    parsed.method = requestLine.value(0);
+    parsed.target = requestLine.value(1);
+    for (int i = 1; i < lines.size(); ++i) {
+        const int colon = lines.at(i).indexOf(':');
+        if (colon > 0) parsed.headers.insert(lines.at(i).left(colon).trimmed().toLower(), lines.at(i).mid(colon + 1).trimmed());
+    }
+    parsed.body = raw.mid(headerEnd + 4);
+    return parsed;
+}
+
+// A DER-shaped stand-in signature (the client only checks its shape).
+QString fakeDeviceSignature(int serial)
+{
+    QByteArray der = QByteArray::fromHex("3044022001020304050607080910111213141516171819202122232425262728293031"
+                                         "3202200102030405060708091011121314151617181920212223242526272829303132");
+    der[5] = char(serial);
+    return QString::fromLatin1(der.toBase64());
+}
+
+// A P-256 SPKI DER prefix plus a fake point: the shape the helper prints.
+const QString DeviceSpki = QString::fromLatin1(
+        (QByteArray::fromHex("3059301306072a8648ce3d020106082a8648ce3d030107034200") + QByteArray(65, '\x04')).toBase64());
+
 QJsonObject fixedCaptureTopology()
 {
     return QJsonDocument::fromJson(R"({
@@ -324,6 +362,20 @@ private slots:
     void helperExitCodesMapToOutcomes();
     void helperListAndCreateParsing();
     void realHelperWithoutKeyFallsBack();
+
+    // Device-bound sessions (section 14)
+    void deviceProofMessageFormat();
+    void validatesDeviceKeysAndSignatures();
+    void parsesDeviceBound();
+    void tlsStartSendsDeviceKeyForBothMethods();
+    void tlsStartOmitsUnusableDeviceKey();
+    void tlsPasskeySignInSendsDeviceKey();
+    void tlsBearerCallsCarryDeviceProof();
+    void tlsBearerCallsWithoutSignerAreUnchanged();
+    void tlsDeviceSigningFailureSendsNoProof();
+    void tlsDeviceBoundSessionRejectionSignsOut();
+    void helperDeviceKeyCommands();
+    void realHelperDeviceKeyWithoutKey();
 };
 
 void TestPlankBroker::initTestCase()
@@ -1516,6 +1568,340 @@ void TestPlankBroker::realHelperWithoutKeyFallsBack()
     QVERIFY(PlankBroker::parsePasskeyAssertion(selfTest.output, request, assertion));
     QCOMPARE(QByteArray::fromBase64(assertion.authenticatorData.toLatin1()), passkeyAuthData(request.rpId));
     qunsetenv("PLANK_PASSKEY_STORE");
+}
+
+// ---------------------------------------------------------------------------
+// Device-bound sessions (bde-linux docs/plank-broker.md section 14)
+// ---------------------------------------------------------------------------
+
+void TestPlankBroker::deviceProofMessageFormat()
+{
+    // Golden string; hashes computed independently with `shasum -a 256`.
+    QCOMPARE(PlankBroker::deviceProofMessage("POST", "/v1/hosts/ws01.example.test/connect", 1790000000,
+                                             QStringLiteral("tok"), "{}"),
+             QByteArray("plank-device-proof-v1\n"
+                        "POST\n"
+                        "/v1/hosts/ws01.example.test/connect\n"
+                        "1790000000\n"
+                        "1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n"
+                        "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"));
+    // GET: empty body; method upper-cased; query never part of the path.
+    QCOMPARE(PlankBroker::deviceProofMessage("get", "/v1/hosts?x=1", 1, QStringLiteral("tok"), QByteArray()),
+             QByteArray("plank-device-proof-v1\nGET\n/v1/hosts\n1\n"
+                        "1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n"
+                        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+}
+
+void TestPlankBroker::validatesDeviceKeysAndSignatures()
+{
+    QVERIFY(PlankBroker::isDevicePublicKey(DeviceSpki));
+    QVERIFY(!PlankBroker::isDevicePublicKey(QString()));
+    QVERIFY(!PlankBroker::isDevicePublicKey(QString::fromLatin1(QByteArray(201, '\x30').toBase64())));
+    QVERIFY(PlankBroker::isDevicePublicKey(QString::fromLatin1(QByteArray(200, '\x30').toBase64())));
+    QVERIFY(!PlankBroker::isDevicePublicKey(QString::fromLatin1(QByteArray(91, '\x04').toBase64())));
+    QVERIFY(!PlankBroker::isDevicePublicKey(DeviceSpki.left(DeviceSpki.size() - 1)));
+    QVERIFY(!PlankBroker::isDevicePublicKey(DeviceSpki + QStringLiteral("\n")));
+    QVERIFY(PlankBroker::isDeviceSignature(fakeDeviceSignature(1)));
+    QVERIFY(!PlankBroker::isDeviceSignature(QString()));
+    QVERIFY(!PlankBroker::isDeviceSignature(QString::fromLatin1(QByteArray(73, '\x30').toBase64())));
+    QVERIFY(!PlankBroker::isDeviceSignature(QString::fromLatin1(QByteArray(70, '\x02').toBase64())));
+    QVERIFY(!PlankBroker::isDeviceSignature(QStringLiteral("not base64!")));
+}
+
+void TestPlankBroker::parsesDeviceBound()
+{
+    auto parse = [](const char* body) { return PlankBroker::parseAuthReply(200, QByteArray(body)); };
+    const auto bound = parse(R"({"state":"authenticated","session_token":"t","expires_in":2592000,"device_bound":true})");
+    QCOMPARE(bound.kind, PlankBroker::ReplyKind::Authenticated);
+    QVERIFY(bound.deviceBound);
+    QCOMPARE(bound.expiresIn, 2592000);
+    const auto absent = parse(R"({"state":"authenticated","session_token":"t","expires_in":36000})");
+    QCOMPARE(absent.kind, PlankBroker::ReplyKind::Authenticated);
+    QVERIFY(!absent.deviceBound);
+    const auto unbound = parse(R"({"state":"authenticated","session_token":"t","device_bound":false})");
+    QCOMPARE(unbound.kind, PlankBroker::ReplyKind::Authenticated);
+    QVERIFY(!unbound.deviceBound);
+    // Tolerated, never taken as bound.
+    const auto odd = parse(R"({"state":"authenticated","session_token":"t","device_bound":"yes"})");
+    QCOMPARE(odd.kind, PlankBroker::ReplyKind::Authenticated);
+    QVERIFY(!odd.deviceBound);
+}
+
+void TestPlankBroker::tlsStartSendsDeviceKeyForBothMethods()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    const QByteArray passwordChallenge = R"({"state":"challenge","conversation_id":"c1","prompts":[)"
+                                         R"({"id":"password","style":"secret","text":"Password"},)"
+                                         R"({"id":"otp","style":"otp","text":"Authenticator code"}]})";
+    server.queue("200 OK", passwordChallenge);
+    server.queue("200 OK", passkeyChallengeReply());
+    server.queue("200 OK", passwordChallenge);
+    server.queue("200 OK", passkeyChallengeReply());
+    PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+    int provided = 0;
+    config.devicePublicKey = [&]() { ++provided; return DeviceSpki; };
+    const PlankBrokerClient bound(config);
+    QCOMPARE(bound.start(QStringLiteral("anna")).kind, PlankBroker::ReplyKind::Challenge);
+    QCOMPARE(bound.start(QStringLiteral("anna"), PlankBroker::AuthMethod::Passkey).kind, PlankBroker::ReplyKind::Challenge);
+    QCOMPARE(provided, 2);
+    const PlankBrokerClient unbound(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    QCOMPARE(unbound.start(QStringLiteral("anna")).kind, PlankBroker::ReplyKind::Challenge);
+    QCOMPARE(unbound.start(QStringLiteral("anna"), PlankBroker::AuthMethod::Passkey).kind, PlankBroker::ReplyKind::Challenge);
+
+    QCOMPARE(server.requestLog.size(), 4);
+    QCOMPARE(parseRecordedRequest(server.requestLog.at(0)).body,
+             QStringLiteral(R"({"device_key":"%1","username":"anna"})").arg(DeviceSpki).toUtf8());
+    QCOMPARE(parseRecordedRequest(server.requestLog.at(1)).body,
+             QStringLiteral(R"({"device_key":"%1","method":"passkey","username":"anna"})").arg(DeviceSpki).toUtf8());
+    QCOMPARE(parseRecordedRequest(server.requestLog.at(2)).body, QByteArray(R"({"username":"anna"})"));
+    QCOMPARE(parseRecordedRequest(server.requestLog.at(3)).body, QByteArray(R"({"method":"passkey","username":"anna"})"));
+    for (const QByteArray& raw : server.requestLog) {
+        const RecordedRequest request = parseRecordedRequest(raw);
+        QCOMPARE(request.target, QByteArray("/v1/auth/start"));
+        // No bearer, so no proof, on sign-in requests.
+        QVERIFY(!request.headers.contains("authorization"));
+        QVERIFY(!request.headers.contains("x-plank-device-proof"));
+        QVERIFY(!request.headers.contains("x-plank-device-time"));
+    }
+}
+
+void TestPlankBroker::tlsStartOmitsUnusableDeviceKey()
+{
+    // Helper missing or failing (empty) or printing garbage: sign in unbound.
+    for (const QString& key : {QString(), QStringLiteral("not base64!"), QString::fromLatin1(QByteArray(201, '\x30').toBase64())}) {
+        TestBrokerServer server(QSsl::TlsV1_3OrLater);
+        QVERIFY(server.listen());
+        server.body = passkeyChallengeReply();
+        PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+        config.devicePublicKey = [key]() { return key; };
+        QCOMPARE(PlankBrokerClient(config).start(QStringLiteral("anna"), PlankBroker::AuthMethod::Passkey).kind,
+                 PlankBroker::ReplyKind::Challenge);
+        QCOMPARE(server.requestLog.size(), 1);
+        QCOMPARE(parseRecordedRequest(server.requestLog.at(0)).body, QByteArray(R"({"method":"passkey","username":"anna"})"));
+    }
+}
+
+void TestPlankBroker::tlsPasskeySignInSendsDeviceKey()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", passkeyChallengeReply());
+    server.queue("200 OK", R"({"state":"authenticated","session_token":"tok-pk","expires_in":2592000,)"
+                           R"("username":"anna","device_bound":true})");
+    PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+    config.devicePublicKey = []() { return DeviceSpki; };
+    const PlankBrokerClient client(config);
+    const QByteArray authData = passkeyAuthData(QStringLiteral("ipa.bde.run"));
+    const auto outcome = client.signInWithPasskey(QStringLiteral("anna"), QStringLiteral("ipa.bde.run"),
+            [&](const PlankBroker::PasskeyRequest& request, PlankBroker::PasskeyAssertion& assertion) {
+        return PlankBroker::parsePasskeyAssertion(assertionJson(PasskeyCredential, authData,
+                                                                QByteArray::fromBase64(fakeDeviceSignature(1).toLatin1())),
+                                                  request, assertion) ?
+                    PlankBrokerClient::PasskeyAssertResult::Signed : PlankBrokerClient::PasskeyAssertResult::Failed;
+    });
+    QCOMPARE(outcome.result, PlankBrokerClient::PasskeySignIn::Authenticated);
+    QVERIFY(outcome.reply.deviceBound);
+    QCOMPARE(outcome.reply.expiresIn, 2592000);
+    QCOMPARE(server.requestLog.size(), 2);
+    QCOMPARE(parseRecordedRequest(server.requestLog.at(0)).body,
+             QStringLiteral(R"({"device_key":"%1","method":"passkey","username":"anna"})").arg(DeviceSpki).toUtf8());
+    // The key rides along the conversation; /v1/auth/respond does not repeat it.
+    QVERIFY(!server.requestLog.at(1).contains("device_key"));
+}
+
+void TestPlankBroker::tlsBearerCallsCarryDeviceProof()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", R"({"hosts":[{"id":"ws01.example.test","name":"ws01","online":true,)"
+                           R"("in_use_by":null,"connectable":true,"reason":null}]})");
+    server.queue("200 OK", QStringLiteral(R"({"route":"relay","endpoint":"127.0.0.1","port":29001,)"
+                                          R"("host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj",)"
+                                          R"("expires_in":30})").arg(HostPin).toUtf8());
+    server.queue("200 OK", R"({"state":"ok"})");
+    server.queue("200 OK", R"({"state":"ok"})");
+    PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+    QList<QByteArray> signedMessages;
+    QList<QString> signatures;
+    config.deviceSigner = [&](const QByteArray& message) {
+        signedMessages.append(message);
+        signatures.append(fakeDeviceSignature(signedMessages.size()));
+        return signatures.last();
+    };
+    const QString token = QStringLiteral("bound-session-token");
+    const qint64 before = QDateTime::currentSecsSinceEpoch();
+    const PlankBrokerClient client(config);
+    QCOMPARE(client.hosts(token).size(), 1);
+    QCOMPARE(client.connect(token, QStringLiteral("ws01.example.test")).port, quint16(29001));
+    client.keepalive(token, QStringLiteral("ws01.example.test"));
+    client.logout(token);
+    const qint64 after = QDateTime::currentSecsSinceEpoch();
+
+    QCOMPARE(server.requestLog.size(), 4);
+    QCOMPARE(signedMessages.size(), 4);
+    const QList<QPair<QByteArray, QByteArray>> expected {
+        {"GET", "/v1/hosts"},
+        {"POST", "/v1/hosts/ws01.example.test/connect"},
+        {"POST", "/v1/hosts/ws01.example.test/keepalive"},
+        {"POST", "/v1/logout"},
+    };
+    const QByteArray tokenHash = QCryptographicHash::hash(token.toUtf8(), QCryptographicHash::Sha256).toHex();
+    for (int i = 0; i < expected.size(); ++i) {
+        const RecordedRequest request = parseRecordedRequest(server.requestLog.at(i));
+        QCOMPARE(request.method, expected.at(i).first);
+        QCOMPARE(request.target, expected.at(i).second);
+        QCOMPARE(request.body, QByteArray(request.method == "GET" ? "" : "{}"));
+        QCOMPARE(request.headers.value("authorization"), "Bearer " + token.toLatin1());
+        const QByteArray time = request.headers.value("x-plank-device-time");
+        bool numeric = false;
+        const qint64 seconds = time.toLongLong(&numeric);
+        QVERIFY(numeric);
+        QVERIFY(seconds >= before && seconds <= after);
+        QCOMPARE(request.headers.value("x-plank-device-proof"), signatures.at(i).toLatin1());
+        // The signed message is the canonical string rebuilt from the bytes
+        // the broker actually received.
+        const QByteArray canonical = "plank-device-proof-v1\n" + request.method + "\n" + request.target + "\n" + time +
+                "\n" + tokenHash + "\n" + QCryptographicHash::hash(request.body, QCryptographicHash::Sha256).toHex();
+        QCOMPARE(signedMessages.at(i), canonical);
+        QCOMPARE(signedMessages.at(i), PlankBroker::deviceProofMessage(request.method, request.target, seconds,
+                                                                        token, request.body));
+    }
+}
+
+void TestPlankBroker::tlsBearerCallsWithoutSignerAreUnchanged()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", R"({"hosts":[]})");
+    server.queue("200 OK", R"({"state":"ok"})");
+    server.queue("200 OK", R"({"state":"ok"})");
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    QVERIFY(client.hosts(QStringLiteral("t")).isEmpty());
+    client.keepalive(QStringLiteral("t"), QStringLiteral("ws01.example.test"));
+    client.logout(QStringLiteral("t"));
+    QCOMPARE(server.requestLog.size(), 3);
+    for (const QByteArray& raw : server.requestLog) {
+        QVERIFY(!raw.toLower().contains("x-plank-device"));
+        QVERIFY(raw.contains("Authorization: Bearer t\r\n"));
+    }
+}
+
+void TestPlankBroker::tlsDeviceSigningFailureSendsNoProof()
+{
+    // The helper failed (empty) or printed something that is not a signature:
+    // the request still goes out, without proof headers.
+    for (const QString& signature : {QString(), QStringLiteral("garbage"), QString::fromLatin1(QByteArray(90, '\x30').toBase64())}) {
+        TestBrokerServer server(QSsl::TlsV1_3OrLater);
+        QVERIFY(server.listen());
+        server.body = R"({"hosts":[]})";
+        PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+        int calls = 0;
+        config.deviceSigner = [&](const QByteArray&) { ++calls; return signature; };
+        QVERIFY(PlankBrokerClient(config).hosts(QStringLiteral("t")).isEmpty());
+        QCOMPARE(calls, 1);
+        QCOMPARE(server.requestLog.size(), 1);
+        QVERIFY(!server.requestLog.at(0).toLower().contains("x-plank-device"));
+        QVERIFY(server.requestLog.at(0).contains("Authorization: Bearer t\r\n"));
+    }
+}
+
+void TestPlankBroker::tlsDeviceBoundSessionRejectionSignsOut()
+{
+    // A bound session without a valid proof is answered 401: SessionExpired.
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.status = "401 Unauthorized";
+    server.body = R"({"state":"denied"})";
+    PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+    config.deviceSigner = [](const QByteArray&) { return QString(); };
+    try {
+        PlankBrokerClient(config).hosts(QStringLiteral("t"));
+        QFAIL("401 must throw");
+    } catch (const PlankBrokerError& error) {
+        QCOMPARE(error.kind(), PlankBrokerError::SessionExpired);
+    }
+}
+
+void TestPlankBroker::helperDeviceKeyCommands()
+{
+    // parse
+    QCOMPARE(PlankPasskeyHelper::parseDevicePublicKey(QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8() + "\n"),
+             DeviceSpki);
+    QVERIFY(PlankPasskeyHelper::parseDevicePublicKey(R"({"public_key":"x"})").isEmpty());
+    QVERIFY(PlankPasskeyHelper::parseDevicePublicKey(QStringLiteral(R"({"public_key":"%1","extra":1})").arg(DeviceSpki).toUtf8()).isEmpty());
+    QVERIFY(PlankPasskeyHelper::parseDevicePublicKey("[]").isEmpty());
+    const QString signature = fakeDeviceSignature(7);
+    QCOMPARE(PlankPasskeyHelper::parseDeviceSignature(QStringLiteral(R"({"signature":"%1"})").arg(signature).toUtf8()), signature);
+    QVERIFY(PlankPasskeyHelper::parseDeviceSignature(R"({"signature":""})").isEmpty());
+
+    // public: argv, no stdin, parsed output.
+    QTemporaryDir directory;
+    const QString publicHelper = fakeHelper(directory, 0, QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8());
+    QCOMPARE(PlankPasskeyHelper(publicHelper).devicePublicKey(QStringLiteral("remote.bde.run")), DeviceSpki);
+    QCOMPARE(readFile(publicHelper + QStringLiteral(".args")), QByteArray("device-key\npublic\n--broker\nremote.bde.run\n"));
+    QVERIFY(readFile(publicHelper + QStringLiteral(".stdin")).isEmpty());
+
+    // sign: argv and {"message":"<b64>"} on stdin.
+    QTemporaryDir signDirectory;
+    const QString signHelper = fakeHelper(signDirectory, 0, QStringLiteral(R"({"signature":"%1"})").arg(signature).toUtf8());
+    const QByteArray message = PlankBroker::deviceProofMessage("GET", "/v1/hosts", 1790000000, QStringLiteral("t"), QByteArray());
+    QCOMPARE(PlankPasskeyHelper(signHelper).deviceSign(QStringLiteral("remote.bde.run"), message), signature);
+    QCOMPARE(readFile(signHelper + QStringLiteral(".args")), QByteArray("device-key\nsign\n--broker\nremote.bde.run\n"));
+    const QJsonObject input = QJsonDocument::fromJson(readFile(signHelper + QStringLiteral(".stdin"))).object();
+    QCOMPARE(input.size(), 1);
+    QCOMPARE(QByteArray::fromBase64(input.value(QStringLiteral("message")).toString().toLatin1()), message);
+
+    // No key (exit 3), other failures, missing helper: empty (unbound / no proof).
+    QTemporaryDir noKey;
+    QVERIFY(PlankPasskeyHelper(fakeHelper(noKey, 3, QByteArray())).deviceSign(QStringLiteral("remote.bde.run"), message).isEmpty());
+    QTemporaryDir failing;
+    const QString failingHelper = fakeHelper(failing, 1, QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8());
+    QVERIFY(PlankPasskeyHelper(failingHelper).devicePublicKey(QStringLiteral("remote.bde.run")).isEmpty());
+    QVERIFY(PlankPasskeyHelper(directory.filePath(QStringLiteral("missing"))).devicePublicKey(QStringLiteral("remote.bde.run")).isEmpty());
+    QVERIFY(PlankPasskeyHelper(QString()).deviceSign(QStringLiteral("remote.bde.run"), message).isEmpty());
+
+    // IP literals, upper case, ports and paths never reach the helper.
+    QTemporaryDir untouched;
+    const QString untouchedHelper = fakeHelper(untouched, 0, QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8());
+    for (const QString& host : {QStringLiteral("192.168.10.229"), QStringLiteral("Remote.BDE.run"),
+                                QStringLiteral("remote.bde.run:29000"), QStringLiteral("../x"), QString()}) {
+        QVERIFY(PlankPasskeyHelper(untouchedHelper).devicePublicKey(host).isEmpty());
+        QVERIFY(PlankPasskeyHelper(untouchedHelper).deviceSign(host, message).isEmpty());
+    }
+    QVERIFY(!QFileInfo::exists(untouchedHelper + QStringLiteral(".args")));
+}
+
+void TestPlankBroker::realHelperDeviceKeyWithoutKey()
+{
+    // The real helper, when the build provides it: without a device key `sign`
+    // exits 3 and creates nothing; the software-key self-test's output passes
+    // the Client's signature validation. (OpenSSL verification of the
+    // signature: tests/plankpasskey/test-plank-passkey.sh.)
+    const QString program = qEnvironmentVariable("PLANK_PASSKEY_HELPER");
+    if (program.isEmpty()) QSKIP("PLANK_PASSKEY_HELPER not set");
+    QTemporaryDir store;
+    QVERIFY(store.isValid());
+    const QString storePath = store.filePath(QStringLiteral("device-keys"));
+    qputenv("PLANK_DEVICE_KEY_STORE", storePath.toUtf8());
+    const PlankPasskeyHelper helper(program);
+    const QByteArray message = PlankBroker::deviceProofMessage("GET", "/v1/hosts", 1790000000, QStringLiteral("t"), QByteArray());
+    QVERIFY(helper.deviceSign(QStringLiteral("remote.bde.run"), message).isEmpty());
+    const QByteArray input = QJsonDocument(QJsonObject {{QStringLiteral("message"), QString::fromLatin1(message.toBase64())}})
+            .toJson(QJsonDocument::Compact);
+    const PlankPasskeyHelper::Result noKey = helper.run({QStringLiteral("device-key"), QStringLiteral("sign"),
+                                                         QStringLiteral("--broker"), QStringLiteral("remote.bde.run")},
+                                                        input, PlankPasskeyHelper::DeviceKeyTimeoutMs);
+    QVERIFY(noKey.ran);
+    QCOMPARE(noKey.exitCode, int(PlankPasskeyHelper::NoMatchingKey));
+    QVERIFY(!QFileInfo::exists(storePath));
+    const PlankPasskeyHelper::Result selfTest = helper.run({QStringLiteral("device-key"), QStringLiteral("self-test")},
+                                                           input, PlankPasskeyHelper::DeviceKeyTimeoutMs);
+    QVERIFY(selfTest.ok());
+    const QJsonObject output = QJsonDocument::fromJson(selfTest.output).object();
+    QVERIFY(PlankBroker::isDevicePublicKey(output.value(QStringLiteral("public_key")).toString()));
+    QVERIFY(PlankBroker::isDeviceSignature(output.value(QStringLiteral("signature")).toString()));
+    qunsetenv("PLANK_DEVICE_KEY_STORE");
 }
 
 QTEST_GUILESS_MAIN(TestPlankBroker)
