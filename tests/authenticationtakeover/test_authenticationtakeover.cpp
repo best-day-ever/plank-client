@@ -3,6 +3,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QQuickStyle>
 #include <QQuickWindow>
 #include <future>
 
@@ -10,6 +11,12 @@ class AuthenticationTakeoverTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void initTestCase()
+    {
+        // Match main.cpp; the product never uses native macOS controls.
+        QQuickStyle::setStyle("Material");
+    }
+
     void strictConflict()
     {
         const QString id = QStringLiteral("11111111-2222-4333-8444-555555555555");
