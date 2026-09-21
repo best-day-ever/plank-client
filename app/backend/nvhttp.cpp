@@ -2,6 +2,7 @@
 #include "desktopstage.h"
 #include "hostrecovery.h"
 #include "plankbroker.h"
+#include "plankhttp.h"
 #include <QCryptographicHash>
 #include <QScopedPointer>
 #include <Limelight.h>
@@ -590,9 +591,10 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setSslConfiguration(plankSslConfiguration());
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
-#endif
+    PlankHttp::prepareOneShotRequest(request);
+    // Never reuse a socket for credentials: the previous response's connection
+    // may already be closing, and a reused socket skips the pin check below.
+    m_Nam->clearAccessCache();
 
     const auto sslErrorsConnection = connect(
         m_Nam, &QNetworkAccessManager::sslErrors,
@@ -847,7 +849,7 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toLatin1());
     request.setSslConfiguration(plankSslConfiguration());
-    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    PlankHttp::prepareOneShotRequest(request);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 
     // A fresh manager guarantees the TLS encrypted signal before sending data;
@@ -967,17 +969,8 @@ NvHTTP::openConnection(QUrl baseUrl,
         }
     }
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    // Disable HTTP/2 (GFE 3.22 doesn't like it) and Qt 6 enables it by default
-    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
-#endif
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
-    // Use fine-grained idle timeouts to avoid calling QNetworkAccessManager::clearAccessCache(),
-    // which tears down the NAM's global thread each time. We must not keep persistent connections
-    // or GFE will puke.
-    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
-#endif
+    // No HTTP/2 and no persistent connections: the PLANK host closes after each response.
+    PlankHttp::prepareOneShotRequest(request);
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
     const auto encryptedConnection = rememberPlankTls(m_Nam, this);
