@@ -14,7 +14,83 @@
 #include <QScreen>
 #endif
 
+#ifdef Q_OS_WIN32
+#include <QCryptographicHash>
+
+#include <vector>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
+
+#ifdef Q_OS_WIN32
+// What QueryDisplayConfig knows about each active monitor, by the GDI source
+// name QScreen::name() reports ("\\.\DISPLAY1").
+struct WindowsMonitor
+{
+    QString gdiName;
+    QString name;
+    QString key;
+    bool builtIn = false;
+};
+
+QVector<WindowsMonitor> windowsMonitors()
+{
+    QVector<WindowsMonitor> monitors;
+    UINT32 pathCount = 0;
+    UINT32 modeCount = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
+        return monitors;
+    }
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(),
+                           nullptr) != ERROR_SUCCESS) {
+        return monitors;
+    }
+    for (UINT32 index = 0; index < pathCount; ++index) {
+        const DISPLAYCONFIG_PATH_INFO& path = paths[index];
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {};
+        source.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        source.header.size = sizeof(source);
+        source.header.adapterId = path.sourceInfo.adapterId;
+        source.header.id = path.sourceInfo.id;
+        DISPLAYCONFIG_TARGET_DEVICE_NAME target = {};
+        target.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+        target.header.size = sizeof(target);
+        target.header.adapterId = path.targetInfo.adapterId;
+        target.header.id = path.targetInfo.id;
+        if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS ||
+                DisplayConfigGetDeviceInfo(&target.header) != ERROR_SUCCESS) {
+            continue;
+        }
+        WindowsMonitor monitor;
+        monitor.gdiName = QString::fromWCharArray(source.viewGdiDeviceName);
+        monitor.name = QString::fromWCharArray(target.monitorFriendlyDeviceName);
+        // The monitor's device path names the monitor and its connector;
+        // hashed so settings keys stay short.
+        const QString devicePath = QString::fromWCharArray(target.monitorDevicePath).toLower();
+        if (!devicePath.isEmpty()) {
+            monitor.key = QStringLiteral("win:") + QString::fromLatin1(
+                        QCryptographicHash::hash(devicePath.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+        }
+        const DISPLAYCONFIG_VIDEO_OUTPUT_TECHNOLOGY technology = path.targetInfo.outputTechnology;
+        monitor.builtIn = technology == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL ||
+                technology == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EMBEDDED ||
+                technology == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_UDI_EMBEDDED;
+        // Clone mode: several targets share one source; the first one names it.
+        bool known = false;
+        for (const WindowsMonitor& other : std::as_const(monitors)) {
+            known = known || other.gdiName == monitor.gdiName;
+        }
+        if (!known) monitors.append(monitor);
+    }
+    return monitors;
+}
+#endif
 
 #ifdef Q_OS_DARWIN
 QSize nativePanelPixels(CGDirectDisplayID displayId)
@@ -87,6 +163,9 @@ QVector<NvClientDisplay> ClientDisplayProbe::probe()
     }
 #else
     const QScreen* primary = QGuiApplication::primaryScreen();
+#ifdef Q_OS_WIN32
+    const QVector<WindowsMonitor> monitors = windowsMonitors();
+#endif
     for (QScreen* screen : QGuiApplication::screens()) {
         NvClientDisplay display;
         display.bounds = screen->geometry();
@@ -100,6 +179,15 @@ QVector<NvClientDisplay> ClientDisplayProbe::probe()
         display.key = identity == QLatin1String("//") ?
                     monitorKey(QString(), 0, 0, 0, false, display.nativeSize) :
                     QStringLiteral("qt:") + identity;
+#ifdef Q_OS_WIN32
+        for (const WindowsMonitor& monitor : monitors) {
+            if (monitor.gdiName.compare(screen->name(), Qt::CaseInsensitive) != 0) continue;
+            if (!monitor.key.isEmpty()) display.key = monitor.key;
+            if (!monitor.name.isEmpty()) display.name = monitor.name;
+            display.builtIn = monitor.builtIn;
+            break;
+        }
+#endif
         displays.append(display);
     }
 #endif
