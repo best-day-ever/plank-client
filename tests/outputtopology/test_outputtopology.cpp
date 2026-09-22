@@ -614,15 +614,15 @@ void TestOutputTopology::computesClientMatchTarget()
     const NvClientDisplay display {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(display), QSize(3024, 1964));
     // Notched 14" in the default "looks like 1512x982": native fullscreen is 1512x945 pt below the camera
-    // housing, so the target is the 16:10 viewport and the closest mode fits it without letterboxing.
+    // housing, so the target is the 16:10 viewport, which is itself a qualified mode (1:1).
     const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(notched), QSize(3024, 1890));
     QString layout;
     QStringList modes;
-    bool fitted = false;
+    bool fitted = true;
     QVERIFY(NvOutputTopology::resolveClientDisplayLayout({notched}, layout, modes, nullptr, &fitted));
-    QCOMPARE(modes, QStringList {QStringLiteral("2560x1600")});
-    QVERIFY(fitted);
+    QCOMPARE(modes, QStringList {QStringLiteral("3024x1890")});
+    QVERIFY(!fitted);
     // "More Space" 1800x1169 pt: the viewport 3600x2260 is capped to the panel.
     const NvClientDisplay moreSpace {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338), QSize(3600, 2260)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(moreSpace), QSize(3024, 1898));
@@ -633,8 +633,8 @@ void TestOutputTopology::bestFitsOddClientDisplays_data()
     QTest::addColumn<QSize>("target");
     QTest::addColumn<QString>("mode");
     QTest::addColumn<bool>("fitted");
-    QTest::newRow("MacBook Pro 14") << QSize(3024, 1964) << "2560x1600" << true;
-    QTest::newRow("MacBook Pro 16") << QSize(3456, 2234) << "2560x1600" << true;
+    QTest::newRow("MacBook Pro 14") << QSize(3024, 1964) << "3024x1890" << true;
+    QTest::newRow("MacBook Pro 16") << QSize(3456, 2234) << "3024x1890" << true;
     QTest::newRow("MacBook Air 13") << QSize(2560, 1664) << "2560x1600" << true;
     QTest::newRow("MacBook Air 15") << QSize(2940, 1912) << "2560x1600" << true;
     QTest::newRow("1x 16:10 desktop") << QSize(1920, 1200) << "1920x1200" << false;
@@ -697,9 +697,9 @@ void TestOutputTopology::bestFitsTwoClientDisplays()
         {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964)}},
         layout, modes, &error, &fitted), qPrintable(error));
     QCOMPARE(layout, QStringLiteral("dual-horizontal"));
-    QCOMPARE(modes, QStringList({QStringLiteral("2560x1600"), QStringLiteral("3840x2160")}));
+    QCOMPARE(modes, QStringList({QStringLiteral("3024x1890"), QStringLiteral("3840x2160")}));
     QVERIFY(fitted);
-    QCOMPARE(NvOutputTopology::virtualCanvasSize(layout, modes), QSize(6400, 2160));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(layout, modes), QSize(6864, 2160));
 
     // Two exact qualified monitors stay exact.
     QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
