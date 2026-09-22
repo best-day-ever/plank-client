@@ -41,6 +41,8 @@ enum Source { FromHost = 0, FromBookmark = 1, FromDefaults = 2, FromBuiltIn = 3 
 // Mirrors NvOutputTopology::NvfbcHevc10NvencFeature (kept local so this
 // header does not need the topology parser).
 static constexpr int NvfbcHevc10NvencFeature = 0x2000;
+// Mirrors NvOutputTopology::NvfbcNvenc420Feature.
+static constexpr int NvfbcNvenc420Feature = 0x2000000;
 
 struct Setup
 {
@@ -371,6 +373,8 @@ inline QString profileName(int profile)
     case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444: return tr("H.265 10-bit 4:4:4 (identity GBR) — NVENC");
     case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420: return tr("HEVC 10-bit 4:2:0 — Apple VideoToolbox");
     case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444: return tr("HEVC 10-bit 4:4:4 — Apple VideoToolbox");
+    case StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_420: return tr("H.264 8-bit 4:2:0 — NVENC (low bandwidth)");
+    case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_420: return tr("H.265 10-bit 4:2:0 — NVENC (low bandwidth)");
     default: return tr("an unknown encoding profile");
     }
 }
@@ -400,6 +404,12 @@ inline QString problemFor(int captureSource, int profile, const Capabilities& ca
             profile == StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444 &&
             (caps.featureFlags & NvfbcHevc10NvencFeature) == 0) {
         return tr("This workstation can't use %1 with NvFBC capture. Choose another encoding or capture source.")
+                .arg(profileName(profile));
+    }
+    if (caps.platform == LinuxPlatform &&
+            StreamingPreferences::isPlankNvenc420Profile(profile) &&
+            (caps.featureFlags & NvfbcNvenc420Feature) == 0) {
+        return tr("This workstation's PLANK is too old for %1. Choose another encoding.")
                 .arg(profileName(profile));
     }
     return QString();

@@ -76,6 +76,9 @@ struct NvOutputTopology
     static const int PlatformClipboardSyncFeature = 0;
     static const int PlatformClipboardFilesFeature = 0;
 #endif
+    // Linux host: NvFBC into direct NVENC 4:2:0 (H.264 High 8-bit, HEVC
+    // Main10), limited-range BT.709, for bandwidth-limited links.
+    static const int NvfbcNvenc420Feature = 0x2000000;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -101,7 +104,8 @@ struct NvOutputTopology
                                              WorkerInstanceFeature |
                                              DesktopSignOutFeature |
                                              PlatformClipboardSyncFeature |
-                                             PlatformClipboardFilesFeature;
+                                             PlatformClipboardFilesFeature |
+                                             NvfbcNvenc420Feature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
