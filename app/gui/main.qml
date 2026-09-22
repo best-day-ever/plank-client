@@ -31,6 +31,12 @@ ApplicationWindow {
         // The PLANK launcher is always a normal desktop window.
         window.show()
 
+        // A brand-new installation starts with the first sign-in wizard on
+        // top of the remote sign-in (main.cpp / OnboardingController decide).
+        if (typeof showOnboarding !== "undefined" && showOnboarding) {
+            stackView.push("qrc:/gui/OnboardingView.qml")
+        }
+
         // Display any modal dialogs for configuration warnings
         if (SystemProperties.isWow64) {
             wow64Dialog.open()

@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QStandardPaths>
 
 namespace {
 
@@ -31,6 +32,18 @@ QString PlankPasskeyHelper::bundledProgram()
 #ifdef Q_OS_MACOS
     if (QCoreApplication::instance() == nullptr) return QString();
     return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("plank-passkey"));
+#else
+    return QString();
+#endif
+}
+
+QString PlankPasskeyHelper::localStoreRoot()
+{
+#ifdef Q_OS_MACOS
+    // plank-passkey.swift storeRoot(): Application Support/PLANK/passkeys.
+    const QString support = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (support.isEmpty()) return QString();
+    return QDir(support).filePath(QStringLiteral("PLANK/passkeys"));
 #else
     return QString();
 #endif

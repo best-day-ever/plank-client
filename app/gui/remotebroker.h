@@ -19,7 +19,8 @@ class Session;
 class StreamingPreferences;
 
 // "Remote (broker)" mode controller exposed to QML as a singleton. Owns the
-// in-memory broker session token (never persisted), the host list, brokered
+// broker session token (remembered in the macOS Keychain, see
+// BrokerSessionStore), the host list, brokered
 // connects (bde-linux docs/plank-broker.md section 10.2) and the lease
 // keepalive while a brokered stream runs. On macOS it also drives Touch ID
 // sign-in through the bundled plank-passkey helper (section 13.4).
@@ -67,6 +68,19 @@ public:
     // Hands the prepared brokered Session to QML (JavaScript ownership),
     // once, after connectReady().
     Q_INVOKABLE Session* takeSession();
+
+    // For the first sign-in wizard (OnboardingController), which runs its own
+    // broker conversation and ends in the same signed-in state.
+    PlankBrokerClient::Config brokerClientConfig() const { return clientConfig(); }
+    QString passkeyRelyingParty() const { return passkeyRpId(); }
+    // The plank-passkey helper, or empty where there is none.
+    QString passkeyHelperProgram() const
+    {
+        return m_PasskeyHelper.available() ? m_PasskeyHelper.program() : QString();
+    }
+    // Takes over a session the wizard obtained, exactly like a sign-in here
+    // (Keychain, host list).
+    void adoptSession(QString token, const QString& confirmedUser);
 
     QString brokerAddress() const;
     bool configured() const;

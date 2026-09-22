@@ -272,6 +272,18 @@ void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser)
     refreshHosts();
 }
 
+void RemoteBroker::adoptSession(QString token, const QString& confirmedUser)
+{
+    if (token.isEmpty() || confirmedUser.isEmpty()) {
+        token.fill(QChar('\0'));
+        return;
+    }
+    // Anything still in flight belongs to the previous state.
+    ++m_Generation;
+    finishSignIn(token, confirmedUser);
+    token.fill(QChar('\0'));
+}
+
 void RemoteBroker::signInWithPasskey(const QString& username)
 {
     const QString user = PlankBroker::normalizePasskeyUsername(username);
