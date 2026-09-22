@@ -14,6 +14,7 @@ private slots:
     void clampsProtocolRange();
     void isolatesAppleProfile();
     void retainsValuesWhenAProfileIsAdded();
+    void mapsProfilesToHostEncodingModes();
 };
 
 void TestPlankBitrate::selectsCodecFamilyDefaults()
@@ -167,6 +168,30 @@ void TestPlankBitrate::retainsValuesWhenAProfileIsAdded()
     invalid.append(50000);
     QVERIFY(!P::plankProfileBitratesFromVariantList(invalid, parsed));
     QCOMPARE(parsed, unchanged);
+}
+
+void TestPlankBitrate::mapsProfilesToHostEncodingModes()
+{
+    using P = StreamingPreferences;
+    // Names the host advertises in PlankEncodingModes and accepts at launch.
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_H264_10BIT_444), QStringLiteral("h264-10-444-software"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_H264_8BIT_422), QStringLiteral("h264-8-422-software"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_H264_8BIT_444), QStringLiteral("h264-8-444-software"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_H264_10BIT_422), QStringLiteral("h264-10-422-software"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_NVENC_H264_8BIT_444), QStringLiteral("h264-8-444-nvenc"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_NVENC_HEVC_8BIT_444), QStringLiteral("hevc-8-444-nvenc"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_NVENC_HEVC_10BIT_444), QStringLiteral("hevc-10-444-nvenc"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_APPLE_HEVC_10BIT_420), QStringLiteral("hevc-10-420-videotoolbox"));
+    QCOMPARE(P::plankEncodingMode(P::PLANK_PROFILE_APPLE_HEVC_10BIT_444), QStringLiteral("hevc-10-444-videotoolbox"));
+    QStringList modes;
+    for (int profile = 0; profile < P::PLANK_PROFILE_COUNT; ++profile) {
+        QVERIFY(!modes.contains(P::plankEncodingMode(profile)));
+        modes.append(P::plankEncodingMode(profile));
+    }
+    QVERIFY(P::plankEncodingMode(-1).isEmpty());
+    QVERIFY(P::plankEncodingMode(P::PLANK_PROFILE_COUNT).isEmpty());
+    // PLANK sessions stream at a fixed, qualified rate.
+    QCOMPARE(P::PlankFramesPerSecond, 60);
 }
 
 QTEST_APPLESS_MAIN(TestPlankBitrate)
