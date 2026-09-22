@@ -63,6 +63,9 @@ struct NvOutputTopology
     // Single-user Linux desktop: a launch refused because another account
     // owns the desktop names that owner and may offer to sign it out.
     static const int DesktopSignOutFeature = 0x400000;
+    // Virtual modes matching a notched Apple laptop's fullscreen viewport
+    // (3024x1890). Offered and accepted only when the host advertises it.
+    static const int NotchSafeLaptopModesFeature = 0x1000000;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -86,7 +89,8 @@ struct NvOutputTopology
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
                                              WorkerInstanceFeature |
-                                             DesktopSignOutFeature;
+                                             DesktopSignOutFeature |
+                                             NotchSafeLaptopModesFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -108,6 +112,8 @@ struct NvOutputTopology
                                            QStringList& virtualModes,
                                            QString* error = nullptr);
     static QStringList qualifiedVirtualModes();
+    // Whether a host advertising these feature flags accepts the mode.
+    static bool hostAcceptsVirtualMode(const QString& mode, int hostFeatureFlags);
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
                                                QString* error = nullptr, int* scale = nullptr);
     static QJsonObject macDisplayRequest(const QString& mode, const QString& encodingMode, int scale);

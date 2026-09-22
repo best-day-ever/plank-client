@@ -13,6 +13,7 @@ private slots:
     void rejectsDuplicateIdentity();
     void rejectsConfiguredModeMismatch();
     void acceptsTallCinemaModes();
+    void negotiatesNotchSafeLaptopMode();
     void enforcesHostDisplayPolicy();
     void validatesRequestedLayoutGeometry();
     void matchesOneClientDisplay();
@@ -320,9 +321,9 @@ void TestOutputTopology::rejectsConfiguredModeMismatch()
 void TestOutputTopology::acceptsTallCinemaModes()
 {
     const QStringList modes = NvOutputTopology::qualifiedVirtualModes();
-    QCOMPARE(modes.size(), 12);
+    QCOMPARE(modes.size(), 13);
     QCOMPARE(modes.at(6), QStringLiteral("2560x2160"));
-    QCOMPARE(modes.at(9), QStringLiteral("3840x2160"));
+    QCOMPARE(modes.at(10), QStringLiteral("3840x2160"));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("1024x2160")),
              QSize(1024, 2160));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("4096x2160")),
@@ -353,6 +354,51 @@ void TestOutputTopology::acceptsTallCinemaModes()
     QVERIFY(!NvOutputTopology::virtualCanvasSize(
                  QStringLiteral("dual-horizontal"),
                  {QStringLiteral("3840x2160"), QStringLiteral("5120x2160")}).isValid());
+}
+
+void TestOutputTopology::negotiatesNotchSafeLaptopMode()
+{
+    // A 14-inch MacBook Pro in its default "Looks like 1512x982" scaling:
+    // native fullscreen stops below the camera housing (37 points).
+    int logicalHeight = 982;
+    int pixelHeight = 1964;
+    QVERIFY(MacDisplayGeometry::insetTop(1512, logicalHeight, 3024, pixelHeight, 37));
+    const QString viewport = QStringLiteral("3024x%1").arg(pixelHeight);
+    QCOMPARE(viewport, QStringLiteral("3024x1890"));
+    QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(viewport));
+    QCOMPARE(NvOutputTopology::virtualModeSize(viewport), QSize(3024, 1890));
+    // The panel itself is never presented 1:1, so it is not a mode.
+    QVERIFY(!NvOutputTopology::virtualModeSize(QStringLiteral("3024x1964")).isValid());
+
+    const int withoutFeature = NvOutputTopology::SupportedFeatureFlags &
+            ~NvOutputTopology::NotchSafeLaptopModesFeature;
+    QVERIFY(NvOutputTopology::hostAcceptsVirtualMode(viewport, NvOutputTopology::SupportedFeatureFlags));
+    QVERIFY(!NvOutputTopology::hostAcceptsVirtualMode(viewport, withoutFeature));
+    QVERIFY(NvOutputTopology::hostAcceptsVirtualMode(QStringLiteral("2560x1600"), withoutFeature));
+    QVERIFY(!NvOutputTopology::hostAcceptsVirtualMode(QStringLiteral("3024x1964"),
+                                                      NvOutputTopology::SupportedFeatureFlags));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"), {viewport, QStringLiteral("5120x2160")}),
+             QSize(8144, 2160));
+
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) +
+               "/tests/protocol/output-topology-v13-notch-safe.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(document, topology, &error), qPrintable(error));
+    QVERIFY(topology.featureFlags & NvOutputTopology::NotchSafeLaptopModesFeature);
+    QCOMPARE(topology.virtualModes, QStringList({viewport}));
+    QVERIFY(topology.matchesRequestedHostLayout(QStringLiteral("single"), {viewport}));
+    NvOutputTopology restored;
+    QVERIFY(NvOutputTopology::fromJson(topology.toJson(), restored));
+    QCOMPARE(restored.toJson(), topology.toJson());
+
+    // A host that has not advertised the feature cannot report the mode.
+    document["feature_flags"] = document.value("feature_flags").toInt() &
+            ~NvOutputTopology::NotchSafeLaptopModesFeature;
+    QVERIFY(!NvOutputTopology::fromJson(document, topology));
 }
 
 void TestOutputTopology::enforcesHostDisplayPolicy()

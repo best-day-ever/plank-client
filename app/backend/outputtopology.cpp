@@ -113,10 +113,20 @@ QStringList NvOutputTopology::qualifiedVirtualModes()
     return {QStringLiteral("1024x2160"), QStringLiteral("1280x2160"),
             QStringLiteral("1920x1080"), QStringLiteral("1920x1200"),
             QStringLiteral("2560x1440"), QStringLiteral("2560x1600"),
-            QStringLiteral("2560x2160"),
+            QStringLiteral("2560x2160"), QStringLiteral("3024x1890"),
             QStringLiteral("3440x1440"), QStringLiteral("3840x1600"),
             QStringLiteral("3840x2160"), QStringLiteral("4096x2160"),
             QStringLiteral("5120x2160")};
+}
+
+bool NvOutputTopology::hostAcceptsVirtualMode(const QString& mode, int hostFeatureFlags)
+{
+    if (!qualifiedVirtualModes().contains(mode)) {
+        return false;
+    }
+    // A 14-inch MacBook Pro's fullscreen viewport below the camera housing.
+    return mode != QLatin1String("3024x1890") ||
+            (hostFeatureFlags & NotchSafeLaptopModesFeature) != 0;
 }
 
 QSize NvOutputTopology::virtualModeSize(const QString& mode)
@@ -220,7 +230,7 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
     for (const QJsonValue& mode : layout.value("virtual_modes").toArray()) {
-        if (!mode.isString() || !qualifiedVirtualModes().contains(mode.toString())) {
+        if (!mode.isString() || !hostAcceptsVirtualMode(mode.toString(), parsed.featureFlags)) {
             if (error != nullptr) {
                 *error = QStringLiteral("Invalid host virtual mode");
             }

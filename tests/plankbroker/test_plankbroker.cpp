@@ -1103,8 +1103,9 @@ void TestPlankBroker::remoteDisplaySetupRejectsInvalidEntries()
 
 void TestPlankBroker::remoteDisplaySetupSuggestsFittingMode()
 {
-    // MacBook Pro 14" (3024x1964) and MacBook Air 13" (2560x1664) panels.
-    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964)), QStringLiteral("2560x1600"));
+    // MacBook Pro 14" (3024x1964) and MacBook Air 13" (2560x1664) panels:
+    // each gets its fullscreen viewport below the camera housing.
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964)), QStringLiteral("3024x1890"));
     QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(2560, 1664)), QStringLiteral("2560x1600"));
     QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3840, 2160)), QStringLiteral("3840x2160"));
     QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(5120, 2880)), QStringLiteral("5120x2160"));
@@ -1123,10 +1124,11 @@ void TestPlankBroker::remoteDisplaySetupMatchesOnlyQualifiedScreens()
     QVERIFY(RemoteDisplaySetup::canMatchClient({screen(0, 2560, 1440)}));
     QVERIFY(RemoteDisplaySetup::canMatchClient({screen(0, 3840, 2160), screen(3840, 2560, 1440)}));
 
-    // First connect on a laptop panel: one virtual display that fits, scaled.
+    // First connect on a laptop panel: one virtual display that fits, scaled;
+    // for a 14" MacBook Pro that is its fullscreen viewport below the notch.
     RemoteDisplaySetup::Setup proposal = RemoteDisplaySetup::proposal({screen(0, 3024, 1964)});
     QCOMPARE(proposal.hostLayout, QStringLiteral("single"));
-    QCOMPARE(proposal.virtualMode1, QStringLiteral("2560x1600"));
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("3024x1890"));
     QCOMPARE(proposal.scalingMode, QStringLiteral("scaled-span"));
     QVERIFY(RemoteDisplaySetup::isValid(proposal));
     // A qualified monitor is matched.
