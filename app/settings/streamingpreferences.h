@@ -37,6 +37,9 @@ public:
         PLANK_PROFILE_NVENC_HEVC_10BIT_444,
         PLANK_PROFILE_APPLE_HEVC_10BIT_420,
         PLANK_PROFILE_APPLE_HEVC_10BIT_444,
+        // NVENC 4:2:0, limited-range BT.709: bandwidth profiles for remote links.
+        PLANK_PROFILE_NVENC_H264_8BIT_420,
+        PLANK_PROFILE_NVENC_HEVC_10BIT_420,
         PLANK_PROFILE_COUNT,
     };
     Q_ENUM(PlankVideoProfile)
@@ -91,15 +94,23 @@ public:
         return true;
     }
 
+    static bool isPlankNvenc420Profile(int profile)
+    {
+        return profile == PLANK_PROFILE_NVENC_H264_8BIT_420 ||
+               profile == PLANK_PROFILE_NVENC_HEVC_10BIT_420;
+    }
+
     static bool isPlankNvencProfile(int profile)
     {
-        return profile >= PLANK_PROFILE_NVENC_H264_8BIT_444 &&
-               profile <= PLANK_PROFILE_NVENC_HEVC_10BIT_444;
+        return (profile >= PLANK_PROFILE_NVENC_H264_8BIT_444 &&
+                profile <= PLANK_PROFILE_NVENC_HEVC_10BIT_444) ||
+               isPlankNvenc420Profile(profile);
     }
 
     static bool isPlankH264NvencProfile(int profile)
     {
-        return profile == PLANK_PROFILE_NVENC_H264_8BIT_444;
+        return profile == PLANK_PROFILE_NVENC_H264_8BIT_444 ||
+               profile == PLANK_PROFILE_NVENC_H264_8BIT_420;
     }
 
     static bool isPlankVirtualModeValidForProfile(const QString& mode,
@@ -127,9 +138,18 @@ public:
     static constexpr int PlankBitrateStepKbps = 500;
     static constexpr int PlankH264DefaultBitrateKbps = 80000;
     static constexpr int PlankHevcDefaultBitrateKbps = 50000;
+    // 4:2:0 exists for links that cannot carry the 4:4:4 targets.
+    static constexpr int PlankH264Yuv420DefaultBitrateKbps = 50000;
+    static constexpr int PlankHevcYuv420DefaultBitrateKbps = 30000;
 
     static int plankDefaultBitrateForProfile(int profile)
     {
+        if (profile == PLANK_PROFILE_NVENC_H264_8BIT_420) {
+            return PlankH264Yuv420DefaultBitrateKbps;
+        }
+        if (profile == PLANK_PROFILE_NVENC_HEVC_10BIT_420) {
+            return PlankHevcYuv420DefaultBitrateKbps;
+        }
         return profile == PLANK_PROFILE_NVENC_HEVC_8BIT_444 ||
                profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444 ||
                isPlankAppleProfile(profile) ?
