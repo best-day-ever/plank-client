@@ -215,6 +215,7 @@ SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
     backend/clientdisplayprobe.cpp \
+    backend/displaymonitor.cpp \
     backend/nvapp.cpp \
     main.cpp \
     backend/computerseeker.cpp \
@@ -260,6 +261,7 @@ HEADERS += \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/clientdisplayprobe.h \
+    backend/displaymonitor.h \
     backend/nvapp.h \
     utils.h \
     backend/computerseeker.h \
@@ -487,12 +489,14 @@ macx {
 
     SOURCES += \
         streaming/macquitshortcut.mm \
+        streaming/macdisplayinfo.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
         streaming/video/ffmpeg-renderers/vt_metal.mm
 
     HEADERS += \
         streaming/macquitshortcut.h \
+        streaming/macdisplayinfo.h \
         streaming/macwindow.h \
         streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h \

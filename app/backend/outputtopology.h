@@ -33,6 +33,16 @@ struct NvClientDisplay
     QSize backingSize {}; // macOS current compositor pixels; absent on other platforms
     QSize fullscreenSize {}; // macOS native-fullscreen viewport in backing pixels: the desktop below the
                              // camera housing on notched MacBooks (e.g. 3024x1890 on a 14" panel)
+    // Probe v2 (display setup). Appended so existing aggregate initialisers keep their meaning.
+    QString key {};        // stable monitor identity: "uuid:<UUID>", else vendor/model/serial
+    QString name {};       // what the system calls the monitor ("LG UltraFine", "Built-in Retina Display")
+    bool builtIn = false;  // the laptop's own panel
+    bool main = false;     // the menu-bar (primary) display
+    bool mirrored = false; // other displays mirror this one; they are collapsed into it
+    int refreshMillihz = 0; // 0 when unknown
+    int rotation = 0;      // degrees clockwise
+    bool notch = false;    // a camera housing cuts into the top of the panel
+    quint32 platformId = 0; // session-local platform display id (CGDirectDisplayID); never persisted
 };
 
 struct NvOutputTopology
