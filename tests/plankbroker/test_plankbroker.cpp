@@ -2425,8 +2425,9 @@ void TestPlankBroker::remoteStreamSetupReportsUnusableChoice()
     const int hevc10 = StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444;
     const QStringList allLinuxModes = RemoteStreamSetup::parseEncodingModes(
                 QStringLiteral("h264-8-422-software,h264-8-444-software,h264-10-422-software,"
-                               "h264-10-444-software,h264-8-444-nvenc,hevc-8-444-nvenc,hevc-10-444-nvenc"));
-    QCOMPARE(allLinuxModes.size(), 7);
+                               "h264-10-444-software,h264-8-444-nvenc,hevc-8-444-nvenc,hevc-10-444-nvenc,"
+                               "h264-8-420-nvenc,hevc-10-420-nvenc"));
+    QCOMPARE(allLinuxModes.size(), 9);
 
     // Nothing known yet: only the pairing is checked.
     const RemoteStreamSetup::Capabilities unknown;
@@ -2434,10 +2435,19 @@ void TestPlankBroker::remoteStreamSetupReportsUnusableChoice()
     QVERIFY(!RemoteStreamSetup::problemFor(native10, StreamingPreferences::PLANK_PROFILE_H264_8BIT_422,
                                            unknown).isEmpty());
 
-    const RemoteStreamSetup::Capabilities full = linuxHost(RemoteStreamSetup::NvfbcHevc10NvencFeature, allLinuxModes);
+    const RemoteStreamSetup::Capabilities full = linuxHost(
+                RemoteStreamSetup::NvfbcHevc10NvencFeature | RemoteStreamSetup::NvfbcNvenc420Feature, allLinuxModes);
     for (int profile = 0; profile < StreamingPreferences::PLANK_PROFILE_COUNT; ++profile) {
         if (StreamingPreferences::isPlankAppleProfile(profile)) continue;
         QVERIFY2(RemoteStreamSetup::problemFor(nvfbc, profile, full).isEmpty(), qPrintable(QString::number(profile)));
+    }
+    // A host from before the 4:2:0 modes (1.0.127) offers everything but those.
+    const RemoteStreamSetup::Capabilities older = linuxHost(
+                RemoteStreamSetup::NvfbcHevc10NvencFeature, allLinuxModes.mid(0, 7));
+    for (int profile = 0; profile < StreamingPreferences::PLANK_PROFILE_COUNT; ++profile) {
+        if (StreamingPreferences::isPlankAppleProfile(profile)) continue;
+        QCOMPARE(RemoteStreamSetup::problemFor(nvfbc, profile, older).isEmpty(),
+                 !StreamingPreferences::isPlankNvenc420Profile(profile));
     }
     // HEVC 10-bit from NvFBC needs the host feature; native 10-bit capture does not.
     const RemoteStreamSetup::Capabilities noHevc10Fbc = linuxHost(0, allLinuxModes);
