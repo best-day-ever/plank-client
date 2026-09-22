@@ -8,6 +8,7 @@
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
+#include "backend/clientdisplayprobe.h"
 #ifdef Q_OS_MACOS
 #include "macclipboardsync.h"
 #ifdef PLANK_TRANSPORT
@@ -2077,6 +2078,13 @@ bool Session::snapshotClientDisplays()
     const int targetIndex = getTargetDisplayIndex();
     m_TargetDisplayId = StreamUtils::getDisplayId(targetIndex);
     const int displayCount = StreamUtils::getDisplayCount();
+    // The same probe the display dialogs use, so they agree with the stream.
+    // Elsewhere the probe needs the GUI thread; SDL's native size stands in.
+#ifdef Q_OS_DARWIN
+    const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
+#else
+    const QVector<NvClientDisplay> probed;
+#endif
     for (int index = 0; index < displayCount; ++index) {
         ClientDisplaySnapshot snapshot;
         snapshot.displayId = StreamUtils::getDisplayId(index);
@@ -2093,6 +2101,11 @@ bool Session::snapshotClientDisplays()
             return false;
         }
         snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
+        snapshot.probeView = ClientDisplayProbe::forSessionDisplay(
+                    QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
+                          snapshot.logicalBounds.w, snapshot.logicalBounds.h),
+                    snapshot.nativeSize, probed);
+        snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.probeView);
 #ifdef Q_OS_DARWIN
         if (matchMacDesktop) {
             SDL_DisplayMode currentMode;
@@ -2105,6 +2118,8 @@ bool Session::snapshotClientDisplays()
             // Presentation tiles must share the matched backing-pixel canvas,
             // not mix differently scaled panel-native pixel dimensions.
             snapshot.nativeSize = snapshot.macBackingSize;
+            // A Mac host creates a desktop of exactly these pixels.
+            snapshot.matchTarget = snapshot.macBackingSize;
         }
 #endif
         m_ClientDisplays.append(snapshot);
@@ -2141,11 +2156,13 @@ bool Session::snapshotClientDisplays()
         canvasX += display.nativeSize.width();
         canvasHeight = qMax(canvasHeight, display.nativeSize.height());
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "PLANK client output %u: logical=%dx%d%+d%+d native=%dx%d canvas=%dx%d%+d%+d%s",
+                    "PLANK client output %u: logical=%dx%d%+d%+d native=%dx%d desktop=%dx%d target=%dx%d canvas=%dx%d%+d%+d%s",
                     display.displayId,
                     display.logicalBounds.w, display.logicalBounds.h,
                     display.logicalBounds.x, display.logicalBounds.y,
                     display.nativeSize.width(), display.nativeSize.height(),
+                    display.probeView.backingSize.width(), display.probeView.backingSize.height(),
+                    display.matchTarget.width(), display.matchTarget.height(),
                     display.canvasRect.width(), display.canvasRect.height(),
                     display.canvasRect.x(), display.canvasRect.y(),
                     display.displayId == m_TargetDisplayId ? " primary" : "");
@@ -2417,14 +2434,16 @@ bool Session::configurePlankHostLayout()
         return false;
     }
     m_ResolvedScalingMode = scalingMode;
+    bool matchedExactly = true;
     if (layoutPolicy == NvOutputTopology::MatchClientHostLayout) {
         QVector<NvClientDisplay> displays;
+        QVector<NvClientDisplay> probedDisplays;
         for (const auto& display : std::as_const(m_ClientDisplays)) {
-            displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : QRect(display.logicalBounds.x,
-                                   display.logicalBounds.y,
-                                   display.logicalBounds.w,
-                                   display.logicalBounds.h),
+            const QRect logical(display.logicalBounds.x, display.logicalBounds.y,
+                                display.logicalBounds.w, display.logicalBounds.h);
+            displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : logical,
                              display.nativeSize, display.macBackingSize});
+            probedDisplays.append(display.probeView);
         }
 
         QString error;
@@ -2439,11 +2458,34 @@ bool Session::configurePlankHostLayout()
             }
             m_ResolvedHostLayout = QStringLiteral("fixed");
         }
-        else if (!NvOutputTopology::resolveClientDisplayLayout(
-                    displays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
-            emit displayLaunchError(error);
-            return false;
+        else {
+            // Linux host: the panel and desktop from ClientDisplayProbe, the
+            // same view the display dialogs showed. An odd client size is
+            // matched to the closest qualified mode and letterboxed.
+            bool fitted = false;
+            const bool resolved = NvOutputTopology::resolveClientDisplayLayout(
+                        probedDisplays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, &fitted);
+            for (int index = 0; index < probedDisplays.size(); ++index) {
+                const QSize target = NvOutputTopology::clientMatchTarget(probedDisplays.at(index));
+                const QString mode = m_ResolvedVirtualModes.value(index);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s",
+                            qPrintable(ClientDisplayProbe::logLine(
+                                probedDisplays.at(index), mode,
+                                mode == QStringLiteral("%1x%2").arg(target.width()).arg(target.height()))));
+            }
+            if (!resolved) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+                emit displayLaunchError(error);
+                return false;
+            }
+            matchedExactly = !fitted;
+            if (fitted && m_ResolvedScalingMode != NvOutputTopology::ScaledSpanMode) {
+                // A closest-supported mode differs from the client's pixels,
+                // so 1:1 would not fit: present it scaled to fit instead.
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "PLANK match client fitted a closest supported mode; scaling to fit");
+                m_ResolvedScalingMode = NvOutputTopology::ScaledSpanMode;
+            }
         }
     }
     else if (layoutPolicy == QStringLiteral("fixed") &&
@@ -2478,10 +2520,10 @@ bool Session::configurePlankHostLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s",
+                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s%s",
                 qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
                 qPrintable(m_ResolvedVirtualModes.join(',')),
-                qPrintable(m_ResolvedScalingMode));
+                qPrintable(m_ResolvedScalingMode), matchedExactly ? "" : " fitted");
     return true;
 }
 
@@ -2493,15 +2535,17 @@ QSize Session::configurePlankDisplayMode()
         int width = 0;
         int height = 0;
         for (const auto& display : std::as_const(m_ClientDisplays)) {
-            width += display.nativeSize.width();
-            height = qMax(height, display.nativeSize.height());
+            width += display.matchTarget.width();
+            height = qMax(height, display.matchTarget.height());
         }
         detectedResolution = QSize(width, height);
     }
     else {
+        // The match target, not the panel: the client presents into the
+        // desktop backing, so a larger stream would only cost bitrate.
         for (const auto& display : std::as_const(m_ClientDisplays)) {
             if (display.displayId == m_TargetDisplayId) {
-                detectedResolution = display.nativeSize;
+                detectedResolution = display.matchTarget;
                 break;
             }
         }

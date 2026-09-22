@@ -1,4 +1,6 @@
 #include <QtTest>
+#include <QJsonArray>
+#include <QJsonDocument>
 
 #include "outputtopology.h"
 #include "../../app/streaming/macdisplaygeometry.h"
@@ -26,6 +28,11 @@ private slots:
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
     void buildsMacDisplayRequest();
+    void computesClientMatchTarget();
+    void bestFitsOddClientDisplays_data();
+    void bestFitsOddClientDisplays();
+    void bestFitsTwoClientDisplays();
+    void keepsHostTopologyParsingStrict();
 };
 
 void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
@@ -153,9 +160,15 @@ void TestOutputTopology::matchesMacClientCanvas()
         QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode(screens), mode);
         QCOMPARE(NvOutputTopology::macDisplayModeSize(mode), native);
         QVERIFY(!NvOutputTopology::virtualModeSize(mode).isValid());
+        // A Linux host has no such virtual mode: the closest qualified mode
+        // is used and flagged as fitted (letterboxed), never the raw size.
         QString layout;
         QStringList modes;
-        QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(screens, layout, modes));
+        bool fitted = false;
+        QVERIFY(NvOutputTopology::resolveClientDisplayLayout(screens, layout, modes, nullptr, &fitted));
+        QVERIFY(fitted);
+        QVERIFY(!modes.contains(mode));
+        QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(modes.value(0)));
     }
     for (const QString mode : {"0x2160", "3023x1964", "3024x1963", "8194x2160",
             "3840x8194", "-2x2", "03024x1964", "3024X1964", "3024x1964x2", "2x+2",
@@ -493,12 +506,179 @@ void TestOutputTopology::rejectsUnsupportedClientLayouts()
                 verticalDisplays, layout, modes, &error));
     QVERIFY(error.contains(QStringLiteral("left to right")));
 
-    const QVector<NvClientDisplay> unsupportedDisplay {
+    // An odd monitor is no longer refused: 5:4 gets the closest aspect.
+    const QVector<NvClientDisplay> oddDisplay {
         {QRect(0, 0, 1280, 1024), QSize(1280, 1024)},
     };
+    bool fitted = false;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                oddDisplay, layout, modes, &error, &fitted));
+    QVERIFY(fitted);
+    QCOMPARE(modes, QStringList({QStringLiteral("1920x1200")}));
+
+    const QVector<NvClientDisplay> undetected {
+        {QRect(0, 0, 1280, 1024), QSize()},
+    };
     QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
-                unsupportedDisplay, layout, modes, &error));
-    QVERIFY(error.contains(QStringLiteral("not a qualified")));
+                undetected, layout, modes, &error, &fitted));
+    QVERIFY(error.contains(QStringLiteral("could not be detected")));
+    QVERIFY(modes.isEmpty());
+    QVERIFY(layout.isEmpty());
+}
+
+void TestOutputTopology::computesClientMatchTarget()
+{
+    // Desktop backing below the panel (macOS 1x "1920x1200" on a 14" panel).
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(1920, 1200), QSize(3024, 1964)), QSize(1920, 1200));
+    // Default Retina "looks like 1512x982": backing equals the panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(3024, 1964), QSize(3024, 1964)), QSize(3024, 1964));
+    // "More Space" renders 3600x2338 and scales it down onto the panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(3600, 2338), QSize(3024, 1964)), QSize(3024, 1964));
+    // 16" "More Space" 2056x1329@2x on a 3456x2234 panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(4112, 2658), QSize(3456, 2234)), QSize(3456, 2234));
+    // Unknown backing (not macOS) or unknown panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(), QSize(2560, 1440)), QSize(2560, 1440));
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(2560, 1440), QSize()), QSize(2560, 1440));
+    QVERIFY(!NvOutputTopology::clientMatchTarget(QSize(), QSize()).isValid());
+    const NvClientDisplay display {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(display), QSize(3024, 1964));
+    // Notched 14" in the default "looks like 1512x982": native fullscreen is 1512x945 pt below the camera
+    // housing, so the target is the 16:10 viewport and the closest mode fits it without letterboxing.
+    const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(notched), QSize(3024, 1890));
+    QString layout;
+    QStringList modes;
+    bool fitted = false;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({notched}, layout, modes, nullptr, &fitted));
+    QCOMPARE(modes, QStringList {QStringLiteral("2560x1600")});
+    QVERIFY(fitted);
+    // "More Space" 1800x1169 pt: the viewport 3600x2260 is capped to the panel.
+    const NvClientDisplay moreSpace {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338), QSize(3600, 2260)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(moreSpace), QSize(3024, 1898));
+}
+
+void TestOutputTopology::bestFitsOddClientDisplays_data()
+{
+    QTest::addColumn<QSize>("target");
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<bool>("fitted");
+    QTest::newRow("MacBook Pro 14") << QSize(3024, 1964) << "2560x1600" << true;
+    QTest::newRow("MacBook Pro 16") << QSize(3456, 2234) << "2560x1600" << true;
+    QTest::newRow("MacBook Air 13") << QSize(2560, 1664) << "2560x1600" << true;
+    QTest::newRow("MacBook Air 15") << QSize(2940, 1912) << "2560x1600" << true;
+    QTest::newRow("1x 16:10 desktop") << QSize(1920, 1200) << "1920x1200" << false;
+    QTest::newRow("4K") << QSize(3840, 2160) << "3840x2160" << false;
+    QTest::newRow("QHD") << QSize(2560, 1440) << "2560x1440" << false;
+    // 5K 16:9: the same shape wins over the wider 5120x2160.
+    QTest::newRow("5K") << QSize(5120, 2880) << "3840x2160" << true;
+    QTest::newRow("Ultrawide 3440") << QSize(3440, 1440) << "3440x1440" << false;
+    QTest::newRow("Ultrawide 3840x1600 fits") << QSize(3840, 1600) << "3840x1600" << false;
+    QTest::newRow("5120x1440 super-wide") << QSize(5120, 1440) << "3440x1440" << true;
+    // Smaller than every qualified mode (a Retina desktop at 1x points):
+    // the closest aspect that enlarges least; presentation scales it down.
+    QTest::newRow("1512x982 nothing fits") << QSize(1512, 982) << "1920x1200" << true;
+    QTest::newRow("1366x768 nothing fits") << QSize(1366, 768) << "1920x1080" << true;
+    // Portrait monitors get the tall modes.
+    QTest::newRow("portrait 4K") << QSize(2160, 3840) << "1280x2160" << true;
+    QTest::newRow("portrait exact") << QSize(1280, 2160) << "1280x2160" << false;
+}
+
+void TestOutputTopology::bestFitsOddClientDisplays()
+{
+    QFETCH(QSize, target);
+    QFETCH(QString, mode);
+    QFETCH(bool, fitted);
+    QCOMPARE(NvOutputTopology::rankedVirtualModes(target).value(0), mode);
+
+    QString layout;
+    QStringList modes;
+    QString error;
+    bool wasFitted = !fitted;
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 {{QRect(QPoint(0, 0), target), target}}, layout, modes, &error, &wasFitted),
+             qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(modes, QStringList({mode}));
+    QCOMPARE(wasFitted, fitted);
+    // A fitting mode never exceeds the client (no upscale) unless none fits.
+    const QSize size = NvOutputTopology::virtualModeSize(mode);
+    if (target.width() >= 1920 && target.height() >= 1080 && target.width() >= target.height()) {
+        QVERIFY(size.width() <= target.width() && size.height() <= target.height());
+    }
+    // Every ranked mode is qualified; each appears once.
+    const QStringList ranked = NvOutputTopology::rankedVirtualModes(target);
+    for (const QString& candidate : ranked) {
+        QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(candidate));
+        QCOMPARE(ranked.count(candidate), 1);
+    }
+    QVERIFY(NvOutputTopology::rankedVirtualModes(QSize()).isEmpty());
+}
+
+void TestOutputTopology::bestFitsTwoClientDisplays()
+{
+    QString layout;
+    QStringList modes;
+    QString error;
+    bool fitted = false;
+    // MacBook Pro 14 (default Retina) left of a 4K monitor.
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(1512, 0, 3840, 2160), QSize(3840, 2160)},
+        {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964)}},
+        layout, modes, &error, &fitted), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("dual-horizontal"));
+    QCOMPARE(modes, QStringList({QStringLiteral("2560x1600"), QStringLiteral("3840x2160")}));
+    QVERIFY(fitted);
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(layout, modes), QSize(6400, 2160));
+
+    // Two exact qualified monitors stay exact.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(0, 0, 2560, 1440), QSize(2560, 1440)},
+        {QRect(2560, 0, 1920, 1080), QSize(1920, 1080)}},
+        layout, modes, &error, &fitted));
+    QCOMPARE(modes, QStringList({QStringLiteral("2560x1440"), QStringLiteral("1920x1080")}));
+    QVERIFY(!fitted);
+
+    // Canvas guard: two 5120x2160 would be 10240 wide; each steps down its
+    // own ranking (closest aspect first: 3440x1440) until the pair fits the
+    // 8192 canvas.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(0, 0, 5120, 2160), QSize(5120, 2160)},
+        {QRect(5120, 0, 5120, 2160), QSize(5120, 2160)}},
+        layout, modes, &error, &fitted));
+    QVERIFY(fitted);
+    QCOMPARE(modes, QStringList({QStringLiteral("3440x1440"), QStringLiteral("3440x1440")}));
+    const QSize canvas = NvOutputTopology::virtualCanvasSize(layout, modes);
+    QVERIFY(canvas.isValid());
+    QVERIFY(canvas.width() <= NvOutputTopology::MaximumVirtualCanvasWidth);
+    QVERIFY(canvas.height() <= 2160);
+
+    // 5K + 4K: the wider one steps down first.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(0, 0, 5120, 2160), QSize(5120, 2160)},
+        {QRect(5120, 0, 3840, 2160), QSize(3840, 2160)}},
+        layout, modes, &error, &fitted));
+    QCOMPARE(modes, QStringList({QStringLiteral("3440x1440"), QStringLiteral("3840x2160")}));
+    QVERIFY(NvOutputTopology::virtualCanvasSize(layout, modes).width() <= 8192);
+}
+
+void TestOutputTopology::keepsHostTopologyParsingStrict()
+{
+    // Best fit happens on the client only: a host that reports a mode off
+    // the allowlist is still rejected, whatever the client asked for.
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/output-topology-v13.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject vector = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(vector, topology));
+    for (const QString& odd : {QStringLiteral("3024x1964"), QStringLiteral("2560x1664"),
+                               QStringLiteral("1512x982")}) {
+        QJsonObject object = vector;
+        QJsonObject layout = object["layout"].toObject();
+        layout["virtual_modes"] = QJsonArray {odd, QStringLiteral("1280x2160")};
+        object["layout"] = layout;
+        QVERIFY2(!NvOutputTopology::fromJson(object, topology), qPrintable(odd));
+        QVERIFY(!NvOutputTopology::virtualModeSize(odd).isValid());
+    }
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)

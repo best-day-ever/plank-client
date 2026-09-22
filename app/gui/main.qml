@@ -693,6 +693,14 @@ ApplicationWindow {
             }
 
             Label {
+                Layout.fillWidth: true
+                visible: addCaptureSource.captureSource !== 2 && addHostLayout.currentIndex === 0
+                text: visible ? ComputerManager.plankMatchClientSummary() : ""
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            Label {
                 text: addCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
                 opacity: (addCaptureSource.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2) ? 1.0 : 0.5

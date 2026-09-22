@@ -1,4 +1,5 @@
 #include "computermanager.h"
+#include "clientdisplayprobe.h"
 #include "nvhttp.h"
 #include "settings/plankclientpolicy.h"
 
@@ -930,6 +931,22 @@ QStringList ComputerManager::plankVirtualModeChoices() const
         choice.replace(QLatin1Char('x'), QChar(0x00D7));
     }
     return choices;
+}
+
+QString ComputerManager::plankMatchClientSummary() const
+{
+    const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
+    const ClientDisplayProbe::MatchPreview match = ClientDisplayProbe::matchPreview(displays);
+#ifdef Q_OS_DARWIN
+    const QString client = tr("This Mac: %1").arg(ClientDisplayProbe::describe(displays));
+#else
+    const QString client = tr("This computer: %1").arg(ClientDisplayProbe::describe(displays));
+#endif
+    if (!match.ok) {
+        return client + QLatin1Char('\n') + tr("Matching is unavailable: %1").arg(match.reason);
+    }
+    return client + QLatin1Char('\n') +
+            tr("Match client displays → %1").arg(ClientDisplayProbe::matchSummary(match));
 }
 
 void ComputerManager::addNewHostManually(QString address, QString nickname,
