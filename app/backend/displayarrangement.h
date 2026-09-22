@@ -120,6 +120,27 @@ QString validate(const QString& request, const Capabilities& capabilities, QVect
 // Checks 1-10 and the backing rule (11).
 Resolution resolve(const QString& request, const Capabilities& capabilities);
 
+// Packed capture: what a host encodes for an arrangement. The capture is the
+// desktop when the desktop fits the encoding limit; otherwise, with
+// packed_capture, the outputs in rows in request order (a new row when an
+// output does not fit the rest of the row, each row as tall as its tallest
+// output, each output top-left in its slot).
+struct Packing
+{
+    bool ok = false;
+    QString error;             // canvas_too_large, or a request check's code
+    bool packed = false;       // the capture differs from the desktop
+    QSize capture;             // the encoded frame
+    QVector<QRect> sourceRects; // per entry, in capture coordinates
+};
+
+// The rule itself. limit invalid: no encoding limit, the desktop as it is.
+Packing pack(const QVector<Entry>& entries, const QSize& limit, bool packedCapture);
+
+// Checks 1-10, then the capture for this launch encoding mode (its
+// encoding_limits entry; none: no limit).
+Packing pack(const QString& request, const Capabilities& capabilities, const QString& encodingMode);
+
 // Carrier for a virtual display of this size from the pool (backing rule 2).
 QSize carrierFor(const QSize& size, const QStringList& pool = virtualPool());
 

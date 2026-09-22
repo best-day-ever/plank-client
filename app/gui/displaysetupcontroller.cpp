@@ -114,6 +114,10 @@ DisplayPlanner::HostInfo DisplaySetupController::hostInfo(const QString& hostId)
 DisplayPlanner::Limits DisplaySetupController::limits() const
 {
     DisplayPlanner::Limits limits;
+#ifdef Q_OS_WIN32
+    // One D3D11 window on Windows: never a packed capture.
+    limits.separateWindows = false;
+#endif
 #ifdef Q_OS_DARWIN
     limits.separateSpaces = MacDisplayInfo::screensHaveSeparateSpaces();
     limits.decoderMaximum = DecoderCaps::cachedMaximum(m_Host.encodingMode);
@@ -552,7 +556,11 @@ QVariantMap DisplaySetupController::clientExtent() const
 
 QVariantMap DisplaySetupController::desktop() const
 {
-    return rect(0, 0, m_Plan.canvas.width(), m_Plan.canvas.height());
+    QVariantMap map = rect(0, 0, m_Plan.canvas.width(), m_Plan.canvas.height());
+    map.insert(QStringLiteral("packed"), m_Plan.packed);
+    map.insert(QStringLiteral("captureWidth"), m_Plan.capture.width());
+    map.insert(QStringLiteral("captureHeight"), m_Plan.capture.height());
+    return map;
 }
 
 QVariantList DisplaySetupController::warnings() const
@@ -562,7 +570,8 @@ QVariantList DisplaySetupController::warnings() const
         list.append(QVariantMap {{QStringLiteral("code"), warning.code}, {QStringLiteral("text"), warning.text},
                                  {QStringLiteral("action"), warning.action},
                                  {QStringLiteral("actionLabel"), warning.actionLabel},
-                                 {QStringLiteral("key"), warning.key}});
+                                 {QStringLiteral("key"), warning.key},
+                                 {QStringLiteral("info"), warning.info}});
     }
     return list;
 }

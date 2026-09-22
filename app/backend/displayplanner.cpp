@@ -240,13 +240,17 @@ void commonWarnings(Plan& plan, const QVector<NvClientDisplay>& displays)
                  QString(), QString(), output.key);
         }
     }
-    const qint64 pixels = area(plan.canvas);
+    // What is encoded: the capture when known (packed rows included).
+    qint64 pixels = 0;
+    for (const Output& output : plan.outputs) {
+        if (output.included) pixels += area(output.size);
+    }
     if (pixels > qint64(3840) * 2160 * 3 / 2) {
         // The HEVC 4:4:4 default spends about 50 Mbps on a 4K desktop.
         const int megabits = int(std::lround(50.0 * pixels / (3840.0 * 2160.0) / 10.0) * 10);
         warn(plan, QStringLiteral("bitrate"),
-             tr("This layout is %1 pixels wide in total and needs about %2 Mbps for a sharp picture.")
-                 .arg(plan.canvas.width()).arg(megabits));
+             tr("These screens have %1 megapixels together and need about %2 Mbps for a sharp picture.")
+                 .arg(QString::number(pixels / 1e6, 'f', 1)).arg(megabits));
     }
 }
 
@@ -272,6 +276,7 @@ void planMac(Plan& plan, const QVector<NvClientDisplay>& displays, const QString
     plan.macMode = mode;
     plan.macScale = scale;
     plan.canvas = NvOutputTopology::macDisplayModeSize(mode);
+    plan.capture = plan.canvas;
     QVector<int> order = indices;
     std::sort(order.begin(), order.end(), [&displays](int a, int b) {
         return displays.at(a).bounds.x() < displays.at(b).bounds.x();
@@ -340,6 +345,7 @@ void planLegacy(Plan& plan, const QVector<NvClientDisplay>& displays, int primar
         height = qMax(height, output.size.height());
     }
     plan.canvas = QSize(x, height);
+    plan.capture = plan.canvas;
     int on = 0;
     for (const Output& output : std::as_const(plan.outputs)) on += output.on ? 1 : 0;
     if (on > selected.size() || plan.legacyFitted) {
@@ -432,29 +438,28 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
         }
     }
 
-    // The whole desktop must fit the host's canvas; without packed capture the
-    // capture is the desktop, so it must also fit the encoder and this
-    // client's decoder.
-    QSize canvasLimit = caps.maxCanvas;
-    bool encoderLimited = false;
-    bool decoderLimited = false;
-    if (!caps.packedCapture) {
-        const auto encoding = caps.encodingLimits.constFind(host.encodingMode);
-        if (encoding != caps.encodingLimits.constEnd() && encoding->maximum.isValid()) {
-            encoderLimited = encoding->maximum.width() < canvasLimit.width() ||
-                    encoding->maximum.height() < canvasLimit.height();
-            canvasLimit = canvasLimit.boundedTo(encoding->maximum);
-        }
-        if (limits.decoderMaximum.isValid()) {
-            decoderLimited = limits.decoderMaximum.width() < canvasLimit.width() ||
-                    limits.decoderMaximum.height() < canvasLimit.height();
-            canvasLimit = canvasLimit.boundedTo(limits.decoderMaximum);
-        }
-    }
+    // The whole desktop must fit the host's canvas (its X screen), and the
+    // frame the host encodes for it must fit the encoder and this client's
+    // decoder. That frame is the desktop, or with packed capture the outputs
+    // in rows (DisplayArrangement::pack, the host's own rule); displays are
+    // only stepped down when neither fits.
+    // Encoding not known yet (a preview before any stream setting): the
+    // remote default, H.265 4:4:4.
+    const QString encodingMode = host.encodingMode.isEmpty() ? QStringLiteral("hevc-10-444-nvenc") : host.encodingMode;
+    const auto encoding = caps.encodingLimits.constFind(encodingMode);
+    const QSize encoderLimit = encoding != caps.encodingLimits.constEnd() ? encoding->maximum : QSize();
     QVector<QRect> logical;
     for (const int index : std::as_const(included)) logical.append(displays.at(index).bounds);
     const int primaryPosition = int(included.indexOf(primary));
     QVector<QPoint> positions;
+    QVector<int> entries;
+    DisplayArrangement::Packing packing;
+    // Packed rows only make sense in one window per display.
+    const bool mayPack = caps.packedCapture && profile.presentation == QLatin1String("windows") &&
+            limits.separateSpaces && limits.separateWindows;
+    enum class Limit { None, Canvas, Encoder, Decoder };
+    Limit binding = Limit::None;
+    Limit shrinkReason = Limit::None;
     bool shrankForCanvas = false;
     for (int attempt = 0;; ++attempt) {
         QVector<QSize> pixels;
@@ -472,9 +477,38 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
         for (int position = 0; position < included.size(); ++position) {
             canvas = canvas.expandedTo(QSize(positions.at(position).x() + pixels.at(position).width(),
                                              positions.at(position).y() + pixels.at(position).height()));
+            plan.outputs[included.at(position)].position = positions.at(position);
         }
         plan.canvas = canvas;
-        if (canvas.width() <= canvasLimit.width() && canvas.height() <= canvasLimit.height()) break;
+
+        // The request order: the primary first, then left to right, top to
+        // bottom. Packing follows it.
+        entries = included;
+        std::stable_sort(entries.begin(), entries.end(), [&plan, primary](int a, int b) {
+            if ((a == primary) != (b == primary)) return a == primary;
+            const QPoint pa = plan.outputs.at(a).position;
+            const QPoint pb = plan.outputs.at(b).position;
+            return pa.x() != pb.x() ? pa.x() < pb.x() : pa.y() < pb.y();
+        });
+        QVector<DisplayArrangement::Entry> rects;
+        for (const int index : std::as_const(entries)) {
+            rects.append({QRect(plan.outputs.at(index).position, plan.outputs.at(index).size),
+                          DisplayArrangement::Preference::Auto});
+        }
+        binding = Limit::None;
+        if (canvas.width() > caps.maxCanvas.width() || canvas.height() > caps.maxCanvas.height()) {
+            binding = Limit::Canvas;
+        } else {
+            packing = DisplayArrangement::pack(rects, encoderLimit, mayPack);
+            if (!packing.ok) {
+                binding = Limit::Encoder;
+            } else if (limits.decoderMaximum.isValid() &&
+                       (packing.capture.width() > limits.decoderMaximum.width() ||
+                        packing.capture.height() > limits.decoderMaximum.height())) {
+                binding = Limit::Decoder;
+            }
+        }
+        if (binding == Limit::None) break;
         // Step the largest display that can still get smaller down once.
         int largest = -1;
         QSize next;
@@ -493,23 +527,17 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
         plan.outputs[largest].size = next;
         plan.outputs[largest].scaled = true;
         shrankForCanvas = true;
+        // Why the last step was needed decides the warning below.
+        shrinkReason = binding;
     }
-    for (int position = 0; position < included.size(); ++position) {
-        plan.outputs[included.at(position)].position = positions.at(position);
-    }
+    plan.capture = packing.capture;
+    plan.packed = packing.packed;
 
-    // The request: the primary first, then the others left to right, top to bottom.
-    QVector<int> entries = included;
-    std::stable_sort(entries.begin(), entries.end(), [&plan, primary](int a, int b) {
-        if ((a == primary) != (b == primary)) return a == primary;
-        const QPoint pa = plan.outputs.at(a).position;
-        const QPoint pb = plan.outputs.at(b).position;
-        return pa.x() != pb.x() ? pa.x() < pb.x() : pa.y() < pb.y();
-    });
     QVector<DisplayArrangement::Entry> request;
     for (int position = 0; position < entries.size(); ++position) {
         Output& output = plan.outputs[entries.at(position)];
         output.arrangementIndex = position;
+        output.sourceRect = packing.sourceRects.value(position);
         DisplayArrangement::Entry entry;
         entry.rect = QRect(output.position, output.size);
         DisplayArrangement::preferenceFromName(output.preference, entry.preference);
@@ -527,26 +555,37 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
         output.backingOutput = resolution.outputs.at(position).output;
     }
 
-    if (shrankForCanvas && encoderLimited && host.encodingMode.startsWith(QLatin1String("h264"))) {
+    if (shrankForCanvas && shrinkReason == Limit::Encoder &&
+            encodingMode.startsWith(QLatin1String("h264"))) {
         const auto hevc = caps.encodingLimits.constFind(QStringLiteral("hevc-10-444-nvenc"));
         const bool hevcHelps = hevc != caps.encodingLimits.constEnd() &&
-                hevc->maximum.width() > canvasLimit.width();
+                (hevc->maximum.width() > encoderLimit.width() || hevc->maximum.height() > encoderLimit.height());
         warn(plan, QStringLiteral("codec"),
              tr("H.264 streams at most %1 pixels wide, so some screens are scaled down.")
-                 .arg(caps.encodingLimits.value(host.encodingMode).maximum.width()),
+                 .arg(encoderLimit.width()),
              hevcHelps ? QStringLiteral("use-hevc") : QString(), hevcHelps ? tr("Use H.265 4:4:4") : QString());
-    } else if (shrankForCanvas && decoderLimited) {
+    } else if (shrankForCanvas && shrinkReason == Limit::Decoder) {
         warn(plan, QStringLiteral("decoder"),
              tr("This Mac decodes at most %1 in hardware, so some screens are scaled down.")
                  .arg(sizeLabel(limits.decoderMaximum)));
+    } else if (shrankForCanvas && shrinkReason == Limit::Encoder) {
+        warn(plan, QStringLiteral("canvas"),
+             tr("The screens together are larger than the workstation can stream (%1), so some are scaled down.")
+                 .arg(sizeLabel(encoderLimit)));
     } else if (shrankForCanvas) {
         warn(plan, QStringLiteral("canvas"),
              tr("The screens together are larger than the workstation's desktop (%1), so some are scaled down.")
                  .arg(sizeLabel(caps.maxCanvas)));
     }
-    const auto encoding = caps.encodingLimits.constFind(host.encodingMode);
+    if (plan.packed) {
+        warn(plan, QStringLiteral("packed"),
+             tr("Your screens together are wider than one video frame, so they are packed into one %1 stream.")
+                 .arg(sizeLabel(plan.capture)));
+        plan.warnings.last().info = true;
+    }
     if (encoding != caps.encodingLimits.constEnd() && encoding->qualified.isValid() &&
-            (plan.canvas.width() > encoding->qualified.width() || plan.canvas.height() > encoding->qualified.height())) {
+            (plan.capture.width() > encoding->qualified.width() ||
+             plan.capture.height() > encoding->qualified.height())) {
         warn(plan, QStringLiteral("unqualified"),
              tr("The workstation has been tested at up to %1 with this encoding; larger desktops may not reach "
                 "60 frames per second.").arg(sizeLabel(encoding->qualified)));
@@ -798,7 +837,7 @@ Plan plan(const QVector<NvClientDisplay>& displays, const DisplayProfile::Profil
     if (!result.ok) return result;
 
     const int shown = result.includedCount();
-    if (shown > 1 && !host.isMac() && profile.presentation == QLatin1String("windows")) {
+    if (shown > 1 && !host.isMac() && profile.presentation == QLatin1String("windows") && limits.separateWindows) {
         if (limits.separateSpaces) {
             result.presentation = QStringLiteral("windows");
         } else {

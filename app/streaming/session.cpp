@@ -2253,7 +2253,10 @@ void Session::rebuildPresentationLayout()
             topology = m_Computer->outputTopology;
         }
         const QSize streamSize(m_StreamConfig.width, m_StreamConfig.height);
-        const QSize captureSize(topology.desktopWidth, topology.desktopHeight);
+        // Source rectangles are in the host's capture (packed rows when the
+        // desk is wider than the encoder), pointer positions in its desktop.
+        const QSize captureSize = topology.captureSize();
+        const QSize desktopSize(topology.desktopWidth, topology.desktopHeight);
         for (const auto& display : std::as_const(m_ClientDisplays)) {
             if (arrangement && display.planIndex < 0) {
                 // Stays local: no window (createSecondaryWindows skips it too).
@@ -2278,22 +2281,25 @@ void Session::rebuildPresentationLayout()
                 const DisplayPlanner::Output& planned = m_DisplayPlan.outputs.at(display.planIndex);
                 output.canvasRect = QRect(planned.position, planned.size);
                 QRect desktopRect = output.canvasRect;
-                QRect captureRect = output.canvasRect;
-                QSize capture = m_DisplayPlan.canvas;
-                for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
-                    if (topology.displayArrangementPublished() &&
-                            hostOutput.arrangementIndex == planned.arrangementIndex) {
-                        desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
-                                            hostOutput.width, hostOutput.height);
-                        captureRect = QRect(hostOutput.sourceX, hostOutput.sourceY,
-                                            hostOutput.sourceWidth, hostOutput.sourceHeight);
-                        capture = captureSize;
-                        break;
+                QRect captureRect = planned.sourceRect.isValid() ? planned.sourceRect : output.canvasRect;
+                QSize capture = m_DisplayPlan.capture.isValid() ? m_DisplayPlan.capture : m_DisplayPlan.canvas;
+                QSize desktop = m_DisplayPlan.canvas;
+                if (topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
+                    for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
+                        if (hostOutput.arrangementIndex == planned.arrangementIndex) {
+                            desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
+                                                hostOutput.width, hostOutput.height);
+                            captureRect = QRect(hostOutput.sourceX, hostOutput.sourceY,
+                                                hostOutput.sourceWidth, hostOutput.sourceHeight);
+                            capture = captureSize;
+                            desktop = desktopSize;
+                            break;
+                        }
                     }
                 }
                 output.desktopRect = desktopRect;
                 output.sourceRect = PlankPresentation::sourceRectInStream(captureRect, capture, streamSize);
-                m_PresentationLayout.desktopSize = capture;
+                m_PresentationLayout.desktopSize = desktop;
             }
             m_PresentationLayout.outputs.append(output);
             canvasWidth = qMax(canvasWidth, output.canvasRect.right() + 1);
@@ -2319,7 +2325,7 @@ void Session::rebuildPresentationLayout()
                                   hostOutput.sourceWidth, hostOutput.sourceHeight),
                             captureSize, streamSize);
             }
-            m_PresentationLayout.desktopSize = captureSize;
+            m_PresentationLayout.desktopSize = desktopSize;
         }
     }
     else {
@@ -2327,8 +2333,30 @@ void Session::rebuildPresentationLayout()
         int height = 0;
         SDL_GetWindowSizeInPixels(m_Window, &width, &height);
         m_PresentationLayout.canvasSize = QSize(qMax(1, width), qMax(1, height));
-        m_PresentationLayout.outputs.append(
-            {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true});
+        PlankPresentationOutput output {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true};
+        NvOutputTopology topology;
+        {
+            QReadLocker lock(&m_Computer->lock);
+            topology = m_Computer->outputTopology;
+        }
+        if (!m_ResolvedArrangement.isEmpty() && topology.matchesRequestedArrangement(m_ResolvedArrangement) &&
+                topology.captureSize() != QSize(topology.desktopWidth, topology.desktopHeight)) {
+            // One window on a packed capture (left fullscreen): it would show
+            // the rows, not the desk, so it shows the primary display, and the
+            // pointer maps through it to the desktop.
+            for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
+                if (!hostOutput.primary) continue;
+                output.desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
+                                           hostOutput.width, hostOutput.height);
+                output.sourceRect = PlankPresentation::sourceRectInStream(
+                            QRect(hostOutput.sourceX, hostOutput.sourceY, hostOutput.sourceWidth,
+                                  hostOutput.sourceHeight),
+                            topology.captureSize(), QSize(m_StreamConfig.width, m_StreamConfig.height));
+                m_PresentationLayout.desktopSize = QSize(topology.desktopWidth, topology.desktopHeight);
+                break;
+            }
+        }
+        m_PresentationLayout.outputs.append(output);
     }
 
     if (m_InputHandler != nullptr) {
@@ -2940,6 +2968,9 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
     // Never an 8K stream this Mac would decode in software.
     limits.decoderMaximum = DecoderCaps::maximum(host.encodingMode);
 #endif
+    const char* driver = SDL_GetCurrentVideoDriver();
+    limits.separateWindows = m_IsFullScreen && driver != nullptr &&
+            (strcmp(driver, "cocoa") == 0 || strcmp(driver, "wayland") == 0);
     const DisplayProfile::Resolved resolved = displayProfileFor(displays);
     m_DisplayPlan = DisplayPlanner::plan(displays, resolved.profile, host, limits);
     for (const DisplayPlanner::Output& output : std::as_const(m_DisplayPlan.outputs)) {
@@ -2984,8 +3015,9 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
         matchedExactly = matchedExactly && !output.scaled;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK display arrangement: request=%s canvas=%dx%d presentation=%s profile=%s",
+                "PLANK display arrangement: request=%s canvas=%dx%d capture=%dx%d%s presentation=%s profile=%s",
                 qPrintable(m_ResolvedArrangement), m_DisplayPlan.canvas.width(), m_DisplayPlan.canvas.height(),
+                m_DisplayPlan.capture.width(), m_DisplayPlan.capture.height(), m_DisplayPlan.packed ? " packed" : "",
                 qPrintable(m_DisplayPlan.presentation),
                 resolved.source == DisplayProfile::Resolved::HostCustom ? "workstation" :
                 resolved.source == DisplayProfile::Resolved::Global ? "saved" : "proposal");
@@ -3057,19 +3089,44 @@ QSize Session::arrangementStreamLimit() const
     if (entry != topology.displayCapabilities.encodingLimits.constEnd() && entry->maximum.isValid()) {
         limit = entry->maximum;
     }
+#ifdef Q_OS_DARWIN
+    // Never a stream this Mac would decode in software.
+    const QSize decoder = DecoderCaps::maximum(mode);
+    if (decoder.isValid()) {
+        limit = limit.isValid() ? limit.boundedTo(decoder) : decoder;
+    }
+#endif
     return limit;
+}
+
+QSize Session::arrangementCaptureSize() const
+{
+    // The host's capture once it shows this arrangement (it may pack the
+    // outputs into rows); until then the capture the plan expects.
+    NvOutputTopology topology;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        topology = m_Computer->outputTopology;
+    }
+    if (topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
+        return topology.captureSize();
+    }
+    return m_DisplayPlan.capture.isValid() ? m_DisplayPlan.capture : m_DisplayPlan.canvas;
 }
 
 QSize Session::configurePlankDisplayMode()
 {
     if (!m_ResolvedArrangement.isEmpty()) {
-        // The workstation desktop, 1:1: the plan already fitted it to the
-        // host's canvas, its encoder and this client.
+        // The host's capture, 1:1: the desktop, or its outputs packed into
+        // rows. The plan already fitted it to the host's canvas, its encoder
+        // and this client's decoder.
         QString error;
-        const QSize selected = PlankDisplayMode::resolveClient(m_DisplayPlan.canvas, arrangementStreamLimit(), &error);
+        const QSize capture = arrangementCaptureSize();
+        const QSize selected = PlankDisplayMode::resolveClient(capture, arrangementStreamLimit(), &error);
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "PLANK client physical resolution: arrangement canvas=%dx%d selected=%dx%d resolution-policy=desktop",
+                    "PLANK client physical resolution: arrangement desktop=%dx%d capture=%dx%d%s selected=%dx%d resolution-policy=capture",
                     m_DisplayPlan.canvas.width(), m_DisplayPlan.canvas.height(),
+                    capture.width(), capture.height(), m_DisplayPlan.packed ? " (packed)" : "",
                     selected.width(), selected.height());
         if (!selected.isValid()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));

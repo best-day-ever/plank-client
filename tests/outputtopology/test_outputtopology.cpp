@@ -39,6 +39,7 @@ private slots:
     void ignoresArrangementFieldsWithoutTheFeature();
     void rejectsMalformedArrangementFields();
     void matchesRequestedArrangement();
+    void parsesPackedCapture();
 };
 
 void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
@@ -946,6 +947,107 @@ void TestOutputTopology::matchesRequestedArrangement()
     shifted.desktopX = 100;
     for (NvOutput& output : shifted.outputs) output.x += 100;
     QVERIFY(shifted.matchesRequestedArrangement(request));
+}
+
+namespace {
+
+// A hybrid host presenting three UHD monitors side by side (11520x2160),
+// its capture packed into rows for the encoder (7680x4320).
+QJsonObject packedThreeUhd()
+{
+    QJsonObject object = arrangementVector();
+    object["generation"] = "x11:packed-three-uhd";
+    QJsonObject layout = object["layout"].toObject();
+    layout["output_count"] = 3;
+    layout["arrangement"] = QJsonObject {
+        {"request", "1:3840x2160+0+0:auto,3840x2160+3840+0:auto,3840x2160+7680+0:auto"},
+        {"transition", QJsonObject {{"state", "applied"}, {"reason", ""}}}};
+    object["layout"] = layout;
+    object["desktop"] = QJsonObject {{"x", 0}, {"y", 0}, {"width", 11520}, {"height", 2160}};
+    QJsonObject caps = object["display_capabilities"].toObject();
+    caps["packed_capture"] = true;
+    caps["max_canvas"] = QJsonObject {{"width", 16384}, {"height", 8192}};
+    object["display_capabilities"] = caps;
+    const QJsonObject first = object["outputs"].toArray().at(1).toObject();
+    QJsonArray outputs;
+    const int sources[3][2] = {{0, 0}, {3840, 0}, {0, 2160}};
+    for (int index = 0; index < 3; ++index) {
+        QJsonObject output = first;
+        output["id"] = QStringLiteral("x11:DP-%1").arg(index);
+        output["name"] = QStringLiteral("DP-%1").arg(index);
+        output["x"] = 3840 * index;
+        output["y"] = 0;
+        output["primary"] = index == 0;
+        output["backing"] = index == 0 ? "physical" : "virtual";
+        output["arrangement_index"] = index;
+        output["source_rect"] = QJsonObject {{"x", sources[index][0]}, {"y", sources[index][1]},
+                                             {"width", 3840}, {"height", 2160}};
+        outputs.append(output);
+    }
+    object["outputs"] = outputs;
+    object["capture"] = QJsonObject {{"width", 7680}, {"height", 4320}};
+    return object;
+}
+
+}
+
+void TestOutputTopology::parsesPackedCapture()
+{
+    const QJsonObject packed = packedThreeUhd();
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(packed, topology, &error), qPrintable(error));
+    QVERIFY(topology.capturePublished);
+    QCOMPARE(topology.captureSize(), QSize(7680, 4320));
+    QCOMPARE(QSize(topology.desktopWidth, topology.desktopHeight), QSize(11520, 2160));
+    QCOMPARE(topology.outputs.at(2).x, 7680);
+    QCOMPARE(topology.outputs.at(2).sourceX, 0);
+    QCOMPARE(topology.outputs.at(2).sourceY, 2160);
+    QVERIFY(topology.displayCapabilities.packedCapture);
+    QVERIFY(topology.matchesRequestedArrangement(
+                QStringLiteral("1:3840x2160+0+0:auto,3840x2160+3840+0:auto,3840x2160+7680+0:auto")));
+    QCOMPARE(topology.toJson(), packed);
+
+    // Without the bit, exactly as before (and as the 1.0.129 parser does):
+    // "capture" is read as a macOS fixed capture, so the document is refused.
+    QJsonObject legacy = packed;
+    legacy["feature_flags"] = packed.value("feature_flags").toInt() & ~NvOutputTopology::DisplayArrangementFeature;
+    QVERIFY(!NvOutputTopology::fromJson(legacy, topology, &error));
+    QVERIFY(error.contains(QStringLiteral("fixed capture")));
+    QJsonObject unpacked = arrangementVector();
+    unpacked["capture"] = QJsonObject {{"width", 6864}, {"height", 2160}};
+    unpacked["feature_flags"] = unpacked.value("feature_flags").toInt() & ~NvOutputTopology::DisplayArrangementFeature;
+    QVERIFY(!NvOutputTopology::fromJson(unpacked, topology));
+    // A source rectangle below the desktop without any capture is refused too.
+    QJsonObject noCapture = packed;
+    noCapture.remove("capture");
+    noCapture["feature_flags"] = legacy.value("feature_flags");
+    QVERIFY(!NvOutputTopology::fromJson(noCapture, topology));
+    // A macOS fixed capture still parses as one.
+    QFile fixed(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/fixed-capture-v13.json");
+    QVERIFY(fixed.open(QIODevice::ReadOnly));
+    QVERIFY(NvOutputTopology::fromJson(QJsonDocument::fromJson(fixed.readAll()).object(), topology));
+    QCOMPARE(topology.layoutKind, QStringLiteral("fixed"));
+    // With the bit and no "capture": the capture is the desktop.
+    QVERIFY(NvOutputTopology::fromJson(arrangementVector(), topology));
+    QVERIFY(!topology.capturePublished);
+    QCOMPARE(topology.captureSize(), QSize(6864, 2160));
+
+    // Sources must lie inside the published capture; the capture is strict.
+    const auto rejects = [&packed, &topology](const std::function<void(QJsonObject&)>& edit) {
+        QJsonObject object = packed;
+        edit(object);
+        return !NvOutputTopology::fromJson(object, topology);
+    };
+    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 7680}, {"height", 4000}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o.remove("capture"); }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 7680}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 7680}, {"height", 4320.5}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 32768}, {"height", 4320}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = "7680x4320"; }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        o["capture"] = QJsonObject {{"width", 7680}, {"height", 4320}, {"packed", true}};
+    }));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)

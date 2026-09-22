@@ -300,9 +300,10 @@ Capabilities Capabilities::fleetDefault()
     caps.fingerprint = QStringLiteral("fleet-default");
     caps.maxOutputs = 4;
     caps.virtualHeads = 3;
-    // X screen Virtual 16384x8192 bounded by the NVENC maximum until the
-    // host packs its capture.
-    caps.maxCanvas = QSize(8192, 8192);
+    // The X screen reserves 16384x8192; a desktop larger than the encoder
+    // is captured packed into rows.
+    caps.maxCanvas = QSize(16384, 8192);
+    caps.packedCapture = true;
     caps.minOutput = QSize(640, 480);
     // A 2:1 ViewPortIn downscale over the largest carrier (5120x2160).
     caps.maxOutput = QSize(8192, 4320);
@@ -531,6 +532,65 @@ QString validate(const QString& request, const Capabilities& caps, QVector<Entry
     // Every value now fits the canvas, so QRect cannot overflow.
     if (out != nullptr) *out = toEntries(raws);
     return QString();
+}
+
+Packing pack(const QVector<Entry>& entries, const QSize& limit, bool packedCapture)
+{
+    Packing result;
+    const QSize desktop = boundingSize(entries);
+    if (!limit.isValid() || (desktop.width() <= limit.width() && desktop.height() <= limit.height())) {
+        result.ok = true;
+        result.capture = desktop;
+        for (const Entry& entry : entries) result.sourceRects.append(entry.rect);
+        return result;
+    }
+    if (!packedCapture) {
+        result.error = QStringLiteral("canvas_too_large");
+        return result;
+    }
+    int rowTop = 0;
+    int rowWidth = 0;
+    int rowHeight = 0;
+    int captureWidth = 0;
+    for (const Entry& entry : entries) {
+        const int width = entry.rect.width();
+        const int height = entry.rect.height();
+        if (width > limit.width()) {
+            result.error = QStringLiteral("canvas_too_large");
+            result.sourceRects.clear();
+            return result;
+        }
+        if (rowWidth > 0 && rowWidth + width > limit.width()) {
+            rowTop += rowHeight;
+            rowWidth = 0;
+            rowHeight = 0;
+        }
+        result.sourceRects.append(QRect(rowWidth, rowTop, width, height));
+        rowWidth += width;
+        rowHeight = qMax(rowHeight, height);
+        captureWidth = qMax(captureWidth, rowWidth);
+    }
+    const int captureHeight = rowTop + rowHeight;
+    if (captureHeight > limit.height()) {
+        result.error = QStringLiteral("canvas_too_large");
+        result.sourceRects.clear();
+        return result;
+    }
+    result.ok = true;
+    result.packed = true;
+    result.capture = QSize(captureWidth, captureHeight);
+    return result;
+}
+
+Packing pack(const QString& request, const Capabilities& caps, const QString& encodingMode)
+{
+    QVector<Entry> entries;
+    Packing result;
+    result.error = validate(request, caps, &entries);
+    if (!result.error.isEmpty()) return result;
+    const auto encoding = caps.encodingLimits.constFind(encodingMode);
+    const QSize limit = encoding != caps.encodingLimits.constEnd() ? encoding->maximum : QSize();
+    return pack(entries, limit, caps.packedCapture);
 }
 
 QSize carrierFor(const QSize& size, const QStringList& pool)

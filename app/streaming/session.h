@@ -363,6 +363,8 @@ private:
     // The largest stream this client and the host's encoder carry for the
     // arrangement; invalid for no limit.
     QSize arrangementStreamLimit() const;
+    // The frame the host encodes for the arrangement (packed capture).
+    QSize arrangementCaptureSize() const;
 
     QSize configurePlankDisplayMode();
 

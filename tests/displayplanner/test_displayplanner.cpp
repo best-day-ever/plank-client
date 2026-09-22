@@ -5,6 +5,7 @@
 #include "displayplanner.h"
 #include "displayprofile.h"
 #include "outputtopology.h"
+#include "streaming/plankpresentation.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -100,6 +101,10 @@ private slots:
     void requestNumbersStayWithin32Bits();
     void refusalsReadAsSentences();
     void unlistedEncodingUsesTheOlderLayout();
+    void packingVectors();
+    void threeUhdPackIntoOneStream();
+    void packedCaptureMustFitTheDecoder();
+    void packedWindowsMapToTheDesktop();
 
     // Planner
     void exactAndLooksLikeSizes();
@@ -349,10 +354,14 @@ void TestDisplayPlanner::fleetDefaultCapabilities()
     QVERIFY(fleet.valid);
     DisplayArrangement::Capabilities parsed;
     QVERIFY(DisplayArrangement::Capabilities::fromJson(fleet.toJson(), parsed));
-    // The vectors' fleet-hybrid host, with the canvas the X screen allows
-    // until the host packs its capture.
+    // The vectors' fleet-hybrid host with the fleet's packing canvas.
     const DisplayArrangement::Capabilities vector = vectorCapabilities(QStringLiteral("fleet-hybrid"));
-    QCOMPARE(fleet.maxCanvas, QSize(8192, 8192));
+    // The X screen reserves 16384x8192 and the host packs wider desks.
+    QCOMPARE(fleet.maxCanvas, QSize(16384, 8192));
+    QVERIFY(fleet.packedCapture);
+    const DisplayArrangement::Capabilities packedVector = vectorCapabilities(QStringLiteral("fleet-hybrid-packed"));
+    QCOMPARE(fleet.maxCanvas, packedVector.maxCanvas);
+    QCOMPARE(fleet.packedCapture, packedVector.packedCapture);
     QCOMPARE(fleet.maxOutputs, vector.maxOutputs);
     QCOMPARE(fleet.virtualHeads, vector.virtualHeads);
     // The fleet publishes a 2:1 ViewPortIn downscale over its 5120x2160 carrier.
@@ -562,28 +571,34 @@ void TestDisplayPlanner::ultrawideAndStudioDisplayScaleToTheCanvas()
         mac(QStringLiteral("uuid:UW"), QRect(0, 0, 3440, 1440), QSize(3440, 1440), true),
         mac(QStringLiteral("uuid:5K"), QRect(3440, 0, 2560, 1440), QSize(5120, 2880)),
     };
-    // 3440 + 5120 = 8560 pixels: wider than the 8192 canvas, so the 5K display
-    // steps down to "looks like" and says so.
-    const DisplayPlanner::Plan plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
-                                                           DisplayPlanner::HostInfo());
+    // A host that cannot pack its capture: 3440 + 5120 = 8560 pixels is
+    // wider than its 8192 canvas, so the 5K display steps down to "looks
+    // like" and says so.
+    const DisplayPlanner::Plan plan = DisplayPlanner::plan(
+                displays, DisplayPlanner::proposal(displays),
+                arrangementHost(vectorCapabilities(QStringLiteral("fleet-hybrid"))));
     QVERIFY2(plan.ok, qPrintable(plan.error));
     QCOMPARE(plan.arrangement, QStringLiteral("1:3440x1440+0+0:auto,2560x1440+3440+0:auto"));
     QVERIFY(!plan.outputs.at(0).scaled);
     QVERIFY(plan.outputs.at(1).scaled);
     QCOMPARE(plan.outputs.at(1).badge, QStringLiteral("scaled"));
     QVERIFY(warningCodes(plan).contains(QStringLiteral("canvas")));
+    QVERIFY(!plan.packed);
+    QCOMPARE(plan.capture, plan.canvas);
     QCOMPARE(plan.outputs.at(0).backing, DisplayArrangement::Backing::Virtual);
     QCOMPARE(plan.outputs.at(1).backing, DisplayArrangement::Backing::Virtual);
-    // With a canvas that holds both (packed capture later), both are exact.
-    DisplayArrangement::Capabilities wide = DisplayArrangement::Capabilities::fleetDefault();
-    wide.maxCanvas = QSize(16384, 8192);
-    wide.packedCapture = true;
+    // The fleet packs its capture: both exact, packed into one 5120x4320 frame.
     const DisplayPlanner::Plan exact = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
-                                                            arrangementHost(wide));
+                                                            DisplayPlanner::HostInfo());
     QVERIFY2(exact.ok, qPrintable(exact.error));
     QCOMPARE(exact.arrangement, QStringLiteral("1:3440x1440+0+0:auto,5120x2880+3440+0:auto"));
     QVERIFY(!exact.outputs.at(1).scaled);
     QCOMPARE(exact.outputs.at(1).badge, QStringLiteral("exact"));
+    QCOMPARE(exact.canvas, QSize(8560, 2880));
+    QVERIFY(exact.packed);
+    QCOMPARE(exact.capture, QSize(5120, 4320));
+    QCOMPARE(exact.outputs.at(1).sourceRect, QRect(0, 1440, 5120, 2880));
+    QVERIFY(!warningCodes(exact).contains(QStringLiteral("canvas")));
 }
 
 void TestDisplayPlanner::eightKMonitor()
@@ -944,6 +959,172 @@ void TestDisplayPlanner::arrangeInvariants()
     const QVector<QPoint> seam = DisplayPlanner::arrange(desks.at(3), sizes.at(3), 0);
     QVERIFY(qMin(seam.at(0).y() + 1440, seam.at(1).y() + 2880) - qMax(seam.at(0).y(), seam.at(1).y()) >=
             DisplayPlanner::MinimumSeam);
+}
+
+void TestDisplayPlanner::packingVectors()
+{
+    const QJsonArray cases = vectors().value(QStringLiteral("packing")).toArray();
+    QVERIFY(cases.size() >= 10);
+    for (const QJsonValue& value : cases) {
+        const QJsonObject entry = value.toObject();
+        const QString name = entry.value(QStringLiteral("name")).toString();
+        const DisplayArrangement::Capabilities caps =
+                vectorCapabilities(entry.value(QStringLiteral("capabilities")).toString());
+        QVERIFY2(caps.valid, qPrintable(name));
+        const DisplayArrangement::Packing packing = DisplayArrangement::pack(
+                    entry.value(QStringLiteral("request")).toString(), caps,
+                    entry.value(QStringLiteral("encoding_mode")).toString());
+        if (entry.contains(QStringLiteral("error"))) {
+            QVERIFY2(!packing.ok, qPrintable(name));
+            QCOMPARE(packing.error, entry.value(QStringLiteral("error")).toString());
+            continue;
+        }
+        QVERIFY2(packing.ok, qPrintable(name + QStringLiteral(": ") + packing.error));
+        const QJsonObject result = entry.value(QStringLiteral("result")).toObject();
+        QCOMPARE(packing.packed, result.value(QStringLiteral("packed")).toBool());
+        const QJsonObject capture = result.value(QStringLiteral("capture")).toObject();
+        QCOMPARE(packing.capture, QSize(capture.value(QStringLiteral("width")).toInt(),
+                                        capture.value(QStringLiteral("height")).toInt()));
+        const QJsonArray rects = result.value(QStringLiteral("source_rects")).toArray();
+        QCOMPARE(packing.sourceRects.size(), rects.size());
+        for (int index = 0; index < rects.size(); ++index) {
+            const QJsonObject rect = rects.at(index).toObject();
+            QCOMPARE(packing.sourceRects.at(index),
+                     QRect(rect.value(QStringLiteral("x")).toInt(), rect.value(QStringLiteral("y")).toInt(),
+                           rect.value(QStringLiteral("width")).toInt(), rect.value(QStringLiteral("height")).toInt()));
+        }
+    }
+}
+
+void TestDisplayPlanner::threeUhdPackIntoOneStream()
+{
+    // Three UHD monitors at "looks like 1920 x 1080", side by side, the
+    // middle one primary: an 11520x2160 desk, packed by the host into a
+    // 7680x4320 capture. Nothing is scaled and nothing warns.
+    const QVector<NvClientDisplay> displays {
+        mac(QStringLiteral("uuid:L"), QRect(-1920, 0, 1920, 1080), QSize(3840, 2160)),
+        mac(QStringLiteral("uuid:M"), QRect(0, 0, 1920, 1080), QSize(3840, 2160), true),
+        mac(QStringLiteral("uuid:R"), QRect(1920, 0, 1920, 1080), QSize(3840, 2160)),
+    };
+    DisplayPlanner::Limits limits;
+    limits.decoderMaximum = QSize(8192, 4320);
+    const DisplayPlanner::Plan plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
+                                                           DisplayPlanner::HostInfo(), limits);
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QCOMPARE(plan.arrangement, QStringLiteral("1:3840x2160+3840+0:auto,3840x2160+0+0:auto,3840x2160+7680+0:auto"));
+    QCOMPARE(plan.canvas, QSize(11520, 2160));
+    QVERIFY(plan.packed);
+    QCOMPARE(plan.capture, QSize(7680, 4320));
+    for (const DisplayPlanner::Output& output : plan.outputs) {
+        QVERIFY(!output.scaled);
+        QCOMPARE(output.badge, QStringLiteral("exact"));
+    }
+    // Request order packs: the primary, then the left one, then the right one on the second row.
+    QCOMPARE(plan.outputs.at(1).sourceRect, QRect(0, 0, 3840, 2160));
+    QCOMPARE(plan.outputs.at(0).sourceRect, QRect(3840, 0, 3840, 2160));
+    QCOMPARE(plan.outputs.at(2).sourceRect, QRect(0, 2160, 3840, 2160));
+    const QStringList codes = warningCodes(plan);
+    QVERIFY(!codes.contains(QStringLiteral("canvas")));
+    QVERIFY(!codes.contains(QStringLiteral("decoder")));
+    const int packed = codes.indexOf(QStringLiteral("packed"));
+    QVERIFY(packed >= 0);
+    QVERIFY(plan.warnings.at(packed).info);
+    QVERIFY(plan.warnings.at(packed).text.contains(QStringLiteral("7680 × 4320")));
+    QVERIFY(plan.warnings.at(packed).action.isEmpty());
+    // The host's own rule gives the same capture for the request.
+    const DisplayArrangement::Packing host = DisplayArrangement::pack(
+                plan.arrangement, vectorCapabilities(QStringLiteral("fleet-hybrid-packed")),
+                QStringLiteral("hevc-10-444-nvenc"));
+    QVERIFY(host.ok);
+    QCOMPARE(host.capture, plan.capture);
+    // Every other warning is a real one.
+    for (const DisplayPlanner::Warning& warning : plan.warnings) {
+        QCOMPARE(warning.info, warning.code == QLatin1String("packed"));
+    }
+
+    // Packed rows need one window per display. In one window (chosen, no
+    // separate Spaces, or no fullscreen windows) the desk must fit the
+    // encoder as it is, so displays step down instead.
+    DisplayProfile::Profile single = DisplayPlanner::proposal(displays);
+    single.presentation = QStringLiteral("single");
+    DisplayPlanner::Limits noSpaces = limits;
+    noSpaces.separateSpaces = false;
+    DisplayPlanner::Limits windowed = limits;
+    windowed.separateWindows = false;
+    const QVector<DisplayPlanner::Plan> unpacked {
+        DisplayPlanner::plan(displays, single, DisplayPlanner::HostInfo(), limits),
+        DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), DisplayPlanner::HostInfo(), noSpaces),
+        DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), DisplayPlanner::HostInfo(), windowed)};
+    for (const DisplayPlanner::Plan& one : unpacked) {
+        QVERIFY2(one.ok, qPrintable(one.error));
+        QVERIFY(!one.packed);
+        QCOMPARE(one.presentation, QStringLiteral("single"));
+        QCOMPARE(one.capture, one.canvas);
+        QVERIFY(one.canvas.width() <= 8192);
+        QVERIFY(warningCodes(one).contains(QStringLiteral("canvas")));
+        QVERIFY(!warningCodes(one).contains(QStringLiteral("packed")));
+    }
+}
+
+void TestDisplayPlanner::packedCaptureMustFitTheDecoder()
+{
+    // Two 6K XDRs side by side pack into 6016x6768: the encoder takes it,
+    // a decoder that stops at 4320 lines does not, so one display steps down.
+    const QVector<NvClientDisplay> displays {
+        mac(QStringLiteral("uuid:A"), QRect(0, 0, 3008, 1692), QSize(6016, 3384), true),
+        mac(QStringLiteral("uuid:B"), QRect(3008, 0, 3008, 1692), QSize(6016, 3384)),
+    };
+    DisplayPlanner::Plan plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
+                                                     DisplayPlanner::HostInfo());
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QVERIFY(plan.packed);
+    QCOMPARE(plan.capture, QSize(6016, 6768));
+    QVERIFY(!plan.outputs.at(0).scaled && !plan.outputs.at(1).scaled);
+    DisplayPlanner::Limits limits;
+    limits.decoderMaximum = QSize(8192, 4320);
+    plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), DisplayPlanner::HostInfo(), limits);
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QVERIFY(plan.capture.width() <= 8192 && plan.capture.height() <= 4320);
+    QVERIFY(plan.outputs.at(0).scaled || plan.outputs.at(1).scaled);
+    QVERIFY(warningCodes(plan).contains(QStringLiteral("decoder")));
+    // A desk the encoder takes unpacked is never packed.
+    const QVector<NvClientDisplay> pair {macBook14(),
+                                         mac(QStringLiteral("uuid:UHD"), QRect(1512, 0, 1920, 1080), QSize(3840, 2160))};
+    plan = DisplayPlanner::plan(pair, DisplayPlanner::proposal(pair), DisplayPlanner::HostInfo(), limits);
+    QVERIFY(!plan.packed);
+    QCOMPARE(plan.capture, plan.canvas);
+    QVERIFY(!warningCodes(plan).contains(QStringLiteral("packed")));
+}
+
+void TestDisplayPlanner::packedWindowsMapToTheDesktop()
+{
+    // The third UHD screen of a packed 3xUHD desk: its window shows capture
+    // rows from y 2160, and its pointer lands on the desktop at x >= 7680.
+    const QVector<NvClientDisplay> displays {
+        mac(QStringLiteral("uuid:A"), QRect(0, 0, 1920, 1080), QSize(3840, 2160), true),
+        mac(QStringLiteral("uuid:B"), QRect(1920, 0, 1920, 1080), QSize(3840, 2160)),
+        mac(QStringLiteral("uuid:C"), QRect(3840, 0, 1920, 1080), QSize(3840, 2160)),
+    };
+    const DisplayPlanner::Plan plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
+                                                           DisplayPlanner::HostInfo());
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QCOMPARE(plan.capture, QSize(7680, 4320));
+    const DisplayPlanner::Output& third = plan.outputs.at(2);
+    QCOMPARE(third.position, QPoint(7680, 0));
+    QVERIFY(third.sourceRect.y() >= 2160);
+    PlankPresentationOutput window;
+    window.sourceRect = PlankPresentation::sourceRectInStream(third.sourceRect, plan.capture, plan.capture);
+    window.desktopRect = QRect(third.position, third.size);
+    const auto slice = PlankPresentation::sliceForSource(plan.capture, window.sourceRect, QSize(3840, 2160));
+    QVERIFY(slice.visible);
+    QVERIFY(slice.sourceRect.top() >= 2160);
+    QCOMPARE(slice.destinationRect, QRect(0, 0, 3840, 2160));
+    QPointF desktopPoint;
+    QVERIFY(PlankPresentation::mapWindowPointToDesktop(QPointF(960, 540), QSize(1920, 1080), QSize(3840, 2160),
+                                                       window, plan.capture, desktopPoint, false));
+    QVERIFY(desktopPoint.x() >= 7680);
+    QCOMPARE(desktopPoint, QPointF(7680 + 1920, 1080));
+    QCOMPARE(PlankPresentation::absoluteDesktopPosition(desktopPoint, plan.canvas), QPoint(9600, 1080));
 }
 
 QTEST_GUILESS_MAIN(TestDisplayPlanner)

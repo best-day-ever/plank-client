@@ -731,8 +731,7 @@ public:
         // One window per workstation display: every other window gets its own
         // Metal view and layer on the same device, queue, texture cache and
         // pipelines, and shows its own rectangle of each frame.
-        if (params->presentationLayout != nullptr && params->presentationLayout->usesSourceRects() &&
-                params->presentationLayout->outputs.size() > 1) {
+        if (params->presentationLayout != nullptr && params->presentationLayout->usesSourceRects()) {
             for (const auto& output : params->presentationLayout->outputs) {
                 if (output.window == m_Window) {
                     m_PrimarySourceRect = output.sourceRect;
@@ -756,7 +755,7 @@ public:
                 m_Secondaries.push_back(std::move(target));
             }
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Metal renderer presenting %zu windows",
+                        "Metal renderer presenting %zu window(s) from source rectangles",
                         m_Secondaries.size() + 1);
         }
 

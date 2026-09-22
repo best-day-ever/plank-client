@@ -102,6 +102,13 @@ void TestPlankDisplayMode::streamsArrangementCanvasOneToOne()
     QVERIFY(!PlankDisplayMode::resolveClient(QSize(), QSize(), &error).isValid());
     QCOMPARE(PlankDisplayMode::resolveClient(QSize(3024, 1890), QSize(3024, 1890), &error), QSize(3024, 1890));
     QVERIFY(error.isEmpty());
+    // A packed capture (three UHD screens as 7680x4320) is checked against
+    // the smaller of the encoder and this Mac's hardware decoder.
+    const QSize packed(7680, 4320);
+    QCOMPARE(PlankDisplayMode::resolveClient(packed, QSize(8192, 8192).boundedTo(QSize(8192, 4320))), packed);
+    QVERIFY(!PlankDisplayMode::resolveClient(packed, QSize(8192, 8192).boundedTo(QSize(4096, 2304)), &error)
+             .isValid());
+    QVERIFY(error.contains(QStringLiteral("7680x4320")));
 }
 
 QTEST_APPLESS_MAIN(TestPlankDisplayMode)

@@ -218,6 +218,15 @@ struct NvOutputTopology
     QVector<NvOutput> outputs;
     QRectF captureLogicalBounds;
     QString appleEncodingMode = QStringLiteral("hevc-10-420-videotoolbox");
+    // The encoded frame source rectangles refer to: the desktop size unless
+    // the host publishes a packed capture (display arrangement only).
+    int captureWidth = 0;
+    int captureHeight = 0;
+    bool capturePublished = false;
+    QSize captureSize() const
+    {
+        return QSize(captureWidth > 0 ? captureWidth : desktopWidth, captureHeight > 0 ? captureHeight : desktopHeight);
+    }
     // Display arrangement (0x8000000) only; ignored without the bit.
     DisplayArrangement::Capabilities displayCapabilities;
     QString startupPolicy;           // physical | virtual | hybrid

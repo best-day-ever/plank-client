@@ -37,6 +37,7 @@ private slots:
     void remoteCursorFindsItsWindow();
     void sourceRectsMatchLegacyExactLayout();
     void layoutRequiresCompleteSourceRects();
+    void packedThreeUhdThirdScreenMapsToTheDesktop();
 
 private:
     static PlankOutputGeometry singleOutput(const QSize& snapshotCanvas,
@@ -647,6 +648,48 @@ void TestPlankPresentation::layoutRequiresCompleteSourceRects()
     PlankPresentationOutput legacy {nullptr, QRect(0, 0, 1920, 1080), true};
     QVERIFY(!legacy.sourceRect.isValid());
     QVERIFY(!legacy.desktopRect.isValid());
+}
+
+void TestPlankPresentation::packedThreeUhdThirdScreenMapsToTheDesktop()
+{
+    // The packing vector "three-uhd-row": an 11520x2160 desktop captured as
+    // 7680x4320, the third screen's pixels on the second row.
+    const QSize capture(7680, 4320);
+    const QSize desktop(11520, 2160);
+    PlankPresentationLayout layout;
+    layout.desktopSize = desktop;
+    layout.canvasSize = desktop;
+    const QRect sources[3] = {QRect(0, 0, 3840, 2160), QRect(3840, 0, 3840, 2160), QRect(0, 2160, 3840, 2160)};
+    for (int index = 0; index < 3; ++index) {
+        PlankPresentationOutput output(nullptr, QRect(3840 * index, 0, 3840, 2160), index == 0);
+        output.sourceRect = PlankPresentation::sourceRectInStream(sources[index], capture, capture);
+        output.desktopRect = QRect(3840 * index, 0, 3840, 2160);
+        layout.outputs.append(output);
+    }
+    QVERIFY(layout.usesSourceRects());
+    const PlankPresentationOutput& third = layout.outputs.at(2);
+    // Its window (1920x1080 points on a 2x panel) shows capture rows from 2160 down...
+    const auto slice = PlankPresentation::sliceForSource(capture, third.sourceRect, QSize(3840, 2160));
+    QVERIFY(slice.visible);
+    QVERIFY(slice.sourceRect.top() >= 2160);
+    QCOMPARE(slice.sourceRect, QRectF(0, 2160, 3840, 2160));
+    // ...and every point in it lands on the desktop at x >= 7680.
+    for (const QPointF point : {QPointF(0, 0), QPointF(960, 540), QPointF(1919, 1079)}) {
+        QPointF desktopPoint;
+        QVERIFY(PlankPresentation::mapWindowPointToDesktop(point, QSize(1920, 1080), QSize(3840, 2160), third,
+                                                           capture, desktopPoint, false));
+        QVERIFY(desktopPoint.x() >= 7680);
+        const QPoint absolute = PlankPresentation::absoluteDesktopPosition(desktopPoint, layout.desktopSize);
+        QVERIFY(absolute.x() >= 7680 && absolute.x() < 11520);
+        QVERIFY(absolute.y() >= 0 && absolute.y() < 2160);
+    }
+    // The remote cursor at desktop-row pixel (1920, 3240) of the capture is on that window.
+    QPointF windowPoint;
+    QVERIFY(PlankPresentation::mapStreamPointToSourceWindow(QPointF(1920, 3240), capture, third, QSize(1920, 1080),
+                                                            QSize(3840, 2160), windowPoint));
+    QCOMPARE(windowPoint, QPointF(960, 540));
+    QVERIFY(!PlankPresentation::mapStreamPointToSourceWindow(QPointF(1920, 3240), capture, layout.outputs.at(0),
+                                                             QSize(1920, 1080), QSize(3840, 2160), windowPoint));
 }
 
 QTEST_APPLESS_MAIN(TestPlankPresentation)

@@ -167,9 +167,12 @@ ColumnLayout {
                 x: 12
                 y: 8
                 width: parent.width - 24
-                text: DisplaySetup.planOk && DisplaySetup.desktop.width > 0 ?
-                          qsTr("Workstation · %1 × %2").arg(DisplaySetup.desktop.width).arg(DisplaySetup.desktop.height) :
-                          qsTr("Workstation")
+                text: !DisplaySetup.planOk || DisplaySetup.desktop.width <= 0 ? qsTr("Workstation") :
+                      DisplaySetup.desktop.packed ?
+                          qsTr("Workstation · %1 × %2 · one %3 × %4 stream").arg(DisplaySetup.desktop.width)
+                              .arg(DisplaySetup.desktop.height).arg(DisplaySetup.desktop.captureWidth)
+                              .arg(DisplaySetup.desktop.captureHeight) :
+                          qsTr("Workstation · %1 × %2").arg(DisplaySetup.desktop.width).arg(DisplaySetup.desktop.height)
                 color: theme.textSecondary
                 font.pointSize: 10
                 font.weight: Font.DemiBold
@@ -434,12 +437,14 @@ ColumnLayout {
         model: panel.readOnly ? [] : DisplaySetup.warnings
 
         delegate: Rectangle {
+            // Info (a packed capture) is news in the accent colour, not a warning.
+            readonly property color tone: modelData.info ? theme.accent : theme.warning
             Layout.fillWidth: true
             implicitHeight: warningRow.implicitHeight + 16
             radius: theme.radiusSmall
-            color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.12)
+            color: Qt.rgba(tone.r, tone.g, tone.b, 0.12)
             border.width: 1
-            border.color: Qt.rgba(theme.warning.r, theme.warning.g, theme.warning.b, 0.45)
+            border.color: Qt.rgba(tone.r, tone.g, tone.b, 0.45)
 
             RowLayout {
                 id: warningRow

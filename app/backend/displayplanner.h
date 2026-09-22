@@ -55,12 +55,16 @@ struct HostInfo
 
 struct Limits
 {
-    // Largest frame this client decodes in hardware for the stream's profile;
-    // invalid while unknown.
+    // Largest frame this client decodes in hardware for the stream's profile
+    // (the host's capture must fit it); invalid while unknown.
     QSize decoderMaximum;
     // macOS "Displays have separate Spaces": without it one app cannot put a
     // fullscreen window on every display.
     bool separateSpaces = true;
+    // This client can put a fullscreen window on every display (fullscreen
+    // on macOS or Wayland). A packed capture needs one window per display:
+    // one window would show the rows, not the desk.
+    bool separateWindows = true;
 };
 
 struct SizeOption
@@ -88,6 +92,7 @@ struct Output
     QSize size;                // planned workstation desktop size
     QPoint position;           // planned workstation desktop position
     int arrangementIndex = -1; // entry number in the request
+    QRect sourceRect;          // where it sits in the encoded capture (capture pixels)
     bool scaled = false;       // stepped down to fit the limits
     QString badge;             // exact | looks-like | preset | custom | scaled | closest
     DisplayArrangement::Backing backing = DisplayArrangement::Backing::None; // expected
@@ -98,11 +103,12 @@ struct Output
 struct Warning
 {
     QString code;        // codec, decoder, too-many, bitrate, mixed-dpi, low-refresh, spaces, old-host,
-                         // unqualified, arrangement
+                         // unqualified, arrangement, encoding, canvas; packed (info)
     QString text;        // user-facing
     QString action;      // use-hevc, match-text-size, choose-screens, update-host, open-spaces, "" for none
     QString actionLabel;
     QString key;         // the monitor it is about, when it is about one
+    bool info = false;   // news, not a problem (packed capture)
 };
 
 struct Plan
@@ -111,6 +117,10 @@ struct Plan
     QString error;             // user-facing, when !ok
     QVector<Output> outputs;   // every probed monitor, in probe order
     QSize canvas;              // the workstation desktop's bounding box
+    // The frame the workstation encodes: the desktop, or its outputs packed
+    // into rows when the desktop is larger than the encoder (packed capture).
+    QSize capture;
+    bool packed = false;
     // Display arrangement hosts (and the preview before the first connect).
     QString arrangement;       // canonical plankDisplayArrangement
     bool backingExpected = false; // backing previewed from defaults, not this workstation
