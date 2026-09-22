@@ -12,6 +12,7 @@
 #include "plankhttp.h"
 #include "remotedisplaysetup.h"
 #include "clientdisplayprobe.h"
+#include "remotestreamsetup.h"
 #include "brokersessionstore.h"
 #include <QTemporaryDir>
 #include <QNetworkProxy>
@@ -379,6 +380,15 @@ private slots:
     void tlsDeviceBoundSessionRejectionSignsOut();
     void helperDeviceKeyCommands();
     void realHelperDeviceKeyWithoutKey();
+
+    // Remote stream settings (per workstation, remote access defaults)
+    void remoteStreamSetupPersistsPerHost();
+    void remoteStreamSetupRejectsInvalidEntries();
+    void remoteStreamSetupPicksBitrateForRoute();
+    void remoteStreamSetupLayersDefaults();
+    void remoteStreamSetupSeedsOnlyFromExactBookmark();
+    void remoteStreamSetupReportsUnusableChoice();
+    void remoteStreamSetupCachesCapabilities();
 };
 
 void TestPlankBroker::initTestCase()
@@ -2109,6 +2119,342 @@ void TestPlankBroker::realHelperDeviceKeyWithoutKey()
     QVERIFY(PlankBroker::isDevicePublicKey(output.value(QStringLiteral("public_key")).toString()));
     QVERIFY(PlankBroker::isDeviceSignature(output.value(QStringLiteral("signature")).toString()));
     qunsetenv("PLANK_DEVICE_KEY_STORE");
+}
+
+namespace {
+
+RemoteStreamSetup::Setup customStream(int capture, int profile)
+{
+    RemoteStreamSetup::Setup setup;
+    setup.mode = RemoteStreamSetup::Custom;
+    setup.captureSource = capture;
+    setup.videoProfile = profile;
+    return setup;
+}
+
+RemoteStreamSetup::Capabilities linuxHost(int flags, const QStringList& modes)
+{
+    RemoteStreamSetup::Capabilities caps;
+    caps.known = true;
+    caps.platform = RemoteStreamSetup::LinuxPlatform;
+    caps.featureFlags = flags;
+    caps.encodingModes = modes;
+    return caps;
+}
+
+}
+
+void TestPlankBroker::remoteStreamSetupPersistsPerHost()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, QStringLiteral("ws01.example.test")).mode,
+             RemoteStreamSetup::Unset);
+
+    RemoteStreamSetup::Setup setup = customStream(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10,
+                                                  StreamingPreferences::PLANK_PROFILE_H264_10BIT_444);
+    setup.officeBitratesKbps[StreamingPreferences::PLANK_PROFILE_H264_10BIT_444] = 120000;
+    setup.internetBitratesKbps[StreamingPreferences::PLANK_PROFILE_H264_10BIT_444] = 30000;
+    QVERIFY(RemoteStreamSetup::saveHost(settings, QStringLiteral("WS01.example.test"), setup));
+
+    const RemoteStreamSetup::Setup loaded = RemoteStreamSetup::loadHost(settings, QStringLiteral("ws01.example.test"));
+    QCOMPARE(loaded.mode, RemoteStreamSetup::Custom);
+    QCOMPARE(loaded.captureSource, int(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10));
+    QCOMPARE(loaded.videoProfile, int(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444));
+    QCOMPARE(loaded.officeBitratesKbps, setup.officeBitratesKbps);
+    QCOMPARE(loaded.internetBitratesKbps, setup.internetBitratesKbps);
+    // Kept next to the display setup, so both are forgotten together.
+    QVERIFY(settings.contains(QStringLiteral("remote-hosts/ws01.example.test/stream/video-profile")));
+    // Other workstations are independent.
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, QStringLiteral("ws02.example.test")).mode,
+             RemoteStreamSetup::Unset);
+
+    // "Use the defaults" is remembered as such, without stale values.
+    RemoteStreamSetup::Setup follow;
+    follow.mode = RemoteStreamSetup::FollowDefaults;
+    QVERIFY(RemoteStreamSetup::saveHost(settings, QStringLiteral("ws01.example.test"), follow));
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, QStringLiteral("ws01.example.test")).mode,
+             RemoteStreamSetup::FollowDefaults);
+    QVERIFY(!settings.contains(QStringLiteral("remote-hosts/ws01.example.test/stream/video-profile")));
+}
+
+void TestPlankBroker::remoteStreamSetupRejectsInvalidEntries()
+{
+    // X11 native 10-bit cannot feed the H.264 NVENC profile.
+    QVERIFY(!RemoteStreamSetup::isValid(customStream(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10,
+                                                     StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444)));
+    QVERIFY(!RemoteStreamSetup::isValid(customStream(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT,
+                                                     StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420)));
+    RemoteStreamSetup::Setup tooFast = customStream(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT,
+                                                    StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444);
+    tooFast.internetBitratesKbps[0] = StreamingPreferences::PlankBitrateMaximumKbps + 500;
+    QVERIFY(!RemoteStreamSetup::isValid(tooFast));
+
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    const QString host = QStringLiteral("ws01.example.test");
+    QVERIFY(!RemoteStreamSetup::saveHost(settings, host, tooFast));
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+
+    const QString group = QStringLiteral("remote-hosts/ws01.example.test/stream/");
+    const QVariantList bitrates =
+            StreamingPreferences::plankProfileBitratesToVariantList(StreamingPreferences::plankDefaultProfileBitrates());
+    auto write = [&](int capture, int profile, const QVariant& office, const QVariant& internet) {
+        settings.setValue(group + QStringLiteral("mode"), QStringLiteral("custom"));
+        settings.setValue(group + QStringLiteral("capture-source"), capture);
+        settings.setValue(group + QStringLiteral("video-profile"), profile);
+        settings.setValue(group + QStringLiteral("bitrates-office-kbps"), office);
+        settings.setValue(group + QStringLiteral("bitrates-internet-kbps"), internet);
+    };
+    // A valid hand-written entry loads.
+    write(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT, StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444,
+          bitrates, bitrates);
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Custom);
+    // An unknown profile ID (a newer build's) is treated as unset, never replaced.
+    write(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT, 42, bitrates, bitrates);
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+    // A profile the capture source cannot feed.
+    write(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10, StreamingPreferences::PLANK_PROFILE_H264_8BIT_422,
+          bitrates, bitrates);
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+    // An out-of-range bitrate.
+    QVariantList slow = bitrates;
+    slow[3] = StreamingPreferences::PlankBitrateMinimumKbps - 500;
+    write(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT, StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444,
+          bitrates, slow);
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+    // Garbage and missing lists.
+    write(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT, StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444,
+          QStringLiteral("fast"), bitrates);
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+    settings.remove(group + QStringLiteral("bitrates-office-kbps"));
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+    // Profile IDs are append-only: an older build's shorter list gains defaults.
+    const QVariantList older = bitrates.mid(0, 7);
+    write(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT, StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444,
+          older, older);
+    const RemoteStreamSetup::Setup migrated = RemoteStreamSetup::loadHost(settings, host);
+    QCOMPARE(migrated.mode, RemoteStreamSetup::Custom);
+    QCOMPARE(migrated.officeBitratesKbps.size(), int(StreamingPreferences::PLANK_PROFILE_COUNT));
+    // Unknown mode strings are unset.
+    settings.setValue(group + QStringLiteral("mode"), QStringLiteral("turbo"));
+    QCOMPARE(RemoteStreamSetup::loadHost(settings, host).mode, RemoteStreamSetup::Unset);
+}
+
+void TestPlankBroker::remoteStreamSetupPicksBitrateForRoute()
+{
+    RemoteStreamSetup::Setup setup = customStream(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT,
+                                                  StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444);
+    setup.officeBitratesKbps[StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444] = 100000;
+    setup.internetBitratesKbps[StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444] = 30000;
+    QCOMPARE(RemoteStreamSetup::bitrateFor(setup, RemoteStreamSetup::OfficeNetwork), 100000);
+    QCOMPARE(RemoteStreamSetup::bitrateFor(setup, RemoteStreamSetup::Internet), 30000);
+    QCOMPARE(RemoteStreamSetup::bitratesFor(setup, RemoteStreamSetup::Internet), setup.internetBitratesKbps);
+    // Each profile keeps its own target per route.
+    setup.videoProfile = StreamingPreferences::PLANK_PROFILE_H264_10BIT_444;
+    QCOMPARE(RemoteStreamSetup::bitrateFor(setup, RemoteStreamSetup::Internet),
+             StreamingPreferences::PlankH264DefaultBitrateKbps);
+    // Built-in: NVENC HEVC 10-bit 4:4:4 at 50 Mbps on both routes.
+    const RemoteStreamSetup::Setup builtIn = RemoteStreamSetup::builtInDefaults(RemoteStreamSetup::LinuxPlatform);
+    QCOMPARE(builtIn.videoProfile, int(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444));
+    QCOMPARE(builtIn.captureSource, int(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT));
+    QCOMPARE(RemoteStreamSetup::bitrateFor(builtIn, RemoteStreamSetup::OfficeNetwork), 50000);
+    QCOMPARE(RemoteStreamSetup::bitrateFor(builtIn, RemoteStreamSetup::Internet), 50000);
+}
+
+void TestPlankBroker::remoteStreamSetupLayersDefaults()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    QCOMPARE(RemoteStreamSetup::loadDefaults(settings).mode, RemoteStreamSetup::Unset);
+    RemoteStreamSetup::Setup defaults = customStream(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT,
+                                                     StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444);
+    defaults.internetBitratesKbps[StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444] = 25000;
+    QVERIFY(RemoteStreamSetup::saveDefaults(settings, defaults));
+    defaults = RemoteStreamSetup::loadDefaults(settings);
+    QCOMPARE(defaults.mode, RemoteStreamSetup::Custom);
+    QCOMPARE(defaults.videoProfile, int(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444));
+    QCOMPARE(RemoteStreamSetup::bitrateFor(defaults, RemoteStreamSetup::Internet), 25000);
+
+    const RemoteStreamSetup::Setup unset;
+    RemoteStreamSetup::Setup follow;
+    follow.mode = RemoteStreamSetup::FollowDefaults;
+    const RemoteStreamSetup::Setup host = customStream(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10,
+                                                       StreamingPreferences::PLANK_PROFILE_H264_10BIT_444);
+    RemoteStreamSetup::Setup seed = customStream(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT,
+                                                 StreamingPreferences::PLANK_PROFILE_H264_8BIT_444);
+    const int linuxHostPlatform = RemoteStreamSetup::LinuxPlatform;
+
+    // Per workstation > bookmark seed > remote access defaults > built-in.
+    RemoteStreamSetup::Resolution r = RemoteStreamSetup::resolve(host, &seed, defaults, linuxHostPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromHost);
+    QCOMPARE(r.setup.videoProfile, int(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444));
+    r = RemoteStreamSetup::resolve(unset, &seed, defaults, linuxHostPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromBookmark);
+    QCOMPARE(r.setup.videoProfile, int(StreamingPreferences::PLANK_PROFILE_H264_8BIT_444));
+    // Choosing "use the defaults" is never overridden by a bookmark.
+    r = RemoteStreamSetup::resolve(follow, &seed, defaults, linuxHostPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromDefaults);
+    QCOMPARE(r.setup.videoProfile, int(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444));
+    r = RemoteStreamSetup::resolve(unset, nullptr, defaults, RemoteStreamSetup::UnknownPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromDefaults);
+    r = RemoteStreamSetup::resolve(unset, nullptr, RemoteStreamSetup::Setup(), linuxHostPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromBuiltIn);
+    QCOMPARE(r.setup.videoProfile, int(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444));
+
+    // A remote Mac skips Linux layers and gets its own built-in default.
+    r = RemoteStreamSetup::resolve(unset, &seed, defaults, RemoteStreamSetup::MacPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromBuiltIn);
+    QCOMPARE(r.setup.captureSource, int(StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT));
+    QCOMPARE(r.setup.videoProfile, int(StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+    // ...but the user's own choice is kept (and reported, see below).
+    r = RemoteStreamSetup::resolve(host, nullptr, defaults, RemoteStreamSetup::MacPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromHost);
+    QCOMPARE(r.setup.captureSource, int(StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10));
+
+    // Restoring the defaults drops the saved layer.
+    RemoteStreamSetup::clearDefaults(settings);
+    QCOMPARE(RemoteStreamSetup::loadDefaults(settings).mode, RemoteStreamSetup::Unset);
+    QVERIFY(!RemoteStreamSetup::saveDefaults(settings, customStream(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT, 99)));
+}
+
+void TestPlankBroker::remoteStreamSetupSeedsOnlyFromExactBookmark()
+{
+    auto bookmark = [](const QString& name, const QString& address, int profile) {
+        RemoteStreamSetup::BookmarkCandidate candidate;
+        candidate.name = name;
+        candidate.address = address;
+        candidate.captureSource = StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT;
+        candidate.videoProfile = profile;
+        candidate.bitratesKbps = StreamingPreferences::plankDefaultProfileBitrates();
+        candidate.bitratesKbps[profile] = 90000;
+        return candidate;
+    };
+    const QString hostId = QStringLiteral("ws01.example.test");
+    const QString hostName = QStringLiteral("ws01");
+    RemoteStreamSetup::Setup seed;
+
+    // Same name, or an address equal to the host id or name, seeds.
+    QVERIFY(RemoteStreamSetup::seedFromBookmarks(
+                {bookmark(QStringLiteral("WS01"), QStringLiteral("192.0.2.10"),
+                          StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444)}, hostId, hostName, seed));
+    QCOMPARE(seed.videoProfile, int(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444));
+    // A LAN bookmark's target is for the office network only.
+    QCOMPARE(RemoteStreamSetup::bitrateFor(seed, RemoteStreamSetup::OfficeNetwork), 90000);
+    QCOMPARE(RemoteStreamSetup::bitrateFor(seed, RemoteStreamSetup::Internet),
+             StreamingPreferences::PlankHevcDefaultBitrateKbps);
+    QVERIFY(RemoteStreamSetup::seedFromBookmarks(
+                {bookmark(QStringLiteral("Grading"), QStringLiteral("WS01.example.test"),
+                          StreamingPreferences::PLANK_PROFILE_H264_8BIT_444)}, hostId, hostName, seed));
+    QCOMPARE(seed.videoProfile, int(StreamingPreferences::PLANK_PROFILE_H264_8BIT_444));
+
+    // Prefix and look-alike matches do not.
+    RemoteStreamSetup::Setup untouched;
+    QVERIFY(!RemoteStreamSetup::seedFromBookmarks(
+                {bookmark(QStringLiteral("ws01-old"), QStringLiteral("ws01.other.test"),
+                          StreamingPreferences::PLANK_PROFILE_H264_8BIT_444),
+                 bookmark(QStringLiteral("ws010"), QStringLiteral("192.0.2.11"),
+                          StreamingPreferences::PLANK_PROFILE_H264_8BIT_444)}, hostId, hostName, untouched));
+    QCOMPARE(untouched.mode, RemoteStreamSetup::Unset);
+    // Two exact matches that disagree seed nothing.
+    QVERIFY(!RemoteStreamSetup::seedFromBookmarks(
+                {bookmark(QStringLiteral("ws01"), QString(), StreamingPreferences::PLANK_PROFILE_H264_8BIT_444),
+                 bookmark(QStringLiteral("Other"), hostId, StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444)},
+                hostId, hostName, untouched));
+    // An unusable bookmark is ignored.
+    RemoteStreamSetup::BookmarkCandidate broken = bookmark(hostName, QString(),
+                                                           StreamingPreferences::PLANK_PROFILE_H264_8BIT_444);
+    broken.captureSource = StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10;
+    QVERIFY(!RemoteStreamSetup::seedFromBookmarks({broken}, hostId, hostName, untouched));
+}
+
+void TestPlankBroker::remoteStreamSetupReportsUnusableChoice()
+{
+    const int nvfbc = StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT;
+    const int native10 = StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10;
+    const int sck = StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
+    const int hevc10 = StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444;
+    const QStringList allLinuxModes = RemoteStreamSetup::parseEncodingModes(
+                QStringLiteral("h264-8-422-software,h264-8-444-software,h264-10-422-software,"
+                               "h264-10-444-software,h264-8-444-nvenc,hevc-8-444-nvenc,hevc-10-444-nvenc"));
+    QCOMPARE(allLinuxModes.size(), 7);
+
+    // Nothing known yet: only the pairing is checked.
+    const RemoteStreamSetup::Capabilities unknown;
+    QVERIFY(RemoteStreamSetup::problemFor(nvfbc, hevc10, unknown).isEmpty());
+    QVERIFY(!RemoteStreamSetup::problemFor(native10, StreamingPreferences::PLANK_PROFILE_H264_8BIT_422,
+                                           unknown).isEmpty());
+
+    const RemoteStreamSetup::Capabilities full = linuxHost(RemoteStreamSetup::NvfbcHevc10NvencFeature, allLinuxModes);
+    for (int profile = 0; profile < StreamingPreferences::PLANK_PROFILE_COUNT; ++profile) {
+        if (StreamingPreferences::isPlankAppleProfile(profile)) continue;
+        QVERIFY2(RemoteStreamSetup::problemFor(nvfbc, profile, full).isEmpty(), qPrintable(QString::number(profile)));
+    }
+    // HEVC 10-bit from NvFBC needs the host feature; native 10-bit capture does not.
+    const RemoteStreamSetup::Capabilities noHevc10Fbc = linuxHost(0, allLinuxModes);
+    const QString hevcProblem = RemoteStreamSetup::problemFor(nvfbc, hevc10, noHevc10Fbc);
+    QVERIFY(hevcProblem.contains(QStringLiteral("NvFBC")));
+    QVERIFY(RemoteStreamSetup::problemFor(native10, hevc10, noHevc10Fbc).isEmpty());
+    // A mode the host does not advertise (e.g. no NVENC).
+    const RemoteStreamSetup::Capabilities softwareOnly = linuxHost(
+                RemoteStreamSetup::NvfbcHevc10NvencFeature, allLinuxModes.mid(0, 4));
+    QVERIFY(RemoteStreamSetup::problemFor(nvfbc, hevc10, softwareOnly).contains(QStringLiteral("can't use")));
+    QVERIFY(RemoteStreamSetup::problemFor(nvfbc, StreamingPreferences::PLANK_PROFILE_H264_10BIT_444,
+                                          softwareOnly).isEmpty());
+    // A host that does not advertise modes is not second-guessed.
+    QVERIFY(RemoteStreamSetup::problemFor(nvfbc, StreamingPreferences::PLANK_PROFILE_H264_8BIT_422,
+                                          linuxHost(0, {})).isEmpty());
+    // Platform mismatches.
+    QVERIFY(!RemoteStreamSetup::problemFor(sck, StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420,
+                                           full).isEmpty());
+    RemoteStreamSetup::Capabilities mac;
+    mac.known = true;
+    mac.platform = RemoteStreamSetup::MacPlatform;
+    QVERIFY(!RemoteStreamSetup::problemFor(nvfbc, hevc10, mac).isEmpty());
+    QVERIFY(RemoteStreamSetup::problemFor(sck, StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444,
+                                          mac).isEmpty());
+
+    // No silent fallback: a saved choice the workstation cannot use resolves
+    // to that choice, and the caller gets a reason to ask the user.
+    const RemoteStreamSetup::Setup saved = customStream(nvfbc, hevc10);
+    const RemoteStreamSetup::Resolution r = RemoteStreamSetup::resolve(saved, nullptr, RemoteStreamSetup::Setup(),
+                                                                       RemoteStreamSetup::LinuxPlatform);
+    QCOMPARE(r.source, RemoteStreamSetup::FromHost);
+    QCOMPARE(r.setup.videoProfile, hevc10);
+    QVERIFY(!RemoteStreamSetup::problemFor(r.setup, noHevc10Fbc).isEmpty());
+    // The built-in default is reported too rather than swapped for another.
+    const RemoteStreamSetup::Resolution builtIn = RemoteStreamSetup::resolve(
+                RemoteStreamSetup::Setup(), nullptr, RemoteStreamSetup::Setup(), RemoteStreamSetup::LinuxPlatform);
+    QVERIFY(!RemoteStreamSetup::problemFor(builtIn.setup, noHevc10Fbc).isEmpty());
+}
+
+void TestPlankBroker::remoteStreamSetupCachesCapabilities()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    const QString host = QStringLiteral("WS01.example.test");
+    QVERIFY(!RemoteStreamSetup::loadCapabilities(settings, host).known);
+    const RemoteStreamSetup::Capabilities caps = linuxHost(
+                RemoteStreamSetup::NvfbcHevc10NvencFeature,
+                RemoteStreamSetup::parseEncodingModes(QStringLiteral(" hevc-10-444-nvenc, h264-10-444-software,,hevc-10-444-nvenc")));
+    QCOMPARE(caps.encodingModes, QStringList({QStringLiteral("hevc-10-444-nvenc"),
+                                              QStringLiteral("h264-10-444-software")}));
+    RemoteStreamSetup::saveCapabilities(settings, host, caps);
+    const RemoteStreamSetup::Capabilities loaded = RemoteStreamSetup::loadCapabilities(settings, host.toLower());
+    QVERIFY(loaded.known);
+    QCOMPARE(loaded.platform, int(RemoteStreamSetup::LinuxPlatform));
+    QCOMPARE(loaded.featureFlags, RemoteStreamSetup::NvfbcHevc10NvencFeature);
+    QCOMPARE(loaded.encodingModes, caps.encodingModes);
+    // Unknown capabilities are never written.
+    RemoteStreamSetup::saveCapabilities(settings, QStringLiteral("ws02.example.test"), RemoteStreamSetup::Capabilities());
+    QVERIFY(!RemoteStreamSetup::loadCapabilities(settings, QStringLiteral("ws02.example.test")).known);
+    // The host-side mode names match what launch requests send.
+    for (int profile = 0; profile < StreamingPreferences::PLANK_PROFILE_COUNT; ++profile) {
+        QVERIFY(!StreamingPreferences::plankEncodingMode(profile).isEmpty());
+    }
+    QCOMPARE(StreamingPreferences::plankEncodingMode(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444),
+             QStringLiteral("hevc-10-444-nvenc"));
 }
 
 QTEST_GUILESS_MAIN(TestPlankBroker)

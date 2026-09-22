@@ -84,7 +84,6 @@ void StreamingPreferences::reload()
     recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
 
     fps = settings.value(SER_FPS, 60).toInt();
-    identityGbrBitDepth = 10;
     plankToolbarPinned = settings.value(SER_PLANK_TOOLBAR_PINNED, false).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
