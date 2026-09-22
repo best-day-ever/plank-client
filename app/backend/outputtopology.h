@@ -218,8 +218,8 @@ struct NvOutputTopology
     QVector<NvOutput> outputs;
     QRectF captureLogicalBounds;
     QString appleEncodingMode = QStringLiteral("hevc-10-420-videotoolbox");
-    // The encoded frame source rectangles refer to: the desktop size unless
-    // the host publishes a packed capture (display arrangement only).
+    // The encoded frame source rectangles refer to: capture_size during an
+    // arrangement lease (display arrangement only), else the desktop size.
     int captureWidth = 0;
     int captureHeight = 0;
     bool capturePublished = false;

@@ -796,6 +796,13 @@ void TestOutputTopology::parsesDisplayArrangementVector()
     QCOMPARE(topology.outputs.at(0).sourceY, 270);
     QCOMPARE(topology.displayCapabilities.maxOutputs, 4);
     QCOMPARE(topology.displayCapabilities.physicalOutputs.first().id, QStringLiteral("x11:HDMI-0"));
+    // The lease's capture is the desktop (not packed). Older copies of the
+    // vector predate capture_size; then only its absence is checked.
+    QCOMPARE(topology.captureSize(), QSize(6864, 2160));
+    QCOMPARE(topology.capturePublished, vector.contains("capture_size"));
+    if (vector.contains("capture_size")) {
+        QCOMPARE(vector.value("capture_size").toObject(), (QJsonObject {{"width", 6864}, {"height", 2160}}));
+    }
     // Round trip: the document serialises back to itself.
     QCOMPARE(topology.toJson(), vector);
     NvOutputTopology again;
@@ -822,6 +829,8 @@ void TestOutputTopology::ignoresArrangementFieldsWithoutTheFeature()
     }
     QVERIFY(!topology.toJson().contains("display_capabilities"));
     QVERIFY(!topology.toJson().value("layout").toObject().contains("arrangement"));
+    QVERIFY(!topology.toJson().contains("capture_size"));
+    QVERIFY(!topology.capturePublished);
     // Garbage in the additive fields is ignored without the bit, as before.
     vector["display_capabilities"] = QStringLiteral("garbage");
     QJsonObject layout = vector["layout"].toObject();
@@ -985,7 +994,7 @@ QJsonObject packedThreeUhd()
         outputs.append(output);
     }
     object["outputs"] = outputs;
-    object["capture"] = QJsonObject {{"width", 7680}, {"height", 4320}};
+    object["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4320}};
     return object;
 }
 
@@ -1008,30 +1017,36 @@ void TestOutputTopology::parsesPackedCapture()
                 QStringLiteral("1:3840x2160+0+0:auto,3840x2160+3840+0:auto,3840x2160+7680+0:auto")));
     QCOMPARE(topology.toJson(), packed);
 
-    // Without the bit, exactly as before (and as the 1.0.129 parser does):
-    // "capture" is read as a macOS fixed capture, so the document is refused.
+    // Without the bit capture_size means nothing: a source rectangle below
+    // the desktop is refused, as the 1.0.129 parser does.
     QJsonObject legacy = packed;
     legacy["feature_flags"] = packed.value("feature_flags").toInt() & ~NvOutputTopology::DisplayArrangementFeature;
     QVERIFY(!NvOutputTopology::fromJson(legacy, topology, &error));
-    QVERIFY(error.contains(QStringLiteral("fixed capture")));
+    // An unpacked lease without the bit parses, capture_size ignored.
     QJsonObject unpacked = arrangementVector();
-    unpacked["capture"] = QJsonObject {{"width", 6864}, {"height", 2160}};
+    unpacked["capture_size"] = QJsonObject {{"width", 6864}, {"height", 2160}};
     unpacked["feature_flags"] = unpacked.value("feature_flags").toInt() & ~NvOutputTopology::DisplayArrangementFeature;
-    QVERIFY(!NvOutputTopology::fromJson(unpacked, topology));
-    // A source rectangle below the desktop without any capture is refused too.
-    QJsonObject noCapture = packed;
-    noCapture.remove("capture");
-    noCapture["feature_flags"] = legacy.value("feature_flags");
-    QVERIFY(!NvOutputTopology::fromJson(noCapture, topology));
-    // A macOS fixed capture still parses as one.
+    QVERIFY(NvOutputTopology::fromJson(unpacked, topology));
+    QVERIFY(!topology.capturePublished);
+    QVERIFY(!topology.toJson().contains("capture_size"));
+    // With the bit and no capture_size (no lease): the capture is the desktop.
+    QJsonObject noLease = arrangementVector();
+    noLease.remove("capture_size");
+    QVERIFY(NvOutputTopology::fromJson(noLease, topology));
+    QVERIFY(!topology.capturePublished);
+    QCOMPARE(topology.captureSize(), QSize(6864, 2160));
+    // "capture" is a macOS fixed capture, as it always was: a Linux document
+    // carrying it is refused, with or without the bit.
+    for (const bool withBit : {true, false}) {
+        QJsonObject withCapture = withBit ? packed : legacy;
+        withCapture["capture"] = QJsonObject {{"width", 7680}, {"height", 4320}};
+        QVERIFY(!NvOutputTopology::fromJson(withCapture, topology, &error));
+        QVERIFY(error.contains(QStringLiteral("fixed capture")));
+    }
     QFile fixed(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/fixed-capture-v13.json");
     QVERIFY(fixed.open(QIODevice::ReadOnly));
     QVERIFY(NvOutputTopology::fromJson(QJsonDocument::fromJson(fixed.readAll()).object(), topology));
     QCOMPARE(topology.layoutKind, QStringLiteral("fixed"));
-    // With the bit and no "capture": the capture is the desktop.
-    QVERIFY(NvOutputTopology::fromJson(arrangementVector(), topology));
-    QVERIFY(!topology.capturePublished);
-    QCOMPARE(topology.captureSize(), QSize(6864, 2160));
 
     // Sources must lie inside the published capture; the capture is strict.
     const auto rejects = [&packed, &topology](const std::function<void(QJsonObject&)>& edit) {
@@ -1039,14 +1054,14 @@ void TestOutputTopology::parsesPackedCapture()
         edit(object);
         return !NvOutputTopology::fromJson(object, topology);
     };
-    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 7680}, {"height", 4000}}; }));
-    QVERIFY(rejects([](QJsonObject& o) { o.remove("capture"); }));
-    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 7680}}; }));
-    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 7680}, {"height", 4320.5}}; }));
-    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = QJsonObject {{"width", 32768}, {"height", 4320}}; }));
-    QVERIFY(rejects([](QJsonObject& o) { o["capture"] = "7680x4320"; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4000}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o.remove("capture_size"); }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 7680}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4320.5}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 32768}, {"height", 4320}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = "7680x4320"; }));
     QVERIFY(rejects([](QJsonObject& o) {
-        o["capture"] = QJsonObject {{"width", 7680}, {"height", 4320}, {"packed", true}};
+        o["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4320}, {"packed", true}};
     }));
 }
 

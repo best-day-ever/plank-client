@@ -174,12 +174,8 @@ QSize NvOutputTopology::virtualCanvasSize(const QString& hostLayout,
 bool NvOutputTopology::fromJson(const QJsonObject& object,
                                 NvOutputTopology& topology, QString* error)
 {
-    // A macOS host's fixed capture document. A Linux host with the display
-    // arrangement extension also publishes "capture" (its encoded frame);
-    // without that bit the key still means a fixed capture, as it always did.
-    const int advertised = object.value("feature_flags").toInt();
-    if ((advertised & FixedCaptureFeature) ||
-            (object.contains("capture") && !(advertised & DisplayArrangementFeature))) {
+    if (object.contains("capture") ||
+            (object.value("feature_flags").toInt() & FixedCaptureFeature)) {
         const bool valid = parseFixedCapture(object, topology);
         if (!valid && error) *error = QStringLiteral("Unsupported or malformed fixed capture description");
         return valid;
@@ -299,13 +295,14 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
     }
 
     // Source rectangles lie in the capture: the desktop, unless a host with
-    // the display arrangement extension publishes a (packed) capture size.
-    // Without the bit "capture" is ignored and sources stay in the desktop.
+    // the display arrangement extension publishes capture_size (during an
+    // arrangement lease; packed when it differs from the desktop). Without
+    // the bit the field is ignored and sources stay in the desktop.
     parsed.captureWidth = parsed.desktopWidth;
     parsed.captureHeight = parsed.desktopHeight;
-    if ((parsed.featureFlags & DisplayArrangementFeature) != 0 && object.contains("capture")) {
-        const QJsonObject capture = object.value("capture").toObject();
-        if (!object.value("capture").isObject() || capture.size() != 2 ||
+    if ((parsed.featureFlags & DisplayArrangementFeature) != 0 && object.contains("capture_size")) {
+        const QJsonObject capture = object.value("capture_size").toObject();
+        if (!object.value("capture_size").isObject() || capture.size() != 2 ||
                 !requireInteger(capture, "width", parsed.captureWidth) ||
                 !requireInteger(capture, "height", parsed.captureHeight) ||
                 parsed.captureWidth < 2 || parsed.captureHeight < 2 ||
@@ -519,7 +516,7 @@ QJsonObject NvOutputTopology::toJson() const
     };
     if (arrangement) document.insert("display_capabilities", displayCapabilities.toJson());
     if (arrangement && capturePublished) {
-        document.insert("capture", QJsonObject {{"width", captureWidth}, {"height", captureHeight}});
+        document.insert("capture_size", QJsonObject {{"width", captureWidth}, {"height", captureHeight}});
     }
     return document;
 }
