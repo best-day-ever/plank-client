@@ -95,6 +95,8 @@ public:
     // Hands the prepared brokered Session to QML (JavaScript ownership),
     // once, after connectReady().
     Q_INVOKABLE Session* takeSession();
+    // The workstation a brokered stream runs on now, else empty.
+    Q_INVOKABLE QString streamingHostId() const { return m_KeepaliveHostId; }
 
     // For the first sign-in wizard (OnboardingController), which runs its own
     // broker conversation and ends in the same signed-in state.

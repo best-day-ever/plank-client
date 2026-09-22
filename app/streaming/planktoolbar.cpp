@@ -29,6 +29,8 @@
 namespace {
 constexpr int ToolbarPreferredWidth = 539;
 constexpr int ToolbarHeight = 39;
+// The "screens changed" strip below the toolbar row.
+constexpr int ScreensPromptHeight = 36;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
@@ -250,7 +252,7 @@ PlankToolbar::Action PlankToolbar::update(
     }
 
     if (m_Visible && !m_ButtonRouter.hasLocalButtons() &&
-            !m_DraggingSlider && !m_PointerInside &&
+            !m_DraggingSlider && !m_PointerInside && !m_ScreensPromptVisible &&
             m_HideDeadline != 0 && now >= m_HideDeadline) {
         if (m_Pinned) {
             endLocalPointerInteraction();
@@ -325,6 +327,27 @@ void PlankToolbar::hideReconnectPrompt()
     }
 }
 
+void PlankToolbar::showScreensPrompt(const QString& text)
+{
+    m_ScreensPromptText = text;
+    m_ScreensPromptVisible = true;
+    show(SDL_GetTicks());
+    m_HideDeadline = 0;
+}
+
+void PlankToolbar::hideScreensPrompt()
+{
+    if (!m_ScreensPromptVisible) {
+        return;
+    }
+    m_ScreensPromptVisible = false;
+    m_ScreensPromptText.clear();
+    if (m_Visible) {
+        m_HideDeadline = m_Pinned ? 0 : SDL_GetTicks() + AutoHideDelayMs;
+        redraw();
+    }
+}
+
 void PlankToolbar::notifyWindowChanged()
 {
     if (m_WaylandToolbar && !m_WaylandToolbar->isAttachedTo(m_Window)) {
@@ -376,7 +399,7 @@ void PlankToolbar::notifyWindowChanged()
     }
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
-                                    m_Width, ToolbarHeight);
+                                    m_Width, toolbarHeight());
     }
     if (m_WaylandReconnectPrompt) {
         m_WaylandReconnectPrompt->setLayoutAt(
@@ -618,6 +641,15 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
         case Control::Disconnect:
             action = Action::Disconnect;
             break;
+        case Control::ScreensApply:
+            action = Action::ApplyScreens;
+            break;
+        case Control::ScreensKeep:
+            action = Action::KeepScreens;
+            break;
+        case Control::ScreensSetUp:
+            action = Action::SetUpScreens;
+            break;
         default:
             break;
         }
@@ -745,8 +777,8 @@ void PlankToolbar::redraw()
 {
     const int surfaceWidth = m_WaylandToolbar ? m_Width :
             PlankToolbarLogic::physicalExtent(m_Width, m_PixelDensity);
-    const int surfaceHeight = m_WaylandToolbar ? ToolbarHeight :
-            PlankToolbarLogic::physicalExtent(ToolbarHeight,
+    const int surfaceHeight = m_WaylandToolbar ? toolbarHeight() :
+            PlankToolbarLogic::physicalExtent(toolbarHeight(),
                                                        m_PixelDensity);
     SDL_Surface* surface = SDL_CreateSurface(
                 surfaceWidth, surfaceHeight, SDL_PIXELFORMAT_ARGB8888);
@@ -971,6 +1003,34 @@ void PlankToolbar::redraw()
                          "Live bitrate control unavailable");
     }
 
+    if (m_ScreensPromptVisible) {
+        painter.fillRect(QRect(0, ToolbarHeight, m_Width, ScreensPromptHeight), QColor(34, 41, 50));
+        painter.setPen(QPen(QColor(255, 255, 255, 42), 1));
+        painter.drawLine(QPointF(0, ToolbarHeight + 0.5), QPointF(m_Width, ToolbarHeight + 0.5));
+        QFont promptFont = labelFont;
+        promptFont.setPixelSize(12);
+        painter.setFont(promptFont);
+        painter.setPen(QColor(235, 239, 244));
+        const int textRight = screensButtonRect(2).left() - 8;
+        painter.drawText(QRect(12, ToolbarHeight, std::max(0, textRight - 12), ScreensPromptHeight),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         painter.fontMetrics().elidedText(m_ScreensPromptText, Qt::ElideRight,
+                                                          std::max(0, textRight - 12)));
+        static const char* labels[] = {"Apply layout", "Keep", "Set up\u2026"};
+        for (int index = 0; index < 3; ++index) {
+            const QRect rect = screensButtonRect(index);
+            const bool hovered = m_LocalPointerInteraction &&
+                    rect.contains(m_PointerX - toolbarLeft(), m_PointerY);
+            painter.setPen(QPen(index == 0 ? QColor(52, 132, 228) : QColor(104, 116, 131), 1));
+            painter.setBrush(index == 0 ? (hovered ? QColor(62, 146, 240) : QColor(52, 132, 228)) :
+                                          (hovered ? QColor(68, 78, 90, 230) : QColor(48, 57, 68, 210)));
+            painter.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5),
+                                    WindowButtonRadius, WindowButtonRadius);
+            painter.setPen(QColor(246, 248, 250));
+            painter.drawText(rect, Qt::AlignCenter, QString::fromUtf8(labels[index]));
+        }
+    }
+
     painter.end();
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
@@ -978,7 +1038,7 @@ void PlankToolbar::redraw()
     m_LastRedrawTime = SDL_GetTicks();
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
-                                    m_Width, ToolbarHeight);
+                                    m_Width, toolbarHeight());
         m_WaylandToolbar->present(image.copy());
         SDL_DestroySurface(surface);
     } else {
@@ -1207,7 +1267,7 @@ void PlankToolbar::nativePointerMotion(int parentX, int parentY)
         if (newLeft != m_ToolbarLeft) {
             m_ToolbarLeft = newLeft;
             m_WaylandToolbar->setLayout(m_WindowWidth, m_ToolbarLeft,
-                                        m_Width, ToolbarHeight);
+                                        m_Width, toolbarHeight());
             if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
                 redraw();
                 m_LastToolbarMoveDrawTime = now;
@@ -1309,7 +1369,22 @@ void PlankToolbar::queueBitrateRequest(Uint64 now, bool forceSend)
 bool PlankToolbar::contains(int x, int y) const
 {
     return x >= toolbarLeft() && x < toolbarLeft() + m_Width &&
-           y >= 0 && y < ToolbarHeight;
+           y >= 0 && y < toolbarHeight();
+}
+
+int PlankToolbar::toolbarHeight() const
+{
+    return ToolbarHeight + (m_ScreensPromptVisible ? ScreensPromptHeight : 0);
+}
+
+// Toolbar-local rectangles of the prompt's buttons, right to left:
+// 0 Apply layout, 1 Keep, 2 Set up…
+QRect PlankToolbar::screensButtonRect(int index) const
+{
+    static const int widths[] = {98, 52, 66};
+    int right = m_Width - 8;
+    for (int button = 0; button < index; ++button) right -= widths[button] + 6;
+    return QRect(right - widths[index], ToolbarHeight + 5, widths[index], ScreensPromptHeight - 10);
 }
 
 bool PlankToolbar::sliderContains(int x, int y) const
@@ -1351,6 +1426,13 @@ bool PlankToolbar::disconnectContains(int x, int y) const
 PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
 {
     if (!contains(x, y)) {
+        return Control::None;
+    }
+    if (m_ScreensPromptVisible && y >= ToolbarHeight) {
+        const QPoint local(x - toolbarLeft(), y);
+        if (screensButtonRect(0).contains(local)) return Control::ScreensApply;
+        if (screensButtonRect(1).contains(local)) return Control::ScreensKeep;
+        if (screensButtonRect(2).contains(local)) return Control::ScreensSetUp;
         return Control::None;
     }
     if (handleContains(x, y)) {

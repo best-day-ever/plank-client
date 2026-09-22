@@ -51,6 +51,8 @@ private:
     SDL_Window *m_Window;
     QSize m_PresentationCanvasSize;
     std::vector<PlankPresentationOutput> m_PresentationTargets;
+    // Every output shows its own source rectangle (display arrangement).
+    bool m_PresentationSourceRects = false;
     IFFmpegRenderer *m_Backend;
     unsigned int m_VAO;
     unsigned int m_VideoVbo;

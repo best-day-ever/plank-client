@@ -67,6 +67,16 @@ Item {
         console.error(text)
     }
 
+    // "Set up…" in the stream's screens-changed prompt: the display setup
+    // over the stream; saving applies it to this session.
+    function displaySetupRequested()
+    {
+        window.visible = true
+        window.raise()
+        window.requestActivate()
+        screensDialog.openForSession(session)
+    }
+
     function displayLaunchWarning(text)
     {
         // This toast appears for 3 seconds, just shorter than how long
@@ -136,6 +146,7 @@ Item {
         session.desktopSignOutRequested.connect(desktopSignOutRequested)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
+        session.displaySetupRequested.connect(displaySetupRequested)
         session.sessionFinished.connect(sessionFinished)
         session.readyForDeletion.connect(sessionReadyForDeletion)
 

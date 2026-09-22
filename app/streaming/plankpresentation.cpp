@@ -215,3 +215,95 @@ bool PlankPresentation::mapStreamPointToWindow(
             outputCanvasRect.height());
     return true;
 }
+
+QRectF PlankPresentation::sourceRectInStream(const QRect& captureRect,
+                                             const QSize& captureSize,
+                                             const QSize& streamSize)
+{
+    if (!captureRect.isValid() || captureSize.isEmpty() || streamSize.isEmpty()) {
+        return QRectF();
+    }
+    const qreal scaleX = static_cast<qreal>(streamSize.width()) / captureSize.width();
+    const qreal scaleY = static_cast<qreal>(streamSize.height()) / captureSize.height();
+    return QRectF(captureRect.x() * scaleX, captureRect.y() * scaleY,
+                  captureRect.width() * scaleX, captureRect.height() * scaleY);
+}
+
+PlankPresentationSlice PlankPresentation::sliceForSource(const QSize& streamSize,
+                                                         const QRectF& sourceRect,
+                                                         const QSize& drawableSize)
+{
+    PlankPresentationSlice slice;
+    if (streamSize.isEmpty() || drawableSize.isEmpty() || !sourceRect.isValid()) {
+        return slice;
+    }
+    const QRectF source = sourceRect.intersected(QRectF(QPointF(0, 0), QSizeF(streamSize)));
+    if (source.isEmpty()) {
+        return slice;
+    }
+    const QRect destination = aspectFitRect(QSize(qMax(1, qRound(source.width())),
+                                                  qMax(1, qRound(source.height()))),
+                                            QRect(QPoint(0, 0), drawableSize));
+    if (destination.isEmpty()) {
+        return slice;
+    }
+    slice.sourceRect = source;
+    slice.destinationRect = destination;
+    slice.visible = true;
+    return slice;
+}
+
+bool PlankPresentation::mapWindowPointToDesktop(const QPointF& windowPoint,
+                                                const QSize& windowSize,
+                                                const QSize& drawableSize,
+                                                const PlankPresentationOutput& output,
+                                                const QSize& streamSize,
+                                                QPointF& desktopPoint,
+                                                bool allowClampedPosition)
+{
+    if (windowSize.isEmpty() || !output.desktopRect.isValid() || output.desktopRect.isEmpty()) {
+        return false;
+    }
+    const QSize drawable = drawableSize.isEmpty() ? windowSize : drawableSize;
+    const PlankPresentationSlice slice = sliceForSource(streamSize, output.sourceRect, drawable);
+    if (!slice.visible) {
+        return false;
+    }
+    const QPointF drawablePoint(windowPoint.x() * drawable.width() / windowSize.width(),
+                                windowPoint.y() * drawable.height() / windowSize.height());
+    const QRect& video = slice.destinationRect;
+    const bool inside = video.contains(qFloor(drawablePoint.x()), qFloor(drawablePoint.y()));
+    if (!inside && !allowClampedPosition) {
+        return false;
+    }
+    const qreal fractionX = qBound<qreal>(0.0, (drawablePoint.x() - video.left()) / video.width(), 1.0);
+    const qreal fractionY = qBound<qreal>(0.0, (drawablePoint.y() - video.top()) / video.height(), 1.0);
+    desktopPoint = QPointF(output.desktopRect.left() + fractionX * output.desktopRect.width(),
+                           output.desktopRect.top() + fractionY * output.desktopRect.height());
+    return true;
+}
+
+bool PlankPresentation::mapStreamPointToSourceWindow(const QPointF& streamPoint,
+                                                     const QSize& streamSize,
+                                                     const PlankPresentationOutput& output,
+                                                     const QSize& windowSize,
+                                                     const QSize& drawableSize,
+                                                     QPointF& windowPoint)
+{
+    if (windowSize.isEmpty()) {
+        return false;
+    }
+    const QSize drawable = drawableSize.isEmpty() ? windowSize : drawableSize;
+    const PlankPresentationSlice slice = sliceForSource(streamSize, output.sourceRect, drawable);
+    if (!slice.visible || streamPoint.x() < slice.sourceRect.left() || streamPoint.y() < slice.sourceRect.top() ||
+            streamPoint.x() >= slice.sourceRect.right() || streamPoint.y() >= slice.sourceRect.bottom()) {
+        return false;
+    }
+    const QRect& video = slice.destinationRect;
+    const QPointF drawablePoint(
+        video.left() + (streamPoint.x() - slice.sourceRect.left()) * video.width() / slice.sourceRect.width(),
+        video.top() + (streamPoint.y() - slice.sourceRect.top()) * video.height() / slice.sourceRect.height());
+    windowPoint = QPointF(drawablePoint.x() * windowSize.width() / drawable.width(),
+                          drawablePoint.y() * windowSize.height() / drawable.height());
+    return true;
+}

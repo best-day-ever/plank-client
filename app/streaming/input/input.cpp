@@ -955,6 +955,29 @@ bool SdlInputHandler::mapRemoteCursorPositionToWindow(
     }
 
     const QPointF streamPoint(position.x, position.y);
+    if (m_PresentationLayout.usesSourceRects()) {
+        // The cursor is in capture (stream) pixels: the window whose source
+        // rectangle holds it shows it.
+        for (const auto& output : m_PresentationLayout.outputs) {
+            int windowWidth = 0;
+            int windowHeight = 0;
+            int drawableWidth = 0;
+            int drawableHeight = 0;
+            SDL_GetWindowSize(output.window, &windowWidth, &windowHeight);
+            SDL_GetWindowSizeInPixels(output.window, &drawableWidth, &drawableHeight);
+            QPointF windowPoint;
+            if (PlankPresentation::mapStreamPointToSourceWindow(
+                        streamPoint, QSize(position.frameWidth, position.frameHeight), output,
+                        QSize(windowWidth, windowHeight), QSize(drawableWidth, drawableHeight),
+                        windowPoint)) {
+                window = output.window;
+                x = qRound(windowPoint.x());
+                y = qRound(windowPoint.y());
+                return true;
+            }
+        }
+        return false;
+    }
     for (const auto& output : m_PresentationLayout.outputs) {
         PlankOutputGeometry geometry;
         if (!outputGeometry(output.window, geometry)) {
@@ -1123,6 +1146,17 @@ bool SdlInputHandler::mapWindowPointToNormalizedStream(
         SDL_Window* window, float windowX, float windowY,
         float& normalizedX, float& normalizedY) const
 {
+    if (m_PresentationLayout.usesSourceRects()) {
+        // Normalized over the whole workstation desktop.
+        QPointF desktopPoint;
+        if (!mapWindowPointToDesktop(window, windowX, windowY, desktopPoint, true)) {
+            return false;
+        }
+        const QSize desktop = m_PresentationLayout.desktopSize;
+        normalizedX = static_cast<float>(qBound(0.0, desktopPoint.x() / desktop.width(), 1.0));
+        normalizedY = static_cast<float>(qBound(0.0, desktopPoint.y() / desktop.height(), 1.0));
+        return true;
+    }
     PlankOutputGeometry geometry;
     if (!outputGeometry(window, geometry)) {
         return false;

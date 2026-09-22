@@ -9,6 +9,7 @@
 
 #ifdef Q_OS_DARWIN
 #include "streaming/macdisplayinfo.h"
+#include "streaming/video/decodercaps.h"
 #endif
 
 #include <QCoreApplication>
@@ -16,8 +17,11 @@
 #include <QDebug>
 #include <QDesktopServices>
 #include <QJsonDocument>
+#include <QGuiApplication>
 #include <QLocale>
+#include <QPointer>
 #include <QSettings>
+#include <QThreadPool>
 #include <QUrl>
 
 namespace {
@@ -112,6 +116,21 @@ DisplayPlanner::Limits DisplaySetupController::limits() const
     DisplayPlanner::Limits limits;
 #ifdef Q_OS_DARWIN
     limits.separateSpaces = MacDisplayInfo::screensHaveSeparateSpaces();
+    limits.decoderMaximum = DecoderCaps::cachedMaximum(m_Host.encodingMode);
+    if (!limits.decoderMaximum.isValid() && !m_Host.encodingMode.isEmpty() &&
+            !m_DecoderProbesStarted.contains(m_Host.encodingMode)) {
+        // First time for this profile on this Mac: decode the 8K test frames
+        // in the background, then plan again with the answer.
+        m_DecoderProbesStarted.insert(m_Host.encodingMode);
+        const QString mode = m_Host.encodingMode;
+        QPointer<DisplaySetupController> self(const_cast<DisplaySetupController*>(this));
+        QThreadPool::globalInstance()->start([self, mode]() {
+            if (!DecoderCaps::probe(mode).isValid()) return;
+            QMetaObject::invokeMethod(qApp, [self]() {
+                if (self) self->replan();
+            });
+        });
+    }
 #endif
     return limits;
 }

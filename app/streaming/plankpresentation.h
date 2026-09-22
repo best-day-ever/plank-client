@@ -12,19 +12,49 @@ struct SDL_Window;
 
 struct PlankPresentationOutput
 {
+    PlankPresentationOutput() = default;
+    PlankPresentationOutput(SDL_Window* outputWindow, const QRect& outputCanvasRect, bool isPrimary)
+        : window(outputWindow), canvasRect(outputCanvasRect), primary(isPrimary)
+    {
+    }
+
     SDL_Window* window = nullptr;
     QRect canvasRect;
     bool primary = false;
+    // When valid, this window shows exactly this rectangle of the stream
+    // (stream pixels: the host's source_rect scaled to the stream), fitted
+    // into its own drawable, and pointer input maps through it to
+    // desktopRect (host desktop coordinates, the host's output rectangle).
+    // Otherwise the window shows its canvasRect slice of the canvas.
+    QRectF sourceRect;
+    QRect desktopRect;
 };
 
 struct PlankPresentationLayout
 {
     QSize canvasSize;
     QVector<PlankPresentationOutput> outputs;
+    // Host desktop bounding box: the reference size for absolute pointer
+    // positions when the outputs carry source rectangles.
+    QSize desktopSize;
 
     bool isMultiOutput() const
     {
         return outputs.size() > 1;
+    }
+
+    bool usesSourceRects() const
+    {
+        if (outputs.isEmpty() || !desktopSize.isValid() || desktopSize.isEmpty()) {
+            return false;
+        }
+        for (const PlankPresentationOutput& output : outputs) {
+            if (!output.sourceRect.isValid() || output.sourceRect.isEmpty() ||
+                    !output.desktopRect.isValid() || output.desktopRect.isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
@@ -160,4 +190,47 @@ public:
         const QRect& outputCanvasRect,
         const QSize& windowSize,
         QPointF& windowPoint);
+
+    // ---- Outputs with a source rectangle (PlankPresentationOutput::sourceRect)
+
+    // The host's capture rectangle of one output (source_rect, in capture
+    // pixels) as stream pixels: the capture may be scaled to the stream.
+    static QRectF sourceRectInStream(const QRect& captureRect,
+                                     const QSize& captureSize,
+                                     const QSize& streamSize);
+
+    // What one window draws: sourceRect of the stream (clipped to it),
+    // aspect-fitted and centred in the window's drawable; the destination is
+    // in drawable pixels.
+    static PlankPresentationSlice sliceForSource(const QSize& streamSize,
+                                                 const QRectF& sourceRect,
+                                                 const QSize& drawableSize);
+
+    // A window point (event coordinates) as a host desktop point, through
+    // the window's drawable, its fitted source rectangle and its desktop
+    // rectangle. Outside the video only with allowClampedPosition.
+    static bool mapWindowPointToDesktop(const QPointF& windowPoint,
+                                        const QSize& windowSize,
+                                        const QSize& drawableSize,
+                                        const PlankPresentationOutput& output,
+                                        const QSize& streamSize,
+                                        QPointF& desktopPoint,
+                                        bool allowClampedPosition);
+
+    // A stream point (the remote cursor) in this window, when the window
+    // shows it.
+    static bool mapStreamPointToSourceWindow(const QPointF& streamPoint,
+                                             const QSize& streamSize,
+                                             const PlankPresentationOutput& output,
+                                             const QSize& windowSize,
+                                             const QSize& drawableSize,
+                                             QPointF& windowPoint);
+
+    // Absolute pointer coordinates on the host desktop: rounded and kept
+    // inside it (0..width-1, 0..height-1).
+    static QPoint absoluteDesktopPosition(const QPointF& desktopPoint,
+                                          const QSize& desktopSize)
+    {
+        return absoluteStreamPosition(desktopPoint, desktopSize);
+    }
 };

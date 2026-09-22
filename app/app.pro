@@ -499,12 +499,15 @@ macx {
         streaming/macdisplayinfo.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
-        streaming/video/ffmpeg-renderers/vt_metal.mm
+        streaming/video/ffmpeg-renderers/vt_metal.mm \
+        streaming/video/decodercaps.mm
 
     HEADERS += \
         streaming/macquitshortcut.h \
         streaming/macdisplayinfo.h \
         streaming/macwindow.h \
+        streaming/video/decodercaps.h \
+        streaming/video/decodercaps-test-frames.h \
         streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h \
         streaming/macclipboardsync.h \

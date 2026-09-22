@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <memory>
+#include <QRect>
 #include <QString>
 
 #include "planktoolbarlogic.h"
@@ -25,6 +26,10 @@ public:
         Minimize,
         Disconnect,
         KeepWaiting,
+        // "Screens changed" prompt.
+        ApplyScreens,
+        KeepScreens,
+        SetUpScreens,
     };
 
     PlankToolbar(SDL_Window* window,
@@ -39,6 +44,11 @@ public:
     Action update(Uint64 now, bool transportAvailable = true);
     void showReconnectPrompt(int unreachableSeconds);
     void hideReconnectPrompt();
+    // "Screens changed — [Apply layout] [Keep] [Set up…]" under the toolbar,
+    // shown (and kept visible) until answered or hidden.
+    void showScreensPrompt(const QString& text);
+    void hideScreensPrompt();
+    bool screensPromptVisible() const { return m_ScreensPromptVisible; }
     // Returns true when status is presented independently of video frames.
     bool setReconnectStatus(const QString& text, bool warning);
     void notifyWindowChanged();
@@ -59,9 +69,14 @@ private:
         Fullscreen,
         Minimize,
         Disconnect,
+        ScreensApply,
+        ScreensKeep,
+        ScreensSetUp,
     };
 
     void show(Uint64 now);
+    int toolbarHeight() const;
+    QRect screensButtonRect(int index) const;
     void hide();
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
@@ -114,6 +129,8 @@ private:
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
     bool m_ReconnectPromptVisible;
+    bool m_ScreensPromptVisible = false;
+    QString m_ScreensPromptText;
     bool m_ReconnectPromptPointerInside;
     bool m_ReconnectPromptButtonDown;
     int m_ReconnectPromptPointerX;

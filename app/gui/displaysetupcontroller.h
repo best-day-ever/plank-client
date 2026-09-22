@@ -4,6 +4,7 @@
 #include "backend/displayprofile.h"
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
@@ -164,4 +165,6 @@ private:
     QString m_Scope = QStringLiteral("global");
     QString m_BannerKind;
     QString m_BannerText;
+    // Encoding modes whose decoder test runs or ran in this process.
+    mutable QSet<QString> m_DecoderProbesStarted;
 };

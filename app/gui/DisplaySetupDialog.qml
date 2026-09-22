@@ -20,6 +20,9 @@ NavigableDialog {
     property bool connectAfter: false
     // 0: the overview, 1: the manual setup.
     property int page: 0
+    // A running stream that asked for the setup (screens changed): saving
+    // applies the layout to it, and the launcher hides again either way.
+    property var session: null
 
     title: hostName !== "" ? qsTr("Screens for %1").arg(hostName) : qsTr("Display setup")
     width: Math.min(860, parent.width - 40)
@@ -38,15 +41,35 @@ NavigableDialog {
         dialog.open()
     }
 
+    function openForSession(streamSession) {
+        dialog.session = streamSession
+        openFor(RemoteBroker.streamingHostId(), "", "new-screens", false, 0)
+    }
+
+    function returnToStream(apply) {
+        var streamSession = dialog.session
+        dialog.session = null
+        if (streamSession !== null) {
+            if (apply) {
+                streamSession.applyDisplayLayout()
+            }
+            window.visible = false
+        }
+    }
+
     function save() {
         if (!DisplaySetup.accept()) {
             return
         }
+        returnToStream(true)
         dialog.close()
         if (dialog.connectAfter && dialog.hostId !== "") {
             RemoteBroker.connectToHost(dialog.hostId)
         }
     }
+
+    // Escape, or any other way out, while a stream waits: back to it.
+    onClosed: returnToStream(false)
 
     Connections {
         target: DisplaySetup
@@ -166,6 +189,7 @@ NavigableDialog {
                 flat: true
                 onClicked: {
                     DisplaySetup.cancel()
+                    dialog.returnToStream(false)
                     dialog.close()
                 }
             }

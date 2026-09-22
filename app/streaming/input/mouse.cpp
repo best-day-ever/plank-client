@@ -154,10 +154,48 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     m_MouseWasInVideoRegion = mouseInVideoRegion;
 }
 
+bool SdlInputHandler::mapWindowPointToDesktop(SDL_Window* window, float windowX, float windowY,
+                                              QPointF& desktopPoint, bool allowClampedPosition) const
+{
+    const auto* output = presentationOutput(window);
+    if (output == nullptr) {
+        return false;
+    }
+    int windowWidth = 0;
+    int windowHeight = 0;
+    int drawableWidth = 0;
+    int drawableHeight = 0;
+    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+    SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight);
+    return PlankPresentation::mapWindowPointToDesktop(
+                QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
+                QSize(drawableWidth, drawableHeight), *output, streamDimensions(),
+                desktopPoint, allowClampedPosition);
+}
+
 bool SdlInputHandler::sendAbsoluteMousePosition(
         SDL_Window* window, float windowX, float windowY,
         bool allowClampedPosition)
 {
+    if (m_PresentationLayout.usesSourceRects()) {
+        // One window per workstation display: positions go out in desktop
+        // coordinates with the desktop as the reference, so they stay right
+        // however the host packs its capture.
+        QPointF desktopPoint;
+        if (!mapWindowPointToDesktop(window, windowX, windowY, desktopPoint,
+                                     allowClampedPosition)) {
+            return false;
+        }
+        const QSize desktop = m_PresentationLayout.desktopSize;
+        const QPoint position =
+                PlankPresentation::absoluteDesktopPosition(desktopPoint, desktop);
+        return LiSendMousePositionEvent(
+                    static_cast<short>(position.x()),
+                    static_cast<short>(position.y()),
+                    static_cast<short>(desktop.width()),
+                    static_cast<short>(desktop.height())) == 0;
+    }
+
     PlankOutputGeometry geometry;
     if (!outputGeometry(window, geometry)) {
         return false;
@@ -229,6 +267,10 @@ bool SdlInputHandler::isMouseInVideoRegion(float mouseX, float mouseY,
                                            Uint32 windowId)
 {
     SDL_Window* window = presentationWindow(windowId);
+    if (window != nullptr && m_PresentationLayout.usesSourceRects()) {
+        QPointF desktopPoint;
+        return mapWindowPointToDesktop(window, mouseX, mouseY, desktopPoint, false);
+    }
     PlankOutputGeometry geometry;
     if (window == nullptr || !outputGeometry(window, geometry)) {
         return false;

@@ -587,8 +587,14 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
             !params->presentationLayout->outputs.isEmpty()) {
         m_PresentationCanvasSize = params->presentationLayout->canvasSize;
         for (const auto& output : params->presentationLayout->outputs) {
-            m_PresentationTargets.push_back(
-                {output.window, output.canvasRect, output.primary});
+            PresentationTarget target;
+            target.window = output.window;
+            target.canvasRect = output.canvasRect;
+            target.primary = output.primary;
+            if (params->presentationLayout->usesSourceRects()) {
+                target.sourceRect = output.sourceRect;
+            }
+            m_PresentationTargets.push_back(target);
         }
         std::stable_sort(m_PresentationTargets.begin(),
                          m_PresentationTargets.end(),
@@ -1254,10 +1260,35 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
 
         pl_frame targetFrame;
         pl_frame_from_swapchain(&targetFrame, &target.swapchainFrame);
-        const auto slice = PlankPresentation::sliceForOutput(
-                    streamSize, m_PresentationCanvasSize,
-                    target.canvasRect);
-        if (slice.visible) {
+        if (target.sourceRect.isValid()) {
+            // One workstation display per window: its source rectangle
+            // fitted into this swapchain.
+            const QSize drawable(qRound(targetFrame.crop.x1 - targetFrame.crop.x0),
+                                 qRound(targetFrame.crop.y1 - targetFrame.crop.y0));
+            const auto slice = PlankPresentation::sliceForSource(streamSize, target.sourceRect, drawable);
+            if (slice.visible) {
+                pl_frame sourceFrame = mappedFrame;
+                sourceFrame.crop.x0 = mappedFrame.crop.x0 + slice.sourceRect.x();
+                sourceFrame.crop.y0 = mappedFrame.crop.y0 + slice.sourceRect.y();
+                sourceFrame.crop.x1 = sourceFrame.crop.x0 + slice.sourceRect.width();
+                sourceFrame.crop.y1 = sourceFrame.crop.y0 + slice.sourceRect.height();
+                const float targetOriginX = targetFrame.crop.x0;
+                const float targetOriginY = targetFrame.crop.y0;
+                targetFrame.crop.x0 = targetOriginX + slice.destinationRect.x();
+                targetFrame.crop.y0 = targetOriginY + slice.destinationRect.y();
+                targetFrame.crop.x1 = targetFrame.crop.x0 + slice.destinationRect.width();
+                targetFrame.crop.y1 = targetFrame.crop.y0 + slice.destinationRect.height();
+                targetFrame.num_overlays = target.primary ? static_cast<int>(overlays.size()) : 0;
+                targetFrame.overlays = target.primary ? overlays.data() : nullptr;
+                if (!pl_render_image(m_Renderer, &sourceFrame, &targetFrame, &pl_render_fast_params)) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                 "pl_render_image() failed for PLANK output");
+                }
+            }
+        }
+        else if (const auto slice = PlankPresentation::sliceForOutput(
+                     streamSize, m_PresentationCanvasSize,
+                     target.canvasRect); slice.visible) {
             pl_frame sourceFrame = mappedFrame;
             sourceFrame.crop.x0 = mappedFrame.crop.x0 + slice.sourceRect.x();
             sourceFrame.crop.y0 = mappedFrame.crop.y0 + slice.sourceRect.y();
