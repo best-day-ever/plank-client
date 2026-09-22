@@ -1,3 +1,15 @@
+## 1.0.152
+
+### Client
+
+- Match the primary client monitor when ordering a Linux Host's virtual displays.
+- Keep the existing image proportions when host and client monitor sizes differ.
+- Allow manual two-display bookmarks when the client has a different monitor layout.
+
+### Host
+
+- Linux: place the first virtual connector on the client's primary side for applications that choose the first monitor.
+
 ## 1.0.151
 
 ### Client

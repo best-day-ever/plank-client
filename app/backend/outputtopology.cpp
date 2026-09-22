@@ -568,7 +568,7 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
     hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
                                        QString::fromLatin1(DualHorizontalHostLayout);
     if (primaryOutput) {
-        *primaryOutput = clientPrimaryIndex(displays);
+        *primaryOutput = clientPrimaryIndex(displays, displays.size());
         if (*primaryOutput < 0) {
             if (error) *error = QStringLiteral("Unable to identify one primary client display. Please reconnect.");
             hostLayout.clear();
@@ -579,14 +579,26 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
     return true;
 }
 
-int NvOutputTopology::clientPrimaryIndex(QVector<NvClientDisplay> displays)
+int NvOutputTopology::clientPrimaryIndex(QVector<NvClientDisplay> displays, int outputCount)
 {
+    if (outputCount < 1 || outputCount > 2 || displays.size() != outputCount) {
+        return -1;
+    }
     std::sort(displays.begin(), displays.end(), [](const auto& left, const auto& right) {
         return std::make_tuple(left.bounds.x(), left.bounds.y()) <
                 std::make_tuple(right.bounds.x(), right.bounds.y());
     });
+    if (displays.size() == 2) {
+        const QRect& left = displays.at(0).bounds;
+        const QRect& right = displays.at(1).bounds;
+        if (left.right() >= right.left() ||
+                left.top() > right.bottom() || right.top() > left.bottom()) {
+            return -1;
+        }
+    }
     int primary = -1;
     for (int index = 0; index < displays.size(); ++index) {
+        if (!displays[index].bounds.isValid()) return -1;
         if (!displays[index].primary) continue;
         if (primary != -1) return -1;
         primary = index;

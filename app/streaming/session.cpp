@@ -2378,11 +2378,11 @@ bool Session::configurePlankHostLayout()
                                            display.logicalBounds.w, display.logicalBounds.h),
                                      display.nativeSize, display.macBackingSize, display.primary});
                 }
-                m_ResolvedPrimaryOutput = NvOutputTopology::clientPrimaryIndex(displays);
-                if (m_ResolvedPrimaryOutput < 0) {
-                    emit displayLaunchError(tr("Unable to identify one primary client display. Please reconnect."));
-                    return false;
-                }
+                // A manual bookmark remains usable with a different number
+                // or arrangement of local monitors. Omit an ambiguous hint;
+                // never send an index into unrelated local displays.
+                m_ResolvedPrimaryOutput = NvOutputTopology::clientPrimaryIndex(
+                    displays, m_ResolvedVirtualModes.size());
             }
         }
     }
@@ -2483,26 +2483,6 @@ bool Session::configurePlankLaunchGeometry()
                     "PLANK presentation selection: host-outputs=%d client-multi=%d selected-outputs=%d",
                     hostOutputs, m_MultiDisplayPresentationAvailable,
                     m_UseMultiDisplayPresentation ? 2 : 1);
-    }
-
-    // Manual virtual modes define the stream boundary. Each fullscreen window
-    // must use its Host output rectangle even if its Mac panel has more pixels.
-    if (m_UseMultiDisplayPresentation &&
-            m_ResolvedHostLayout == NvOutputTopology::DualHorizontalHostLayout &&
-            m_ResolvedScalingMode == NvOutputTopology::NativeScalingMode &&
-            m_ResolvedVirtualModes.size() == m_ClientDisplays.size()) {
-        QVector<QSize> hostOutputSizes;
-        for (const QString& mode : std::as_const(m_ResolvedVirtualModes)) {
-            hostOutputSizes.append(NvOutputTopology::virtualModeSize(mode));
-        }
-        const auto hostCanvas = PlankPresentation::horizontalCanvas(hostOutputSizes);
-        if (hostCanvas.size() != m_ClientDisplays.size()) {
-            emit displayLaunchError(tr("The Host output sizes are invalid for two-screen presentation."));
-            return false;
-        }
-        for (int i = 0; i < m_ClientDisplays.size(); ++i) {
-            m_ClientDisplays[i].canvasRect = hostCanvas.at(i);
-        }
     }
 
     const QSize resolution = configurePlankDisplayMode();

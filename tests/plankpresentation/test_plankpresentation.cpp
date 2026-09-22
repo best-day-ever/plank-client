@@ -14,7 +14,7 @@ private slots:
     void preservesMouseMotionBarriers_data();
     void preservesMouseMotionBarriers();
     void exactDualOutputSlices();
-    void manualHostModesOverrideRetinaPanelBoundary();
+    void preservesAspectWithDifferentHostAndClientModes();
     void letterboxedDualOutputSlices();
     void mapsEachWindowIntoOneStreamCanvas();
     void preservesMappingWithScaledLogicalWindows();
@@ -61,24 +61,35 @@ void TestPlankPresentation::exactDualOutputSlices()
     QCOMPARE(right.destinationRect, QRect(0, 0, 2560, 2160));
 }
 
-void TestPlankPresentation::manualHostModesOverrideRetinaPanelBoundary()
+void TestPlankPresentation::preservesAspectWithDifferentHostAndClientModes()
 {
-    const QSize stream(4480, 1440);
-    const auto canvas = PlankPresentation::horizontalCanvas(
-        {QSize(1920, 1200), QSize(2560, 1440)});
-    QCOMPARE(canvas.size(), 2);
-    QCOMPARE(canvas[0], QRect(0, 0, 1920, 1200));
-    QCOMPARE(canvas[1], QRect(1920, 0, 2560, 1440));
-
-    const auto laptop = PlankPresentation::sliceForDrawable(
-        stream, stream, canvas[0], QSize(4112, 2572));
-    const auto external = PlankPresentation::sliceForDrawable(
-        stream, stream, canvas[1], QSize(2560, 1440));
-    QCOMPARE(laptop.sourceRect, QRectF(0, 0, 1920, 1200));
-    QCOMPARE(external.sourceRect, QRectF(1920, 0, 2560, 1440));
-    QCOMPARE(laptop.destinationRect, QRect(0, 0, 4112, 2572));
-    QCOMPARE(external.destinationRect, QRect(0, 0, 2560, 1440));
-    QVERIFY(PlankPresentation::horizontalCanvas({QSize(1920, 1200), QSize()}).isEmpty());
+    // Two 1920x1080 Host outputs on taller client monitors. Retain the client
+    // pixel canvas: substituting Host output sizes would stretch each image
+    // vertically to 2160 instead of preserving its aspect and letterboxing.
+    const QSize stream(3840, 1080);
+    const QSize canvas(5120, 2160);
+    const QSize drawable(2560, 2160);
+    for (int index = 0; index < 2; ++index) {
+        const QRect output(index * drawable.width(), 0, drawable.width(), drawable.height());
+        const auto slice = PlankPresentation::sliceForDrawable(stream, canvas, output, drawable);
+        QCOMPARE(slice.sourceRect, QRectF(index * 1920, 0, 1920, 1080));
+        QCOMPARE(slice.destinationRect, QRect(0, 360, 2560, 1440));
+        // Mouse/pen and cursor mappings share the same geometry, including a
+        // Retina window's logical coordinates and noninteractive black bars.
+        for (int scale : {1, 2}) {
+            const QSize window = drawable / scale;
+            const QPointF center(window.width() / 2.0, window.height() / 2.0);
+            QPointF streamPoint, windowPoint;
+            QVERIFY(PlankPresentation::mapWindowPointToStream(
+                center, window, stream, canvas, output, streamPoint, false));
+            QCOMPARE(streamPoint, QPointF(index * 1920 + 960, 540));
+            QVERIFY(PlankPresentation::mapStreamPointToWindow(
+                streamPoint, stream, canvas, output, window, windowPoint));
+            QCOMPARE(windowPoint, center);
+            QVERIFY(!PlankPresentation::mapWindowPointToStream(
+                QPointF(center.x(), 0), window, stream, canvas, output, streamPoint, false));
+        }
+    }
 }
 
 void TestPlankPresentation::letterboxedDualOutputSlices()

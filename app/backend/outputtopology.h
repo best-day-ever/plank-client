@@ -116,7 +116,9 @@ struct NvOutputTopology
                                            QStringList& virtualModes,
                                            QString* error = nullptr,
                                            int* primaryOutput = nullptr);
-    static int clientPrimaryIndex(QVector<NvClientDisplay> displays);
+    // Optional connector hint; -1 when the requested outputs cannot be mapped
+    // one-to-one to an unambiguous horizontal client display layout.
+    static int clientPrimaryIndex(QVector<NvClientDisplay> displays, int outputCount);
     static QStringList qualifiedVirtualModes();
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
                                                QString* error = nullptr, int* scale = nullptr);
