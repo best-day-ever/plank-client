@@ -71,6 +71,27 @@ public:
                profile < PLANK_PROFILE_COUNT;
     }
 
+    // Host encoding mode for a profile, as the host names it in launch
+    // requests and in its advertised PlankEncodingModes list; empty for an
+    // invalid profile.
+    static QString plankEncodingMode(int profile)
+    {
+        switch (profile) {
+        case PLANK_PROFILE_H264_8BIT_422: return QStringLiteral("h264-8-422-software");
+        case PLANK_PROFILE_H264_8BIT_444: return QStringLiteral("h264-8-444-software");
+        case PLANK_PROFILE_H264_10BIT_422: return QStringLiteral("h264-10-422-software");
+        case PLANK_PROFILE_H264_10BIT_444: return QStringLiteral("h264-10-444-software");
+        case PLANK_PROFILE_NVENC_H264_8BIT_444: return QStringLiteral("h264-8-444-nvenc");
+        case PLANK_PROFILE_NVENC_HEVC_8BIT_444: return QStringLiteral("hevc-8-444-nvenc");
+        case PLANK_PROFILE_NVENC_HEVC_10BIT_444: return QStringLiteral("hevc-10-444-nvenc");
+        case PLANK_PROFILE_APPLE_HEVC_10BIT_420:
+        case PLANK_PROFILE_APPLE_HEVC_10BIT_444: return plankAppleEncodingMode(profile);
+        case PLANK_PROFILE_NVENC_H264_8BIT_420: return QStringLiteral("h264-8-420-nvenc");
+        case PLANK_PROFILE_NVENC_HEVC_10BIT_420: return QStringLiteral("hevc-10-420-nvenc");
+        default: return {};
+        }
+    }
+
     static bool isPlankProfileValidForCaptureSource(
             int profile, int captureSource)
     {
@@ -132,6 +153,10 @@ public:
         return !isPlankH264NvencProfile(profile) ||
                (width <= 4096 && height <= 2160);
     }
+
+    // Every PLANK session streams at this rate; the Frame rate preference
+    // applies to non-PLANK hosts only.
+    static constexpr int PlankFramesPerSecond = 60;
 
     static constexpr int PlankBitrateMinimumKbps = 10000;
     static constexpr int PlankBitrateMaximumKbps = 150000;
@@ -324,6 +349,10 @@ public:
         return plankProfileBitratesToVariantList(
                     plankDefaultProfileBitrates());
     }
+    Q_INVOKABLE int plankFramesPerSecond() const
+    {
+        return PlankFramesPerSecond;
+    }
     Q_INVOKABLE int plankBitrateMinimumKbps() const
     {
         return PlankBitrateMinimumKbps;
@@ -357,7 +386,6 @@ public:
     int plankUnreachableTimeoutSeconds;
     PlankUnreachableAction plankUnreachableAction;
     AudioConfig audioConfig;
-    int identityGbrBitDepth;
     bool plankToolbarPinned;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;

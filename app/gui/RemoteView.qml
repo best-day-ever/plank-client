@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.3
 
 import RemoteBroker 1.0
 import ComputerManager 1.0
+import StreamingPreferences 1.0
 
 // Remote (broker) mode: sign in once with username, password and
 // authenticator code, pick an assigned workstation, stream through the
@@ -61,10 +62,14 @@ Item {
         function onDisplaySetupRequired(hostId, hostName, reason) {
             displaySetupDialog.openFor(hostId, hostName, true, reason)
         }
+        function onStreamSetupRequired(hostId, hostName, reason) {
+            displaySetupDialog.openFor(hostId, hostName, true, "", reason)
+        }
     }
 
-    // Per-workstation display setup, asked on first connect and editable from
-    // each row; kept locally (RemoteBroker.displaySetup / saveDisplaySetup).
+    // Per-workstation settings (display setup and stream quality), asked on
+    // first connect and editable from each row; kept locally
+    // (RemoteBroker.displaySetup / streamSetup and their save functions).
     NavigableDialog {
         id: displaySetupDialog
         property string hostId: ""
@@ -73,7 +78,9 @@ Item {
         property string reason: ""
         property var setup: ({})
         property var modes: []
-        title: qsTr("Display setup for %1").arg(hostName)
+        property string streamReason: ""
+        property var stream: ({})
+        title: qsTr("Settings for %1").arg(hostName)
         width: Math.min(560, remoteView.width - 40)
         height: Math.min(implicitHeight, remoteView.height - 20)
         dim: false
@@ -85,7 +92,8 @@ Item {
             return mode.replace("x", "×")
         }
 
-        function openFor(hostId, hostName, connectAfter, reason) {
+        function openFor(hostId, hostName, connectAfter, reason, streamReason) {
+            displaySetupDialog.streamReason = streamReason || ""
             displaySetupDialog.hostId = hostId
             displaySetupDialog.hostName = hostName
             displaySetupDialog.connectAfter = connectAfter
@@ -96,7 +104,41 @@ Item {
             setupMode1.currentIndex = Math.max(0, displaySetupDialog.modes.indexOf(displaySetupDialog.setup.virtualMode1))
             setupMode2.currentIndex = Math.max(0, displaySetupDialog.modes.indexOf(displaySetupDialog.setup.virtualMode2))
             setupScaling.currentIndex = displaySetupDialog.setup.scalingChoice
+            displaySetupDialog.loadStream()
             displaySetupDialog.open()
+        }
+
+        function loadStream() {
+            stream = RemoteBroker.streamSetup(hostId)
+            streamVideoSettings.hostPlatform = stream.platform || 0
+            // A choice the workstation refused is shown as the user's own
+            // choice, so it can be changed rather than hidden behind defaults.
+            streamUseDefaults.checked = stream.useDefaults === true && streamReason === ""
+            streamVideoSettings.load(stream.captureSource, stream.videoProfile,
+                                     stream.officeBitratesKbps, stream.internetBitratesKbps)
+        }
+
+        function streamProblem(capture, profile) {
+            return RemoteBroker.streamProfileProblem(hostId, capture, profile)
+        }
+
+        function saveStream() {
+            return RemoteBroker.saveStreamSetup(hostId, streamUseDefaults.checked,
+                                                streamVideoSettings.captureSource,
+                                                streamVideoSettings.videoProfile,
+                                                streamVideoSettings.officeBitratesKbps,
+                                                streamVideoSettings.internetBitratesKbps)
+        }
+
+        onOpened: {
+            // Right after the workstation refused a choice (streamReason) its
+            // capabilities were just probed, so an unusable choice cannot be
+            // saved. Otherwise they come from an earlier connect and may be
+            // stale (host upgraded, encoder fixed): the choice is only
+            // flagged, and the connect checks it against the live host.
+            standardButton(Dialog.Ok).enabled = Qt.binding(function() {
+                return streamReason === "" || streamVideoSettings.problemText === ""
+            })
         }
 
         onAccepted: {
@@ -106,6 +148,10 @@ Item {
                                                       setupScaling.currentIndex)
             if (!saved) {
                 remoteView.errorText = qsTr("That display setup is not supported.")
+                return
+            }
+            if (!saveStream()) {
+                remoteView.errorText = qsTr("Those stream settings are not supported.")
                 return
             }
             if (connectAfter) {
@@ -121,7 +167,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 visible: displaySetupDialog.connectAfter && !displaySetupDialog.setup.configured
-                text: qsTr("Choose how %1 should present its desktop to this computer. You can change it later with Display….").arg(displaySetupDialog.hostName)
+                text: qsTr("Choose how %1 should present its desktop to this computer. You can change it later with Settings….").arg(displaySetupDialog.hostName)
                 wrapMode: Text.Wrap
             }
             Label {
@@ -133,7 +179,9 @@ Item {
             }
             Label {
                 Layout.fillWidth: true
-                text: qsTr("This computer: %1").arg(displaySetupDialog.setup.clientResolution || "")
+                text: (Qt.platform.os === "osx" ? qsTr("This Mac: %1") : qsTr("This computer: %1"))
+                      .arg(displaySetupDialog.setup.clientResolution || "")
+                wrapMode: Text.Wrap
                 opacity: 0.72
             }
 
@@ -156,6 +204,13 @@ Item {
                     enabled: index !== 0 || displaySetupDialog.setup.canMatchClient === true
                     highlighted: setupLayout.highlightedIndex === index
                 }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: setupLayout.currentIndex === 0 && displaySetupDialog.setup.canMatchClient === true
+                text: qsTr("Match my display → %1").arg(displaySetupDialog.setup.matchClientSummary || "")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
             Label {
                 Layout.fillWidth: true
@@ -201,6 +256,47 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: qsTr("Native shows one workstation pixel per screen pixel. Scale to fit shows the whole workstation desktop on this screen.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            // ------------------------------------------------ stream quality
+            Label {
+                Layout.topMargin: 8
+                text: qsTr("Stream quality")
+                font.bold: true
+                font.pointSize: 13
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: displaySetupDialog.streamReason !== ""
+                text: displaySetupDialog.streamReason
+                color: theme.warning
+                wrapMode: Text.Wrap
+            }
+            PlankCheckBox {
+                id: streamUseDefaults
+                Layout.fillWidth: true
+                text: qsTr("Use the remote access defaults (Settings › Remote Access)")
+                onToggled: {
+                    if (checked) {
+                        var defaults = displaySetupDialog.stream.defaults
+                        streamVideoSettings.load(defaults.captureSource, defaults.videoProfile,
+                                                 defaults.officeBitratesKbps, defaults.internetBitratesKbps)
+                    }
+                }
+            }
+            PlankVideoSettings {
+                id: streamVideoSettings
+                Layout.fillWidth: true
+                enabled: !streamUseDefaults.checked
+                showRoutes: true
+                profileProblem: displaySetupDialog.streamProblem
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: displaySetupDialog.streamReason === "" && streamVideoSettings.problemText !== ""
+                text: qsTr("This is what the workstation reported on the last connect. Connecting checks it again.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }
@@ -510,7 +606,7 @@ Item {
                     }
 
                     Button {
-                        text: qsTr("Display…")
+                        text: qsTr("Settings…")
                         flat: true
                         enabled: !RemoteBroker.busy
                         onClicked: displaySetupDialog.openFor(modelData.id, modelData.name, false, "")

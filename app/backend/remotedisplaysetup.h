@@ -7,6 +7,7 @@
 
 #include "outputtopology.h"
 
+#include <QPoint>
 #include <QSettings>
 #include <QSize>
 #include <QString>
@@ -89,7 +90,14 @@ inline Setup load(QSettings& settings, const QString& hostId)
     setup.virtualMode2 = settings.value(QStringLiteral("virtual-mode-2")).toString();
     setup.scalingMode = settings.value(QStringLiteral("scaling-mode")).toString();
     settings.endGroup();
-    // Anything unreadable (older build, hand edit) is simply asked again.
+    // Match client re-resolves its virtual modes from the client displays on
+    // every connect, so stale stored modes (an older build stored whatever
+    // the display dialog guessed) must not force the dialog again.
+    if (setup.hostLayout == QLatin1String(NvOutputTopology::MatchClientHostLayout)) {
+        if (!isQualifiedMode(setup.virtualMode1)) setup.virtualMode1 = QStringLiteral("1920x1080");
+        if (!isQualifiedMode(setup.virtualMode2)) setup.virtualMode2 = setup.virtualMode1;
+    }
+    // Anything else unreadable (older build, hand edit) is simply asked again.
     setup.configured = isValid(setup);
     return setup;
 }
@@ -106,31 +114,22 @@ inline bool save(QSettings& settings, const QString& hostId, const Setup& setup)
     return true;
 }
 
-// Largest qualified virtual mode that fits inside the client panel, so the
-// stream is never upscaled; the smallest standard mode if none fits.
-inline QString suggestedMode(const QSize& clientNativeSize)
+// Best qualified virtual mode for one virtual display on this client: the
+// same ranking Match client uses (exact, else the closest aspect ratio that
+// fits without upscaling), restricted to landscape modes because the
+// ultra-tall halves only make sense as a pair.
+inline QString suggestedMode(const QSize& clientSize)
 {
-    QString best;
-    qint64 bestArea = -1;
-    for (const QString& mode : NvOutputTopology::qualifiedVirtualModes()) {
-        const QStringList parts = mode.split(QLatin1Char('x'));
-        if (parts.size() != 2) continue;
-        const int width = parts[0].toInt();
-        const int height = parts[1].toInt();
-        // Ultra-tall halves (1024/1280/2560x2160) only make sense as a pair.
-        if (height > width) continue;
-        if (width > clientNativeSize.width() || height > clientNativeSize.height()) continue;
-        const qint64 area = qint64(width) * height;
-        if (area > bestArea) {
-            bestArea = area;
-            best = mode;
-        }
+    for (const QString& mode : NvOutputTopology::rankedVirtualModes(clientSize)) {
+        const QSize size = NvOutputTopology::virtualModeSize(mode);
+        if (size.width() >= size.height()) return mode;
     }
-    return best.isEmpty() ? QStringLiteral("1920x1080") : best;
+    return QStringLiteral("1920x1080");
 }
 
 // Whether "Match my displays" can work for these client displays; the reason
-// is user-facing when it cannot.
+// is user-facing when it cannot. Any single display or left-to-right pair
+// can: odd sizes are matched to the closest supported mode.
 inline bool canMatchClient(const QVector<NvClientDisplay>& displays, QString* reason = nullptr)
 {
     QString layout;
@@ -141,18 +140,57 @@ inline bool canMatchClient(const QVector<NvClientDisplay>& displays, QString* re
     return ok;
 }
 
-// First-connect proposal: match the client when its displays qualify,
-// otherwise one virtual display that fits the main panel, scaled to fit.
+// The display the client treats as main: the one at the desktop origin.
+inline NvClientDisplay primaryDisplay(const QVector<NvClientDisplay>& displays)
+{
+    for (const NvClientDisplay& display : displays) {
+        if (display.bounds.contains(QPoint(0, 0))) return display;
+    }
+    return displays.isEmpty() ? NvClientDisplay { QRect(0, 0, 1920, 1080), QSize(1920, 1080) } :
+                                displays.first();
+}
+
+// First-connect proposal: match the client's displays whenever that works,
+// otherwise one virtual display that fits the main display, scaled to fit.
 inline Setup proposal(const QVector<NvClientDisplay>& displays)
 {
     Setup setup;
-    const QSize primary = displays.isEmpty() ? QSize(1920, 1080) : displays.first().nativeSize;
-    const QString mode = suggestedMode(primary);
-    setup.hostLayout = layoutForChoice(canMatchClient(displays) ? MatchClient : SingleVirtual);
+    const bool canMatch = canMatchClient(displays);
+    QString layout;
+    QStringList modes;
+    if (canMatch) NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes);
+    const QString mode = canMatch ? modes.first() :
+            suggestedMode(NvOutputTopology::clientMatchTarget(primaryDisplay(displays)));
+    setup.hostLayout = layoutForChoice(canMatch ? MatchClient : SingleVirtual);
     setup.virtualMode1 = mode;
-    setup.virtualMode2 = mode;
+    setup.virtualMode2 = canMatch ? modes.value(1, mode) : mode;
     setup.scalingMode = QString::fromLatin1(NvOutputTopology::ScaledSpanMode);
     return setup;
+}
+
+// Connect time for a saved Match client setup: resolve the modes for the
+// client displays as they are now and store them, so the dialog shows what
+// is really used. Returns false (with a user-facing reason) only when the
+// displays cannot be matched at all.
+inline bool refreshMatchedModes(QSettings& settings, const QString& hostId, Setup& setup,
+                                const QVector<NvClientDisplay>& displays, QString* reason = nullptr)
+{
+    if (setup.hostLayout != QLatin1String(NvOutputTopology::MatchClientHostLayout)) return true;
+    QString layout;
+    QStringList modes;
+    QString error;
+    if (!NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, &error)) {
+        if (reason != nullptr) *reason = error;
+        return false;
+    }
+    const QString mode1 = modes.first();
+    const QString mode2 = modes.value(1, mode1);
+    if (setup.virtualMode1 != mode1 || setup.virtualMode2 != mode2) {
+        setup.virtualMode1 = mode1;
+        setup.virtualMode2 = mode2;
+        save(settings, hostId, setup);
+    }
+    return true;
 }
 
 }

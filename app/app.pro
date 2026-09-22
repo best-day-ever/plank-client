@@ -214,6 +214,7 @@ macx {
 SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
+    backend/clientdisplayprobe.cpp \
     backend/nvapp.cpp \
     main.cpp \
     backend/computerseeker.cpp \
@@ -255,6 +256,7 @@ HEADERS += \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
+    backend/clientdisplayprobe.h \
     backend/nvapp.h \
     utils.h \
     backend/computerseeker.h \
@@ -264,6 +266,7 @@ HEADERS += \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
     backend/remotedisplaysetup.h \
+    backend/remotestreamsetup.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \
     backend/computermanager.h \
@@ -485,7 +488,15 @@ macx {
         streaming/macquitshortcut.h \
         streaming/macwindow.h \
         streaming/macdisplaygeometry.h \
-        streaming/video/ffmpeg-renderers/vt.h
+        streaming/video/ffmpeg-renderers/vt.h \
+        streaming/macclipboardsync.h \
+        streaming/clipboardpolltimer.h \
+        streaming/plankclipboard.h
+    OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    contains(CONFIG, plank-transport) {
+        HEADERS += streaming/macfileclipboard.h
+        OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
+    }
 }
 embedded {
     message(Embedded build)

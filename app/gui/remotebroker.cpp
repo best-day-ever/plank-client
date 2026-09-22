@@ -1,17 +1,18 @@
 #include "remotebroker.h"
 
 #include "backend/brokersessionstore.h"
+#include "backend/clientdisplayprobe.h"
 #include "backend/computermanager.h"
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
 #include "backend/outputtopology.h"
 #include "backend/remotedisplaysetup.h"
+#include "backend/remotestreamsetup.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/session.h"
 
 #include <QDebug>
 #include <QGuiApplication>
-#include <QScreen>
 #include <QSettings>
 #include <QElapsedTimer>
 #include <QQmlEngine>
@@ -30,24 +31,6 @@ QElapsedTimer& monotonicClock()
 }
 
 qint64 nowMs() { return monotonicClock().elapsed(); }
-
-// GUI thread: the client's screens in native pixels, left to right, as the
-// Session will see them at stream start (an approximation for the dialog).
-QVector<NvClientDisplay> clientDisplaySnapshot()
-{
-    QVector<NvClientDisplay> displays;
-    for (QScreen* screen : QGuiApplication::screens()) {
-        NvClientDisplay display;
-        display.bounds = screen->geometry();
-        display.nativeSize = QSize(qRound(screen->geometry().width() * screen->devicePixelRatio()),
-                                   qRound(screen->geometry().height() * screen->devicePixelRatio()));
-        displays.append(display);
-    }
-    std::sort(displays.begin(), displays.end(), [](const NvClientDisplay& a, const NvClientDisplay& b) {
-        return a.bounds.x() < b.bounds.x();
-    });
-    return displays;
-}
 
 // Maps broker failures onto the exception types the Session re-auth paths
 // already classify (401 while authenticating is terminal, TLS is terminal,
@@ -477,42 +460,64 @@ void RemoteBroker::refreshHosts()
     });
 }
 
-RemoteBroker::HostDefaults RemoteBroker::bookmarkDefaultsFor(const QString& hostName) const
+QVector<RemoteStreamSetup::BookmarkCandidate> RemoteBroker::bookmarkCandidates() const
 {
-    HostDefaults defaults;
-    if (m_ComputerManager.isNull()) return defaults;
+    QVector<RemoteStreamSetup::BookmarkCandidate> candidates;
+    if (m_ComputerManager.isNull()) return candidates;
     const QVector<NvComputer*> computers = m_ComputerManager->getComputers();
     for (NvComputer* computer : computers) {
         QReadLocker lock(&computer->lock);
-        const QString address = computer->manualAddress.isNull() ? QString() :
-                                                                 computer->manualAddress.address();
-        const bool matches = computer->name.compare(hostName, Qt::CaseInsensitive) == 0 ||
-                address.compare(hostName, Qt::CaseInsensitive) == 0 ||
-                address.startsWith(hostName + QLatin1Char('.'), Qt::CaseInsensitive);
-        if (!matches) continue;
-        defaults.found = true;
-        defaults.videoProfile = computer->plankVideoProfile;
-        defaults.captureSource = computer->plankCaptureSource;
-        defaults.scalingMode = computer->plankScalingMode;
-        defaults.hostLayout = computer->plankHostLayout;
-        defaults.virtualMode1 = computer->plankVirtualMode1;
-        defaults.virtualMode2 = computer->plankVirtualMode2;
-        defaults.profileBitratesKbps = computer->plankProfileBitratesKbps;
-        break;
+        RemoteStreamSetup::BookmarkCandidate candidate;
+        candidate.name = computer->name;
+        candidate.address = computer->manualAddress.isNull() ? QString() : computer->manualAddress.address();
+        candidate.captureSource = computer->plankCaptureSource;
+        candidate.videoProfile = computer->plankVideoProfile;
+        candidate.bitratesKbps = computer->plankProfileBitratesKbps;
+        candidates.append(candidate);
     }
-    return defaults;
+    return candidates;
+}
+
+bool RemoteBroker::bookmarkSeedFor(const QString& hostId, const QString& hostName,
+                                   RemoteStreamSetup::Setup& seed) const
+{
+    return RemoteStreamSetup::seedFromBookmarks(bookmarkCandidates(), hostId, hostName, seed);
+}
+
+RemoteStreamSetup::Resolution RemoteBroker::resolveStreamSetup(const QString& hostId, int platform) const
+{
+    QSettings settings;
+    const RemoteStreamSetup::Setup host = RemoteStreamSetup::loadHost(settings, hostId);
+    const RemoteStreamSetup::Setup defaults = RemoteStreamSetup::loadDefaults(settings);
+    RemoteStreamSetup::Setup seed;
+    const bool seeded = host.mode == RemoteStreamSetup::Unset &&
+            bookmarkSeedFor(hostId, hostNameFor(hostId), seed);
+    return RemoteStreamSetup::resolve(host, seeded ? &seed : nullptr, defaults, platform);
 }
 
 namespace {
 
+// Stream settings the worker resolves once it knows the workstation's platform.
+struct StreamInputs {
+    RemoteStreamSetup::Setup host;
+    bool seeded = false;
+    RemoteStreamSetup::Setup seed;
+    RemoteStreamSetup::Setup defaults;
+};
+
+// The stream settings do not fit the workstation: ask instead of launching.
+struct StreamSettingsRequired {
+    QString reason;
+};
+
 // Worker thread: section 10.2 steps 1-2 plus the ordinary pre-launch
 // preparation (topology, app list). The returned computer is authorized with
-// a one-use host token and pinned to the broker-supplied leaf.
+// a one-use host token and pinned to the broker-supplied leaf. capabilities
+// receives what the workstation reported, even when it throws.
 NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QString& hostId,
-                                    const QString& hostName, bool defaultsFound, int profile, int capture,
-                                    const QString& scalingMode, const QString& hostLayout,
-                                    const QString& virtualMode1, const QString& virtualMode2,
-                                    const QVector<int>& bitrates, const RemoteDisplaySetup::Setup& display)
+                                    const QString& hostName, const StreamInputs& stream,
+                                    const RemoteDisplaySetup::Setup& display,
+                                    RemoteStreamSetup::Capabilities& capabilities)
 {
     const NvAddress address(lease.endpoint, lease.port);
     NvHTTP http(address);
@@ -523,29 +528,32 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
         throw GfeHttpResponseException(400, "The remote workstation does not offer PLANK authentication");
     }
     const bool macHost = probed.plankFeatureFlags == NvOutputTopology::FixedCaptureFlags;
-    const bool bookmarkMatchesPlatform = defaultsFound &&
-            ((capture == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) == macHost) &&
-            StreamingPreferences::isPlankProfileValidForCaptureSource(profile, capture);
-    if (!bookmarkMatchesPlatform) {
-        capture = macHost ? StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT :
-                            StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT;
-        profile = macHost ? StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420 :
-                            StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444;
+    capabilities.known = true;
+    capabilities.platform = macHost ? RemoteStreamSetup::MacPlatform : RemoteStreamSetup::LinuxPlatform;
+    capabilities.featureFlags = probed.plankFeatureFlags;
+    capabilities.encodingModes = probed.plankEncodingModes;
+
+    const RemoteStreamSetup::Resolution resolution = RemoteStreamSetup::resolve(
+                stream.host, stream.seeded ? &stream.seed : nullptr, stream.defaults, capabilities.platform);
+    const QString problem = RemoteStreamSetup::problemFor(resolution.setup, capabilities);
+    if (!problem.isEmpty()) {
+        qWarning() << "Remote stream settings do not fit" << hostId << ": profile"
+                   << resolution.setup.videoProfile << "capture" << resolution.setup.captureSource
+                   << "source" << resolution.source;
+        throw StreamSettingsRequired { problem };
     }
+    const RemoteStreamSetup::Route route = lease.route == PlankBroker::Route::Direct ?
+                RemoteStreamSetup::OfficeNetwork : RemoteStreamSetup::Internet;
+    const QVector<int>& bitrates = RemoteStreamSetup::bitratesFor(resolution.setup, route);
+    qInfo() << "Remote stream settings for" << hostId << ": profile" << resolution.setup.videoProfile
+            << "capture" << resolution.setup.captureSource << "source" << resolution.source
+            << "startup target" << RemoteStreamSetup::bitrateFor(resolution.setup, route) << "kbps";
+
     std::unique_ptr<NvComputer> computer(new NvComputer(
-            address, hostName, profile, capture,
-            bookmarkMatchesPlatform && !bitrates.isEmpty() ? bitrates :
-                                                           StreamingPreferences::plankDefaultProfileBitrates()));
+            address, hostName, resolution.setup.videoProfile, resolution.setup.captureSource, bitrates));
     {
         QWriteLocker lock(&computer->lock);
-        if (bookmarkMatchesPlatform) {
-            computer->plankScalingMode = scalingMode;
-            computer->plankHostLayout = hostLayout;
-            computer->plankVirtualMode1 = virtualMode1;
-            computer->plankVirtualMode2 = virtualMode2;
-        }
-        // The display setup chosen for this remote workstation wins over a
-        // same-named LAN bookmark: it is what the user picked for remote use.
+        // Connecting always has a display setup chosen for this workstation.
         if (display.configured) {
             computer->plankScalingMode = display.scalingMode;
             computer->plankHostLayout = display.hostLayout;
@@ -614,24 +622,14 @@ QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
     if (!PlankBroker::isHostId(hostId)) return result;
     QSettings settings;
     RemoteDisplaySetup::Setup setup = RemoteDisplaySetup::load(settings, hostId);
-    const QVector<NvClientDisplay> displays = clientDisplaySnapshot();
-    QString matchReason;
-    const bool canMatch = RemoteDisplaySetup::canMatchClient(displays, &matchReason);
-    QSize primary(1920, 1080);
-    if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        primary = QSize(qRound(screen->geometry().width() * screen->devicePixelRatio()),
-                        qRound(screen->geometry().height() * screen->devicePixelRatio()));
-    }
+    // The same probe the streaming Session uses, so the dialog shows and
+    // proposes exactly what a connect will do.
+    const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
+    const ClientDisplayProbe::MatchPreview match = ClientDisplayProbe::matchPreview(displays);
+    const bool canMatch = match.ok;
     const bool configured = setup.configured;
     if (!configured) {
-        QVector<NvClientDisplay> primaryFirst;
-        primaryFirst.append(NvClientDisplay { QRect(QPoint(), primary), primary });
-        setup = RemoteDisplaySetup::proposal(canMatch ? displays : primaryFirst);
-        if (!canMatch) setup.hostLayout = RemoteDisplaySetup::layoutForChoice(RemoteDisplaySetup::SingleVirtual);
-    }
-    QStringList resolutions;
-    for (const NvClientDisplay& display : displays) {
-        resolutions.append(QStringLiteral("%1×%2").arg(display.nativeSize.width()).arg(display.nativeSize.height()));
+        setup = RemoteDisplaySetup::proposal(displays);
     }
     result.insert(QStringLiteral("configured"), configured);
     result.insert(QStringLiteral("layoutChoice"), RemoteDisplaySetup::choiceForLayout(setup.hostLayout));
@@ -639,8 +637,10 @@ QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
     result.insert(QStringLiteral("virtualMode2"), setup.virtualMode2);
     result.insert(QStringLiteral("scalingChoice"), RemoteDisplaySetup::choiceForScaling(setup.scalingMode));
     result.insert(QStringLiteral("canMatchClient"), canMatch);
-    result.insert(QStringLiteral("matchClientReason"), matchReason);
-    result.insert(QStringLiteral("clientResolution"), resolutions.join(QStringLiteral(" + ")));
+    result.insert(QStringLiteral("matchClientReason"), match.reason);
+    result.insert(QStringLiteral("matchClientSummary"), ClientDisplayProbe::matchSummary(match));
+    result.insert(QStringLiteral("matchClientFitted"), match.fitted);
+    result.insert(QStringLiteral("clientResolution"), ClientDisplayProbe::describe(displays));
     result.insert(QStringLiteral("virtualModes"), NvOutputTopology::qualifiedVirtualModes());
     return result;
 }
@@ -660,44 +660,178 @@ bool RemoteBroker::saveDisplaySetup(const QString& hostId, int layoutChoice, con
     return saved;
 }
 
+namespace {
+
+QVariantList bitrateList(const QVector<int>& bitrates)
+{
+    return StreamingPreferences::plankProfileBitratesToVariantList(bitrates);
+}
+
+QVariantMap streamMap(const RemoteStreamSetup::Setup& setup)
+{
+    QVariantMap map;
+    map.insert(QStringLiteral("captureSource"), setup.captureSource);
+    map.insert(QStringLiteral("videoProfile"), setup.videoProfile);
+    map.insert(QStringLiteral("officeBitratesKbps"), bitrateList(setup.officeBitratesKbps));
+    map.insert(QStringLiteral("internetBitratesKbps"), bitrateList(setup.internetBitratesKbps));
+    return map;
+}
+
+bool streamFromQml(int captureSource, int videoProfile, const QVariantList& office, const QVariantList& internet,
+                   RemoteStreamSetup::Setup& setup)
+{
+    setup.mode = RemoteStreamSetup::Custom;
+    setup.captureSource = captureSource;
+    setup.videoProfile = videoProfile;
+    return StreamingPreferences::plankProfileBitratesFromVariantList(office, setup.officeBitratesKbps) &&
+           StreamingPreferences::plankProfileBitratesFromVariantList(internet, setup.internetBitratesKbps) &&
+           RemoteStreamSetup::isValid(setup);
+}
+
+QString sourceName(RemoteStreamSetup::Source source)
+{
+    switch (source) {
+    case RemoteStreamSetup::FromHost: return QStringLiteral("host");
+    case RemoteStreamSetup::FromBookmark: return QStringLiteral("bookmark");
+    case RemoteStreamSetup::FromDefaults: return QStringLiteral("defaults");
+    case RemoteStreamSetup::FromBuiltIn: default: return QStringLiteral("builtin");
+    }
+}
+
+}
+
+QVariantMap RemoteBroker::streamSetup(const QString& hostId) const
+{
+    QVariantMap result;
+    if (!PlankBroker::isHostId(hostId)) return result;
+    QSettings settings;
+    const RemoteStreamSetup::Capabilities caps = RemoteStreamSetup::loadCapabilities(settings, hostId);
+    const RemoteStreamSetup::Setup host = RemoteStreamSetup::loadHost(settings, hostId);
+    const RemoteStreamSetup::Setup defaults = RemoteStreamSetup::loadDefaults(settings);
+    const RemoteStreamSetup::Resolution effective = resolveStreamSetup(hostId, caps.platform);
+    // "Use the defaults" skips this workstation's own choice and any bookmark.
+    RemoteStreamSetup::Setup follow;
+    follow.mode = RemoteStreamSetup::FollowDefaults;
+    const RemoteStreamSetup::Resolution fromDefaults = RemoteStreamSetup::resolve(follow, nullptr, defaults, caps.platform);
+
+    result = streamMap(effective.setup);
+    result.insert(QStringLiteral("useDefaults"), effective.source == RemoteStreamSetup::FromDefaults ||
+                                                 effective.source == RemoteStreamSetup::FromBuiltIn);
+    result.insert(QStringLiteral("saved"), host.mode != RemoteStreamSetup::Unset);
+    result.insert(QStringLiteral("source"), sourceName(effective.source));
+    result.insert(QStringLiteral("platform"), caps.platform);
+    result.insert(QStringLiteral("encodingModes"), caps.encodingModes);
+    result.insert(QStringLiteral("defaults"), streamMap(fromDefaults.setup));
+    return result;
+}
+
+bool RemoteBroker::saveStreamSetup(const QString& hostId, bool useDefaults, int captureSource, int videoProfile,
+                                   const QVariantList& officeBitratesKbps, const QVariantList& internetBitratesKbps)
+{
+    if (!PlankBroker::isHostId(hostId)) return false;
+    RemoteStreamSetup::Setup setup;
+    if (useDefaults) {
+        setup.mode = RemoteStreamSetup::FollowDefaults;
+    } else if (!streamFromQml(captureSource, videoProfile, officeBitratesKbps, internetBitratesKbps, setup)) {
+        return false;
+    }
+    QSettings settings;
+    const bool saved = RemoteStreamSetup::saveHost(settings, hostId, setup);
+    if (saved) settings.sync();
+    return saved;
+}
+
+QString RemoteBroker::streamProfileProblem(const QString& hostId, int captureSource, int videoProfile) const
+{
+    QSettings settings;
+    const RemoteStreamSetup::Capabilities caps = PlankBroker::isHostId(hostId) ?
+                RemoteStreamSetup::loadCapabilities(settings, hostId) : RemoteStreamSetup::Capabilities();
+    return RemoteStreamSetup::problemFor(captureSource, videoProfile, caps);
+}
+
+QVariantMap RemoteBroker::remoteStreamDefaults() const
+{
+    QSettings settings;
+    const RemoteStreamSetup::Setup defaults = RemoteStreamSetup::loadDefaults(settings);
+    const bool custom = defaults.mode == RemoteStreamSetup::Custom;
+    QVariantMap result = streamMap(custom ? defaults : RemoteStreamSetup::builtInDefaults(RemoteStreamSetup::LinuxPlatform));
+    result.insert(QStringLiteral("custom"), custom);
+    return result;
+}
+
+bool RemoteBroker::saveRemoteStreamDefaults(int captureSource, int videoProfile,
+                                            const QVariantList& officeBitratesKbps,
+                                            const QVariantList& internetBitratesKbps)
+{
+    RemoteStreamSetup::Setup setup;
+    if (!streamFromQml(captureSource, videoProfile, officeBitratesKbps, internetBitratesKbps, setup) ||
+            captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
+        // The remote access defaults are for Linux workstations; remote Macs
+        // keep their built-in default unless chosen per workstation.
+        return false;
+    }
+    QSettings settings;
+    const bool saved = RemoteStreamSetup::saveDefaults(settings, setup);
+    if (saved) settings.sync();
+    return saved;
+}
+
+void RemoteBroker::resetRemoteStreamDefaults()
+{
+    QSettings settings;
+    RemoteStreamSetup::clearDefaults(settings);
+    settings.sync();
+}
+
 void RemoteBroker::connectToHost(const QString& hostId)
 {
     if (!signedIn() || busy() || !PlankBroker::isHostId(hostId)) return;
     const QString hostName = hostNameFor(hostId);
     QSettings settings;
-    const RemoteDisplaySetup::Setup display = RemoteDisplaySetup::load(settings, hostId);
+    RemoteDisplaySetup::Setup display = RemoteDisplaySetup::load(settings, hostId);
     if (!display.configured) {
         emit displaySetupRequired(hostId, hostName, QString());
         return;
     }
     QString matchReason;
-    if (display.hostLayout == QLatin1String(NvOutputTopology::MatchClientHostLayout) &&
-            !RemoteDisplaySetup::canMatchClient(clientDisplaySnapshot(), &matchReason)) {
-        // Screens changed since the setup was saved (e.g. an external monitor).
+    if (!RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display,
+                                                 ClientDisplayProbe::probe(), &matchReason)) {
+        // Screens changed since the setup was saved (e.g. a third monitor).
         emit displaySetupRequired(hostId, hostName, matchReason);
         return;
     }
-    const HostDefaults defaults = bookmarkDefaultsFor(hostName);
+    StreamInputs stream;
+    stream.host = RemoteStreamSetup::loadHost(settings, hostId);
+    stream.defaults = RemoteStreamSetup::loadDefaults(settings);
+    stream.seeded = stream.host.mode == RemoteStreamSetup::Unset &&
+            bookmarkSeedFor(hostId, hostName, stream.seed);
+    // Capabilities cached by an earlier connect are advisory only (the
+    // settings dialog flags choices with them): the workstation may have been
+    // upgraded or its encoder probe may have recovered since, and refusing
+    // here would keep the cache from ever being refreshed. The check after
+    // the probe below is authoritative and refreshes the cache.
 
     setBusy(tr("Connecting to %1...").arg(hostName));
     const PlankBrokerClient::Config config = clientConfig();
     const auto token = m_Token;
     const quint64 generation = m_Generation;
     QPointer<RemoteBroker> self(this);
-    QThreadPool::globalInstance()->start([self, config, token, generation, hostId, hostName, defaults, display]() {
+    QThreadPool::globalInstance()->start([self, config, token, generation, hostId, hostName, stream, display]() {
         NvComputer* computer = nullptr;
         std::shared_ptr<PlankBrokerError> brokerFailure;
         QString hostFailure;
+        QString streamProblem;
+        RemoteStreamSetup::Capabilities capabilities;
         try {
             PlankBroker::Lease lease = PlankBrokerClient(config).connect(token->get(), hostId);
             // Office LAN: the broker hands out the workstation itself; the flow is identical.
             qInfo() << "Remote access route to" << hostId << ":"
                     << (lease.route == PlankBroker::Route::Direct ? "direct" : "relay");
-            computer = prepareBrokeredComputer(lease, hostId, hostName, defaults.found,
-                                               defaults.videoProfile, defaults.captureSource,
-                                               defaults.scalingMode, defaults.hostLayout,
-                                               defaults.virtualMode1, defaults.virtualMode2,
-                                               defaults.profileBitratesKbps, display);
+            try {
+                computer = prepareBrokeredComputer(lease, hostId, hostName, stream, display, capabilities);
+            } catch (const StreamSettingsRequired& required) {
+                streamProblem = required.reason;
+            }
             lease.gssapiToken.fill(QChar('\0'));
         } catch (const PlankBrokerError& error) {
             brokerFailure = std::make_shared<PlankBrokerError>(error);
@@ -713,7 +847,12 @@ void RemoteBroker::connectToHost(const QString& hostId)
                         tr("The workstation could not be reached through the remote access server.");
         }
         QMetaObject::invokeMethod(qApp, [self, generation, hostId, hostName, computer,
-                                         brokerFailure, hostFailure]() {
+                                         brokerFailure, hostFailure, streamProblem, capabilities]() {
+            if (capabilities.known) {
+                // Kept for the settings dialog and the next connect's check.
+                QSettings settings;
+                RemoteStreamSetup::saveCapabilities(settings, hostId, capabilities);
+            }
             if (!self || generation != self->m_Generation) {
                 // Signed out meanwhile; the one-use host token is abandoned.
                 delete computer;
@@ -721,6 +860,12 @@ void RemoteBroker::connectToHost(const QString& hostId)
             }
             if (brokerFailure) {
                 self->handleBrokerError(*brokerFailure, true);
+                return;
+            }
+            if (!streamProblem.isEmpty()) {
+                // The lease is abandoned; a retry is a fresh broker connect.
+                self->setBusy(QString());
+                emit self->streamSetupRequired(hostId, hostName, streamProblem);
                 return;
             }
             if (computer == nullptr) {

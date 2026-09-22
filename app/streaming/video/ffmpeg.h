@@ -9,6 +9,7 @@
 #include "decoder.h"
 #include "ffmpeg-renderers/renderer.h"
 #include "ffmpeg-renderers/pacer/pacer.h"
+#include "streaming/plankpresentation.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -30,6 +31,7 @@ public:
     virtual void renderFrameOnMainThread() override;
     virtual void setHdrMode(bool enabled) override;
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) override;
+    virtual bool letterboxesAgainstLiveDrawable() override;
     virtual bool suspendForReconnect() override;
     virtual bool resumeAfterReconnect() override;
 
@@ -128,6 +130,9 @@ private:
     bool m_IdentityGbrEnabled;
     bool m_NeedsSpsFixup;
     bool m_TestOnly;
+    // Decoder-thread only (reset while the thread is stopped): the decoded
+    // frame size last reported to the session.
+    PlankDecodedFrameSizeTracker m_DecodedFrameSizeTracker;
     SDL_Thread* m_DecoderThread;
     SDL_AtomicInt m_DecoderThreadShouldQuit;
 

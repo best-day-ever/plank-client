@@ -3,6 +3,7 @@
 #include "backend/plankbroker.h"
 #include "backend/plankbrokerclient.h"
 #include "backend/plankpasskey.h"
+#include "backend/remotestreamsetup.h"
 
 #include <QMutex>
 #include <QObject>
@@ -19,7 +20,8 @@ class Session;
 class StreamingPreferences;
 
 // "Remote (broker)" mode controller exposed to QML as a singleton. Owns the
-// in-memory broker session token (never persisted), the host list, brokered
+// broker session token (in memory; on macOS also remembered in the Keychain,
+// never in the settings file), the host list, brokered
 // connects (bde-linux docs/plank-broker.md section 10.2) and the lease
 // keepalive while a brokered stream runs. On macOS it also drives Touch ID
 // sign-in through the bundled plank-passkey helper (section 13.4).
@@ -55,14 +57,37 @@ public:
     Q_INVOKABLE void refreshHosts();
     // Connects with the saved display setup; without one (or when the saved
     // "match my displays" no longer fits the current screens) it emits
-    // displaySetupRequired instead, and QML asks before connecting.
+    // displaySetupRequired instead, and QML asks before connecting. When the
+    // stream settings cannot work on the workstation it emits
+    // streamSetupRequired instead of streaming with something else.
     Q_INVOKABLE void connectToHost(const QString& hostId);
     // Per-workstation display setup kept in the Client's local settings.
     // Keys: configured, layoutChoice, virtualMode1, virtualMode2, scalingChoice,
-    // canMatchClient, matchClientReason, clientResolution, virtualModes.
+    // canMatchClient, matchClientReason, matchClientSummary, matchClientFitted,
+    // clientResolution, virtualModes.
     Q_INVOKABLE QVariantMap displaySetup(const QString& hostId) const;
     Q_INVOKABLE bool saveDisplaySetup(const QString& hostId, int layoutChoice, const QString& virtualMode1,
                                       const QString& virtualMode2, int scalingChoice);
+    // Per-workstation stream quality kept in the Client's local settings
+    // (RemoteStreamSetup). Keys: useDefaults, source ("host", "bookmark",
+    // "defaults", "builtin"), captureSource, videoProfile, officeBitratesKbps,
+    // internetBitratesKbps, platform (0 = not known yet), encodingModes,
+    // defaults (what "use the defaults" gives: captureSource, videoProfile,
+    // officeBitratesKbps, internetBitratesKbps).
+    Q_INVOKABLE QVariantMap streamSetup(const QString& hostId) const;
+    Q_INVOKABLE bool saveStreamSetup(const QString& hostId, bool useDefaults, int captureSource,
+                                     int videoProfile, const QVariantList& officeBitratesKbps,
+                                     const QVariantList& internetBitratesKbps);
+    // Why the workstation cannot use this choice, as far as its last connect
+    // told us; empty when it can (or nothing is known yet).
+    Q_INVOKABLE QString streamProfileProblem(const QString& hostId, int captureSource, int videoProfile) const;
+    // Remote access defaults for workstations without their own settings.
+    // Keys: custom, captureSource, videoProfile, officeBitratesKbps, internetBitratesKbps.
+    Q_INVOKABLE QVariantMap remoteStreamDefaults() const;
+    Q_INVOKABLE bool saveRemoteStreamDefaults(int captureSource, int videoProfile,
+                                              const QVariantList& officeBitratesKbps,
+                                              const QVariantList& internetBitratesKbps);
+    Q_INVOKABLE void resetRemoteStreamDefaults();
     Q_INVOKABLE void logout();
     // Hands the prepared brokered Session to QML (JavaScript ownership),
     // once, after connectReady().
@@ -88,6 +113,9 @@ signals:
     void errorOccurred(QString message);
     void connectReady(QString hostName);
     void displaySetupRequired(QString hostId, QString hostName, QString reason);
+    // The saved (or default) stream settings do not fit the workstation;
+    // reason is user-facing.
+    void streamSetupRequired(QString hostId, QString hostName, QString reason);
     void passkeysChanged();
     // No usable passkey for this sign-in: ask for password + code instead.
     void passkeyFallback(QString message);
@@ -109,24 +137,16 @@ private:
         QString m_Token;
     };
 
-    struct HostDefaults {
-        bool found = false;
-        int videoProfile = 0;
-        int captureSource = 0;
-        QString scalingMode;
-        QString hostLayout;
-        QString virtualMode1;
-        QString virtualMode2;
-        QVector<int> profileBitratesKbps;
-    };
-
     PlankBrokerClient::Config clientConfig() const;
     QString passkeyRpId() const;
     void finishSignIn(QString token, const QString& confirmedUser);
     void setBusy(const QString& text);
     void handleBrokerError(const PlankBrokerError& error, bool connecting);
     void signOutLocally(const QString& message = QString());
-    HostDefaults bookmarkDefaultsFor(const QString& hostName) const;
+    // LAN bookmarks that could seed a workstation's first stream settings.
+    QVector<RemoteStreamSetup::BookmarkCandidate> bookmarkCandidates() const;
+    bool bookmarkSeedFor(const QString& hostId, const QString& hostName, RemoteStreamSetup::Setup& seed) const;
+    RemoteStreamSetup::Resolution resolveStreamSetup(const QString& hostId, int platform) const;
     QString hostNameFor(const QString& hostId) const;
     void startKeepalive(const QString& hostId, Session* session);
     void stopKeepalive();
