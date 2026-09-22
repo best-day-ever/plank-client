@@ -435,6 +435,7 @@ bool EGLRenderer::initialize(PDECODER_PARAMETERS params)
             params->presentationLayout->canvasSize.isValid() &&
             !params->presentationLayout->outputs.isEmpty()) {
         m_PresentationCanvasSize = params->presentationLayout->canvasSize;
+        m_PresentationSourceRects = params->presentationLayout->usesSourceRects();
         for (const auto& output : params->presentationLayout->outputs) {
             m_PresentationTargets.push_back(output);
         }
@@ -949,9 +950,15 @@ void EGLRenderer::renderFrame(AVFrame* frame)
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const auto slice = PlankPresentation::sliceForOutput(
-                    streamSize, m_PresentationCanvasSize,
-                    target.canvasRect);
+        // One workstation display per window (source rectangle), or this
+        // window's slice of the shared canvas.
+        const bool sourceTarget = target.sourceRect.isValid() && m_PresentationSourceRects;
+        const auto slice = sourceTarget ?
+                    PlankPresentation::sliceForSource(streamSize, target.sourceRect,
+                                                      QSize(drawableWidth, drawableHeight)) :
+                    PlankPresentation::sliceForOutput(
+                        streamSize, m_PresentationCanvasSize,
+                        target.canvasRect);
         if (slice.visible) {
             const float u0 = slice.sourceRect.left() / frame->width;
             const float v0 = slice.sourceRect.top() / frame->height;
@@ -969,9 +976,10 @@ void EGLRenderer::renderFrame(AVFrame* frame)
                             sizeof(vertices), vertices);
             glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-            const float targetScaleX = drawableWidth /
+            // Source-rectangle destinations are already drawable pixels.
+            const float targetScaleX = sourceTarget ? 1.0f : drawableWidth /
                     static_cast<float>(target.canvasRect.width());
-            const float targetScaleY = drawableHeight /
+            const float targetScaleY = sourceTarget ? 1.0f : drawableHeight /
                     static_cast<float>(target.canvasRect.height());
             const QRect destination = slice.destinationRect;
             glViewport(qRound(destination.x() * targetScaleX),

@@ -55,10 +55,13 @@ public:
     Q_INVOKABLE void createPasskey(const QString& username);
     Q_INVOKABLE void removePasskey(const QString& username);
     Q_INVOKABLE void refreshHosts();
-    // Connects with the saved display setup; without one (or when the saved
-    // "match my displays" no longer fits the current screens) it emits
-    // displaySetupRequired instead, and QML asks before connecting. When the
-    // stream settings cannot work on the workstation it emits
+    // Connects with the display setup for the current screens (DisplayProfile:
+    // this workstation's own, else the global one). Screens without one emit
+    // displaySetupRequired with reason "new-screens" (unless the suggested
+    // layout is accepted automatically), and QML runs the display setup
+    // before connecting. A workstation on a fixed layout (older PLANK, remote
+    // Mac) uses its saved setup and asks again when that no longer fits. When
+    // the stream settings cannot work on the workstation it emits
     // streamSetupRequired instead of streaming with something else.
     Q_INVOKABLE void connectToHost(const QString& hostId);
     // Per-workstation display setup kept in the Client's local settings.
@@ -92,6 +95,8 @@ public:
     // Hands the prepared brokered Session to QML (JavaScript ownership),
     // once, after connectReady().
     Q_INVOKABLE Session* takeSession();
+    // The workstation a brokered stream runs on now, else empty.
+    Q_INVOKABLE QString streamingHostId() const { return m_KeepaliveHostId; }
 
     // For the first sign-in wizard (OnboardingController), which runs its own
     // broker conversation and ends in the same signed-in state.

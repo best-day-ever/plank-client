@@ -10,11 +10,6 @@
 #include <QThreadPool>
 #include <QCoreApplication>
 #include <QGuiApplication>
-#include <QScreen>
-#ifdef Q_OS_DARWIN
-#include "streaming/streamutils.h"
-#include <ApplicationServices/ApplicationServices.h>
-#endif
 
 #include <utility>
 #include <limits>
@@ -783,30 +778,10 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         // current backing pixels AND logical size used by Session. Panel-native
         // pixels alone lose the user's Retina "Looks like" setting.
         Q_ASSERT(QThread::currentThread() == qApp->thread());
-        QVector<NvClientDisplay> displays;
-#ifdef Q_OS_DARWIN
-        CGDirectDisplayID ids[16];
-        uint32_t count = 0;
-        if (CGGetActiveDisplayList(16, ids, &count) == kCGErrorSuccess) {
-            for (uint32_t index = 0; index < count; ++index) {
-                SDL_DisplayMode mode;
-                SDL_Rect safeArea;
-                if (!StreamUtils::getMacCurrentDisplayMode(ids[index], &mode, &safeArea,
-                        m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED)) {
-                    displays.clear();
-                    break;
-                }
-                displays.append({QRect(safeArea.x, safeArea.y, safeArea.w, safeArea.h),
-                    QSize(mode.w, mode.h), QSize(mode.w, mode.h)});
-            }
-        }
-#else
-        for (QScreen* screen : QGuiApplication::screens()) {
-            const QRect geometry = screen->geometry();
-            const qreal ratio = screen->devicePixelRatio();
-            displays.append({geometry, QSize(qRound(geometry.width() * ratio), qRound(geometry.height() * ratio))});
-        }
-#endif
+        // The display probe the dialogs and the Session use; in fullscreen
+        // each display's viewport below the camera housing.
+        const QVector<NvClientDisplay> displays = ClientDisplayProbe::macMatchDisplays(
+                    ClientDisplayProbe::probe(), m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED);
         QString error;
         matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &matchedScale);
         if (matchedMode.isEmpty()) {

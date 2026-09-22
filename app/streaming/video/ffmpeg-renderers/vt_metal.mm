@@ -23,6 +23,11 @@ extern "C" {
 }
 
 #include "vt_colors.h"
+#include "streaming/plankpresentation.h"
+
+#include <atomic>
+#include <memory>
+#include <vector>
 
 struct Vertex
 {
@@ -66,6 +71,16 @@ public:
 
     virtual ~VTMetalRenderer() override
     { @autoreleasepool {
+        for (auto& target : m_Secondaries) {
+            if (target->vertexBuffer != nullptr) {
+                [target->vertexBuffer release];
+            }
+            if (target->view != nullptr) {
+                SDL_Metal_DestroyView(target->view);
+            }
+        }
+        m_Secondaries.clear();
+
         if (m_PresentationCond != nullptr) {
             SDL_DestroyCondition(m_PresentationCond);
         }
@@ -162,25 +177,37 @@ public:
         discardNextDrawable();
     }
 
-    bool updateVideoRegionSizeForFrame(AVFrame* frame)
+    // The video quad for one window: sourceRect of the frame (the whole frame
+    // when invalid) aspect-fitted into the window's drawable.
+    bool updateVertices(id<MTLBuffer>& buffer, int& lastFrameWidth, int& lastFrameHeight,
+                        int& lastDrawableWidth, int& lastDrawableHeight,
+                        SDL_Window* window, const QRectF& sourceRect, AVFrame* frame)
     {
         int drawableWidth, drawableHeight;
-        if (!SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight))
+        if (!SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight))
             return false;
 
         // Check if anything has changed since the last vertex buffer upload
-        if (m_VideoVertexBuffer &&
-                frame->width == m_LastFrameWidth && frame->height == m_LastFrameHeight &&
-                drawableWidth == m_LastDrawableWidth && drawableHeight == m_LastDrawableHeight) {
+        if (buffer &&
+                frame->width == lastFrameWidth && frame->height == lastFrameHeight &&
+                drawableWidth == lastDrawableWidth && drawableHeight == lastDrawableHeight) {
             // Nothing to do
             return true;
+        }
+
+        QRectF source(0, 0, frame->width, frame->height);
+        if (sourceRect.isValid()) {
+            source = sourceRect.intersected(source);
+            if (source.isEmpty()) {
+                return false;
+            }
         }
 
         // Determine the correct scaled size for the video region
         SDL_Rect src, dst;
         src.x = src.y = 0;
-        src.w = frame->width;
-        src.h = frame->height;
+        src.w = qMax(1, qRound(source.width()));
+        src.h = qMax(1, qRound(source.height()));
         dst.x = dst.y = 0;
         dst.w = drawableWidth;
         dst.h = drawableHeight;
@@ -190,29 +217,40 @@ public:
         SDL_FRect renderRect;
         StreamUtils::screenSpaceToNormalizedDeviceCoords(&dst, &renderRect, drawableWidth, drawableHeight);
 
+        const float u0 = source.left() / frame->width;
+        const float u1 = source.right() / frame->width;
+        const float vTop = source.top() / frame->height;
+        const float vBottom = source.bottom() / frame->height;
         Vertex verts[] =
         {
-            { { renderRect.x, renderRect.y, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-            { { renderRect.x, renderRect.y+renderRect.h, 0.0f, 1.0f }, { 0.0f, 0} },
-            { { renderRect.x+renderRect.w, renderRect.y, 0.0f, 1.0f }, { 1.0f, 1.0f} },
-            { { renderRect.x+renderRect.w, renderRect.y+renderRect.h, 0.0f, 1.0f }, { 1.0f, 0} },
+            { { renderRect.x, renderRect.y, 0.0f, 1.0f }, { u0, vBottom } },
+            { { renderRect.x, renderRect.y+renderRect.h, 0.0f, 1.0f }, { u0, vTop } },
+            { { renderRect.x+renderRect.w, renderRect.y, 0.0f, 1.0f }, { u1, vBottom } },
+            { { renderRect.x+renderRect.w, renderRect.y+renderRect.h, 0.0f, 1.0f }, { u1, vTop } },
         };
 
-        [m_VideoVertexBuffer release];
+        [buffer release];
         auto bufferOptions = MTLCPUCacheModeWriteCombined | MTLResourceStorageModeManaged;
-        m_VideoVertexBuffer = [m_MetalLayer.device newBufferWithBytes:verts length:sizeof(verts) options:bufferOptions];
-        if (!m_VideoVertexBuffer) {
+        buffer = [m_MetalLayer.device newBufferWithBytes:verts length:sizeof(verts) options:bufferOptions];
+        if (!buffer) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Failed to create video vertex buffer");
             return false;
         }
 
-        m_LastFrameWidth = frame->width;
-        m_LastFrameHeight = frame->height;
-        m_LastDrawableWidth = drawableWidth;
-        m_LastDrawableHeight = drawableHeight;
+        lastFrameWidth = frame->width;
+        lastFrameHeight = frame->height;
+        lastDrawableWidth = drawableWidth;
+        lastDrawableHeight = drawableHeight;
 
         return true;
+    }
+
+    bool updateVideoRegionSizeForFrame(AVFrame* frame)
+    {
+        return updateVertices(m_VideoVertexBuffer, m_LastFrameWidth, m_LastFrameHeight,
+                              m_LastDrawableWidth, m_LastDrawableHeight,
+                              m_Window, m_PrimarySourceRect, frame);
     }
 
     int getFramePlaneCount(AVFrame* frame)
@@ -256,8 +294,12 @@ public:
             const auto paramBuffer = plankVTColorParams(matrix, fullRange, depth, highBits);
             CGColorSpaceRef newColorSpace = CGColorSpaceCreateWithName(colorSpaceName);
             m_MetalLayer.colorspace = newColorSpace;
-            CGColorSpaceRelease(newColorSpace);
             m_MetalLayer.pixelFormat = depth == 10 ? MTLPixelFormatBGR10A2Unorm : MTLPixelFormatBGRA8Unorm;
+            for (auto& target : m_Secondaries) {
+                target->layer.colorspace = newColorSpace;
+                target->layer.pixelFormat = m_MetalLayer.pixelFormat;
+            }
+            CGColorSpaceRelease(newColorSpace);
 
             // Create the new colorspace parameter buffer for our fragment shader
             [m_CscParamsBuffer release];
@@ -451,21 +493,15 @@ public:
             }
         }
 
-        // Prepare a render pass to render into the next drawable
-        auto renderPassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-        renderPassDescriptor.colorAttachments[0].texture = m_NextDrawable.texture;
-        renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
-        renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-        auto commandBuffer = [m_CommandQueue commandBuffer];
-        auto renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+        // The frame's planes as Metal textures, shared by every window.
+        std::array<id<MTLTexture>, MAX_VIDEO_PLANES> planeTextures {};
+        for (size_t i = 0; i < planes; i++) {
+            planeTextures[i] = frame->format == AV_PIX_FMT_VIDEOTOOLBOX ?
+                        CVMetalTextureGetTexture(cvMetalTextures[i]) : mapPlaneForSoftwareFrame(frame, i);
+        }
 
-        // Bind textures and buffers then draw the video region
-        [renderEncoder setRenderPipelineState:m_VideoPipelineState];
+        auto commandBuffer = [m_CommandQueue commandBuffer];
         if (frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
-            for (size_t i = 0; i < planes; i++) {
-                [renderEncoder setFragmentTexture:CVMetalTextureGetTexture(cvMetalTextures[i]) atIndex:i];
-            }
             [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer>) {
                 // Free textures after completion of rendering per CVMetalTextureCache requirements
                 for (size_t i = 0; i < planes; i++) {
@@ -473,14 +509,51 @@ public:
                 }
             }];
         }
-        else {
+
+        // One render pass per window, all in this command buffer: the video
+        // quad, and on the primary window the overlays and toolbar.
+        const auto encodeVideo = [&](id<MTLTexture> targetTexture, id<MTLBuffer> vertices) {
+            auto passDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+            passDescriptor.colorAttachments[0].texture = targetTexture;
+            passDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+            passDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
+            passDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+            auto encoder = [commandBuffer renderCommandEncoderWithDescriptor:passDescriptor];
+            [encoder setRenderPipelineState:m_VideoPipelineState];
             for (size_t i = 0; i < planes; i++) {
-                [renderEncoder setFragmentTexture:mapPlaneForSoftwareFrame(frame, i) atIndex:i];
+                [encoder setFragmentTexture:planeTextures[i] atIndex:i];
             }
+            [encoder setFragmentBuffer:m_CscParamsBuffer offset:0 atIndex:0];
+            [encoder setVertexBuffer:vertices offset:0 atIndex:0];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+            return encoder;
+        };
+
+        for (auto& target : m_Secondaries) {
+            // Pacing follows the primary: a window whose drawables are all
+            // still in flight (a slower display) skips this frame.
+            if (target->inFlight->load() >= (int)target->layer.maximumDrawableCount) {
+                continue;
+            }
+            if (!updateVertices(target->vertexBuffer, target->lastFrameWidth, target->lastFrameHeight,
+                                target->lastDrawableWidth, target->lastDrawableHeight,
+                                target->window, target->sourceRect, frame)) {
+                continue;
+            }
+            id<CAMetalDrawable> drawable = [target->layer nextDrawable];
+            if (drawable == nil) {
+                continue;
+            }
+            [encodeVideo(drawable.texture, target->vertexBuffer) endEncoding];
+            target->inFlight->fetch_add(1);
+            std::shared_ptr<std::atomic<int>> inFlight = target->inFlight;
+            [drawable addPresentedHandler:^(id<MTLDrawable>) {
+                inFlight->fetch_sub(1);
+            }];
+            [commandBuffer presentDrawable:drawable];
         }
-        [renderEncoder setFragmentBuffer:m_CscParamsBuffer offset:0 atIndex:0];
-        [renderEncoder setVertexBuffer:m_VideoVertexBuffer offset:0 atIndex:0];
-        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+
+        auto renderEncoder = encodeVideo(m_NextDrawable.texture, m_VideoVertexBuffer);
 
         // Now draw any overlays that are enabled
         for (int i = 0; i < Overlay::OverlayMax; i++) {
@@ -654,6 +727,37 @@ public:
 
         // Allow tearing if V-Sync is off (also requires direct display path)
         m_MetalLayer.displaySyncEnabled = params->enableVsync;
+
+        // One window per workstation display: every other window gets its own
+        // Metal view and layer on the same device, queue, texture cache and
+        // pipelines, and shows its own rectangle of each frame.
+        if (params->presentationLayout != nullptr && params->presentationLayout->usesSourceRects()) {
+            for (const auto& output : params->presentationLayout->outputs) {
+                if (output.window == m_Window) {
+                    m_PrimarySourceRect = output.sourceRect;
+                    continue;
+                }
+                auto target = std::make_unique<SecondaryTarget>();
+                target->window = output.window;
+                target->sourceRect = output.sourceRect;
+                target->view = SDL_Metal_CreateView(output.window);
+                if (!target->view) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                 "SDL_Metal_CreateView() failed for a PLANK output window: %s",
+                                 SDL_GetError());
+                    return false;
+                }
+                target->layer = (CAMetalLayer*)SDL_Metal_GetLayer(target->view);
+                target->layer.device = device;
+                target->layer.wantsExtendedDynamicRangeContent = m_MetalLayer.wantsExtendedDynamicRangeContent;
+                target->layer.maximumDrawableCount = 3;
+                target->layer.displaySyncEnabled = params->enableVsync;
+                m_Secondaries.push_back(std::move(target));
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Metal renderer presenting %zu window(s) from source rectangles",
+                        m_Secondaries.size() + 1);
+        }
 
         // Create the Metal texture cache for our CVPixelBuffers
         CFStringRef keys[1] = { kCVMetalTextureUsage };
@@ -832,8 +936,28 @@ public:
     }
 
 private:
+    // A window other than the primary one (one per workstation display).
+    struct SecondaryTarget
+    {
+        SDL_Window* window = nullptr;
+        SDL_MetalView view = nullptr;
+        CAMetalLayer* layer = nullptr;
+        QRectF sourceRect;
+        id<MTLBuffer> vertexBuffer = nullptr;
+        int lastFrameWidth = -1;
+        int lastFrameHeight = -1;
+        int lastDrawableWidth = -1;
+        int lastDrawableHeight = -1;
+        // Drawables queued but not yet presented. Shared with the presented
+        // handlers, which may run after this renderer is gone.
+        std::shared_ptr<std::atomic<int>> inFlight = std::make_shared<std::atomic<int>>(0);
+    };
+
     bool m_HwAccel;
     SDL_Window* m_Window;
+    std::vector<std::unique_ptr<SecondaryTarget>> m_Secondaries;
+    // The primary window's rectangle of each frame; invalid: the whole frame.
+    QRectF m_PrimarySourceRect;
     AVBufferRef* m_HwContext;
     CAMetalLayer* m_MetalLayer;
     CVMetalTextureCacheRef m_TextureCache;

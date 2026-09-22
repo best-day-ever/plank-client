@@ -215,6 +215,9 @@ SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
     backend/clientdisplayprobe.cpp \
+    backend/displayarrangement.cpp \
+    backend/displaymonitor.cpp \
+    backend/displayplanner.cpp \
     backend/nvapp.cpp \
     main.cpp \
     backend/computerseeker.cpp \
@@ -246,6 +249,7 @@ SOURCES += \
     gui/computermodel.cpp \
     gui/remotebroker.cpp \
     gui/onboardingcontroller.cpp \
+    gui/displaysetupcontroller.cpp \
     streaming/bandwidth.cpp \
     streaming/streamutils.cpp \
     path.cpp \
@@ -260,6 +264,10 @@ HEADERS += \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/clientdisplayprobe.h \
+    backend/displayarrangement.h \
+    backend/displaymonitor.h \
+    backend/displayplanner.h \
+    backend/displayprofile.h \
     backend/nvapp.h \
     utils.h \
     backend/computerseeker.h \
@@ -298,6 +306,7 @@ HEADERS += \
     gui/computermodel.h \
     gui/remotebroker.h \
     gui/onboardingcontroller.h \
+    gui/displaysetupcontroller.h \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \
@@ -487,13 +496,18 @@ macx {
 
     SOURCES += \
         streaming/macquitshortcut.mm \
+        streaming/macdisplayinfo.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
-        streaming/video/ffmpeg-renderers/vt_metal.mm
+        streaming/video/ffmpeg-renderers/vt_metal.mm \
+        streaming/video/decodercaps.mm
 
     HEADERS += \
         streaming/macquitshortcut.h \
+        streaming/macdisplayinfo.h \
         streaming/macwindow.h \
+        streaming/video/decodercaps.h \
+        streaming/video/decodercaps-test-frames.h \
         streaming/macdisplaygeometry.h \
         streaming/video/ffmpeg-renderers/vt.h \
         streaming/macclipboardsync.h \

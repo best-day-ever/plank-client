@@ -9,7 +9,8 @@ SOURCES += \
     ../../app/backend/plankenrollment.cpp \
     ../../app/backend/qrencoder.cpp \
     ../../app/backend/plankpasskey.cpp \
-    ../../app/backend/outputtopology.cpp
+    ../../app/backend/outputtopology.cpp \
+    ../../app/backend/displayarrangement.cpp
 
 HEADERS += \
     ../../app/backend/plankbroker.h \
@@ -19,12 +20,14 @@ HEADERS += \
     ../../app/backend/onboardingstate.h \
     ../../app/backend/plankhttp.h \
     ../../app/backend/remotedisplaysetup.h \
+    ../../app/backend/displayprofile.h \
     ../../app/backend/remotestreamsetup.h \
     ../../app/backend/clientdisplayprobe.h \
     ../../app/backend/brokersessionstore.h \
     ../../app/backend/plankpasskey.h \
     ../../app/backend/macpreviewlaunch.h \
-    ../../app/backend/outputtopology.h
+    ../../app/backend/outputtopology.h \
+    ../../app/backend/displayarrangement.h
 
 INCLUDEPATH += \
     ../../app/backend \

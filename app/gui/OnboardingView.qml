@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 
+import DisplaySetup 1.0
 import Onboarding 1.0
 import RemoteBroker 1.0
 
@@ -9,7 +10,9 @@ import RemoteBroker 1.0
 // created the account and issued a one-time password. The steps come from
 // the Onboarding controller (bde-linux docs/plank-broker.md section 16):
 // welcome -> credentials -> newPassword -> authenticator -> [nextCode] ->
-// [passkey] -> done. Leaving the view ends the setup conversation.
+// [passkey] -> [displays] -> done. The displays step is client-only: this
+// computer's screens get a display setup (DisplaySetup) unless they have one.
+// Leaving the view ends the setup conversation.
 Item {
     id: onboardingView
     objectName: qsTr("Welcome")
@@ -24,7 +27,12 @@ Item {
     Component.onDestruction: Onboarding.cancel()
 
     StackView.onActivated: focusFirstField()
-    onStepChanged: focusFirstField()
+    onStepChanged: {
+        if (step === "displays") {
+            DisplaySetup.begin("", "", "onboarding")
+        }
+        focusFirstField()
+    }
 
     function focusFirstField() {
         if (step === "credentials") {
@@ -90,7 +98,7 @@ Item {
                 id: panel
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: 32
-                width: Math.min(500, onboardingView.width - 32)
+                width: Math.min(onboardingView.step === "displays" ? 760 : 500, onboardingView.width - 32)
                 height: column.implicitHeight + 56
                 color: theme.surface
                 radius: theme.radiusLarge
@@ -115,6 +123,7 @@ Item {
                             case "authenticator": return qsTr("Add your authenticator app")
                             case "nextCode": return qsTr("One more code")
                             case "passkey": return qsTr("Use Touch ID on this Mac?")
+                            case "displays": return qsTr("Your screens")
                             default: return qsTr("You're all set")
                             }
                         }
@@ -374,6 +383,24 @@ Item {
                         wrapMode: Text.Wrap
                     }
 
+                    // ------------------------------------------------ displays
+                    ColumnLayout {
+                        visible: onboardingView.step === "displays"
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: qsTr("Your workstation will show its desktop on these screens, each at its exact size and arranged like your desk. Turn a screen off to keep it for this Mac, or pick another size. You can change this any time in Settings.")
+                            color: theme.textSecondary
+                            wrapMode: Text.Wrap
+                        }
+                        DisplaySetupPanel {
+                            Layout.fillWidth: true
+                            compact: true
+                        }
+                    }
+
                     // ---------------------------------------------------- done
                     Label {
                         visible: onboardingView.step === "done"
@@ -446,6 +473,12 @@ Item {
                             enabled: !Onboarding.busy
                             onClicked: Onboarding.skipTouchId()
                         }
+                        Button {
+                            visible: onboardingView.step === "displays"
+                            text: qsTr("Skip for now")
+                            flat: true
+                            onClicked: Onboarding.finishDisplays()
+                        }
 
                         // Primary action per step.
                         Button {
@@ -488,6 +521,17 @@ Item {
                             highlighted: true
                             enabled: !Onboarding.busy
                             onClicked: Onboarding.setUpTouchId()
+                        }
+                        Button {
+                            visible: onboardingView.step === "displays"
+                            text: qsTr("Use this layout")
+                            highlighted: true
+                            enabled: DisplaySetup.planOk
+                            onClicked: {
+                                if (DisplaySetup.accept()) {
+                                    Onboarding.finishDisplays()
+                                }
+                            }
                         }
                         Button {
                             visible: onboardingView.step === "done"

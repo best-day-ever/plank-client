@@ -9,6 +9,7 @@
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
+#include "backend/displayprofile.h"
 #ifdef Q_OS_MACOS
 #include "macclipboardsync.h"
 #ifdef PLANK_TRANSPORT
@@ -22,6 +23,8 @@
 #endif
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
+#include "streaming/macdisplayinfo.h"
+#include "streaming/video/decodercaps.h"
 #endif
 
 #include <Limelight.h>
@@ -68,6 +71,7 @@
 #define SDL_CODE_PLANK_FILE_CLIPBOARD_READY 113
 #define SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH 114
 #define SDL_CODE_PLANK_DECODED_FRAME_SIZE 115
+#define SDL_CODE_PLANK_APPLY_SCREENS 116
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -83,6 +87,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QSettings>
 
 #ifdef PLANK_TRANSPORT
 #include "plank_transport.h"
@@ -2043,6 +2048,14 @@ int Session::getTargetDisplayIndex() const
 {
     int displayIndex = 0;
 
+    if (m_Window == nullptr && m_PlannedPrimaryDisplay != 0) {
+        // Display arrangement: the stream opens on the plan's primary.
+        const int plannedIndex = StreamUtils::getDisplayIndex(m_PlannedPrimaryDisplay);
+        if (plannedIndex >= 0) {
+            return plannedIndex;
+        }
+    }
+
     if (m_Window != nullptr) {
         displayIndex = StreamUtils::getDisplayIndex(SDL_GetDisplayForWindow(m_Window));
         if (displayIndex < 0) {
@@ -2233,7 +2246,22 @@ void Session::rebuildPresentationLayout()
         int canvasWidth = 0;
         int canvasHeight = 0;
         int secondaryIndex = 0;
+        const bool arrangement = !m_ResolvedArrangement.isEmpty();
+        NvOutputTopology topology;
+        {
+            QReadLocker lock(&m_Computer->lock);
+            topology = m_Computer->outputTopology;
+        }
+        const QSize streamSize(m_StreamConfig.width, m_StreamConfig.height);
+        // Source rectangles are in the host's capture (packed rows when the
+        // desk is wider than the encoder), pointer positions in its desktop.
+        const QSize captureSize = topology.captureSize();
+        const QSize desktopSize(topology.desktopWidth, topology.desktopHeight);
         for (const auto& display : std::as_const(m_ClientDisplays)) {
+            if (arrangement && display.planIndex < 0) {
+                // Stays local: no window (createSecondaryWindows skips it too).
+                continue;
+            }
             SDL_Window* window = display.displayId == m_TargetDisplayId ?
                         m_Window : nullptr;
             if (window == nullptr &&
@@ -2246,20 +2274,90 @@ void Session::rebuildPresentationLayout()
             if (window == nullptr) {
                 continue;
             }
-            m_PresentationLayout.outputs.append(
-                {window, display.canvasRect, window == m_Window});
-            canvasWidth = qMax(canvasWidth, display.canvasRect.right() + 1);
-            canvasHeight = qMax(canvasHeight, display.canvasRect.bottom() + 1);
+            PlankPresentationOutput output {window, display.canvasRect, window == m_Window};
+            if (arrangement) {
+                // The host's own rectangles for this entry when it published
+                // them (the truth after launch), else the plan's.
+                const DisplayPlanner::Output& planned = m_DisplayPlan.outputs.at(display.planIndex);
+                output.canvasRect = QRect(planned.position, planned.size);
+                QRect desktopRect = output.canvasRect;
+                QRect captureRect = planned.captureRect.isValid() ? planned.captureRect : output.canvasRect;
+                QSize capture = m_DisplayPlan.capture.isValid() ? m_DisplayPlan.capture : m_DisplayPlan.canvas;
+                QSize desktop = m_DisplayPlan.canvas;
+                if (topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
+                    for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
+                        if (hostOutput.arrangementIndex == planned.arrangementIndex) {
+                            desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
+                                                hostOutput.width, hostOutput.height);
+                            captureRect = hostOutput.captureRect();
+                            capture = captureSize;
+                            desktop = desktopSize;
+                            break;
+                        }
+                    }
+                }
+                output.desktopRect = desktopRect;
+                output.sourceRect = PlankPresentation::sourceRectInStream(captureRect, capture, streamSize);
+                m_PresentationLayout.desktopSize = desktop;
+            }
+            m_PresentationLayout.outputs.append(output);
+            canvasWidth = qMax(canvasWidth, output.canvasRect.right() + 1);
+            canvasHeight = qMax(canvasHeight, output.canvasRect.bottom() + 1);
         }
         m_PresentationLayout.canvasSize = QSize(canvasWidth, canvasHeight);
+        if (!arrangement && topology.layoutKind == NvOutputTopology::DualHorizontalHostLayout &&
+                topology.outputs.size() == m_PresentationLayout.outputs.size() &&
+                captureSize.isValid() && !captureSize.isEmpty()) {
+            // Today's two-output layout: each window shows the host output
+            // with the same place from the left, through its source_rect.
+            QVector<NvOutput> hostOutputs = topology.outputs;
+            std::sort(hostOutputs.begin(), hostOutputs.end(), [](const NvOutput& a, const NvOutput& b) {
+                return std::make_tuple(a.x, a.y) < std::make_tuple(b.x, b.y);
+            });
+            for (int index = 0; index < hostOutputs.size(); ++index) {
+                const NvOutput& hostOutput = hostOutputs.at(index);
+                auto& output = m_PresentationLayout.outputs[index];
+                output.desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
+                                           hostOutput.width, hostOutput.height);
+                output.sourceRect = PlankPresentation::sourceRectInStream(
+                            hostOutput.captureRect(), captureSize, streamSize);
+            }
+            m_PresentationLayout.desktopSize = desktopSize;
+        }
     }
     else {
         int width = 0;
         int height = 0;
         SDL_GetWindowSizeInPixels(m_Window, &width, &height);
         m_PresentationLayout.canvasSize = QSize(qMax(1, width), qMax(1, height));
-        m_PresentationLayout.outputs.append(
-            {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true});
+        PlankPresentationOutput output {m_Window, QRect(QPoint(0, 0), m_PresentationLayout.canvasSize), true};
+        NvOutputTopology topology;
+        {
+            QReadLocker lock(&m_Computer->lock);
+            topology = m_Computer->outputTopology;
+        }
+        bool packed = false;
+        for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
+            packed = packed || hostOutput.captureRect() !=
+                    QRect(hostOutput.sourceX, hostOutput.sourceY, hostOutput.sourceWidth, hostOutput.sourceHeight);
+        }
+        if (!m_ResolvedArrangement.isEmpty() && topology.matchesRequestedArrangement(m_ResolvedArrangement) &&
+                (packed || topology.captureSize() != QSize(topology.desktopWidth, topology.desktopHeight))) {
+            // One window on a packed capture (left fullscreen): it would show
+            // the rows, not the desk, so it shows the primary display, and the
+            // pointer maps through it to the desktop.
+            for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
+                if (!hostOutput.primary) continue;
+                output.desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
+                                           hostOutput.width, hostOutput.height);
+                output.sourceRect = PlankPresentation::sourceRectInStream(
+                            hostOutput.captureRect(), topology.captureSize(),
+                            QSize(m_StreamConfig.width, m_StreamConfig.height));
+                m_PresentationLayout.desktopSize = QSize(topology.desktopWidth, topology.desktopHeight);
+                break;
+            }
+        }
+        m_PresentationLayout.outputs.append(output);
     }
 
     if (m_InputHandler != nullptr) {
@@ -2272,6 +2370,227 @@ void Session::rebuildPresentationLayout()
                 m_PresentationLayout.canvasSize.width(),
                 m_PresentationLayout.canvasSize.height(),
                 m_PresentationFullscreen ? "yes" : "no");
+}
+
+bool Session::createSecondaryWindows(Uint32 defaultWindowFlags, const std::string& windowName)
+{
+    const bool cocoa = strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0;
+    const bool arrangement = !m_ResolvedArrangement.isEmpty();
+    for (const auto& display : std::as_const(m_ClientDisplays)) {
+        if (display.displayId == m_TargetDisplayId ||
+                (arrangement && display.planIndex < 0)) {
+            continue;
+        }
+
+        SDL_PropertiesID properties = SDL_CreateProperties();
+        // macOS: each window enters native fullscreen on its own display
+        // later, one at a time (setPresentationWindowsFullscreen). Create it
+        // windowed and hidden there first.
+        const Uint32 flags = (defaultWindowFlags & ~SDL_WINDOW_FULLSCREEN) |
+                (cocoa ? SDL_WINDOW_HIDDEN : 0) |
+                StreamUtils::getPlatformWindowFlags();
+        SDL_SetStringProperty(properties,
+                              SDL_PROP_WINDOW_CREATE_TITLE_STRING,
+                              windowName.c_str());
+        SDL_SetNumberProperty(properties,
+                              SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER,
+                              display.logicalBounds.w);
+        SDL_SetNumberProperty(properties,
+                              SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER,
+                              display.logicalBounds.h);
+        SDL_SetNumberProperty(properties,
+                              SDL_PROP_WINDOW_CREATE_X_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
+        SDL_SetNumberProperty(properties,
+                              SDL_PROP_WINDOW_CREATE_Y_NUMBER,
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
+        SDL_SetNumberProperty(properties,
+                              SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                              flags);
+        SDL_SetBooleanProperty(properties,
+                               SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
+                               !cocoa);
+        SDL_Window* secondary = SDL_CreateWindowWithProperties(properties);
+        SDL_DestroyProperties(properties);
+        if (secondary == nullptr) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Failed to create PLANK fullscreen surface for client output %u: %s",
+                         display.displayId, SDL_GetError());
+            emit displayLaunchError(
+                tr("Unable to create a fullscreen surface for the second client monitor."));
+            destroySecondaryWindows();
+            return false;
+        }
+        if (!cocoa) {
+            SDL_SetWindowFullscreenMode(secondary, nullptr);
+            SDL_SetWindowFullscreen(secondary, true);
+            if (!placeFullscreenWindowOnDisplay(secondary,
+                                                display.displayId)) {
+                SDL_DestroyWindow(secondary);
+                emit displayLaunchError(
+                    tr("Unable to place the second fullscreen surface on its client monitor."));
+                destroySecondaryWindows();
+                return false;
+            }
+        }
+        else {
+            // Borderless desktop fullscreen in its own Space, on this display.
+            SDL_SetWindowFullscreenMode(secondary, nullptr);
+        }
+        SDL_StopTextInput(secondary);
+        m_SecondaryWindows.append(secondary);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Created PLANK %s surface for output %u",
+                    cocoa ? "macOS" : "Wayland fullscreen", display.displayId);
+    }
+    return true;
+}
+
+void Session::destroySecondaryWindows()
+{
+    for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
+        SDL_DestroyWindow(window);
+    }
+    m_SecondaryWindows.clear();
+}
+
+void Session::collapseToSingleWindow()
+{
+    if (m_SecondaryWindows.isEmpty()) {
+        return;
+    }
+    // The renderer draws into every window: release it before they go.
+    SDL_LockSpinlock(&m_DecoderLock);
+    delete m_VideoDecoder;
+    m_VideoDecoder = nullptr;
+    SDL_UnlockSpinlock(&m_DecoderLock);
+    destroySecondaryWindows();
+    m_UseMultiDisplayPresentation = false;
+    rebuildPresentationLayout();
+    SDL_Event resetEvent = {};
+    resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+    SDL_PushEvent(&resetEvent);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK presentation collapsed to one scaled window after a screen change");
+}
+
+namespace {
+
+// What the presentation depends on: which monitors, where, at which size.
+QString presentedDisplaySignature(const QVector<NvClientDisplay>& displays)
+{
+    QStringList parts;
+    for (const NvClientDisplay& display : displays) {
+        parts.append(QStringLiteral("%1@%2,%3,%4x%5/%6x%7").arg(display.key)
+                     .arg(display.bounds.x()).arg(display.bounds.y())
+                     .arg(display.bounds.width()).arg(display.bounds.height())
+                     .arg(display.backingSize.width()).arg(display.backingSize.height()));
+    }
+    return parts.join(QLatin1Char(';'));
+}
+
+}
+
+void Session::handleClientDisplaysChanged()
+{
+    const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
+    const QString fingerprint = ClientDisplayProbe::fingerprint(probed);
+    const QString signature = presentedDisplaySignature(probed);
+    if (signature == m_PresentedDisplaySignature) {
+        // A mode or position notification that changed nothing we present.
+        return;
+    }
+    m_PresentedDisplaySignature = signature;
+    // A window whose display went away shows nothing useful; one window,
+    // scaled, until the user decides.
+    collapseToSingleWindow();
+    if (!snapshotClientDisplays()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "PLANK could not read the client displays after a change");
+        return;
+    }
+    QString layoutPolicy;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        layoutPolicy = m_Computer->plankHostLayout;
+    }
+    const bool followsClient = layoutPolicy == NvOutputTopology::MatchClientHostLayout &&
+            m_PlankCaptureSource != StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK client screens changed: %lld display(s)%s",
+                static_cast<long long>(probed.size()),
+                fingerprint == m_PresentedDisplayFingerprint ? " (same monitors)" : " (new monitor set)");
+    if (!followsClient || !m_PlankToolbar) {
+        return;
+    }
+    m_PlankToolbar->showScreensPrompt(
+                fingerprint == m_PresentedDisplayFingerprint ?
+                    tr("Screens rearranged: %1").arg(ClientDisplayProbe::label(probed)) :
+                    tr("Screens changed: %1").arg(ClientDisplayProbe::label(probed)));
+}
+
+bool Session::requestDisplayLayoutApply()
+{
+    if (m_Reconnecting.load() || m_ReconnectRequested.exchange(true) || !m_CanReconnect.load() ||
+            !hasPlankCredentials()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "PLANK cannot apply the display layout now");
+        return false;
+    }
+    if (m_PlankToolbar) {
+        m_PlankToolbar->hideScreensPrompt();
+    }
+    // The saved layout for the monitors connected now; the reconnect plans
+    // and launches it (425 wait included) while the desktop keeps running.
+    collapseToSingleWindow();
+    snapshotClientDisplays();
+    m_DisplayReconfigureRequested.store(true);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK applying the display layout for the current screens");
+    SDL_Event event = {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_PLANK_RECONNECT;
+    return SDL_PushEvent(&event);
+}
+
+void Session::applyDisplayLayout()
+{
+    SDL_Event event = {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_PLANK_APPLY_SCREENS;
+    SDL_PushEvent(&event);
+}
+
+void Session::applyPendingPresentation()
+{
+    if (!m_PresentationChangePending.exchange(false) || m_Window == nullptr) {
+        return;
+    }
+    // The reconnect planned while the windows existed: one window per
+    // display again, where the new plan puts them.
+    collapseToSingleWindow();
+    m_UseMultiDisplayPresentation = m_PendingMultiDisplayPresentation;
+    m_TargetDisplayId = SDL_GetDisplayForWindow(m_Window);
+    if (m_UseMultiDisplayPresentation) {
+        bool primaryShown = false;
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            primaryShown = primaryShown || (display.displayId == m_TargetDisplayId && display.planIndex >= 0);
+        }
+        const std::string windowName = QString(m_Computer->name).toStdString();
+        if (!primaryShown || !createSecondaryWindows(SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE,
+                                                     windowName)) {
+            // The main window sits on a display the plan leaves local (or a
+            // window failed): stay with one scaled window.
+            destroySecondaryWindows();
+            m_UseMultiDisplayPresentation = false;
+        }
+    }
+    setPresentationWindowsFullscreen(m_PresentationFullscreen);
+    const QVector<NvClientDisplay> presented = ClientDisplayProbe::probe();
+    m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
+    m_PresentedDisplaySignature = presentedDisplaySignature(presented);
+    SDL_Event resetEvent = {};
+    resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+    SDL_PushEvent(&resetEvent);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK presentation after the new layout: %s",
+                m_UseMultiDisplayPresentation ? "one window per display" : "one window");
 }
 
 bool Session::placeFullscreenWindowOnDisplay(SDL_Window* window,
@@ -2399,6 +2718,15 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
             }
         }
     }
+    const bool cocoa = strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0;
+    if (cocoa && fullscreen && !m_SecondaryWindows.isEmpty() && !SDL_SyncWindow(m_Window)) {
+        // Native fullscreen animates into a new Space per window; one at a
+        // time or AppKit drops the later transitions.
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Timed out waiting for the primary fullscreen transition: %s",
+                    SDL_GetError());
+    }
+    int secondaryIndex = 0;
     for (SDL_Window* window : m_SecondaryWindows) {
         if (fullscreen) {
             SDL_ShowWindow(window);
@@ -2407,10 +2735,22 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
                             "Failed to set secondary presentation fullscreen state: %s",
                             SDL_GetError());
             }
+            if (cocoa) {
+                if (!SDL_SyncWindow(window)) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                "Timed out waiting for a secondary fullscreen transition: %s",
+                                SDL_GetError());
+                }
+                // Which display it really landed on, for the log.
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                            "PLANK secondary window %d fullscreen on display %u",
+                            secondaryIndex, SDL_GetDisplayForWindow(window));
+            }
         }
         else {
             SDL_HideWindow(window);
         }
+        ++secondaryIndex;
     }
     rebuildPresentationLayout();
 }
@@ -2433,9 +2773,16 @@ bool Session::configurePlankHostLayout()
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
     int hostFeatureFlags = 0;
+    NvOutputTopology topologySnapshot;
+    bool arrangementPublished = false;
     {
         QReadLocker lock(&m_Computer->lock);
         hostFeatureFlags = m_Computer->outputTopology.featureFlags;
+        topologySnapshot = m_Computer->outputTopology;
+        // Only when this launch negotiates it too.
+        arrangementPublished = topologySnapshot.displayArrangementPublished() &&
+                (m_Computer->plankFeatureFlags & NvOutputTopology::SupportedFeatureFlags &
+                 NvOutputTopology::DisplayArrangementFeature) != 0;
         layoutPolicy = m_Computer->plankHostLayout;
         scalingMode = m_Computer->plankScalingMode;
         virtualMode1 = m_Computer->plankVirtualMode1;
@@ -2457,6 +2804,14 @@ bool Session::configurePlankHostLayout()
 
     m_ResolvedHostLayout.clear();
     m_ResolvedVirtualModes.clear();
+    m_ResolvedArrangement.clear();
+    m_DisplayPlan = {};
+    for (auto& display : m_ClientDisplays) {
+        display.planIndex = -1;
+    }
+    if (m_Window == nullptr) {
+        m_PlannedPrimaryDisplay = 0;
+    }
     if (scalingMode != NvOutputTopology::NativeScalingMode &&
             scalingMode != NvOutputTopology::ScaledSpanMode) {
         const QString error = tr("The bookmark contains an unsupported client scaling mode.");
@@ -2488,6 +2843,18 @@ bool Session::configurePlankHostLayout()
                 return false;
             }
             m_ResolvedHostLayout = QStringLiteral("fixed");
+        }
+        else if (displayProfileFor(probedDisplays).source != DisplayProfile::Resolved::Legacy) {
+            // Linux host, planned from the display setup: with the display
+            // arrangement extension every monitor at its own size where the
+            // setup puts it; without it the primary and one side neighbour
+            // from the qualified modes, as the setup previewed.
+            if (!planDisplayArrangement(probedDisplays,
+                                        arrangementPublished ? hostFeatureFlags :
+                                                               hostFeatureFlags & ~NvOutputTopology::DisplayArrangementFeature,
+                                        topologySnapshot, matchedExactly)) {
+                return false;
+            }
         }
         else {
             // Linux host: the panel and desktop from ClientDisplayProbe, the
@@ -2561,15 +2928,214 @@ bool Session::configurePlankHostLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s%s",
+                "PLANK host layout: policy=%s resolved=%s modes=%s arrangement=%s scaling=%s%s",
                 qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
                 qPrintable(m_ResolvedVirtualModes.join(',')),
+                qPrintable(m_ResolvedArrangement.isEmpty() ? QStringLiteral("-") : m_ResolvedArrangement),
                 qPrintable(m_ResolvedScalingMode), matchedExactly ? "" : " fitted");
     return true;
 }
 
+DisplayProfile::Resolved Session::displayProfileFor(const QVector<NvClientDisplay>& displays) const
+{
+    QString hostId;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        hostId = m_Computer->brokerHostId;
+    }
+    // The display setup saves the profile before it connects; a LAN bookmark
+    // (no workstation id) uses the global profile for these monitors.
+    QSettings settings;
+    DisplayProfile::Resolved resolved =
+            DisplayProfile::resolveForHost(settings, hostId, ClientDisplayProbe::fingerprint(displays));
+    if (resolved.source == DisplayProfile::Resolved::None) {
+        resolved.profile = DisplayPlanner::proposal(displays);
+    }
+    return resolved;
+}
+
+bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, int hostFeatureFlags,
+                                     const NvOutputTopology& topology, bool& matchedExactly)
+{
+    DisplayPlanner::HostInfo host;
+    host.known = true;
+    host.platform = 1;
+    host.featureFlags = hostFeatureFlags;
+    host.capabilities = topology.displayCapabilities;
+    host.encodingMode = StreamingPreferences::plankEncodingMode(m_PlankVideoProfile);
+    DisplayPlanner::Limits limits;
+#ifdef Q_OS_DARWIN
+    limits.separateSpaces = MacDisplayInfo::screensHaveSeparateSpaces();
+    // Never an 8K stream this Mac would decode in software.
+    limits.decoderMaximum = DecoderCaps::maximum(host.encodingMode);
+#endif
+    const char* driver = SDL_GetCurrentVideoDriver();
+    limits.separateWindows = m_IsFullScreen && driver != nullptr &&
+            (strcmp(driver, "cocoa") == 0 || strcmp(driver, "wayland") == 0);
+    const DisplayProfile::Resolved resolved = displayProfileFor(displays);
+    m_DisplayPlan = DisplayPlanner::plan(displays, resolved.profile, host, limits);
+    for (const DisplayPlanner::Output& output : std::as_const(m_DisplayPlan.outputs)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK display plan: client=%dx%d%+d%+d exact=%dx%d on=%d entry=%d size=%dx%d%+d%+d backing=%s%s badge=%s%s",
+                    output.clientBounds.width(), output.clientBounds.height(),
+                    output.clientBounds.x(), output.clientBounds.y(),
+                    output.exactSize.width(), output.exactSize.height(), output.on ? 1 : 0,
+                    output.arrangementIndex, output.size.width(), output.size.height(),
+                    output.position.x(), output.position.y(),
+                    qPrintable(DisplayArrangement::backingName(output.backing)),
+                    m_DisplayPlan.backingExpected ? " (expected)" : "",
+                    qPrintable(output.badge), output.primary ? " primary" : "");
+    }
+    for (const DisplayPlanner::Warning& warning : std::as_const(m_DisplayPlan.warnings)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK display plan warning: %s", qPrintable(warning.code));
+    }
+    if (!m_DisplayPlan.ok) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(m_DisplayPlan.error));
+        emit displayLaunchError(m_DisplayPlan.error);
+        return false;
+    }
+    if (m_DisplayPlan.legacy) {
+        // No extension: today's layout request for the planned displays.
+        m_ResolvedHostLayout = m_DisplayPlan.legacyHostLayout;
+        m_ResolvedVirtualModes = m_DisplayPlan.legacyModes;
+        matchedExactly = !m_DisplayPlan.legacyFitted;
+        if (m_DisplayPlan.legacyFitted && m_ResolvedScalingMode != NvOutputTopology::ScaledSpanMode) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PLANK match client fitted a closest supported mode; scaling to fit");
+            m_ResolvedScalingMode = NvOutputTopology::ScaledSpanMode;
+        }
+        return true;
+    }
+    m_ResolvedHostLayout = QStringLiteral("arrangement");
+    m_ResolvedArrangement = m_DisplayPlan.arrangement;
+    // The stream is the workstation desktop 1:1; presentation fits it into
+    // the windows when they differ.
+    m_ResolvedScalingMode = NvOutputTopology::NativeScalingMode;
+    matchedExactly = true;
+    for (const DisplayPlanner::Output& output : std::as_const(m_DisplayPlan.outputs)) {
+        matchedExactly = matchedExactly && !output.scaled;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK display arrangement: request=%s canvas=%dx%d capture=%dx%d%s presentation=%s profile=%s",
+                qPrintable(m_ResolvedArrangement), m_DisplayPlan.canvas.width(), m_DisplayPlan.canvas.height(),
+                m_DisplayPlan.capture.width(), m_DisplayPlan.capture.height(), m_DisplayPlan.packed ? " packed" : "",
+                qPrintable(m_DisplayPlan.presentation),
+                resolved.source == DisplayProfile::Resolved::HostCustom ? "workstation" :
+                resolved.source == DisplayProfile::Resolved::Global ? "saved" : "proposal");
+    applyArrangementPresentation();
+    return true;
+}
+
+void Session::applyArrangementPresentation()
+{
+    // Which client display shows which planned workstation display. The plan
+    // was made from these very snapshots (probeView), so bounds identify them.
+    int shown = 0;
+    SDL_DisplayID primary = 0;
+    for (auto& display : m_ClientDisplays) {
+        display.planIndex = -1;
+        for (int index = 0; index < m_DisplayPlan.outputs.size(); ++index) {
+            const DisplayPlanner::Output& output = m_DisplayPlan.outputs.at(index);
+            if (output.included && output.clientBounds == display.probeView.bounds) {
+                display.planIndex = index;
+                ++shown;
+                if (output.primary) {
+                    primary = display.displayId;
+                }
+                break;
+            }
+        }
+    }
+    const char* driver = SDL_GetCurrentVideoDriver();
+    const bool separateWindows = driver != nullptr &&
+            (strcmp(driver, "cocoa") == 0 || strcmp(driver, "wayland") == 0);
+    const bool multi = m_IsFullScreen && separateWindows && shown > 1 &&
+            m_DisplayPlan.presentation == QLatin1String("windows");
+    if (m_Window != nullptr) {
+        // The windows exist (in-session reconnect on another thread): the SDL
+        // thread applies the new presentation when the reconnect finishes.
+        m_PendingMultiDisplayPresentation = multi;
+        m_PresentationChangePending.store(true);
+    } else {
+        m_UseMultiDisplayPresentation = multi;
+        m_PlannedPrimaryDisplay = primary;
+        if (primary != 0) {
+            m_TargetDisplayId = primary;
+        }
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK arrangement presentation: displays=%d primary=%u windows=%s%s",
+                shown, primary, multi ? "one per display" : "single",
+                m_Window != nullptr ? " (after reconnect)" : "");
+}
+
+bool Session::topologyMatchesRequest(const NvOutputTopology& topology) const
+{
+    if (!m_ResolvedArrangement.isEmpty()) {
+        return topology.matchesRequestedArrangement(m_ResolvedArrangement);
+    }
+    return topology.matchesRequestedHostLayout(m_ResolvedHostLayout, m_ResolvedVirtualModes);
+}
+
+QSize Session::arrangementStreamLimit() const
+{
+    QSize limit;
+    const QString mode = StreamingPreferences::plankEncodingMode(m_PlankVideoProfile);
+    NvOutputTopology topology;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        topology = m_Computer->outputTopology;
+    }
+    const auto entry = topology.displayCapabilities.encodingLimits.constFind(mode);
+    if (entry != topology.displayCapabilities.encodingLimits.constEnd() && entry->maximum.isValid()) {
+        limit = entry->maximum;
+    }
+#ifdef Q_OS_DARWIN
+    // Never a stream this Mac would decode in software.
+    const QSize decoder = DecoderCaps::maximum(mode);
+    if (decoder.isValid()) {
+        limit = limit.isValid() ? limit.boundedTo(decoder) : decoder;
+    }
+#endif
+    return limit;
+}
+
+QSize Session::arrangementCaptureSize() const
+{
+    // The host's capture once it shows this arrangement (it may pack the
+    // outputs into rows); until then the capture the plan expects.
+    NvOutputTopology topology;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        topology = m_Computer->outputTopology;
+    }
+    if (topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
+        return topology.captureSize();
+    }
+    return m_DisplayPlan.capture.isValid() ? m_DisplayPlan.capture : m_DisplayPlan.canvas;
+}
+
 QSize Session::configurePlankDisplayMode()
 {
+    if (!m_ResolvedArrangement.isEmpty()) {
+        // The host's capture, 1:1: the desktop, or its outputs packed into
+        // rows. The plan already fitted it to the host's canvas, its encoder
+        // and this client's decoder.
+        QString error;
+        const QSize capture = arrangementCaptureSize();
+        const QSize selected = PlankDisplayMode::resolveClient(capture, arrangementStreamLimit(), &error);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK client physical resolution: arrangement desktop=%dx%d capture=%dx%d%s selected=%dx%d resolution-policy=capture",
+                    m_DisplayPlan.canvas.width(), m_DisplayPlan.canvas.height(),
+                    capture.width(), capture.height(), m_DisplayPlan.packed ? " (packed)" : "",
+                    selected.width(), selected.height());
+        if (!selected.isValid()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+            emit displayLaunchError(error);
+        }
+        return selected;
+    }
+
     QSize detectedResolution;
 
     if (m_UseMultiDisplayPresentation) {
@@ -3004,6 +3570,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                           m_ResolvedHostLayout,
                           m_ResolvedVirtualModes.value(0),
                           m_ResolvedVirtualModes.value(1),
+                          m_ResolvedArrangement,
                           captureSource,
                           encoderBackend,
                           encodingMode,
@@ -3020,11 +3587,34 @@ bool Session::startConnectionAsync(bool reconnecting,
             startApp();
         } catch (const GfeHttpResponseException& e) {
             const QString statusMessage = QString::fromUtf8(e.getStatusMessage());
+            const QString arrangementError = http->displayArrangementError();
+            if (m_Computer->plankAuthentication && !arrangementError.isEmpty() &&
+                    (e.getStatusCode() == 400 || e.getStatusCode() == 409)) {
+                // Also a legacy layout's stream the host's encoder cannot
+                // carry (400 canvas_too_large with the bit negotiated).
+                // The workstation cannot show this arrangement, now or ever:
+                // say why instead of waiting or retrying.
+                NvOutputTopology topology;
+                {
+                    QReadLocker lock(&m_Computer->lock);
+                    topology = m_Computer->outputTopology;
+                }
+                const QString error = DisplayPlanner::errorText(arrangementError, topology.displayCapabilities);
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PLANK display arrangement refused (%d %s): %s",
+                             e.getStatusCode(), qPrintable(arrangementError),
+                             qPrintable(m_ResolvedArrangement.isEmpty() ? m_ResolvedHostLayout : m_ResolvedArrangement));
+                if (reconnecting) {
+                    m_ReconnectCancelled.store(true);
+                }
+                emit displayLaunchError(error);
+                return false;
+            }
             const bool displayTransitionStarted =
                     m_Computer->plankAuthentication &&
                     ((e.getStatusCode() == 425 &&
-                      statusMessage ==
-                          QStringLiteral("PLANK host display transition started")) ||
+                      (statusMessage ==
+                           QStringLiteral("PLANK host display transition started") ||
+                       !m_ResolvedArrangement.isEmpty())) ||
                      (takeOverActiveSession &&
                       e.getStatusCode() == 503 &&
                       statusMessage ==
@@ -3045,7 +3635,9 @@ bool Session::startConnectionAsync(bool reconnecting,
             }
             else if (displayTransitionStarted) {
                 constexpr int RetryIntervalMs = 500;
-                constexpr int MaximumWaitMs = 45000;
+                // A host keeps a pending arrangement for up to 120 s (a
+                // greeter restart may be part of it); layouts take 45 s at most.
+                const int MaximumWaitMs = m_ResolvedArrangement.isEmpty() ? 45000 : 120000;
                 constexpr int CancellationPollMs = 50;
                 bool started = false;
 
@@ -3116,16 +3708,46 @@ bool Session::startConnectionAsync(bool reconnecting,
                             emit sessionCleanupWaitChanged(false, QString());
                             return false;
                         }
-                        if (!topology.matchesRequestedHostLayout(
-                                    m_ResolvedHostLayout,
-                                    m_ResolvedVirtualModes)) {
+                        if (!m_ResolvedArrangement.isEmpty() &&
+                                topology.arrangementRequest == m_ResolvedArrangement &&
+                                topology.arrangementState == QLatin1String("failed")) {
+                            // The host tried and restored its previous layout.
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            qWarning() << "PLANK display arrangement failed on the host:"
+                                       << topology.arrangementReason;
+                            emit displayLaunchError(DisplayPlanner::errorText(
+                                        topology.arrangementReason.isEmpty() ? QStringLiteral("apply_failed") :
+                                                                               topology.arrangementReason,
+                                        topology.displayCapabilities));
+                            return false;
+                        }
+                        if (!topologyMatchesRequest(topology)) {
                             qInfo() << "PLANK display transition is still pending:"
-                                    << topology.layoutKind << topology.virtualModes;
+                                    << topology.layoutKind << topology.virtualModes
+                                    << topology.arrangementRequest << topology.arrangementState;
                             continue;
                         }
                         startApp();
                         started = true;
                     } catch (const GfeHttpResponseException& retryError) {
+                        if (!http->displayArrangementError().isEmpty() &&
+                                (retryError.getStatusCode() == 400 || retryError.getStatusCode() == 409)) {
+                            // Refused while waiting: stop at once with the reason.
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            NvOutputTopology topology;
+                            {
+                                QReadLocker lock(&m_Computer->lock);
+                                topology = m_Computer->outputTopology;
+                            }
+                            if (reconnecting) {
+                                m_ReconnectCancelled.store(true);
+                            }
+                            emit displayLaunchError(DisplayPlanner::errorText(http->displayArrangementError(),
+                                                                              topology.displayCapabilities));
+                            return false;
+                        }
                         if (retryError.getStatusCode() == 423) {
                             m_WaitingForSessionCleanup.store(false);
                             emit sessionCleanupWaitChanged(false, QString());
@@ -3161,7 +3783,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                 if (!started) {
                     if (!reconnecting) {
                         emit displayLaunchError(
-                                    tr("The workstation display layout did not become ready within 45 seconds."));
+                                    tr("The workstation display layout did not become ready within %n second(s).",
+                                       nullptr, MaximumWaitMs / 1000));
                     }
                     return false;
                 }
@@ -3819,6 +4442,12 @@ bool Session::runPlankReconnect()
                 m_Computer->updateAppList(apps);
             }
 
+            if (m_DisplayReconfigureRequested.load() && !macDesktop && !configurePlankLaunchGeometry()) {
+                // Applying a new display layout: plan it for the monitors
+                // connected now. A plan that cannot work ends the attempt.
+                m_ReconnectCancelled.store(true);
+                return false;
+            }
             if (waitForPlankReconnectRequest() && startConnectionAsync(true) &&
                     !m_ReconnectCancelled.load() && m_ReconnectPolicy.allowsRequest(SDL_GetTicks())) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -3904,16 +4533,28 @@ bool Session::finishPlankReconnect(
 
     m_OverlayManager.setOverlayColor(Overlay::OverlayStatusUpdate, {0xCC, 0x00, 0x00, 0xFF});
 
+    const bool displaysReconfigured = m_DisplayReconfigureRequested.exchange(false);
     if (!success) {
+        m_PresentationChangePending.store(false);
         return false;
     }
 
-    if (!resumedRenderer) {
+    if (m_PresentationChangePending.load()) {
+        // New layout: new windows and a new renderer for them.
+        SDL_LockSpinlock(&m_DecoderLock);
+        delete m_VideoDecoder;
+        m_VideoDecoder = nullptr;
+        SDL_UnlockSpinlock(&m_DecoderLock);
+        applyPendingPresentation();
+    } else if (!resumedRenderer) {
         SDL_Event resetEvent = {};
         resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
         SDL_PushEvent(&resetEvent);
     } else {
         LiRequestIdrFrame();
+    }
+    if (displaysReconfigured && m_InputHandler != nullptr) {
+        m_InputHandler->setStreamDimensions(m_StreamConfig.width, m_StreamConfig.height);
     }
     if (state.inputCaptureWasActive) {
         m_InputHandler->setCaptureActive(true);
@@ -4294,82 +4935,16 @@ void Session::execInternal()
 
     SDL_SetWindowPosition(m_Window, x, y);
 
-    if (m_UseMultiDisplayPresentation) {
-        for (const auto& display : std::as_const(m_ClientDisplays)) {
-            if (display.displayId == m_TargetDisplayId) {
-                continue;
-            }
-
-            SDL_PropertiesID properties = SDL_CreateProperties();
-            const Uint32 flags = defaultWindowFlags |
-                    StreamUtils::getPlatformWindowFlags();
-            SDL_SetStringProperty(properties,
-                                  SDL_PROP_WINDOW_CREATE_TITLE_STRING,
-                                  windowName.c_str());
-            SDL_SetNumberProperty(properties,
-                                  SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER,
-                                  display.logicalBounds.w);
-            SDL_SetNumberProperty(properties,
-                                  SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER,
-                                  display.logicalBounds.h);
-            SDL_SetNumberProperty(properties,
-                                  SDL_PROP_WINDOW_CREATE_X_NUMBER,
-                                  SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
-            SDL_SetNumberProperty(properties,
-                                  SDL_PROP_WINDOW_CREATE_Y_NUMBER,
-                                  SDL_WINDOWPOS_CENTERED_DISPLAY(display.displayId));
-            SDL_SetNumberProperty(properties,
-                                  SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
-                                  flags);
-            SDL_SetBooleanProperty(properties,
-                                   SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN,
-                                   true);
-            SDL_Window* secondary = SDL_CreateWindowWithProperties(properties);
-            SDL_DestroyProperties(properties);
-            if (secondary == nullptr) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                             "Failed to create PLANK fullscreen surface for client output %u: %s",
-                             display.displayId, SDL_GetError());
-                emit displayLaunchError(
-                    tr("Unable to create a fullscreen surface for the second client monitor."));
-                for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
-                    SDL_DestroyWindow(window);
-                }
-                m_SecondaryWindows.clear();
-                SDL_DestroyWindow(m_Window);
-                m_Window = nullptr;
-                delete m_InputHandler;
-                m_InputHandler = nullptr;
-                SDL_QuitSubSystem(SDL_INIT_VIDEO);
-                QThreadPool::globalInstance()->start(
-                            new DeferredSessionCleanupTask(this));
-                return;
-            }
-            SDL_SetWindowFullscreenMode(secondary, nullptr);
-            SDL_SetWindowFullscreen(secondary, true);
-            if (!placeFullscreenWindowOnDisplay(secondary,
-                                                display.displayId)) {
-                SDL_DestroyWindow(secondary);
-                emit displayLaunchError(
-                    tr("Unable to place the second fullscreen surface on its client monitor."));
-                for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
-                    SDL_DestroyWindow(window);
-                }
-                m_SecondaryWindows.clear();
-                SDL_DestroyWindow(m_Window);
-                m_Window = nullptr;
-                delete m_InputHandler;
-                m_InputHandler = nullptr;
-                SDL_QuitSubSystem(SDL_INIT_VIDEO);
-                QThreadPool::globalInstance()->start(
-                            new DeferredSessionCleanupTask(this));
-                return;
-            }
-            m_SecondaryWindows.append(secondary);
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Created PLANK Wayland fullscreen surface for output %u",
-                        display.displayId);
-        }
+    if (m_UseMultiDisplayPresentation &&
+            !createSecondaryWindows(defaultWindowFlags, windowName)) {
+        SDL_DestroyWindow(m_Window);
+        m_Window = nullptr;
+        delete m_InputHandler;
+        m_InputHandler = nullptr;
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        QThreadPool::globalInstance()->start(
+                    new DeferredSessionCleanupTask(this));
+        return;
     }
 
     if (!m_IsFullScreen) {
@@ -4417,6 +4992,12 @@ void Session::execInternal()
 
     m_InputHandler->setWindow(m_Window);
     rebuildPresentationLayout();
+    // The monitor set this stream presents, to tell a rearrangement from new screens.
+    {
+        const QVector<NvClientDisplay> presented = ClientDisplayProbe::probe();
+        m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
+        m_PresentedDisplaySignature = presentedDisplaySignature(presented);
+    }
 
     QImage iconImage(":/res/plank-logo.png");
     iconImage = iconImage.scaled(ICON_SIZE,
@@ -4681,7 +5262,22 @@ void Session::execInternal()
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK toolbar minimize requested");
                 minimizePresentationWindows();
+            } else if (action == PlankToolbar::Action::ApplyScreens) {
+                requestDisplayLayoutApply();
+            } else if (action == PlankToolbar::Action::KeepScreens) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: keeping the current layout");
+                m_PlankToolbar->hideScreensPrompt();
+            } else if (action == PlankToolbar::Action::SetUpScreens) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: display setup requested");
+                emit displaySetupRequested();
             }
+        }
+
+        // Client monitors settled after a change (dock, undock, lid).
+        if (m_ClientDisplayChangeDeadline != 0 && now >= m_ClientDisplayChangeDeadline &&
+                !m_Reconnecting.load() && !m_ReconnectRequested.load()) {
+            m_ClientDisplayChangeDeadline = 0;
+            handleClientDisplaysChanged();
         }
 
         // The old desktop worker may lose Xorg before it can send a logout
@@ -4875,6 +5471,9 @@ void Session::execInternal()
                     m_VideoDecoder->renderFrameOnMainThread();
                 }
                 break;
+            case SDL_CODE_PLANK_APPLY_SCREENS:
+                requestDisplayLayoutApply();
+                break;
             case SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER:
                 m_FlushingWindowEventsRef--;
                 break;
@@ -4888,6 +5487,14 @@ void Session::execInternal()
             if (m_PlankToolbar) {
                 m_PlankToolbar->notifyWindowChanged();
             }
+            break;
+
+        case SDL_EVENT_DISPLAY_ADDED:
+        case SDL_EVENT_DISPLAY_REMOVED:
+        case SDL_EVENT_DISPLAY_MOVED:
+        case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED:
+            // Docking brings displays up one by one: act once they settle.
+            m_ClientDisplayChangeDeadline = SDL_GetTicks() + 1500;
             break;
 
 #ifdef Q_OS_DARWIN
@@ -5230,6 +5837,20 @@ void Session::execInternal()
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "PLANK toolbar minimize requested");
                     minimizePresentationWindows();
+                    break;
+                }
+                if (action == PlankToolbar::Action::ApplyScreens) {
+                    requestDisplayLayoutApply();
+                    break;
+                }
+                if (action == PlankToolbar::Action::KeepScreens) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: keeping the current layout");
+                    m_PlankToolbar->hideScreensPrompt();
+                    break;
+                }
+                if (action == PlankToolbar::Action::SetUpScreens) {
+                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: display setup requested");
+                    emit displaySetupRequested();
                     break;
                 }
                 if (action == PlankToolbar::Action::Consumed) {

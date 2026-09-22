@@ -214,6 +214,11 @@ private:
                                    bool allowClampedPosition);
     // Geometry of one presentation window at event time: live drawable for a
     // single output whose renderer letterboxes live, snapshot otherwise.
+    // Outputs with source rectangles (display arrangements): a window point
+    // as a host desktop point (PlankPresentation::mapWindowPointToDesktop).
+    bool mapWindowPointToDesktop(SDL_Window* window, float windowX, float windowY,
+                                 QPointF& desktopPoint, bool allowClampedPosition) const;
+
     bool outputGeometry(SDL_Window* window,
                         PlankOutputGeometry& geometry) const;
 

@@ -18,15 +18,22 @@
 #include "outputtopology.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QLocale>
 #include <QString>
 #include <QStringList>
 #include <QVector>
 
+#include <algorithm>
+#include <utility>
+
 namespace ClientDisplayProbe {
 
-// The active client displays sorted left to right. macOS asks CoreGraphics
-// (safe from any thread); other platforms use QScreen (GUI thread only).
+// The active client displays sorted left to right, displays that mirror
+// another one collapsed into it. macOS asks CoreGraphics (safe from any
+// thread; names come from a cache MacDisplayInfo refreshes on the main
+// thread); other platforms use QScreen (GUI thread only). Every display has
+// a unique key (see uniqueKeys).
 QVector<NvClientDisplay> probe();
 
 // The Session's view of one SDL display, from the same probe the dialogs use:
@@ -41,10 +48,105 @@ inline NvClientDisplay forSessionDisplay(const QRect& sdlLogicalBounds, const QS
 {
     for (const NvClientDisplay& display : probed) {
         if (display.bounds == sdlLogicalBounds) {
-            return {sdlLogicalBounds, display.nativeSize, display.backingSize, display.fullscreenSize};
+            return display;
         }
     }
     return {sdlLogicalBounds, sdlNativeSize, QSize()};
+}
+
+// Stable identity of one monitor, independent of its size and position: the
+// platform's display UUID where there is one, else vendor/model/serial, else
+// the panel size (built-in or not) as a last resort.
+inline QString monitorKey(const QString& uuid, quint32 vendor, quint32 model, quint32 serial,
+                          bool builtIn, const QSize& panel)
+{
+    if (!uuid.trimmed().isEmpty()) {
+        return QStringLiteral("uuid:") + uuid.trimmed().toUpper();
+    }
+    if (vendor != 0 || model != 0 || serial != 0) {
+        return QStringLiteral("edid:%1-%2-%3").arg(vendor, 0, 16).arg(model, 0, 16).arg(serial, 0, 16);
+    }
+    return QStringLiteral("%1:%2x%3").arg(builtIn ? QStringLiteral("builtin") : QStringLiteral("panel"))
+            .arg(panel.width()).arg(panel.height());
+}
+
+// Keys for a list of displays: each display's key, made unique with "#2",
+// "#3" when two identical monitors report the same identity.
+inline QStringList uniqueKeys(const QVector<NvClientDisplay>& displays)
+{
+    QStringList keys;
+    for (const NvClientDisplay& display : displays) {
+        const QString base = display.key.isEmpty() ?
+                    monitorKey(QString(), 0, 0, 0, display.builtIn, display.nativeSize) : display.key;
+        QString key = base;
+        for (int copy = 2; keys.contains(key); ++copy) {
+            key = base + QStringLiteral("#") + QString::number(copy);
+        }
+        keys.append(key);
+    }
+    return keys;
+}
+
+// Gives every display a unique key (see uniqueKeys).
+inline void assignUniqueKeys(QVector<NvClientDisplay>& displays)
+{
+    const QStringList keys = uniqueKeys(displays);
+    for (int index = 0; index < displays.size(); ++index) {
+        displays[index].key = keys.at(index);
+    }
+}
+
+// The monitor set: sha256 over the sorted keys, so the same monitors give the
+// same fingerprint wherever they are placed and whatever resolution they run.
+// 20 hex digits keep settings keys short and are ample for one user's desks.
+inline QString fingerprint(const QVector<NvClientDisplay>& displays)
+{
+    if (displays.isEmpty()) return QString();
+    QStringList keys = uniqueKeys(displays);
+    keys.sort();
+    return QString::fromLatin1(QCryptographicHash::hash(keys.join(QLatin1Char('\n')).toUtf8(),
+                                                        QCryptographicHash::Sha256).toHex().left(20));
+}
+
+// A short human name for one monitor.
+inline QString displayName(const NvClientDisplay& display)
+{
+    if (!display.name.trimmed().isEmpty()) return display.name.trimmed();
+    return display.builtIn ? QCoreApplication::translate("ClientDisplayProbe", "Built-in display") :
+                             QCoreApplication::translate("ClientDisplayProbe", "Display");
+}
+
+// "Built-in Retina Display + LG UltraFine": the monitor set, left to right.
+inline QString label(const QVector<NvClientDisplay>& displays)
+{
+    QVector<NvClientDisplay> ordered = displays;
+    std::stable_sort(ordered.begin(), ordered.end(), [](const NvClientDisplay& a, const NvClientDisplay& b) {
+        return std::make_pair(a.bounds.x(), a.bounds.y()) < std::make_pair(b.bounds.x(), b.bounds.y());
+    });
+    QStringList names;
+    for (const NvClientDisplay& display : std::as_const(ordered)) names.append(displayName(display));
+    return names.join(QStringLiteral(" + "));
+}
+
+// The Mac-host Match client view of the displays (ComputerManager and the
+// Session): each display's current desktop, or in fullscreen the viewport
+// below the camera housing, whose logical bounds start below the inset.
+inline QVector<NvClientDisplay> macMatchDisplays(const QVector<NvClientDisplay>& displays, bool fullscreen)
+{
+    QVector<NvClientDisplay> result;
+    for (const NvClientDisplay& display : displays) {
+        QRect bounds = display.bounds;
+        QSize pixels = display.backingSize.isValid() ? display.backingSize : display.nativeSize;
+        if (fullscreen && display.fullscreenSize.isValid() && display.backingSize.isValid() &&
+                bounds.height() > 0 && display.backingSize.height() % bounds.height() == 0) {
+            const int scale = display.backingSize.height() / bounds.height();
+            const int top = (display.backingSize.height() - display.fullscreenSize.height()) / scale;
+            bounds = QRect(bounds.x(), bounds.y() + top, bounds.width(), bounds.height() - top);
+            pixels = display.fullscreenSize;
+        }
+        result.append({bounds, pixels, pixels});
+    }
+    return result;
 }
 
 inline QSize desktopPixels(const NvClientDisplay& display)

@@ -294,6 +294,27 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
 
+    // The encoded capture: the desktop, unless a host with the display
+    // arrangement extension publishes capture_size (during an arrangement
+    // lease; with each output's capture_rect). source_rect keeps its schema-13
+    // meaning (desktop coordinates) either way. Ignored without the bit.
+    parsed.captureWidth = parsed.desktopWidth;
+    parsed.captureHeight = parsed.desktopHeight;
+    if ((parsed.featureFlags & DisplayArrangementFeature) != 0 && object.contains("capture_size")) {
+        const QJsonObject capture = object.value("capture_size").toObject();
+        if (!object.value("capture_size").isObject() || capture.size() != 2 ||
+                !requireInteger(capture, "width", parsed.captureWidth) ||
+                !requireInteger(capture, "height", parsed.captureHeight) ||
+                parsed.captureWidth < 2 || parsed.captureHeight < 2 ||
+                parsed.captureWidth > 16384 || parsed.captureHeight > 16384) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Invalid capture size");
+            }
+            return false;
+        }
+        parsed.capturePublished = true;
+    }
+
     for (const QJsonValue& value : object.value("outputs").toArray()) {
         if (!value.isObject()) {
             return false;
@@ -341,6 +362,34 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
             }
             return false;
         }
+        // Display arrangement: where the output sits in the encoded capture.
+        // Published with capture_size (during an arrangement lease), and the
+        // same as source_rect unless the capture is packed. Ignored without
+        // the bit, like capture_size.
+        output.captureX = output.sourceX;
+        output.captureY = output.sourceY;
+        output.captureWidth = output.sourceWidth;
+        output.captureHeight = output.sourceHeight;
+        if ((parsed.featureFlags & DisplayArrangementFeature) != 0) {
+            const bool hasCaptureRect = entry.contains("capture_rect");
+            const QJsonObject captureRect = entry.value("capture_rect").toObject();
+            if (hasCaptureRect != parsed.capturePublished ||
+                    (hasCaptureRect &&
+                     (!entry.value("capture_rect").isObject() || captureRect.size() != 4 ||
+                      !requireInteger(captureRect, "x", output.captureX) ||
+                      !requireInteger(captureRect, "y", output.captureY) ||
+                      !requireInteger(captureRect, "width", output.captureWidth) ||
+                      !requireInteger(captureRect, "height", output.captureHeight) ||
+                      output.captureX < 0 || output.captureY < 0 ||
+                      output.captureWidth <= 0 || output.captureHeight <= 0 ||
+                      output.captureX + output.captureWidth > parsed.captureWidth ||
+                      output.captureY + output.captureHeight > parsed.captureHeight))) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("Invalid output capture rectangle");
+                }
+                return false;
+            }
+        }
         parsed.outputs.append(output);
     }
     if (parsed.outputs.isEmpty() || parsed.outputs.size() != declaredOutputCount ||
@@ -351,7 +400,87 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         }
         return false;
     }
+    // Display arrangement: additive fields, read (strictly) only when the
+    // host advertises the extension. Without the bit they are ignored, as
+    // every schema-13 parser before it does.
+    if ((parsed.featureFlags & DisplayArrangementFeature) != 0 &&
+            !parseDisplayArrangement(object, layout, parsed, error)) {
+        return false;
+    }
     topology = parsed;
+    return true;
+}
+
+bool NvOutputTopology::parseDisplayArrangement(const QJsonObject& object, const QJsonObject& layout,
+                                               NvOutputTopology& parsed, QString* error)
+{
+    const auto fail = [error](const char* message) {
+        if (error != nullptr) *error = QString::fromLatin1(message);
+        return false;
+    };
+    QString capabilitiesError;
+    if (!object.value(QStringLiteral("display_capabilities")).isObject() ||
+            !DisplayArrangement::Capabilities::fromJson(object.value(QStringLiteral("display_capabilities")).toObject(),
+                                                        parsed.displayCapabilities, &capabilitiesError)) {
+        if (error != nullptr) *error = QStringLiteral("Invalid display capabilities: ") + capabilitiesError;
+        return false;
+    }
+    parsed.startupPolicy = layout.value(QStringLiteral("startup_policy")).toString();
+    if (parsed.startupPolicy != QLatin1String("physical") && parsed.startupPolicy != QLatin1String("virtual") &&
+            parsed.startupPolicy != QLatin1String("hybrid")) {
+        return fail("Invalid host display startup policy");
+    }
+    const QJsonValue arrangementValue = layout.value(QStringLiteral("arrangement"));
+    const QJsonObject arrangement = arrangementValue.toObject();
+    const QJsonObject transition = arrangement.value(QStringLiteral("transition")).toObject();
+    parsed.arrangementRequest = arrangement.value(QStringLiteral("request")).toString();
+    parsed.arrangementState = transition.value(QStringLiteral("state")).toString();
+    parsed.arrangementReason = transition.value(QStringLiteral("reason")).toString();
+    QVector<DisplayArrangement::Entry> entries;
+    if (!arrangementValue.isObject() || !arrangement.value(QStringLiteral("request")).isString() ||
+            !arrangement.value(QStringLiteral("transition")).isObject() ||
+            !transition.value(QStringLiteral("reason")).isString() || parsed.arrangementReason.size() > 64 ||
+            (parsed.arrangementState != QLatin1String("idle") && parsed.arrangementState != QLatin1String("pending") &&
+             parsed.arrangementState != QLatin1String("applied") && parsed.arrangementState != QLatin1String("failed")) ||
+            (!parsed.arrangementRequest.isEmpty() &&
+             !DisplayArrangement::parse(parsed.arrangementRequest, entries).isEmpty())) {
+        return fail("Invalid host display arrangement state");
+    }
+    const QJsonArray outputs = object.value(QStringLiteral("outputs")).toArray();
+    QVector<bool> seen(DisplayArrangement::MaximumEntries, false);
+    for (int index = 0; index < outputs.size(); ++index) {
+        const QJsonObject entry = outputs.at(index).toObject();
+        NvOutput& output = parsed.outputs[index];
+        DisplayArrangement::Backing backing;
+        output.backing = entry.value(QStringLiteral("backing")).toString();
+        if (!DisplayArrangement::backingFromName(output.backing, backing) ||
+                !requireInteger(entry, "arrangement_index", output.arrangementIndex) ||
+                output.arrangementIndex < -1 || output.arrangementIndex >= DisplayArrangement::MaximumEntries ||
+                (output.arrangementIndex >= 0 && seen.at(output.arrangementIndex))) {
+            return fail("Invalid output backing or arrangement index");
+        }
+        if (output.arrangementIndex >= 0) seen[output.arrangementIndex] = true;
+    }
+    return true;
+}
+
+bool NvOutputTopology::matchesRequestedArrangement(const QString& request) const
+{
+    QVector<DisplayArrangement::Entry> entries;
+    if (!displayArrangementPublished() || request.isEmpty() || arrangementRequest != request ||
+            arrangementState != QLatin1String("applied") ||
+            !DisplayArrangement::parse(request, entries).isEmpty() || outputs.size() != entries.size()) {
+        return false;
+    }
+    QVector<bool> seen(entries.size(), false);
+    for (const NvOutput& output : outputs) {
+        const int index = output.arrangementIndex;
+        if (index < 0 || index >= entries.size() || seen.at(index) ||
+                QRect(output.x - desktopX, output.y - desktopY, output.width, output.height) != entries.at(index).rect) {
+            return false;
+        }
+        seen[index] = true;
+    }
     return true;
 }
 
@@ -365,9 +494,10 @@ QJsonObject NvOutputTopology::toJson() const
                         {"width", captureLogicalBounds.width()}, {"height", captureLogicalBounds.height()}}},
                     {"encoding_profile", applePreviewProfile(appleEncodingMode)}}}};
     }
+    const bool arrangement = displayArrangementPublished();
     QJsonArray serializedOutputs;
     for (const NvOutput& output : outputs) {
-        serializedOutputs.append(QJsonObject {
+        QJsonObject entry {
             {"id", output.id}, {"name", output.name},
             {"x", output.x}, {"y", output.y},
             {"width", output.width}, {"height", output.height},
@@ -380,25 +510,48 @@ QJsonObject NvOutputTopology::toJson() const
                 {"x", output.sourceX}, {"y", output.sourceY},
                 {"width", output.sourceWidth}, {"height", output.sourceHeight},
             }},
+        };
+        if (arrangement) {
+            entry.insert("backing", output.backing);
+            entry.insert("arrangement_index", output.arrangementIndex);
+            if (capturePublished) {
+                entry.insert("capture_rect", QJsonObject {
+                    {"x", output.captureX}, {"y", output.captureY},
+                    {"width", output.captureWidth}, {"height", output.captureHeight}});
+            }
+        }
+        serializedOutputs.append(entry);
+    }
+    QJsonObject serializedLayout {
+        {"kind", layoutKind}, {"virtual", virtualLayout},
+        {"virtual_modes", QJsonArray::fromStringList(virtualModes)},
+        {"output_count", outputs.size()},
+        {"startup_kind", startupLayoutKind},
+        {"allowed_kinds", QJsonArray::fromStringList(allowedLayoutKinds)},
+    };
+    if (arrangement) {
+        serializedLayout.insert("startup_policy", startupPolicy);
+        serializedLayout.insert("arrangement", QJsonObject {
+            {"request", arrangementRequest},
+            {"transition", QJsonObject {{"state", arrangementState}, {"reason", arrangementReason}}},
         });
     }
-    return QJsonObject {
+    QJsonObject document {
         {"schema_version", schemaVersion},
         {"feature_flags", featureFlags},
         {"generation", generation},
-        {"layout", QJsonObject {
-            {"kind", layoutKind}, {"virtual", virtualLayout},
-            {"virtual_modes", QJsonArray::fromStringList(virtualModes)},
-            {"output_count", outputs.size()},
-            {"startup_kind", startupLayoutKind},
-            {"allowed_kinds", QJsonArray::fromStringList(allowedLayoutKinds)},
-        }},
+        {"layout", serializedLayout},
         {"desktop", QJsonObject {
             {"x", desktopX}, {"y", desktopY},
             {"width", desktopWidth}, {"height", desktopHeight},
         }},
         {"outputs", serializedOutputs},
     };
+    if (arrangement) document.insert("display_capabilities", displayCapabilities.toJson());
+    if (arrangement && capturePublished) {
+        document.insert("capture_size", QJsonObject {{"width", captureWidth}, {"height", captureHeight}});
+    }
+    return document;
 }
 
 bool NvOutputTopology::contains(QString outputId) const

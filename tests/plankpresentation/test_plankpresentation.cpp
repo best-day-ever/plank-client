@@ -30,6 +30,15 @@ private slots:
     void decodedSizeReportedOnlyForFrameFittingRenderers();
     void decodedSizeReportedAgainAfterReset();
 
+    // Outputs with source rectangles (display arrangements).
+    void sourceRectsSliceEachWindow();
+    void sourceRectsFitMismatchedWindows();
+    void packedCaptureMapsPointerToDesktop();
+    void remoteCursorFindsItsWindow();
+    void sourceRectsMatchLegacyExactLayout();
+    void layoutRequiresCompleteSourceRects();
+    void packedThreeUhdThirdScreenMapsToTheDesktop();
+
 private:
     static PlankOutputGeometry singleOutput(const QSize& snapshotCanvas,
                                             const QSize& windowSize,
@@ -488,6 +497,201 @@ void TestPlankPresentation::decodedSizeReportedAgainAfterReset()
     tracker.reset();
     QVERIFY(tracker.shouldReport(2560, 1600, true));
     QVERIFY(!tracker.shouldReport(2560, 1600, true));
+}
+
+
+namespace {
+
+PlankPresentationOutput sourceOutput(const QRectF& source, const QRect& desktop, bool primary = false)
+{
+    PlankPresentationOutput output;
+    output.primary = primary;
+    output.sourceRect = source;
+    output.desktopRect = desktop;
+    return output;
+}
+
+}
+
+void TestPlankPresentation::sourceRectsSliceEachWindow()
+{
+    // A 14" MacBook viewport beside a UHD monitor, and a stacked third and
+    // fourth display: 7280x3600 desktop streamed 1:1.
+    const QSize desktop(7280, 3600);
+    const QVector<QRect> rects {QRect(0, 0, 3840, 2160), QRect(3840, 0, 3440, 1440),
+                                QRect(0, 2160, 2560, 1440), QRect(2560, 2160, 1920, 1200)};
+    for (const QRect& rect : rects) {
+        const QRectF source = PlankPresentation::sourceRectInStream(rect, desktop, desktop);
+        QCOMPARE(source, QRectF(rect));
+        // A window of exactly that many pixels shows it 1:1.
+        const auto slice = PlankPresentation::sliceForSource(desktop, source, rect.size());
+        QVERIFY(slice.visible);
+        QCOMPARE(slice.sourceRect, QRectF(rect));
+        QCOMPARE(slice.destinationRect, QRect(QPoint(0, 0), rect.size()));
+    }
+    // A stream scaled to half the desktop scales every source rectangle.
+    QCOMPARE(PlankPresentation::sourceRectInStream(rects.at(1), desktop, QSize(3640, 1800)),
+             QRectF(1920, 0, 1720, 720));
+    // A rectangle that runs past the stream is clipped to it.
+    const auto clipped = PlankPresentation::sliceForSource(QSize(3840, 2160), QRectF(3000, 0, 1000, 2160),
+                                                           QSize(840, 2160));
+    QCOMPARE(clipped.sourceRect, QRectF(3000, 0, 840, 2160));
+}
+
+void TestPlankPresentation::sourceRectsFitMismatchedWindows()
+{
+    // A 3024x1890 viewport shown on a 3024x1964 drawable: letterboxed in
+    // that window only, centred.
+    const auto slice = PlankPresentation::sliceForSource(QSize(6864, 2160), QRectF(0, 270, 3024, 1890),
+                                                         QSize(3024, 1964));
+    QCOMPARE(slice.destinationRect, QRect(0, 37, 3024, 1890));
+    // "Looks like" on a Retina window: a 1512x944 desktop fills 3024x1888 exactly.
+    const auto retina = PlankPresentation::sliceForSource(QSize(1512, 944), QRectF(0, 0, 1512, 944),
+                                                          QSize(3024, 1888));
+    QCOMPARE(retina.destinationRect, QRect(0, 0, 3024, 1888));
+}
+
+void TestPlankPresentation::packedCaptureMapsPointerToDesktop()
+{
+    // Three UHD monitors side by side (11520x2160 desktop) packed by the host
+    // into a 7680x4320 capture: the third monitor's pixels sit below the
+    // first. Pointer positions must still land on the desktop.
+    const QSize stream(7680, 4320);
+    const PlankPresentationOutput third = sourceOutput(QRectF(0, 2160, 3840, 2160), QRect(7680, 0, 3840, 2160));
+    QPointF desktopPoint;
+    // Window in points (1920x1080) on a 2x drawable.
+    QVERIFY(PlankPresentation::mapWindowPointToDesktop(QPointF(960, 540), QSize(1920, 1080), QSize(3840, 2160),
+                                                       third, stream, desktopPoint, false));
+    QCOMPARE(desktopPoint, QPointF(7680 + 1920, 1080));
+    QVERIFY(PlankPresentation::mapWindowPointToDesktop(QPointF(0, 0), QSize(1920, 1080), QSize(3840, 2160),
+                                                       third, stream, desktopPoint, false));
+    QCOMPARE(desktopPoint, QPointF(7680, 0));
+    QCOMPARE(PlankPresentation::absoluteDesktopPosition(QPointF(11520, 2160), QSize(11520, 2160)),
+             QPoint(11519, 2159));
+    // In a letterbox band: only with clamping (a drag that leaves the video).
+    const PlankPresentationOutput notch = sourceOutput(QRectF(0, 270, 3024, 1890), QRect(0, 270, 3024, 1890));
+    QVERIFY(!PlankPresentation::mapWindowPointToDesktop(QPointF(100, 5), QSize(1512, 982), QSize(3024, 1964),
+                                                        notch, QSize(6864, 2160), desktopPoint, false));
+    QVERIFY(PlankPresentation::mapWindowPointToDesktop(QPointF(100, 5), QSize(1512, 982), QSize(3024, 1964),
+                                                       notch, QSize(6864, 2160), desktopPoint, true));
+    QCOMPARE(desktopPoint, QPointF(200, 270));
+}
+
+void TestPlankPresentation::remoteCursorFindsItsWindow()
+{
+    const QSize stream(6864, 2160);
+    const PlankPresentationOutput laptop = sourceOutput(QRectF(0, 270, 3024, 1890), QRect(0, 270, 3024, 1890), true);
+    const PlankPresentationOutput uhd = sourceOutput(QRectF(3024, 0, 3840, 2160), QRect(3024, 0, 3840, 2160));
+    QPointF windowPoint;
+    QVERIFY(PlankPresentation::mapStreamPointToSourceWindow(QPointF(4944, 1080), stream, uhd, QSize(1920, 1080),
+                                                            QSize(3840, 2160), windowPoint));
+    QCOMPARE(windowPoint, QPointF(960, 540));
+    QVERIFY(!PlankPresentation::mapStreamPointToSourceWindow(QPointF(4944, 1080), stream, laptop, QSize(1512, 945),
+                                                             QSize(3024, 1890), windowPoint));
+    // The black corner above the laptop belongs to no window.
+    QVERIFY(!PlankPresentation::mapStreamPointToSourceWindow(QPointF(100, 100), stream, laptop, QSize(1512, 945),
+                                                             QSize(3024, 1890), windowPoint));
+    QVERIFY(PlankPresentation::mapStreamPointToSourceWindow(QPointF(1512, 1215), stream, laptop, QSize(1512, 945),
+                                                            QSize(3024, 1890), windowPoint));
+    QCOMPARE(windowPoint, QPointF(756, 472.5));
+    // Round trip through the desktop.
+    QPointF desktopPoint;
+    QVERIFY(PlankPresentation::mapWindowPointToDesktop(windowPoint, QSize(1512, 945), QSize(3024, 1890), laptop,
+                                                       stream, desktopPoint, false));
+    QCOMPARE(desktopPoint, QPointF(1512, 1215));
+}
+
+void TestPlankPresentation::sourceRectsMatchLegacyExactLayout()
+{
+    // Today's Wayland two-output layout (5120x2160 canvas, two 2560x2160
+    // outputs, stream of the canvas size) expressed with source rectangles:
+    // every slice and every pointer position is the same.
+    const QSize stream(5120, 2160);
+    const QVector<QRect> canvasRects {QRect(0, 0, 2560, 2160), QRect(2560, 0, 2560, 2160)};
+    for (const QRect& canvasRect : canvasRects) {
+        const auto legacy = PlankPresentation::sliceForOutput(stream, stream, canvasRect);
+        const auto source = PlankPresentation::sliceForSource(stream, legacy.sourceRect, canvasRect.size());
+        QCOMPARE(source.sourceRect, legacy.sourceRect);
+        QCOMPARE(source.destinationRect, legacy.destinationRect);
+        const PlankPresentationOutput output = sourceOutput(legacy.sourceRect, canvasRect);
+        for (const QSize windowSize : {canvasRect.size(), QSize(1280, 1080)}) {
+            for (int y = 0; y <= windowSize.height(); y += windowSize.height() / 8) {
+                for (int x = 0; x <= windowSize.width(); x += windowSize.width() / 8) {
+                    QPointF legacyPoint;
+                    QPointF desktopPoint;
+                    const bool legacyOk = PlankPresentation::mapWindowPointToStream(
+                                QPointF(x, y), windowSize, stream, stream, canvasRect, legacyPoint, true);
+                    const bool sourceOk = PlankPresentation::mapWindowPointToDesktop(
+                                QPointF(x, y), windowSize, canvasRect.size(), output, stream, desktopPoint, true);
+                    QCOMPARE(sourceOk, legacyOk);
+                    QVERIFY2(qAbs(desktopPoint.x() - legacyPoint.x()) < 1e-6 &&
+                             qAbs(desktopPoint.y() - legacyPoint.y()) < 1e-6,
+                             qPrintable(QStringLiteral("%1,%2").arg(x).arg(y)));
+                }
+            }
+        }
+    }
+}
+
+void TestPlankPresentation::layoutRequiresCompleteSourceRects()
+{
+    PlankPresentationLayout layout;
+    layout.canvasSize = QSize(6864, 2160);
+    layout.outputs = {sourceOutput(QRectF(0, 270, 3024, 1890), QRect(0, 270, 3024, 1890), true),
+                      sourceOutput(QRectF(3024, 0, 3840, 2160), QRect(3024, 0, 3840, 2160))};
+    QVERIFY(!layout.usesSourceRects()); // no desktop size yet
+    layout.desktopSize = QSize(6864, 2160);
+    QVERIFY(layout.usesSourceRects());
+    layout.outputs[1].sourceRect = QRectF();
+    QVERIFY(!layout.usesSourceRects());
+    // The legacy aggregate still builds a canvas output without them.
+    PlankPresentationOutput legacy {nullptr, QRect(0, 0, 1920, 1080), true};
+    QVERIFY(!legacy.sourceRect.isValid());
+    QVERIFY(!legacy.desktopRect.isValid());
+}
+
+void TestPlankPresentation::packedThreeUhdThirdScreenMapsToTheDesktop()
+{
+    // The packing vector "three-uhd-row": an 11520x2160 desktop captured as
+    // 7680x4320, the third screen's pixels on the second row. The host
+    // publishes that slot as capture_rect (source_rect stays the desktop
+    // rectangle); the Session presents the window from it.
+    const QSize capture(7680, 4320);
+    const QSize desktop(11520, 2160);
+    PlankPresentationLayout layout;
+    layout.desktopSize = desktop;
+    layout.canvasSize = desktop;
+    const QRect captureRects[3] = {QRect(0, 0, 3840, 2160), QRect(3840, 0, 3840, 2160), QRect(0, 2160, 3840, 2160)};
+    for (int index = 0; index < 3; ++index) {
+        PlankPresentationOutput output(nullptr, QRect(3840 * index, 0, 3840, 2160), index == 0);
+        output.sourceRect = PlankPresentation::sourceRectInStream(captureRects[index], capture, capture);
+        output.desktopRect = QRect(3840 * index, 0, 3840, 2160);
+        layout.outputs.append(output);
+    }
+    QVERIFY(layout.usesSourceRects());
+    const PlankPresentationOutput& third = layout.outputs.at(2);
+    // Its window (1920x1080 points on a 2x panel) shows capture rows from 2160 down...
+    const auto slice = PlankPresentation::sliceForSource(capture, third.sourceRect, QSize(3840, 2160));
+    QVERIFY(slice.visible);
+    QVERIFY(slice.sourceRect.top() >= 2160);
+    QCOMPARE(slice.sourceRect, QRectF(0, 2160, 3840, 2160));
+    // ...and every point in it lands on the desktop at x >= 7680.
+    for (const QPointF point : {QPointF(0, 0), QPointF(960, 540), QPointF(1919, 1079)}) {
+        QPointF desktopPoint;
+        QVERIFY(PlankPresentation::mapWindowPointToDesktop(point, QSize(1920, 1080), QSize(3840, 2160), third,
+                                                           capture, desktopPoint, false));
+        QVERIFY(desktopPoint.x() >= 7680);
+        const QPoint absolute = PlankPresentation::absoluteDesktopPosition(desktopPoint, layout.desktopSize);
+        QVERIFY(absolute.x() >= 7680 && absolute.x() < 11520);
+        QVERIFY(absolute.y() >= 0 && absolute.y() < 2160);
+    }
+    // The remote cursor at desktop-row pixel (1920, 3240) of the capture is on that window.
+    QPointF windowPoint;
+    QVERIFY(PlankPresentation::mapStreamPointToSourceWindow(QPointF(1920, 3240), capture, third, QSize(1920, 1080),
+                                                            QSize(3840, 2160), windowPoint));
+    QCOMPARE(windowPoint, QPointF(960, 540));
+    QVERIFY(!PlankPresentation::mapStreamPointToSourceWindow(QPointF(1920, 3240), capture, layout.outputs.at(0),
+                                                             QSize(1920, 1080), QSize(3840, 2160), windowPoint));
 }
 
 QTEST_APPLESS_MAIN(TestPlankPresentation)

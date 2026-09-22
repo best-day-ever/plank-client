@@ -43,6 +43,8 @@ enum Source { FromHost = 0, FromBookmark = 1, FromDefaults = 2, FromBuiltIn = 3 
 static constexpr int NvfbcHevc10NvencFeature = 0x2000;
 // Mirrors NvOutputTopology::NvfbcNvenc420Feature.
 static constexpr int NvfbcNvenc420Feature = 0x2000000;
+// Mirrors NvOutputTopology::DisplayArrangementFeature.
+static constexpr int DisplayArrangementFeature = 0x8000000;
 
 struct Setup
 {
@@ -61,6 +63,9 @@ struct Capabilities
     int featureFlags = 0;
     // Host's PlankEncodingModes; empty when it does not advertise them.
     QStringList encodingModes;
+    // The topology's display_capabilities (display arrangement, 0x8000000)
+    // as compact JSON; empty when the host does not publish them.
+    QString displayCapabilities;
 };
 
 // A LAN bookmark that may seed a new workstation's first proposal.
@@ -272,6 +277,7 @@ inline Capabilities loadCapabilities(QSettings& settings, const QString& hostId)
         caps.featureFlags = settings.value(QStringLiteral("feature-flags")).toInt();
         const QString modes = settings.value(QStringLiteral("encoding-modes")).toString();
         caps.encodingModes = modes.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        caps.displayCapabilities = settings.value(QStringLiteral("display-caps")).toString();
     }
     settings.endGroup();
     return caps;
@@ -284,6 +290,13 @@ inline void saveCapabilities(QSettings& settings, const QString& hostId, const C
     settings.setValue(QStringLiteral("platform"), caps.platform);
     settings.setValue(QStringLiteral("feature-flags"), caps.featureFlags);
     settings.setValue(QStringLiteral("encoding-modes"), caps.encodingModes.join(QLatin1Char(',')));
+    if (!caps.displayCapabilities.isEmpty()) {
+        settings.setValue(QStringLiteral("display-caps"), caps.displayCapabilities);
+    } else if ((caps.featureFlags & DisplayArrangementFeature) == 0) {
+        // No longer published (the host went back to an older PLANK). A
+        // connect that failed before reading them keeps the cache.
+        settings.remove(QStringLiteral("display-caps"));
+    }
     settings.endGroup();
 }
 

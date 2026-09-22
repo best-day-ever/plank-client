@@ -11,12 +11,14 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
 #include "backend/nvhttp.h"
+#include "backend/displayplanner.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
@@ -157,6 +159,10 @@ public:
 
     Q_INVOKABLE void respondToDesktopSignOut(bool signOut);
 
+    // Apply the saved display layout for the current screens during the
+    // stream (in-session reconnect). Thread-safe; ignored while reconnecting.
+    Q_INVOKABLE void applyDisplayLayout();
+
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
@@ -211,6 +217,9 @@ signals:
     void desktopSignOutRequested(QString text);
 
     void displayLaunchError(QString text);
+
+    // "Set up…" in the screens-changed prompt: open the display setup.
+    void displaySetupRequested();
 
     void displayLaunchWarning(QString text);
 
@@ -330,6 +339,32 @@ private:
     void minimizePresentationWindows();
 
     bool configurePlankHostLayout();
+
+    // One window per workstation display (display arrangement on macOS and
+    // Wayland): which displays the plan shows and where the stream opens.
+    void applyArrangementPresentation();
+    bool createSecondaryWindows(Uint32 windowFlags, const std::string& windowName);
+    void destroySecondaryWindows();
+    // Client monitors changed during the stream: back to one window and ask.
+    void handleClientDisplaysChanged();
+    void collapseToSingleWindow();
+    bool requestDisplayLayoutApply();
+    void applyPendingPresentation();
+
+    // Display arrangement (0x8000000) for Match client: plans the client's
+    // monitors with the display profile and the host's capabilities.
+    bool planDisplayArrangement(const QVector<NvClientDisplay>& displays, int hostFeatureFlags,
+                                const NvOutputTopology& topology, bool& matchedExactly);
+    // The display profile for these monitors on this workstation (legacy:
+    // the workstation keeps its pre-profile layout, so no arrangement).
+    DisplayProfile::Resolved displayProfileFor(const QVector<NvClientDisplay>& displays) const;
+    // The host shows what this launch asked for (arrangement or legacy layout).
+    bool topologyMatchesRequest(const NvOutputTopology& topology) const;
+    // The largest stream this client and the host's encoder carry for the
+    // arrangement; invalid for no limit.
+    QSize arrangementStreamLimit() const;
+    // The frame the host encodes for the arrangement (packed capture).
+    QSize arrangementCaptureSize() const;
 
     QSize configurePlankDisplayMode();
 
@@ -467,6 +502,10 @@ private:
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
+    // Display arrangement: the canonical request (m_ResolvedHostLayout is
+    // then "arrangement") and the plan behind it.
+    QString m_ResolvedArrangement;
+    DisplayPlanner::Plan m_DisplayPlan;
 
     struct ClientDisplaySnapshot {
         SDL_DisplayID displayId = 0;
@@ -481,8 +520,22 @@ private:
         QSize macBackingSize;
         QRect macMatchedBounds;
         QRect canvasRect;
+        // Display arrangement: this display's entry in m_DisplayPlan.outputs
+        // when the workstation shows it, else -1.
+        int planIndex = -1;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
+    // The plan's primary display: the stream window opens there.
+    SDL_DisplayID m_PlannedPrimaryDisplay = 0;
+    // Planned while the windows already exist (in-session reconnect): the
+    // SDL thread applies it when the reconnect finishes.
+    std::atomic_bool m_PresentationChangePending {false};
+    bool m_PendingMultiDisplayPresentation = false;
+    // "Screens changed": settle, collapse, ask, and apply on request.
+    Uint64 m_ClientDisplayChangeDeadline = 0;
+    QString m_PresentedDisplayFingerprint;
+    QString m_PresentedDisplaySignature;
+    std::atomic_bool m_DisplayReconfigureRequested {false};
     SDL_DisplayID m_TargetDisplayId = 0;
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;

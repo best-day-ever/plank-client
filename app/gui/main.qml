@@ -5,6 +5,7 @@ import QtQuick.Window 2.2
 import QtQuick.Controls.Material 2.2
 
 import ComputerManager 1.0
+import DisplaySetup 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 
@@ -108,6 +109,70 @@ ApplicationWindow {
             settingsButton.clicked()
         }
 
+    }
+
+    // The display setup wizard: from the first connect with new screens, a
+    // workstation's Settings…, Settings > Displays and the banner below.
+    DisplaySetupDialog {
+        id: screensDialog
+    }
+
+    function openDisplaySetup(hostId, hostName, reason, connectAfter, page) {
+        screensDialog.openFor(hostId, hostName, reason, connectAfter, page)
+    }
+
+    // Screens changed (dock, undock, a lid opened) while no stream runs.
+    Rectangle {
+        id: displayBanner
+        readonly property bool streaming: qmltypeof(stackView.currentItem, "StreamSegue")
+        readonly property bool onboarding: qmltypeof(stackView.currentItem, "OnboardingView")
+        visible: DisplaySetup.bannerKind !== "" && !streaming && !onboarding && !screensDialog.visible
+        z: 10
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 20
+        width: Math.min(760, parent.width - 40)
+        height: bannerRow.implicitHeight + 24
+        radius: theme.radiusLarge
+        color: theme.surfaceRaised
+        border.width: 1
+        border.color: DisplaySetup.bannerKind === "saved" ? theme.borderSubtle : theme.accent
+
+        // A saved layout is only news for a moment.
+        Timer {
+            running: displayBanner.visible && DisplaySetup.bannerKind === "saved"
+            interval: 8000
+            onTriggered: DisplaySetup.dismissBanner()
+        }
+
+        RowLayout {
+            id: bannerRow
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: theme.spaceMedium
+
+            Label {
+                text: DisplaySetup.bannerText
+                color: theme.textPrimary
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            Button {
+                text: DisplaySetup.bannerKind === "saved" ? qsTr("Change…") :
+                      DisplaySetup.bannerKind === "choose" ? qsTr("Choose screens…") : qsTr("Set up…")
+                highlighted: DisplaySetup.bannerKind !== "saved"
+                onClicked: {
+                    var reason = DisplaySetup.bannerKind === "new" ? "new-screens" : ""
+                    DisplaySetup.dismissBanner()
+                    openDisplaySetup("", "", reason, false, 0)
+                }
+            }
+            Button {
+                text: DisplaySetup.bannerKind === "saved" ? qsTr("OK") : qsTr("Later")
+                flat: true
+                onClicked: DisplaySetup.dismissBanner()
+            }
+        }
     }
 
     // This timer keeps us polling for 5 minutes of inactivity
