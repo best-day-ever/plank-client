@@ -1,14 +1,16 @@
-## 1.0.149
+## 1.0.151
 
 ### Client
 
 - Offer Take Over or Cancel when another client is connected to the same Mac account.
 - Use the new client's display size after an approved takeover.
 - Preserve valid packets when the connection adjusts its network packet size.
+- Ubuntu: include the image plugin needed to display dialog icons.
 
 ### Host
 
 - macOS: transfer an active session to another client after explicit confirmation, including while locked.
+- macOS: avoid a temporary loss of connectivity when switching between the login screen and desktop.
 - Preserve valid packets during network packet-size recovery on Linux and macOS.
 - Reduce diagnostic logging overhead during streaming.
 
