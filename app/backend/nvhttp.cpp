@@ -824,6 +824,9 @@ NvOutputTopology NvHTTP::getOutputTopology(QString* certificateSha256)
         // can authenticate once to the replacement worker.
         verifyResponseStatus(response);
     }
+    if (document.isObject() && NvOutputTopology::temporarilyEmpty(document.object())) {
+        throw GfeHttpResponseException(425, "Host display outputs are becoming ready");
+    }
     NvOutputTopology topology;
     QString error;
     if (!document.isObject() ||

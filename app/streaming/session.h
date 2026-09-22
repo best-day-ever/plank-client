@@ -484,6 +484,7 @@ private:
     bool m_UnexpectedTermination;
     std::atomic_bool m_ReconnectRequested;
     std::atomic<Uint64> m_DesktopHandoffNoticeDeadline {0};
+    std::atomic<Uint64> m_DesktopHandoffRetryDeadline {0};
     std::atomic_bool m_ReconnectGreeterConfirmed {false};
     std::atomic<Uint64> m_LastPlankVideoReceived {0};
     QString m_PlankWorkerInstance;

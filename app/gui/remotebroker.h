@@ -159,6 +159,7 @@ private:
     QString passkeyRpId() const;
     void finishSignIn(QString token, const QString& confirmedUser);
     void setBusy(const QString& text);
+    void refreshHostsImpl(bool showBusy);
     void handleBrokerError(const PlankBrokerError& error, bool connecting);
     void signOutLocally(const QString& message = QString());
     // LAN bookmarks that could seed a workstation's first stream settings.
@@ -182,6 +183,7 @@ private:
     bool m_PasskeyBusy = false;
     quint64 m_PasskeyGeneration = 0;
     QPointer<Session> m_PendingSession;
+    bool m_HostRefreshInFlight = false;
     // Brokered computers are never persisted; they must outlive their Session.
     QVector<NvComputer*> m_Computers;
 

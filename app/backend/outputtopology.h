@@ -158,6 +158,10 @@ struct NvOutputTopology
     static int hostPlatform(int version, int featureFlags);
     static bool fromJson(const QJsonObject& object, NvOutputTopology& topology,
                          QString* error = nullptr);
+    // XRandR can briefly report no outputs while the host applies a mode.
+    // Only this exact empty snapshot is retryable; all other invalid topology
+    // documents remain protocol errors.
+    static bool temporarilyEmpty(const QJsonObject& object);
     // The display arrangement fields (feature 0x8000000), strict.
     static bool parseDisplayArrangement(const QJsonObject& object, const QJsonObject& layout,
                                         NvOutputTopology& topology, QString* error);
