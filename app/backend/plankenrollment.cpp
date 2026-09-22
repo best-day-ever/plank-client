@@ -49,6 +49,11 @@ QString noticeText(Notice notice, const PasswordPolicy& policy)
         return QCoreApplication::translate("PlankEnrollment",
             "Setup was interrupted, but your new password is saved. "
             "Start again with your username and the new password.");
+    case Notice::DeniedPasswordMaybeChanged:
+        return QCoreApplication::translate("PlankEnrollment",
+            "Setup was interrupted, and your new password may already be saved. "
+            "Start again with your username and the new password. "
+            "If that doesn't work, use your one-time password.");
     case Notice::AlreadyEnrolled:
         return QCoreApplication::translate("PlankEnrollment",
             "Your account is already set up. Sign in with your password and authenticator code.");
@@ -158,11 +163,14 @@ Reply Conversation::send(Endpoint endpoint, QJsonObject body) const
 Outcome Conversation::deniedOutcome()
 {
     const bool changed = m_PasswordChanged;
+    const bool maybeChanged = m_PasswordMaybeChanged;
     finishLocked();
+    m_PasswordMaybeChanged = false;
     m_Step = Step::Credentials;
     Outcome outcome;
     outcome.step = Step::Credentials;
-    outcome.notice = changed ? Notice::DeniedAfterPasswordChange : Notice::Denied;
+    outcome.notice = changed ? Notice::DeniedAfterPasswordChange :
+                     maybeChanged ? Notice::DeniedPasswordMaybeChanged : Notice::Denied;
     return outcome;
 }
 
@@ -182,6 +190,7 @@ Outcome Conversation::begin(const QString& username, QString oneTimePassword)
     // A fresh start abandons any earlier conversation.
     finishLocked();
     m_PasswordChanged = false;
+    m_PasswordMaybeChanged = false;
     m_Username = username.trimmed();
     if (m_Username.isEmpty() || m_Username.size() > 255 || oneTimePassword.isEmpty() ||
             oneTimePassword.size() > MaximumPasswordLength) {
@@ -279,12 +288,25 @@ Outcome Conversation::changePassword(QString newPassword)
             {QStringLiteral("conversation_id"), m_ConversationId},
             {QStringLiteral("new_password"), newPassword},
         });
+    } catch (const PlankBrokerError& error) {
+        zero(newPassword);
+        // Only these fail before the request is sent (or, for 429, before the
+        // broker acts on it). Anything else, e.g. a timeout, may have lost the
+        // reply to a change the broker already made.
+        if (error.kind() != PlankBrokerError::RateLimited &&
+                error.kind() != PlankBrokerError::NotConfigured &&
+                error.kind() != PlankBrokerError::Tls) {
+            m_PasswordMaybeChanged = true;
+        }
+        throw;
     } catch (...) {
         zero(newPassword);
+        m_PasswordMaybeChanged = true;
         throw;
     }
     switch (reply.state) {
     case State::Totp:
+        m_PasswordMaybeChanged = false;
         zero(m_Password);
         m_Password = newPassword;
         zero(newPassword);
@@ -296,6 +318,8 @@ Outcome Conversation::changePassword(QString newPassword)
         m_Step = Step::Authenticator;
         return authenticatorOutcome();
     case State::PasswordRejected: {
+        // Still at the password stage: an earlier lost request changed nothing.
+        m_PasswordMaybeChanged = false;
         zero(newPassword);
         Outcome outcome;
         outcome.step = Step::NewPassword;

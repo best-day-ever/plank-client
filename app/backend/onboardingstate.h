@@ -2,7 +2,8 @@
 
 // Whether the Client opens with the first sign-in wizard. Only a truly new
 // installation does: anything that shows this Mac was used before - the
-// wizard's own "completed" flag, a remembered remote session, a local
+// "completed" flag (set by the wizard and by every broker sign-in,
+// RemoteBroker::finishSignIn), a remembered remote session, a local
 // Touch ID key, a saved workstation bookmark or a remote display setup -
 // means the person already knows the way, and they get the normal sign-in.
 // Settings written by older Clients (same settings domain) therefore keep
@@ -73,6 +74,11 @@ inline void markCompleted(QSettings& settings)
     settings.setValue(completedKey(), true);
     settings.sync();
 }
+
+// Every successful broker sign-in (password + code, Touch ID, or the
+// wizard's own) calls this. The Keychain session is not lasting proof of
+// earlier use: sign-out and an expired session (401) clear it.
+inline void recordBrokerSignIn(QSettings& settings) { markCompleted(settings); }
 
 // True when the plank-passkey store (<root>/<rp_id>/<user>/<id>.json)
 // holds at least one key, for any relying party.

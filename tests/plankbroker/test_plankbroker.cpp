@@ -82,6 +82,9 @@ QByteArray ecCertificate() { return QByteArray::fromBase64(EcCertificateBase64);
 QByteArray rsaCertificate() { return QByteArray::fromBase64(RsaCertificateBase64); }
 QByteArray json(const char* text) { return QByteArray(text); }
 
+// Queue this status to read the request and drop the connection unanswered.
+const QByteArray DropReply = QByteArrayLiteral("DROP");
+
 // Minimal HTTPS/1.1 responder: one canned reply per connection, records the
 // raw request bytes it received (to prove nothing is sent to a wrong peer).
 // Queued replies (`replies`, status + body) are served first, one per
@@ -123,6 +126,11 @@ public:
                         const auto next = replies.takeFirst();
                         replyStatus = next.first;
                         replyBody = next.second;
+                    }
+                    if (replyStatus == DropReply) {
+                        // The request arrived, but its reply is lost.
+                        socket->abort();
+                        return;
                     }
                     // announceClose=false mimics the PLANK host: HTTP/1.1 without
                     // "Connection: close", yet the socket is closed after the reply.
@@ -396,6 +404,7 @@ private slots:
     void enrollmentWalkDeniedAfterPasswordChange();
     void enrollmentWalkPasskeyRejected();
     void enrollmentWalkTransportErrorsKeepTheStep();
+    void enrollmentWalkLostPasswordReply();
     void enrollmentStartSendsDeviceKey();
     void onboardingDecisionPrecedence();
     void onboardingReadsSettingsAndPasskeys();
@@ -2290,7 +2299,8 @@ void TestPlankBroker::enrollmentTextsAreGeneric()
     QCOMPARE(passwordCheckText(PasswordCheck::TooShort, policy), noticeText(Notice::PasswordTooShort, policy));
     // Every text is distinct and none names the account or says it exists.
     const QList<Notice> notices = {
-        Notice::Denied, Notice::DeniedAfterPasswordChange, Notice::AlreadyEnrolled, Notice::PasswordTooShort,
+        Notice::Denied, Notice::DeniedAfterPasswordChange, Notice::DeniedPasswordMaybeChanged,
+        Notice::AlreadyEnrolled, Notice::PasswordTooShort,
         Notice::PasswordTooSimple, Notice::PasswordReused, Notice::PasswordPolicy, Notice::CodeRejected,
         Notice::NextCodeRejected, Notice::PasskeyNotAdded, Notice::PasskeyNotCreated,
     };
@@ -2519,6 +2529,54 @@ void TestPlankBroker::enrollmentWalkPasskeyRejected()
     QCOMPARE(server.requestLog.size(), 5);
 }
 
+void TestPlankBroker::enrollmentWalkLostPasswordReply()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    // The broker changes the password but the reply never arrives; the
+    // conversation has moved on, so the retry is denied.
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue(DropReply, QByteArray());
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", EnrollDone);
+    // A second run: the reply is lost, but the retry shows nothing changed.
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue(DropReply, QByteArray());
+    server.queue("200 OK", R"({"state":"password_rejected","reason":"too_short"})");
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    QCOMPARE(conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time")).step, Step::NewPassword);
+    try {
+        conversation.changePassword(QStringLiteral("Correct-horse-9"));
+        QFAIL("a lost reply must throw");
+    } catch (const PlankBrokerError& error) {
+        QVERIFY(error.kind() != PlankBrokerError::RateLimited);
+    }
+    QCOMPARE(conversation.step(), Step::NewPassword);
+    Outcome outcome = conversation.changePassword(QStringLiteral("Correct-horse-9"));
+    QCOMPARE(outcome.step, Step::Credentials);
+    QCOMPARE(outcome.notice, Notice::DeniedPasswordMaybeChanged);
+    const QString text = noticeText(outcome.notice, PasswordPolicy {});
+    QVERIFY(text.contains(QStringLiteral("new password")));
+    QVERIFY(text != noticeText(Notice::Denied, PasswordPolicy {}));
+    QCOMPARE(server.requestLog.size(), 5);
+
+    // A definite "still at the password stage" answer clears the doubt.
+    QCOMPARE(conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time")).step, Step::NewPassword);
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, conversation.changePassword(QStringLiteral("Correct-horse-9")));
+    outcome = conversation.changePassword(QStringLiteral("Correct-horse-9"));
+    QCOMPARE(outcome.step, Step::NewPassword);
+    QCOMPARE(outcome.notice, Notice::PasswordTooShort);
+    outcome = conversation.changePassword(QStringLiteral("Correct-horse-10"));
+    QCOMPARE(outcome.notice, Notice::Denied);
+    QCOMPARE(server.requestLog.size(), 11);
+}
+
 void TestPlankBroker::enrollmentWalkTransportErrorsKeepTheStep()
 {
     using namespace PlankEnrollment;
@@ -2656,6 +2714,21 @@ void TestPlankBroker::onboardingReadsSettingsAndPasskeys()
         OnboardingState::markCompleted(settings);
         OnboardingState::readSettings(settings, inputs);
         QVERIFY(inputs.completed);
+    }
+    {
+        // A remote user signs in the normal way, then signs out (or the
+        // session expires) before any display setup: the Keychain session is
+        // gone, no bookmark, no Touch ID key. The sign-in alone must keep
+        // the wizard away on the next launch.
+        QSettings settings(directory.filePath(QStringLiteral("signin.ini")), QSettings::IniFormat);
+        OnboardingState::Inputs inputs;
+        OnboardingState::readSettings(settings, inputs);
+        QCOMPARE(OnboardingState::decide(inputs), OnboardingState::Decision::Show);
+        OnboardingState::recordBrokerSignIn(settings);
+        inputs = OnboardingState::Inputs();
+        inputs.rememberedSession = false;
+        OnboardingState::readSettings(settings, inputs);
+        QCOMPARE(OnboardingState::decide(inputs), OnboardingState::Decision::Completed);
     }
 
     const QString store = directory.filePath(QStringLiteral("passkeys"));

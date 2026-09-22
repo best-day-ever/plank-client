@@ -309,6 +309,7 @@ enum class Notice {
     None,
     Denied,                     // generic: wrong user/password, gate, expired conversation
     DeniedAfterPasswordChange,  // the new password is set; start again with it
+    DeniedPasswordMaybeChanged, // a password change reply was lost; it may be set
     AlreadyEnrolled,
     PasswordTooShort,
     PasswordTooSimple,
@@ -386,6 +387,9 @@ private:
     QString m_Username;
     QString m_Password;     // the current one: one-time, then the new one
     bool m_PasswordChanged = false;
+    // A /v1/enroll/password request may have reached the broker, but its reply
+    // was lost: the new password may already be the one that works.
+    bool m_PasswordMaybeChanged = false;
     PasswordPolicy m_Policy;
     QString m_OtpauthUri;
     QString m_Secret;
