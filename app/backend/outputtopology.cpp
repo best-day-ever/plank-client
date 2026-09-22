@@ -113,10 +113,31 @@ QStringList NvOutputTopology::qualifiedVirtualModes()
     return {QStringLiteral("1024x2160"), QStringLiteral("1280x2160"),
             QStringLiteral("1920x1080"), QStringLiteral("1920x1200"),
             QStringLiteral("2560x1440"), QStringLiteral("2560x1600"),
-            QStringLiteral("2560x2160"),
+            QStringLiteral("2560x2160"), QStringLiteral("3024x1890"),
             QStringLiteral("3440x1440"), QStringLiteral("3840x1600"),
             QStringLiteral("3840x2160"), QStringLiteral("4096x2160"),
             QStringLiteral("5120x2160")};
+}
+
+bool NvOutputTopology::hostAcceptsVirtualMode(const QString& mode, int hostFeatureFlags)
+{
+    if (!qualifiedVirtualModes().contains(mode)) {
+        return false;
+    }
+    // A 14-inch MacBook Pro's fullscreen viewport below the camera housing.
+    return mode != QLatin1String("3024x1890") ||
+            (hostFeatureFlags & NotchSafeLaptopModesFeature) != 0;
+}
+
+QStringList NvOutputTopology::virtualModesForHost(int hostFeatureFlags)
+{
+    QStringList modes;
+    for (const QString& mode : qualifiedVirtualModes()) {
+        if (hostAcceptsVirtualMode(mode, hostFeatureFlags)) {
+            modes.append(mode);
+        }
+    }
+    return modes;
 }
 
 QSize NvOutputTopology::virtualModeSize(const QString& mode)
@@ -220,7 +241,7 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
     for (const QJsonValue& mode : layout.value("virtual_modes").toArray()) {
-        if (!mode.isString() || !qualifiedVirtualModes().contains(mode.toString())) {
+        if (!mode.isString() || !hostAcceptsVirtualMode(mode.toString(), parsed.featureFlags)) {
             if (error != nullptr) {
                 *error = QStringLiteral("Invalid host virtual mode");
             }
@@ -533,7 +554,7 @@ QSize NvOutputTopology::clientMatchTarget(const NvClientDisplay& display)
     return clientMatchTarget(desktop, display.nativeSize);
 }
 
-QStringList NvOutputTopology::rankedVirtualModes(const QSize& target)
+QStringList NvOutputTopology::rankedVirtualModes(const QSize& target, const QStringList& candidateModes)
 {
     if (!target.isValid() || target.isEmpty()) {
         return {};
@@ -549,8 +570,11 @@ QStringList NvOutputTopology::rankedVirtualModes(const QSize& target)
     const double targetAspect = double(target.width()) / target.height();
     QVector<Candidate> candidates;
     QStringList ranked;
-    for (const QString& mode : qualifiedVirtualModes()) {
+    for (const QString& mode : candidateModes) {
         const QSize size = virtualModeSize(mode);
+        if (!size.isValid()) {
+            continue;
+        }
         if (mode == exact) {
             ranked.append(mode);
             continue;
@@ -585,7 +609,8 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,
                                                   QString* error,
-                                                  bool* fitted)
+                                                  bool* fitted,
+                                                  const QStringList& candidateModes)
 {
     hostLayout.clear();
     virtualModes.clear();
@@ -622,7 +647,7 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
     QVector<int> choice;
     for (const NvClientDisplay& display : std::as_const(displays)) {
         const QSize target = clientMatchTarget(display);
-        const QStringList ranked = rankedVirtualModes(target);
+        const QStringList ranked = rankedVirtualModes(target, candidateModes);
         if (ranked.isEmpty()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The size of a client monitor could not be detected.");

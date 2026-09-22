@@ -2432,8 +2432,10 @@ bool Session::configurePlankHostLayout()
     QSize authenticatedDesktopSize;
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
+    int hostFeatureFlags = 0;
     {
         QReadLocker lock(&m_Computer->lock);
+        hostFeatureFlags = m_Computer->outputTopology.featureFlags;
         layoutPolicy = m_Computer->plankHostLayout;
         scalingMode = m_Computer->plankScalingMode;
         virtualMode1 = m_Computer->plankVirtualMode1;
@@ -2493,7 +2495,8 @@ bool Session::configurePlankHostLayout()
             // matched to the closest qualified mode and letterboxed.
             bool fitted = false;
             const bool resolved = NvOutputTopology::resolveClientDisplayLayout(
-                        probedDisplays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, &fitted);
+                        probedDisplays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, &fitted,
+                        NvOutputTopology::virtualModesForHost(hostFeatureFlags));
             for (int index = 0; index < probedDisplays.size(); ++index) {
                 const QSize target = NvOutputTopology::clientMatchTarget(probedDisplays.at(index));
                 const QString mode = m_ResolvedVirtualModes.value(index);
@@ -2546,6 +2549,15 @@ bool Session::configurePlankHostLayout()
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
         emit displayLaunchError(error);
         return false;
+    }
+    for (const QString& mode : std::as_const(m_ResolvedVirtualModes)) {
+        if (!NvOutputTopology::hostAcceptsVirtualMode(mode, hostFeatureFlags)) {
+            const QString error = tr("This workstation does not support %1 yet. Update PLANK on the workstation or choose another resolution.")
+                    .arg(QString(mode).replace(QLatin1Char('x'), QChar(0x00D7)));
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+            emit displayLaunchError(error);
+            return false;
+        }
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

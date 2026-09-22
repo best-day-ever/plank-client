@@ -16,6 +16,7 @@ private slots:
     void rejectsDuplicateIdentity();
     void rejectsConfiguredModeMismatch();
     void acceptsTallCinemaModes();
+    void negotiatesNotchSafeLaptopMode();
     void enforcesHostDisplayPolicy();
     void validatesRequestedLayoutGeometry();
     void matchesOneClientDisplay();
@@ -353,9 +354,9 @@ void TestOutputTopology::rejectsConfiguredModeMismatch()
 void TestOutputTopology::acceptsTallCinemaModes()
 {
     const QStringList modes = NvOutputTopology::qualifiedVirtualModes();
-    QCOMPARE(modes.size(), 12);
+    QCOMPARE(modes.size(), 13);
     QCOMPARE(modes.at(6), QStringLiteral("2560x2160"));
-    QCOMPARE(modes.at(9), QStringLiteral("3840x2160"));
+    QCOMPARE(modes.at(10), QStringLiteral("3840x2160"));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("1024x2160")),
              QSize(1024, 2160));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("4096x2160")),
@@ -386,6 +387,76 @@ void TestOutputTopology::acceptsTallCinemaModes()
     QVERIFY(!NvOutputTopology::virtualCanvasSize(
                  QStringLiteral("dual-horizontal"),
                  {QStringLiteral("3840x2160"), QStringLiteral("5120x2160")}).isValid());
+}
+
+void TestOutputTopology::negotiatesNotchSafeLaptopMode()
+{
+    // A 14-inch MacBook Pro in its default "Looks like 1512x982" scaling:
+    // native fullscreen stops below the camera housing (37 points).
+    int logicalHeight = 982;
+    int pixelHeight = 1964;
+    QVERIFY(MacDisplayGeometry::insetTop(1512, logicalHeight, 3024, pixelHeight, 37));
+    const QString viewport = QStringLiteral("3024x%1").arg(pixelHeight);
+    QCOMPARE(viewport, QStringLiteral("3024x1890"));
+    QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(viewport));
+    QCOMPARE(NvOutputTopology::virtualModeSize(viewport), QSize(3024, 1890));
+    // The panel itself is never presented 1:1, so it is not a mode.
+    QVERIFY(!NvOutputTopology::virtualModeSize(QStringLiteral("3024x1964")).isValid());
+
+    const int withoutFeature = NvOutputTopology::SupportedFeatureFlags &
+            ~NvOutputTopology::NotchSafeLaptopModesFeature;
+    QVERIFY(NvOutputTopology::hostAcceptsVirtualMode(viewport, NvOutputTopology::SupportedFeatureFlags));
+    QVERIFY(!NvOutputTopology::hostAcceptsVirtualMode(viewport, withoutFeature));
+    QVERIFY(NvOutputTopology::hostAcceptsVirtualMode(QStringLiteral("2560x1600"), withoutFeature));
+    QVERIFY(!NvOutputTopology::hostAcceptsVirtualMode(QStringLiteral("3024x1964"),
+                                                      NvOutputTopology::SupportedFeatureFlags));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"), {viewport, QStringLiteral("5120x2160")}),
+             QSize(8144, 2160));
+
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) +
+               "/tests/protocol/output-topology-v13-notch-safe.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(document, topology, &error), qPrintable(error));
+    QVERIFY(topology.featureFlags & NvOutputTopology::NotchSafeLaptopModesFeature);
+    QCOMPARE(topology.virtualModes, QStringList({viewport}));
+    QVERIFY(topology.matchesRequestedHostLayout(QStringLiteral("single"), {viewport}));
+    NvOutputTopology restored;
+    QVERIFY(NvOutputTopology::fromJson(topology.toJson(), restored));
+    QCOMPARE(restored.toJson(), topology.toJson());
+
+    // A host that has not advertised the feature cannot report the mode.
+    document["feature_flags"] = document.value("feature_flags").toInt() &
+            ~NvOutputTopology::NotchSafeLaptopModesFeature;
+    QVERIFY(!NvOutputTopology::fromJson(document, topology));
+
+    // Match client: a 14" in its default scaling, as ClientDisplayProbe sees it.
+    QCOMPARE(NvOutputTopology::virtualModesForHost(NvOutputTopology::SupportedFeatureFlags),
+             NvOutputTopology::qualifiedVirtualModes());
+    QVERIFY(!NvOutputTopology::virtualModesForHost(withoutFeature).contains(viewport));
+    QCOMPARE(NvOutputTopology::virtualModesForHost(withoutFeature).size(),
+             NvOutputTopology::qualifiedVirtualModes().size() - 1);
+    const NvClientDisplay laptop {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964),
+                                  QSize(3024, 1890)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(laptop), QSize(3024, 1890));
+    QString layout;
+    QStringList modes;
+    bool fitted = true;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                {laptop}, layout, modes, &error, &fitted,
+                NvOutputTopology::virtualModesForHost(NvOutputTopology::SupportedFeatureFlags)));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(modes, QStringList({viewport}));
+    QVERIFY(!fitted);
+    // An older host: the closest mode it accepts, presented scaled to fit.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                {laptop}, layout, modes, &error, &fitted,
+                NvOutputTopology::virtualModesForHost(withoutFeature)));
+    QCOMPARE(modes, QStringList({QStringLiteral("2560x1600")}));
+    QVERIFY(fitted);
 }
 
 void TestOutputTopology::enforcesHostDisplayPolicy()
@@ -543,15 +614,15 @@ void TestOutputTopology::computesClientMatchTarget()
     const NvClientDisplay display {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(display), QSize(3024, 1964));
     // Notched 14" in the default "looks like 1512x982": native fullscreen is 1512x945 pt below the camera
-    // housing, so the target is the 16:10 viewport and the closest mode fits it without letterboxing.
+    // housing, so the target is the 16:10 viewport, which is itself a qualified mode (1:1).
     const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(notched), QSize(3024, 1890));
     QString layout;
     QStringList modes;
-    bool fitted = false;
+    bool fitted = true;
     QVERIFY(NvOutputTopology::resolveClientDisplayLayout({notched}, layout, modes, nullptr, &fitted));
-    QCOMPARE(modes, QStringList {QStringLiteral("2560x1600")});
-    QVERIFY(fitted);
+    QCOMPARE(modes, QStringList {QStringLiteral("3024x1890")});
+    QVERIFY(!fitted);
     // "More Space" 1800x1169 pt: the viewport 3600x2260 is capped to the panel.
     const NvClientDisplay moreSpace {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338), QSize(3600, 2260)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(moreSpace), QSize(3024, 1898));
@@ -562,8 +633,8 @@ void TestOutputTopology::bestFitsOddClientDisplays_data()
     QTest::addColumn<QSize>("target");
     QTest::addColumn<QString>("mode");
     QTest::addColumn<bool>("fitted");
-    QTest::newRow("MacBook Pro 14") << QSize(3024, 1964) << "2560x1600" << true;
-    QTest::newRow("MacBook Pro 16") << QSize(3456, 2234) << "2560x1600" << true;
+    QTest::newRow("MacBook Pro 14") << QSize(3024, 1964) << "3024x1890" << true;
+    QTest::newRow("MacBook Pro 16") << QSize(3456, 2234) << "3024x1890" << true;
     QTest::newRow("MacBook Air 13") << QSize(2560, 1664) << "2560x1600" << true;
     QTest::newRow("MacBook Air 15") << QSize(2940, 1912) << "2560x1600" << true;
     QTest::newRow("1x 16:10 desktop") << QSize(1920, 1200) << "1920x1200" << false;
@@ -626,9 +697,9 @@ void TestOutputTopology::bestFitsTwoClientDisplays()
         {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964)}},
         layout, modes, &error, &fitted), qPrintable(error));
     QCOMPARE(layout, QStringLiteral("dual-horizontal"));
-    QCOMPARE(modes, QStringList({QStringLiteral("2560x1600"), QStringLiteral("3840x2160")}));
+    QCOMPARE(modes, QStringList({QStringLiteral("3024x1890"), QStringLiteral("3840x2160")}));
     QVERIFY(fitted);
-    QCOMPARE(NvOutputTopology::virtualCanvasSize(layout, modes), QSize(6400, 2160));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(layout, modes), QSize(6864, 2160));
 
     // Two exact qualified monitors stay exact.
     QVERIFY(NvOutputTopology::resolveClientDisplayLayout({

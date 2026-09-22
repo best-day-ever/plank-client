@@ -1162,8 +1162,9 @@ void TestPlankBroker::remoteDisplaySetupRejectsInvalidEntries()
 
 void TestPlankBroker::remoteDisplaySetupSuggestsFittingMode()
 {
-    // MacBook Pro 14" (3024x1964) and MacBook Air 13" (2560x1664) panels.
-    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964)), QStringLiteral("2560x1600"));
+    // MacBook Pro 14" (3024x1964) and MacBook Air 13" (2560x1664) panels:
+    // each gets its fullscreen viewport below the camera housing.
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964)), QStringLiteral("3024x1890"));
     QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(2560, 1664)), QStringLiteral("2560x1600"));
     QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3840, 2160)), QStringLiteral("3840x2160"));
     // 16:9 5K keeps its shape rather than the wider 5120x2160.
@@ -1190,9 +1191,11 @@ void TestPlankBroker::remoteDisplaySetupMatchesOddScreens()
                                                  screen(3840, 1920, 1080)}, &reason));
     QVERIFY(reason.contains(QStringLiteral("one or two")));
 
+    // A 14" MacBook Pro panel: its 16:10 fullscreen viewport below the notch
+    // is the largest qualified mode that fits without upscaling.
     RemoteDisplaySetup::Setup proposal = RemoteDisplaySetup::proposal({screen(0, 3024, 1964)});
     QCOMPARE(proposal.hostLayout, QStringLiteral("match-client"));
-    QCOMPARE(proposal.virtualMode1, QStringLiteral("2560x1600"));
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("3024x1890"));
     QCOMPARE(proposal.scalingMode, QStringLiteral("scaled-span"));
     QVERIFY(RemoteDisplaySetup::isValid(proposal));
     proposal = RemoteDisplaySetup::proposal({screen(0, 3840, 2160), screen(3840, 2560, 1440)});
@@ -1203,7 +1206,7 @@ void TestPlankBroker::remoteDisplaySetupMatchesOddScreens()
     proposal = RemoteDisplaySetup::proposal({screen(0, 3024, 1964), screen(3024, 1920, 1080),
                                              screen(4944, 1920, 1080)});
     QCOMPARE(proposal.hostLayout, QStringLiteral("single"));
-    QCOMPARE(proposal.virtualMode1, QStringLiteral("2560x1600"));
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("3024x1890"));
     QVERIFY(RemoteDisplaySetup::isValid(proposal));
 }
 
@@ -1270,18 +1273,19 @@ void TestPlankBroker::remoteDisplaySetupDialogAndSessionAgree()
     QVERIFY(!unprobed.backingSize.isValid());
     QCOMPARE(NvOutputTopology::clientMatchTarget(unprobed), QSize(3024, 1964));
 
-    // Default Retina (1512x982 points @2x) and "More Space" (1800x1169 @2x):
-    // both aim at the 3024x1964 panel and get 2560x1600, letterboxed.
+    // Default Retina (1512x982 points @2x) and "More Space" (1800x1169 @2x)
+    // without a fullscreen viewport: both aim at the 3024x1964 panel and get
+    // the largest 16:10 mode that fits, 3024x1890, letterboxed.
     for (const NvClientDisplay& retina : {NvClientDisplay {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964)},
                                           NvClientDisplay {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338)}}) {
         const ClientDisplayProbe::MatchPreview preview = ClientDisplayProbe::matchPreview({retina});
         QVERIFY(preview.ok);
         QVERIFY(preview.fitted);
-        QCOMPARE(preview.modes, QStringList({QStringLiteral("2560x1600")}));
-        QCOMPARE(ClientDisplayProbe::matchSummary(preview), QStringLiteral("2560 × 1600 (closest supported size)"));
+        QCOMPARE(preview.modes, QStringList({QStringLiteral("3024x1890")}));
+        QCOMPARE(ClientDisplayProbe::matchSummary(preview), QStringLiteral("3024 × 1890 (closest supported size)"));
         QVERIFY(ClientDisplayProbe::describe(retina).contains(QStringLiteral("(2×)")));
         QVERIFY(ClientDisplayProbe::logLine(retina, preview.modes.first(), false).endsWith(
-                    QStringLiteral("target=3024x1964 match=2560x1600 (fitted)")));
+                    QStringLiteral("target=3024x1964 match=3024x1890 (fitted)")));
     }
     // Notched 14" at the default 1512x982 pt: native fullscreen is the 3024x1890 viewport below the camera
     // housing. The Session inherits it from the probe, so both aim at the 16:10 viewport, not the panel.
@@ -1291,10 +1295,13 @@ void TestPlankBroker::remoteDisplaySetupDialogAndSessionAgree()
                 QRect(0, 0, 1512, 982), QSize(3024, 1964), probedNotched);
     QCOMPARE(notchedSession.fullscreenSize, QSize(3024, 1890));
     QCOMPARE(NvOutputTopology::clientMatchTarget(notchedSession), QSize(3024, 1890));
+    // That viewport is a qualified mode, so it is matched 1:1.
     const ClientDisplayProbe::MatchPreview notchedPreview = ClientDisplayProbe::matchPreview(probedNotched);
-    QCOMPARE(notchedPreview.modes, QStringList({QStringLiteral("2560x1600")}));
-    QVERIFY(ClientDisplayProbe::logLine(notchedSession, notchedPreview.modes.first(), false).endsWith(
-                QStringLiteral("target=3024x1890 match=2560x1600 (fitted)")));
+    QCOMPARE(notchedPreview.modes, QStringList({QStringLiteral("3024x1890")}));
+    QVERIFY(!notchedPreview.fitted);
+    QCOMPARE(ClientDisplayProbe::matchSummary(notchedPreview), QStringLiteral("3024 × 1890 (exact)"));
+    QVERIFY(ClientDisplayProbe::logLine(notchedSession, notchedPreview.modes.first(), true).endsWith(
+                QStringLiteral("target=3024x1890 match=3024x1890 (exact)")));
     // A plain external monitor describes as its size.
     QCOMPARE(ClientDisplayProbe::describe({screen(0, 2560, 1440), screen(2560, 1920, 1080)}),
              QStringLiteral("2560 × 1440 + 1920 × 1080"));
@@ -1319,12 +1326,12 @@ void TestPlankBroker::remoteDisplaySetupMigratesSavedMatchClient()
     QString reason;
     QVERIFY(RemoteDisplaySetup::refreshMatchedModes(settings, QStringLiteral("studio-a.example.test"), setup,
                                                     {retina}, &reason));
-    QCOMPARE(setup.virtualMode1, QStringLiteral("2560x1600"));
-    QCOMPARE(setup.virtualMode2, QStringLiteral("2560x1600"));
+    QCOMPARE(setup.virtualMode1, QStringLiteral("3024x1890"));
+    QCOMPARE(setup.virtualMode2, QStringLiteral("3024x1890"));
     setup = RemoteDisplaySetup::load(settings, QStringLiteral("studio-a.example.test"));
     QVERIFY(setup.configured);
     QCOMPARE(setup.hostLayout, QStringLiteral("match-client"));
-    QCOMPARE(setup.virtualMode1, QStringLiteral("2560x1600"));
+    QCOMPARE(setup.virtualMode1, QStringLiteral("3024x1890"));
 
     // A stored mode off the allowlist does not force the dialog for Match.
     settings.setValue(QStringLiteral("remote-hosts/studio-b.example.test/host-layout"), QStringLiteral("match-client"));
@@ -1334,7 +1341,7 @@ void TestPlankBroker::remoteDisplaySetupMigratesSavedMatchClient()
     QVERIFY(setup.configured);
     QVERIFY(RemoteDisplaySetup::refreshMatchedModes(settings, QStringLiteral("studio-b.example.test"), setup, {retina}));
     QCOMPARE(RemoteDisplaySetup::load(settings, QStringLiteral("studio-b.example.test")).virtualMode1,
-             QStringLiteral("2560x1600"));
+             QStringLiteral("3024x1890"));
     // ...but a single virtual display with such a mode is still asked again.
     settings.setValue(QStringLiteral("remote-hosts/studio-b.example.test/host-layout"), QStringLiteral("single"));
     settings.setValue(QStringLiteral("remote-hosts/studio-b.example.test/virtual-mode-1"), QStringLiteral("3024x1964"));
