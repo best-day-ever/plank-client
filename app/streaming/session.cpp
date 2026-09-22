@@ -10,6 +10,9 @@
 #include "streaming/streamutils.h"
 #ifdef Q_OS_MACOS
 #include "macclipboardsync.h"
+#ifdef PLANK_TRANSPORT
+#include "macfileclipboard.h"
+#endif
 #endif
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
@@ -61,6 +64,7 @@
 #define SDL_CODE_PLANK_REPLANK_COMPLETE 110
 #define SDL_CODE_PLANK_CLIPBOARD 111
 #define SDL_CODE_PLANK_CLIPBOARD_POLL 112
+#define SDL_CODE_PLANK_FILE_CLIPBOARD_READY 113
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -813,6 +817,7 @@ bool Session::startPlankTransportDataPlane(quint16 port,
     config.idle_timeout_ms = 30000;
     config.keep_alive_interval_ms = 5000;
     config.max_udp_payload_size = quicUdpPayloadMtu;
+    config.file_clipboard_enabled = m_FileClipboardMode != QStringLiteral("off");
     qInfo() << "Using the negotiated fixed maximum QUIC UDP payload:"
             << config.max_udp_payload_size << "bytes";
     config.remote_address = remoteAddressUtf8.constData();
@@ -1015,6 +1020,8 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
                 QStringLiteral("host_feature_flags")).toInt();
     const int referenceFrameInvalidation = response.value(
                 QStringLiteral("reference_frame_invalidation")).toInt(-1);
+    const QString fileClipboardMode = response.value(
+                QStringLiteral("file_clipboard_mode")).toString();
     if (responseVideoFormat != negotiatedVideoFormat || sampleRate != 48000 ||
             responseChannels != audioChannels || responseChannels <= 0 ||
             responseChannels > AUDIO_CONFIGURATION_MAX_CHANNEL_COUNT ||
@@ -1023,6 +1030,7 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
             responsePacketDuration <= 0 || responsePacketDuration > 120 ||
             (hostFeatureFlags & LI_FF_LOCAL_CURSOR) == 0 ||
             (referenceFrameInvalidation != 0 && referenceFrameInvalidation != 1) ||
+            fileClipboardMode != m_FileClipboardMode ||
             mapping.size() != responseChannels) {
         errorMessage = tr("The host returned unsupported native audio or video values.");
         return false;
@@ -1554,6 +1562,21 @@ void Session::startClipboardSync()
                     });
     }
     m_ClipboardSync->start();
+#ifdef PLANK_TRANSPORT
+    if (m_FileClipboardMode != QStringLiteral("off") && !m_FileClipboard) {
+        m_FileClipboard = std::make_unique<MacFileClipboard>(
+                    m_PlankTransportEndpoint,
+                    m_FileClipboardMode.toStdString(),
+                    [] {
+                        SDL_Event event {};
+                        event.type = SDL_EVENT_USER;
+                        event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_READY;
+                        event.user.timestamp = SDL_GetTicks();
+                        return SDL_PushEvent(&event);
+                    });
+    }
+    if (m_FileClipboard) m_FileClipboard->start();
+#endif
     qInfo() << "Started PLANK clipboard sync";
 #endif
 }
@@ -1564,7 +1587,31 @@ void Session::stopClipboardSync()
     if (m_ClipboardSync) {
         m_ClipboardSync->stop();
     }
+#ifdef PLANK_TRANSPORT
+    if (m_FileClipboard) {
+        m_FileClipboard->stop();
+        m_FileClipboard.reset();
+    }
+#endif
 }
+
+#ifdef PLANK_TRANSPORT
+bool Session::beginFileClipboardPasteOnMainThread()
+{
+    return m_FileClipboard != nullptr && anyPresentationWindowFocused() &&
+            m_FileClipboard->beginPasteOnMainThread();
+}
+
+void Session::injectRemoteFilePasteOnMainThread()
+{
+    constexpr short LeftControl = 0xA2;
+    constexpr short V = 0x56;
+    LiSendKeyboardEvent(LeftControl, KEY_ACTION_DOWN, MODIFIER_CTRL);
+    LiSendKeyboardEvent(V, KEY_ACTION_DOWN, MODIFIER_CTRL);
+    LiSendKeyboardEvent(V, KEY_ACTION_UP, MODIFIER_CTRL);
+    LiSendKeyboardEvent(LeftControl, KEY_ACTION_UP, 0);
+}
+#endif
 
 void Session::queueClipboardPollEvent()
 {
@@ -2746,6 +2793,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     QString acceptedCaptureSource;
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
+    QString acceptedFileClipboardMode {QStringLiteral("off")};
     const bool macCapture = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
     MacPreviewLaunch::Reply macLaunch;
     quint32 routeInterfaceMtu = 0;
@@ -2855,6 +2903,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 acceptedCaptureSource = captureSource;
                 acceptedEncoderBackend = encoderBackend;
                 acceptedEncodingMode = encodingMode;
+                acceptedFileClipboardMode = QStringLiteral("off");
                 return;
             }
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
@@ -2880,7 +2929,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                           plankTransportToken,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
-                          acceptedEncodingMode);
+                          acceptedEncodingMode,
+                          acceptedFileClipboardMode);
         };
         try {
             startApp();
@@ -3201,6 +3251,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     LiSetPlankNativeControlSender(nullptr, nullptr);
     LiSetPlankNativeInputSender(nullptr, nullptr);
 #endif
+    m_FileClipboardMode = acceptedFileClipboardMode;
     if (!startPlankTransportDataPlane(plankTransportPort,
                                  plankTransportCertificateSha256,
                                  plankTransportToken,
@@ -4201,6 +4252,16 @@ void Session::execInternal()
             if (m_ClipboardSync != nullptr) {
                 m_ClipboardSync->pollLocalClipboardOnMainThread();
             }
+#ifdef PLANK_TRANSPORT
+            if (m_FileClipboard != nullptr) {
+                m_FileClipboard->pollLocalClipboardOnMainThread();
+            }
+#endif
+#endif
+            return true;
+        case SDL_CODE_PLANK_FILE_CLIPBOARD_READY:
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+            injectRemoteFilePasteOnMainThread();
 #endif
             return true;
         default:

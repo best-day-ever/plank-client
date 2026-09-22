@@ -35,6 +35,10 @@ std::string readGeneralPasteboardText()
         if (pasteboard == nil) {
             return {};
         }
+        NSDictionary* fileOptions = @{NSPasteboardURLReadingFileURLsOnlyKey: @YES};
+        if ([pasteboard canReadObjectForClasses:@[[NSURL class]] options:fileOptions]) {
+            return {};
+        }
         for (NSString* type in pasteboardTextTypes()) {
             NSString* text = [pasteboard stringForType:type];
             if (text != nil && text.length > 0) {

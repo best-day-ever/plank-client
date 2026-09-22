@@ -153,6 +153,24 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         return;
     }
 
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+    if (event->scancode == SDL_SCANCODE_V && !event->down &&
+            m_FilePasteKeyUpConsumed) {
+        m_FilePasteKeyUpConsumed = false;
+        return;
+    }
+    if (event->scancode == SDL_SCANCODE_V && event->down &&
+            (event->mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0 &&
+            (event->mod & SDL_KMOD_ALT) == 0 && Session::get() != nullptr &&
+            Session::get()->beginFileClipboardPasteOnMainThread()) {
+        raiseAllKeys();
+        m_FilePasteKeyUpConsumed = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Preparing local file clipboard for remote paste");
+        return;
+    }
+#endif
+
     // Check for our special key combos
     if ((event->down) &&
             (event->mod & SDL_KMOD_CTRL) &&

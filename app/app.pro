@@ -490,6 +490,10 @@ macx {
         streaming/clipboardpolltimer.h \
         streaming/plankclipboard.h
     OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    contains(CONFIG, plank-transport) {
+        HEADERS += streaming/macfileclipboard.h
+        OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
+    }
 }
 embedded {
     message(Embedded build)

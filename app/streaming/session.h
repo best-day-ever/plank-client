@@ -29,6 +29,9 @@
 class ComputerManager;
 class PlankToolbar;
 class MacClipboardSync;
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+class MacFileClipboard;
+#endif
 #ifdef PLANK_TRANSPORT
 struct PlankTransportNativeEndpoint;
 #endif
@@ -270,6 +273,10 @@ private:
     void stopClipboardPollTimer();
     void queueClipboardPollEvent();
     bool clipboardSyncEnabled() const;
+#ifdef PLANK_TRANSPORT
+    bool beginFileClipboardPasteOnMainThread();
+    void injectRemoteFilePasteOnMainThread();
+#endif
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);
@@ -399,6 +406,7 @@ private:
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
     bool m_MacClipboardNegotiated = false;
+    QString m_FileClipboardMode {QStringLiteral("off")};
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
@@ -483,6 +491,9 @@ private:
 #ifdef Q_OS_MACOS
     std::unique_ptr<MacClipboardSync> m_ClipboardSync;
     ClipboardPollTimer m_ClipboardPollTimer;
+#ifdef PLANK_TRANSPORT
+    std::unique_ptr<MacFileClipboard> m_FileClipboard;
+#endif
 #endif
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;

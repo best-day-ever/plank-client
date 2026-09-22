@@ -203,7 +203,8 @@ public:
              QString& plankTransportToken,
              QString& acceptedCaptureSource,
              QString& acceptedEncoderBackend,
-             QString& acceptedEncodingMode);
+             QString& acceptedEncodingMode,
+             QString& acceptedFileClipboardMode);
 
     QVector<NvApp>
     getAppList();
