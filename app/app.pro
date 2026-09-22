@@ -215,7 +215,9 @@ SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
     backend/clientdisplayprobe.cpp \
+    backend/displayarrangement.cpp \
     backend/displaymonitor.cpp \
+    backend/displayplanner.cpp \
     backend/nvapp.cpp \
     main.cpp \
     backend/computerseeker.cpp \
@@ -261,7 +263,10 @@ HEADERS += \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/clientdisplayprobe.h \
+    backend/displayarrangement.h \
     backend/displaymonitor.h \
+    backend/displayplanner.h \
+    backend/displayprofile.h \
     backend/nvapp.h \
     utils.h \
     backend/computerseeker.h \
