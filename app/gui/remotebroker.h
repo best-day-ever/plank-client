@@ -93,6 +93,19 @@ public:
     // once, after connectReady().
     Q_INVOKABLE Session* takeSession();
 
+    // For the first sign-in wizard (OnboardingController), which runs its own
+    // broker conversation and ends in the same signed-in state.
+    PlankBrokerClient::Config brokerClientConfig() const { return clientConfig(); }
+    QString passkeyRelyingParty() const { return passkeyRpId(); }
+    // The plank-passkey helper, or empty where there is none.
+    QString passkeyHelperProgram() const
+    {
+        return m_PasskeyHelper.available() ? m_PasskeyHelper.program() : QString();
+    }
+    // Takes over a session the wizard obtained, exactly like a sign-in here
+    // (Keychain, host list).
+    void adoptSession(QString token, const QString& confirmedUser);
+
     QString brokerAddress() const;
     bool configured() const;
     bool signedIn() const { return !m_Username.isEmpty() && m_Token->hasToken(); }

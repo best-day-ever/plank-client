@@ -24,6 +24,9 @@
 #include "plankpasskey.h"
 #include "macpreviewlaunch.h"
 #include "outputtopology.h"
+#include "plankenrollment.h"
+#include "onboardingstate.h"
+#include "qrencoder.h"
 
 // Remote (broker) mode: bde-linux docs/plank-broker.md sections 10.1 / 10.2.
 // Certificate fixtures were generated with OpenSSL; their expected pins were
@@ -81,6 +84,9 @@ QByteArray ecCertificate() { return QByteArray::fromBase64(EcCertificateBase64);
 QByteArray rsaCertificate() { return QByteArray::fromBase64(RsaCertificateBase64); }
 QByteArray json(const char* text) { return QByteArray(text); }
 
+// Queue this status to read the request and drop the connection unanswered.
+const QByteArray DropReply = QByteArrayLiteral("DROP");
+
 // Minimal HTTPS/1.1 responder: one canned reply per connection, records the
 // raw request bytes it received (to prove nothing is sent to a wrong peer).
 // Queued replies (`replies`, status + body) are served first, one per
@@ -122,6 +128,11 @@ public:
                         const auto next = replies.takeFirst();
                         replyStatus = next.first;
                         replyBody = next.second;
+                    }
+                    if (replyStatus == DropReply) {
+                        // The request arrived, but its reply is lost.
+                        socket->abort();
+                        return;
                     }
                     // announceClose=false mimics the PLANK host: HTTP/1.1 without
                     // "Connection: close", yet the socket is closed after the reply.
@@ -381,6 +392,26 @@ private slots:
     void helperDeviceKeyCommands();
     void realHelperDeviceKeyWithoutKey();
 
+    // First sign-in wizard (section 16)
+    void qrEncoderMatchesReferenceVectors();
+    void qrEncoderFormatInformationRoundTrip();
+    void qrEncoderCapacityLimits();
+    void parsesEnrollmentReplies();
+    void enrollmentUnknownOrMisplacedStatesAreDenied();
+    void rejectsMalformedEnrollmentReplies();
+    void validatesEnrollmentValues();
+    void checksNewPasswordsLocally();
+    void enrollmentTextsAreGeneric();
+    void enrollmentWalkExpiredPasswordToTouchId();
+    void enrollmentWalkEnrolledThenNextCode();
+    void enrollmentWalkDeniedAndAlreadyEnrolled();
+    void enrollmentWalkDeniedAfterPasswordChange();
+    void enrollmentWalkPasskeyRejected();
+    void enrollmentWalkTransportErrorsKeepTheStep();
+    void enrollmentWalkLostPasswordReply();
+    void enrollmentStartSendsDeviceKey();
+    void onboardingDecisionPrecedence();
+    void onboardingReadsSettingsAndPasskeys();
     // Remote stream settings (per workstation, remote access defaults)
     void remoteStreamSetupPersistsPerHost();
     void remoteStreamSetupAcceptsNvenc420();
@@ -2120,6 +2151,782 @@ void TestPlankBroker::realHelperDeviceKeyWithoutKey()
     QVERIFY(PlankBroker::isDevicePublicKey(output.value(QStringLiteral("public_key")).toString()));
     QVERIFY(PlankBroker::isDeviceSignature(output.value(QStringLiteral("signature")).toString()));
     qunsetenv("PLANK_DEVICE_KEY_STORE");
+}
+
+// ---------------------------------------------------------------------------
+// First sign-in wizard (bde-linux docs/plank-broker.md section 16)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Reference symbols from an independent encoder (libqrencode 4.1.1:
+// `qrencode -l M -8 -t ASCII -m 0 <data>`), '#' = dark.
+const char* const HelloVersion1Mask3[] = {
+        "#######.#..#..#######",
+        "#.....#.####..#.....#",
+        "#.###.#...#.#.#.###.#",
+        "#.###.#.#.#.#.#.###.#",
+        "#.###.#....#..#.###.#",
+        "#.....#....##.#.....#",
+        "#######.#.#.#.#######",
+        "........#..##........",
+        "#.##.###.#.##.#..#.##",
+        ".##.##.#.######..##..",
+        "#...#.#..#.#.......##",
+        "#.##...#...#..####.#.",
+        ".#.######...#..#..#.#",
+        "........####..#...#.#",
+        "#######.#..##..#.....",
+        "#.....#.#.#....#####.",
+        "#.###.#.....######.##",
+        "#.###.#.#.##..#.####.",
+        "#.###.#.##..#.##..#..",
+        "#.....#...#..#.##...#",
+        "#######.#.#..#.#....."
+};
+const char OtpauthVectorUri[] =
+        "otpauth://totp/BDE%20Fernweh:anna?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=BDE%20Fernweh";
+const char* const OtpauthVersion6Mask6[] = {
+        "#######.###..#.#.#.....#...#.#..#.#######",
+        "#.....#.#..#####..##.##.###....#..#.....#",
+        "#.###.#.#..####.#.....#.##.##..#..#.###.#",
+        "#.###.#..#...####.#.#..#..##.#.##.#.###.#",
+        "#.###.#.###..#.#.#...#.#..#....#..#.###.#",
+        "#.....#...#####.#.#.#..#....#...#.#.....#",
+        "#######.#.#.#.#.#.#.#.#.#.#.#.#.#.#######",
+        ".........#..#...#.##..##.##.#...#........",
+        "#..#######..##.#.#.##.#.#..#.###.#..#.###",
+        "#.##.#..#.##..##.###.#.#####..###.####..#",
+        ".######.#.##...#.##..#.#...#.#..#..#.#...",
+        "#...##..#.....#.###.#..#..#..#.#.###.#.##",
+        ".###..#.#..#.###.#.##.##.#.##...####.....",
+        "#..#....#..###.....#..#.#####.#..#####.#.",
+        "####.###.##.##.......##..#.#.###..#..#..#",
+        "...#...##.###..#...#..#.#.#....#.###..##.",
+        "..#..###.##.####...#...#...#.#.......#.#.",
+        "##.#.#...#.#.##...###.##.#...##.##..#....",
+        "#.#########.##.##..#.####..#..##....###.#",
+        "##...#.####..#.####.#.#.#.#.#.#...#.#.##.",
+        ".#..#######.###....#.##..###.#.##.#.....#",
+        "#.##.#.#.####...###......###.###....#.#..",
+        "#.##.##.##..#.......#..#.#.##....#..#....",
+        "..####......##.#.##...#.#.#..#.##...##...",
+        "###.######..####...##.####.#......#####..",
+        "##..##...#.#.#.##.....#...###...##.##.###",
+        "##....##..##..###.##..#.#..#.###.##.##.##",
+        ".#####.#.##.....#.##......##....#...###..",
+        "#.#..#####.#.#.#.#...####......###.#.#.#.",
+        "##..##.#.#....#.###...##.#.#.#..##..#.##.",
+        "###.####....###..#.#....#.##.#.##.#.##.##",
+        "###.........#.##...##..#.#.##.###...#.###",
+        "##.#.##..#.#.#####.##..#...##..#########.",
+        "........#...###.#..#.##......#.##...#....",
+        "#######.#####.#..##...##..##....#.#.#.#..",
+        "#.....#.######.###...##.#.#.#####...##.#.",
+        "#.###.#.#.#..##.###..#.#.####..######.#.#",
+        "#.###.#.#...##...#.#.....#.##....#....##.",
+        "#.###.#....##.....##.##.#..##..#.#.###..#",
+        "#.....#..##....#.#....###.###.##..#.###.#",
+        "#######.#...........#####..#....#..##.#.."
+};
+
+template <size_t Rows>
+bool matrixEquals(const QrEncoder::Matrix& matrix, const char* const (&rows)[Rows])
+{
+    if (matrix.size != int(Rows)) return false;
+    for (int y = 0; y < matrix.size; ++y) {
+        if (int(qstrlen(rows[y])) != matrix.size) return false;
+        for (int x = 0; x < matrix.size; ++x) {
+            if (matrix.dark(x, y) != (rows[y][x] == '#')) return false;
+        }
+    }
+    return true;
+}
+
+const char EnrollSecret[] = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+
+QByteArray enrollTotpReply(const char* secret = EnrollSecret)
+{
+    return QStringLiteral(R"({"state":"totp","otpauth_uri":"otpauth://totp/BDE%20Fernweh:anna?secret=%1&issuer=BDE%20Fernweh","secret":"%1"})")
+            .arg(QString::fromLatin1(secret)).toUtf8();
+}
+
+const QByteArray EnrollStartReply = R"({"conversation_id":"en-1","prompts":[{"id":"password","style":"secret"}]})";
+const QByteArray EnrollNewPasswordReply = R"({"state":"new_password","policy":{"min_length":12,"min_classes":3}})";
+const QByteArray EnrollDone = R"({"state":"done"})";
+
+QJsonObject requestJson(const QByteArray& raw)
+{
+    return QJsonDocument::fromJson(parseRecordedRequest(raw).body).object();
+}
+
+QByteArray requestTarget(const QByteArray& raw)
+{
+    return parseRecordedRequest(raw).target;
+}
+
+QString passkeyMapping()
+{
+    return QStringLiteral("passkey:%1,%2").arg(PasskeyCredential, DeviceSpki);
+}
+
+}
+
+void TestPlankBroker::qrEncoderMatchesReferenceVectors()
+{
+    const QrEncoder::Matrix hello = QrEncoder::encode("HELLO", QrEncoder::Ecc::Medium, 3);
+    QVERIFY(hello.isValid());
+    QCOMPARE(hello.version, 1);
+    QVERIFY(matrixEquals(hello, HelloVersion1Mask3));
+
+    const QrEncoder::Matrix uri = QrEncoder::encode(OtpauthVectorUri, QrEncoder::Ecc::Medium, 6);
+    QCOMPARE(uri.version, 6);
+    QCOMPARE(uri.size, 41);
+    QVERIFY(matrixEquals(uri, OtpauthVersion6Mask6));
+
+    // Automatic mask selection: same symbol version, a valid mask, and for
+    // this input the same choice as the reference encoder.
+    const QrEncoder::Matrix automatic = QrEncoder::encode(OtpauthVectorUri);
+    QCOMPARE(automatic.version, 6);
+    QCOMPARE(automatic.mask, 6);
+    QVERIFY(matrixEquals(automatic, OtpauthVersion6Mask6));
+}
+
+void TestPlankBroker::qrEncoderFormatInformationRoundTrip()
+{
+    // Decode the 15-bit format information (first copy) back out of the
+    // symbol: level and mask must be what was asked for, the BCH remainder
+    // must check, and the second copy must agree.
+    const QList<QPair<QrEncoder::Ecc, int>> levels = {
+        {QrEncoder::Ecc::Low, 1}, {QrEncoder::Ecc::Medium, 0}, {QrEncoder::Ecc::Quartile, 3}, {QrEncoder::Ecc::High, 2},
+    };
+    for (const auto& level : levels) {
+        for (int mask = 0; mask < 8; ++mask) {
+            const QrEncoder::Matrix matrix = QrEncoder::encode("otpauth://totp/x?secret=ABC", level.first, mask);
+            QVERIFY(matrix.isValid());
+            int first = 0;
+            int second = 0;
+            for (int i = 0; i <= 5; ++i) first |= matrix.dark(8, i) << i;
+            first |= matrix.dark(8, 7) << 6 | matrix.dark(8, 8) << 7 | matrix.dark(7, 8) << 8;
+            for (int i = 9; i < 15; ++i) first |= matrix.dark(14 - i, 8) << i;
+            for (int i = 0; i < 8; ++i) second |= matrix.dark(matrix.size - 1 - i, 8) << i;
+            for (int i = 8; i < 15; ++i) second |= matrix.dark(8, matrix.size - 15 + i) << i;
+            QCOMPARE(first, second);
+            const int bits = first ^ 0x5412;
+            QCOMPARE(bits >> 13, level.second);
+            QCOMPARE((bits >> 10) & 7, mask);
+            int check = bits >> 10;
+            for (int i = 0; i < 10; ++i) check = (check << 1) ^ ((check >> 9) * 0x537);
+            QCOMPARE(check & 0x3ff, bits & 0x3ff);
+            QVERIFY(matrix.dark(8, matrix.size - 8)); // dark module
+        }
+    }
+}
+
+void TestPlankBroker::qrEncoderCapacityLimits()
+{
+    QCOMPARE(QrEncoder::byteCapacity(1, QrEncoder::Ecc::Medium), 14);
+    QCOMPARE(QrEncoder::byteCapacity(6, QrEncoder::Ecc::Medium), 106);
+    QCOMPARE(QrEncoder::byteCapacity(40, QrEncoder::Ecc::Low), 2953);
+    QCOMPARE(QrEncoder::encode(QByteArray(14, 'a')).version, 1);
+    QCOMPARE(QrEncoder::encode(QByteArray(15, 'a')).version, 2);
+    QVERIFY(!QrEncoder::encode(QByteArray(2954, 'a'), QrEncoder::Ecc::Low).isValid());
+    QVERIFY(!QrEncoder::encode("x", QrEncoder::Ecc::Medium, 8).isValid());
+    QVERIFY(!QrEncoder::encode(QByteArray(20, 'a'), QrEncoder::Ecc::Medium, -1, 1, 1).isValid());
+}
+
+void TestPlankBroker::parsesEnrollmentReplies()
+{
+    using namespace PlankEnrollment;
+    Reply reply = parseReply(Endpoint::Start, 200, EnrollStartReply);
+    QCOMPARE(reply.state, State::Challenge);
+    QCOMPARE(reply.challenge.conversationId, QStringLiteral("en-1"));
+    QCOMPARE(reply.challenge.prompts.size(), 1);
+    QCOMPARE(reply.challenge.prompts.at(0).style, QStringLiteral("secret"));
+
+    reply = parseReply(Endpoint::Respond, 200, EnrollNewPasswordReply);
+    QCOMPARE(reply.state, State::NewPassword);
+    QCOMPARE(reply.policy.minLength, 12);
+    QCOMPARE(reply.policy.minClasses, 3);
+
+    reply = parseReply(Endpoint::Respond, 200, enrollTotpReply());
+    QCOMPARE(reply.state, State::Totp);
+    QCOMPARE(reply.secret, QString::fromLatin1(EnrollSecret));
+    QVERIFY(reply.otpauthUri.startsWith(QStringLiteral("otpauth://totp/")));
+
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"already_enrolled\"}").state, State::AlreadyEnrolled);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"denied\"}").state, State::Denied);
+
+    const QList<QPair<QByteArray, RejectReason>> reasons = {
+        {"too_short", RejectReason::TooShort}, {"too_simple", RejectReason::TooSimple},
+        {"reused", RejectReason::Reused}, {"policy", RejectReason::Policy}, {"something_new", RejectReason::Policy},
+    };
+    for (const auto& reason : reasons) {
+        reply = parseReply(Endpoint::Password, 200, R"({"state":"password_rejected","reason":")" + reason.first + "\"}");
+        QCOMPARE(reply.state, State::PasswordRejected);
+        QCOMPARE(reply.reason, reason.second);
+    }
+    QCOMPARE(parseReply(Endpoint::Password, 200, enrollTotpReply()).state, State::Totp);
+
+    reply = parseReply(Endpoint::Totp, 200, R"({"state":"authenticated","session_token":"sess-1","expires_in":43200,)"
+                                            R"("username":"anna","device_bound":true,"passkey_available":true})");
+    QCOMPARE(reply.state, State::Authenticated);
+    QCOMPARE(reply.session.sessionToken, QStringLiteral("sess-1"));
+    QCOMPARE(reply.session.expiresIn, 43200);
+    QCOMPARE(reply.session.username, QStringLiteral("anna"));
+    QVERIFY(reply.session.deviceBound);
+    QVERIFY(reply.passkeyAvailable);
+    reply = parseReply(Endpoint::Totp, 200, R"({"state":"enrolled","passkey_available":false})");
+    QCOMPARE(reply.state, State::Enrolled);
+    QVERIFY(!reply.passkeyAvailable);
+    QCOMPARE(parseReply(Endpoint::Totp, 200, "{\"state\":\"code_rejected\"}").state, State::CodeRejected);
+
+    QCOMPARE(parseReply(Endpoint::Passkey, 200, "{\"state\":\"passkey_added\"}").state, State::PasskeyAdded);
+    QCOMPARE(parseReply(Endpoint::Passkey, 200, "{\"state\":\"passkey_rejected\"}").state, State::PasskeyRejected);
+    QCOMPARE(parseReply(Endpoint::Finish, 200, EnrollDone).state, State::Done);
+
+    reply = parseReply(Endpoint::Respond, 429, R"({"retry_after":90})");
+    QCOMPARE(reply.state, State::RateLimited);
+    QCOMPARE(reply.retryAfter, 90);
+}
+
+void TestPlankBroker::enrollmentUnknownOrMisplacedStatesAreDenied()
+{
+    using namespace PlankEnrollment;
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"welcome_back\"}").state, State::Denied);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{}").state, State::Denied);
+    // Valid states, wrong endpoint: never skip a step the Client did not take.
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"authenticated\",\"session_token\":\"t\"}").state, State::Denied);
+    QCOMPARE(parseReply(Endpoint::Password, 200, "{\"state\":\"enrolled\"}").state, State::Denied);
+    QCOMPARE(parseReply(Endpoint::Totp, 200, enrollTotpReply()).state, State::Denied);
+    QCOMPARE(parseReply(Endpoint::Passkey, 200, "{\"state\":\"code_rejected\"}").state, State::Denied);
+    QCOMPARE(parseReply(Endpoint::Start, 200, "{\"state\":\"denied\"}").state, State::Denied);
+    QCOMPARE(parseReply(Endpoint::Finish, 200, "{\"state\":\"whatever\"}").state, State::Denied);
+}
+
+void TestPlankBroker::rejectsMalformedEnrollmentReplies()
+{
+    using namespace PlankEnrollment;
+    QCOMPARE(parseReply(Endpoint::Respond, 500, "{\"state\":\"denied\"}").state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "not json").state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Start, 200, "{\"conversation_id\":\"\",\"prompts\":[{\"id\":\"password\",\"style\":\"secret\"}]}").state,
+             State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Start, 200, "{\"conversation_id\":\"c\",\"prompts\":[{\"id\":\"x\",\"style\":\"weird\"}]}").state,
+             State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"new_password\"}").state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"new_password\",\"policy\":{\"min_length\":-1,\"min_classes\":1}}").state,
+             State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"new_password\",\"policy\":{\"min_length\":8.5,\"min_classes\":1}}").state,
+             State::Malformed);
+    // The typed key and the QR code must describe the same token.
+    const QByteArray mismatched = R"({"state":"totp","otpauth_uri":"otpauth://totp/x?secret=AAAAAAAAAAAAAAAA","secret":"JBSWY3DPEHPK3PXP"})";
+    QCOMPARE(parseReply(Endpoint::Respond, 200, mismatched).state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, "{\"state\":\"totp\",\"otpauth_uri\":\"https://example.test/\",\"secret\":\"JBSWY3DPEHPK3PXP\"}").state,
+             State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, enrollTotpReply("jbswy3dpehpk3pxp")).state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Respond, 200, enrollTotpReply("JBSWY3DP")).state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Totp, 200, "{\"state\":\"authenticated\",\"passkey_available\":true}").state, State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Totp, 200, "{\"state\":\"authenticated\",\"session_token\":\"t\",\"passkey_available\":\"yes\"}").state,
+             State::Malformed);
+    QCOMPARE(parseReply(Endpoint::Totp, 200, "{\"state\":\"enrolled\",\"passkey_available\":1}").state, State::Malformed);
+}
+
+void TestPlankBroker::validatesEnrollmentValues()
+{
+    using namespace PlankEnrollment;
+    QVERIFY(isBase32Secret(QString::fromLatin1(EnrollSecret)));
+    QVERIFY(!isBase32Secret(QStringLiteral("JBSWY3DPEHPK3PX1")));   // '1' is not base32
+    QVERIFY(!isBase32Secret(QStringLiteral("JBSWY3DPEHPK3PXP====")));
+    QCOMPARE(groupSecret(QStringLiteral("JBSWY3DPEHPK3PXPJB")), QStringLiteral("JBSW Y3DP EHPK 3PXP JB"));
+    QCOMPARE(groupSecret(QString()), QString());
+    QVERIFY(isOtpauthUri(QString::fromLatin1(OtpauthVectorUri), QString::fromLatin1(EnrollSecret)));
+    QVERIFY(!isOtpauthUri(QStringLiteral("otpauth://hotp/x?secret=JBSWY3DPEHPK3PXP"), QStringLiteral("JBSWY3DPEHPK3PXP")));
+    QVERIFY(!isOtpauthUri(QStringLiteral("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP&secret=JBSWY3DPEHPK3PXP"),
+                          QStringLiteral("JBSWY3DPEHPK3PXP")));
+    QVERIFY(isPasskeyMapping(passkeyMapping()));
+    QVERIFY(!isPasskeyMapping(QStringLiteral("passkey:abc")));
+    QVERIFY(!isPasskeyMapping(QStringLiteral("key:%1,%2").arg(PasskeyCredential, DeviceSpki)));
+    QVERIFY(!isPasskeyMapping(passkeyMapping() + QStringLiteral(",extra")));
+    QCOMPARE(path(Endpoint::Start), QStringLiteral("/v1/enroll/start"));
+    QCOMPARE(path(Endpoint::Finish), QStringLiteral("/v1/enroll/finish"));
+}
+
+void TestPlankBroker::checksNewPasswordsLocally()
+{
+    using namespace PlankEnrollment;
+    const PasswordPolicy policy {12, 3};
+    QCOMPARE(checkNewPassword(QString(), QString(), policy), PasswordCheck::Empty);
+    QCOMPARE(checkNewPassword(QStringLiteral("Correct-horse-9"), QStringLiteral("Correct-horse-8"), policy),
+             PasswordCheck::Mismatch);
+    QCOMPARE(checkNewPassword(QStringLiteral("Short-9"), QStringLiteral("Short-9"), policy), PasswordCheck::TooShort);
+    QCOMPARE(checkNewPassword(QStringLiteral("alllowercaseletters"), QStringLiteral("alllowercaseletters"), policy),
+             PasswordCheck::TooSimple);
+    QCOMPARE(checkNewPassword(QStringLiteral("Correct-horse-9"), QStringLiteral("Correct-horse-9"), policy),
+             PasswordCheck::Ok);
+    QCOMPARE(characterClasses(QStringLiteral("aA1-")), 4);
+    QCOMPARE(characterClasses(QString::fromUtf8("aA1-ä")), 5);
+    const QString tooLong(MaximumPasswordLength + 1, QLatin1Char('a'));
+    QCOMPARE(checkNewPassword(tooLong, tooLong, PasswordPolicy()), PasswordCheck::TooLong);
+}
+
+void TestPlankBroker::enrollmentTextsAreGeneric()
+{
+    using namespace PlankEnrollment;
+    const PasswordPolicy policy {12, 3};
+    QCOMPARE(noticeText(Notice::Denied, policy),
+             QStringLiteral("We couldn't start setup. Check your username and one-time password. "
+                            "If it's more than 7 days old, ask the studio for a new one."));
+    QCOMPARE(noticeText(Notice::AlreadyEnrolled, policy),
+             QStringLiteral("Your account is already set up. Sign in with your password and authenticator code."));
+    QVERIFY(noticeText(Notice::None, policy).isEmpty());
+    QVERIFY(noticeText(Notice::PasswordTooShort, policy).contains(QStringLiteral("12")));
+    QVERIFY(noticeText(Notice::PasswordTooSimple, policy).contains(QStringLiteral("3")));
+    QVERIFY(passwordCheckText(PasswordCheck::Ok, policy).isEmpty());
+    QCOMPARE(passwordCheckText(PasswordCheck::TooShort, policy), noticeText(Notice::PasswordTooShort, policy));
+    // Every text is distinct and none names the account or says it exists.
+    const QList<Notice> notices = {
+        Notice::Denied, Notice::DeniedAfterPasswordChange, Notice::DeniedPasswordMaybeChanged,
+        Notice::AlreadyEnrolled, Notice::PasswordTooShort,
+        Notice::PasswordTooSimple, Notice::PasswordReused, Notice::PasswordPolicy, Notice::CodeRejected,
+        Notice::NextCodeRejected, Notice::PasskeyNotAdded, Notice::PasskeyNotCreated,
+    };
+    QSet<QString> texts;
+    for (const Notice notice : notices) {
+        const QString text = noticeText(notice, policy);
+        QVERIFY(!text.isEmpty());
+        QVERIFY(!text.contains(QStringLiteral("does not exist"), Qt::CaseInsensitive));
+        QVERIFY(!text.contains(QStringLiteral("unknown user"), Qt::CaseInsensitive));
+        texts.insert(text);
+    }
+    QCOMPARE(texts.size(), notices.size());
+}
+
+void TestPlankBroker::enrollmentWalkExpiredPasswordToTouchId()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue("200 OK", R"({"state":"password_rejected","reason":"too_short"})");
+    server.queue("200 OK", enrollTotpReply());
+    server.queue("200 OK", R"({"state":"code_rejected"})");
+    server.queue("200 OK", R"({"state":"authenticated","session_token":"sess-1","expires_in":43200,)"
+                           R"("username":"anna","device_bound":false,"passkey_available":true})");
+    server.queue("200 OK", R"({"state":"passkey_added"})");
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    Outcome outcome = conversation.begin(QStringLiteral(" anna "), QStringLiteral("one-time-7Qx"));
+    QCOMPARE(outcome.step, Step::NewPassword);
+    QCOMPARE(outcome.notice, Notice::None);
+    QCOMPARE(outcome.policy.minLength, 12);
+    QCOMPARE(conversation.username(), QStringLiteral("anna"));
+
+    outcome = conversation.changePassword(QStringLiteral("short"));
+    QCOMPARE(outcome.step, Step::NewPassword);
+    QCOMPARE(outcome.notice, Notice::PasswordTooShort);
+    QCOMPARE(outcome.policy.minLength, 12);
+
+    outcome = conversation.changePassword(QStringLiteral("Correct-horse-9"));
+    QCOMPARE(outcome.step, Step::Authenticator);
+    QCOMPARE(outcome.secret, QString::fromLatin1(EnrollSecret));
+    QVERIFY(isOtpauthUri(outcome.otpauthUri, outcome.secret));
+
+    // A malformed code never reaches the broker.
+    outcome = conversation.verifyCode(QStringLiteral("12ab56"));
+    QCOMPARE(outcome.step, Step::Authenticator);
+    QCOMPARE(outcome.notice, Notice::CodeRejected);
+    QCOMPARE(server.requestLog.size(), 4);
+
+    outcome = conversation.verifyCode(QStringLiteral("000000"));
+    QCOMPARE(outcome.step, Step::Authenticator);
+    QCOMPARE(outcome.notice, Notice::CodeRejected);
+    QCOMPARE(outcome.secret, QString::fromLatin1(EnrollSecret)); // the same token, scan again not needed
+
+    outcome = conversation.verifyCode(QStringLiteral("123456"));
+    QCOMPARE(outcome.step, Step::Passkey);
+    QVERIFY(outcome.signedIn());
+    QCOMPARE(outcome.sessionToken, QStringLiteral("sess-1"));
+    QCOMPARE(outcome.username, QStringLiteral("anna"));
+    QVERIFY(outcome.passkeyAvailable);
+    QVERIFY(outcome.secret.isEmpty());
+
+    outcome = conversation.addPasskey(passkeyMapping());
+    QCOMPARE(outcome.step, Step::Done);
+    QCOMPARE(outcome.notice, Notice::None);
+    QVERIFY(!conversation.hasConversation());
+
+    // Exactly the contract's requests, in order.
+    QCOMPARE(server.requestLog.size(), 8);
+    const QList<QByteArray> targets = {
+        "/v1/enroll/start", "/v1/enroll/respond", "/v1/enroll/password", "/v1/enroll/password",
+        "/v1/enroll/totp", "/v1/enroll/totp", "/v1/enroll/passkey", "/v1/enroll/finish",
+    };
+    for (int i = 0; i < targets.size(); ++i) {
+        QCOMPARE(requestTarget(server.requestLog.at(i)), targets.at(i));
+        QVERIFY(!server.requestLog.at(i).contains("Authorization:"));
+    }
+    QCOMPARE(requestJson(server.requestLog.at(0)), QJsonObject({{QStringLiteral("username"), QStringLiteral("anna")}}));
+    QCOMPARE(requestJson(server.requestLog.at(1)), QJsonObject({
+        {QStringLiteral("conversation_id"), QStringLiteral("en-1")},
+        {QStringLiteral("responses"), QJsonArray {QStringLiteral("one-time-7Qx")}},
+    }));
+    QCOMPARE(requestJson(server.requestLog.at(3)), QJsonObject({
+        {QStringLiteral("conversation_id"), QStringLiteral("en-1")},
+        {QStringLiteral("new_password"), QStringLiteral("Correct-horse-9")},
+    }));
+    QCOMPARE(requestJson(server.requestLog.at(5)), QJsonObject({
+        {QStringLiteral("conversation_id"), QStringLiteral("en-1")},
+        {QStringLiteral("code"), QStringLiteral("123456")},
+    }));
+    QCOMPARE(requestJson(server.requestLog.at(6)), QJsonObject({
+        {QStringLiteral("conversation_id"), QStringLiteral("en-1")},
+        {QStringLiteral("mapping"), passkeyMapping()},
+    }));
+    QCOMPARE(requestJson(server.requestLog.at(7)), QJsonObject({{QStringLiteral("conversation_id"), QStringLiteral("en-1")}}));
+}
+
+void TestPlankBroker::enrollmentWalkEnrolledThenNextCode()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    // Not expired (changed at a studio desk): straight to the authenticator.
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", enrollTotpReply());
+    server.queue("200 OK", R"({"state":"enrolled","passkey_available":false})");
+    // The next code, through the normal sign-in: first rejected, then accepted.
+    const QByteArray challenge = R"({"state":"challenge","conversation_id":"c1","prompts":[)"
+                                 R"({"id":"password","style":"secret","text":"Password"},)"
+                                 R"({"id":"otp","style":"otp","text":"Authenticator code"}]})";
+    server.queue("200 OK", challenge);
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", challenge);
+    server.queue("200 OK", R"({"state":"authenticated","session_token":"sess-2","username":"anna"})");
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    Outcome outcome = conversation.begin(QStringLiteral("anna"), QStringLiteral("Desk-chosen-4"));
+    QCOMPARE(outcome.step, Step::Authenticator);
+    outcome = conversation.verifyCode(QStringLiteral("111111"));
+    QCOMPARE(outcome.step, Step::NextCode);
+    QVERIFY(!outcome.signedIn());
+    QCOMPARE(outcome.username, QStringLiteral("anna"));
+    QVERIFY(outcome.secret.isEmpty());
+
+    outcome = conversation.signInWithNextCode(QStringLiteral("222222"));
+    QCOMPARE(outcome.step, Step::NextCode);
+    QCOMPARE(outcome.notice, Notice::NextCodeRejected);
+    outcome = conversation.signInWithNextCode(QStringLiteral("333333"));
+    QCOMPARE(outcome.step, Step::Done);
+    QCOMPARE(outcome.sessionToken, QStringLiteral("sess-2"));
+    QVERIFY(!conversation.hasConversation());
+
+    QCOMPARE(server.requestLog.size(), 8);
+    QCOMPARE(requestTarget(server.requestLog.at(3)), QByteArray("/v1/auth/start"));
+    QCOMPARE(requestTarget(server.requestLog.at(6)), QByteArray("/v1/auth/respond"));
+    // The kept (current) password and the new code, never the first code.
+    QCOMPARE(requestJson(server.requestLog.at(6)).value(QStringLiteral("responses")).toArray(),
+             QJsonArray({QStringLiteral("Desk-chosen-4"), QStringLiteral("333333")}));
+    QCOMPARE(requestTarget(server.requestLog.at(7)), QByteArray("/v1/enroll/finish"));
+}
+
+void TestPlankBroker::enrollmentWalkDeniedAndAlreadyEnrolled()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", EnrollDone);
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", R"({"state":"already_enrolled"})");
+    server.queue("200 OK", EnrollDone);
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", R"({"state":"some_future_state"})");
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    Outcome outcome = conversation.begin(QStringLiteral("anna"), QStringLiteral("wrong"));
+    QCOMPARE(outcome.step, Step::Credentials);
+    QCOMPARE(outcome.notice, Notice::Denied);
+    QVERIFY(!conversation.hasConversation());
+
+    outcome = conversation.begin(QStringLiteral("anna"), QStringLiteral("right"));
+    QCOMPARE(outcome.step, Step::Credentials);
+    QCOMPARE(outcome.notice, Notice::AlreadyEnrolled);
+
+    outcome = conversation.begin(QStringLiteral("anna"), QStringLiteral("right"));
+    QCOMPARE(outcome.notice, Notice::Denied);
+    QCOMPARE(server.requestLog.size(), 9);
+
+    // Nothing to send without a user name or password.
+    outcome = conversation.begin(QStringLiteral("  "), QStringLiteral("x"));
+    QCOMPARE(outcome.notice, Notice::Denied);
+    QCOMPARE(server.requestLog.size(), 9);
+}
+
+void TestPlankBroker::enrollmentWalkDeniedAfterPasswordChange()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue("200 OK", enrollTotpReply());
+    server.queue("200 OK", R"({"state":"denied"})"); // e.g. too many wrong codes
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    QCOMPARE(conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time")).step, Step::NewPassword);
+    QCOMPARE(conversation.changePassword(QStringLiteral("Correct-horse-9")).step, Step::Authenticator);
+    const Outcome outcome = conversation.verifyCode(QStringLiteral("999999"));
+    QCOMPARE(outcome.step, Step::Credentials);
+    QCOMPARE(outcome.notice, Notice::DeniedAfterPasswordChange);
+    QVERIFY(!outcome.signedIn());
+    QCOMPARE(conversation.step(), Step::Credentials);
+    // Out-of-order calls are refused locally.
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, conversation.verifyCode(QStringLiteral("123456")));
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, conversation.addPasskey(passkeyMapping()));
+    QCOMPARE(server.requestLog.size(), 5);
+}
+
+void TestPlankBroker::enrollmentWalkPasskeyRejected()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", enrollTotpReply());
+    server.queue("200 OK", R"({"state":"authenticated","session_token":"sess-3","passkey_available":true})");
+    server.queue("200 OK", R"({"state":"passkey_rejected"})");
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    conversation.begin(QStringLiteral("anna"), QStringLiteral("Desk-chosen-4"));
+    Outcome outcome = conversation.verifyCode(QStringLiteral("123456"));
+    QCOMPARE(outcome.step, Step::Passkey);
+    QCOMPARE(outcome.username, QStringLiteral("anna")); // no username in the reply: the typed one
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, conversation.addPasskey(QStringLiteral("not a mapping")));
+    outcome = conversation.addPasskey(passkeyMapping());
+    QCOMPARE(outcome.step, Step::Done);
+    QCOMPARE(outcome.notice, Notice::PasskeyNotAdded);
+    QCOMPARE(server.requestLog.size(), 5);
+}
+
+void TestPlankBroker::enrollmentWalkLostPasswordReply()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    // The broker changes the password but the reply never arrives; the
+    // conversation has moved on, so the retry is denied.
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue(DropReply, QByteArray());
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", EnrollDone);
+    // A second run: the reply is lost, but the retry shows nothing changed.
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue(DropReply, QByteArray());
+    server.queue("200 OK", R"({"state":"password_rejected","reason":"too_short"})");
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    QCOMPARE(conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time")).step, Step::NewPassword);
+    try {
+        conversation.changePassword(QStringLiteral("Correct-horse-9"));
+        QFAIL("a lost reply must throw");
+    } catch (const PlankBrokerError& error) {
+        QVERIFY(error.kind() != PlankBrokerError::RateLimited);
+    }
+    QCOMPARE(conversation.step(), Step::NewPassword);
+    Outcome outcome = conversation.changePassword(QStringLiteral("Correct-horse-9"));
+    QCOMPARE(outcome.step, Step::Credentials);
+    QCOMPARE(outcome.notice, Notice::DeniedPasswordMaybeChanged);
+    const QString text = noticeText(outcome.notice, PasswordPolicy {});
+    QVERIFY(text.contains(QStringLiteral("new password")));
+    QVERIFY(text != noticeText(Notice::Denied, PasswordPolicy {}));
+    QCOMPARE(server.requestLog.size(), 5);
+
+    // A definite "still at the password stage" answer clears the doubt.
+    QCOMPARE(conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time")).step, Step::NewPassword);
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, conversation.changePassword(QStringLiteral("Correct-horse-9")));
+    outcome = conversation.changePassword(QStringLiteral("Correct-horse-9"));
+    QCOMPARE(outcome.step, Step::NewPassword);
+    QCOMPARE(outcome.notice, Notice::PasswordTooShort);
+    outcome = conversation.changePassword(QStringLiteral("Correct-horse-10"));
+    QCOMPARE(outcome.notice, Notice::Denied);
+    QCOMPARE(server.requestLog.size(), 11);
+}
+
+void TestPlankBroker::enrollmentWalkTransportErrorsKeepTheStep()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("429 Too Many Requests", R"({"retry_after":120})");
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", EnrollNewPasswordReply);
+    server.queue("200 OK", R"({"state":"new_password","policy":{}})"); // malformed for /password
+    server.queue("200 OK", EnrollDone);
+
+    Conversation conversation(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    try {
+        conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time"));
+        QFAIL("429 must throw");
+    } catch (const PlankBrokerError& error) {
+        QCOMPARE(error.kind(), PlankBrokerError::RateLimited);
+        QCOMPARE(error.retryAfter(), 120);
+        QCOMPARE(error.userMessage(), QStringLiteral("Too many attempts. Try again in 120 seconds."));
+    }
+    QCOMPARE(conversation.step(), Step::Credentials);
+    QCOMPARE(conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time")).step, Step::NewPassword);
+    // new_password is not an answer /password may give: denied, conversation over.
+    const Outcome outcome = conversation.changePassword(QStringLiteral("Correct-horse-9"));
+    QCOMPARE(outcome.notice, Notice::Denied);
+
+    // A broker whose key matches no pin never sees the password.
+    TestBrokerServer impostor(QSsl::TlsV1_3OrLater);
+    QVERIFY(impostor.listen());
+    Conversation pinned(localConfig(impostor.port(), {QString::fromLatin1(RsaSpkiSha256)}));
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, pinned.begin(QStringLiteral("anna"), QStringLiteral("secret-one-time")));
+    QCoreApplication::processEvents();
+    QVERIFY(!impostor.request.contains("secret-one-time"));
+    QVERIFY(!impostor.request.contains("anna"));
+}
+
+void TestPlankBroker::enrollmentStartSendsDeviceKey()
+{
+    using namespace PlankEnrollment;
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", EnrollStartReply);
+    server.queue("200 OK", R"({"state":"denied"})");
+    server.queue("200 OK", EnrollDone);
+    PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+    config.devicePublicKey = []() { return DeviceSpki; };
+    Conversation conversation(config);
+    conversation.begin(QStringLiteral("anna"), QStringLiteral("one-time"));
+    QCOMPARE(requestJson(server.requestLog.at(0)), QJsonObject({
+        {QStringLiteral("username"), QStringLiteral("anna")},
+        {QStringLiteral("device_key"), DeviceSpki},
+    }));
+}
+
+void TestPlankBroker::onboardingDecisionPrecedence()
+{
+    using OnboardingState::Decision;
+    OnboardingState::Inputs fresh;
+    QCOMPARE(OnboardingState::decide(fresh), Decision::Show);
+    QVERIFY(OnboardingState::shouldShow(fresh));
+
+    // Every sign of earlier use keeps the wizard away; the first one (in the
+    // documented order) is reported.
+    OnboardingState::Inputs used;
+    used.completed = true;
+    used.brokerConfigured = false;
+    used.rememberedSession = true;
+    used.localPasskeys = true;
+    used.bookmarks = true;
+    used.remoteHosts = true;
+    const QList<Decision> order = {
+        Decision::Completed, Decision::NotConfigured, Decision::RememberedSession,
+        Decision::LocalPasskeys, Decision::Bookmarks, Decision::RemoteHosts,
+    };
+    for (const Decision expected : order) {
+        QCOMPARE(OnboardingState::decide(used), expected);
+        QVERIFY(!OnboardingState::shouldShow(used));
+        switch (expected) {
+        case Decision::Completed: used.completed = false; break;
+        case Decision::NotConfigured: used.brokerConfigured = true; break;
+        case Decision::RememberedSession: used.rememberedSession = false; break;
+        case Decision::LocalPasskeys: used.localPasskeys = false; break;
+        case Decision::Bookmarks: used.bookmarks = false; break;
+        case Decision::RemoteHosts: used.remoteHosts = false; break;
+        default: break;
+        }
+    }
+    QCOMPARE(OnboardingState::decide(used), Decision::Show);
+
+    // Each input alone is enough.
+    for (int i = 0; i < 5; ++i) {
+        OnboardingState::Inputs one;
+        (i == 0 ? one.completed : i == 1 ? one.rememberedSession : i == 2 ? one.localPasskeys :
+                  i == 3 ? one.bookmarks : one.remoteHosts) = true;
+        QVERIFY(!OnboardingState::shouldShow(one));
+    }
+}
+
+void TestPlankBroker::onboardingReadsSettingsAndPasskeys()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString file = directory.filePath(QStringLiteral("settings.ini"));
+    {
+        QSettings settings(file, QSettings::IniFormat);
+        OnboardingState::Inputs inputs;
+        OnboardingState::readSettings(settings, inputs);
+        QVERIFY(!inputs.completed);
+        QVERIFY(!inputs.bookmarks);
+        QVERIFY(!inputs.remoteHosts);
+
+        // An existing user's settings: a LAN bookmark (ComputerManager format).
+        settings.beginWriteArray(QStringLiteral("hosts"));
+        settings.setArrayIndex(0);
+        settings.setValue(QStringLiteral("hostname"), QStringLiteral("ws01"));
+        settings.endArray();
+        OnboardingState::readSettings(settings, inputs);
+        QVERIFY(inputs.bookmarks);
+        QVERIFY(!OnboardingState::shouldShow(inputs));
+    }
+    {
+        // A remote display setup (RemoteDisplaySetup format) alone.
+        QSettings settings(directory.filePath(QStringLiteral("remote.ini")), QSettings::IniFormat);
+        RemoteDisplaySetup::Setup setup;
+        setup.hostLayout = RemoteDisplaySetup::layoutForChoice(RemoteDisplaySetup::SingleVirtual);
+        setup.virtualMode1 = QStringLiteral("1920x1080");
+        setup.virtualMode2 = QStringLiteral("1920x1080");
+        setup.scalingMode = RemoteDisplaySetup::scalingForChoice(RemoteDisplaySetup::ScaledSpan);
+        QVERIFY(RemoteDisplaySetup::save(settings, QStringLiteral("ws01.example.test"), setup));
+        OnboardingState::Inputs inputs;
+        OnboardingState::readSettings(settings, inputs);
+        QVERIFY(inputs.remoteHosts);
+        QVERIFY(!inputs.bookmarks);
+        QCOMPARE(OnboardingState::decide(inputs), OnboardingState::Decision::RemoteHosts);
+        OnboardingState::markCompleted(settings);
+        OnboardingState::readSettings(settings, inputs);
+        QVERIFY(inputs.completed);
+    }
+    {
+        // A remote user signs in the normal way, then signs out (or the
+        // session expires) before any display setup: the Keychain session is
+        // gone, no bookmark, no Touch ID key. The sign-in alone must keep
+        // the wizard away on the next launch.
+        QSettings settings(directory.filePath(QStringLiteral("signin.ini")), QSettings::IniFormat);
+        OnboardingState::Inputs inputs;
+        OnboardingState::readSettings(settings, inputs);
+        QCOMPARE(OnboardingState::decide(inputs), OnboardingState::Decision::Show);
+        OnboardingState::recordBrokerSignIn(settings);
+        inputs = OnboardingState::Inputs();
+        inputs.rememberedSession = false;
+        OnboardingState::readSettings(settings, inputs);
+        QCOMPARE(OnboardingState::decide(inputs), OnboardingState::Decision::Completed);
+    }
+
+    const QString store = directory.filePath(QStringLiteral("passkeys"));
+    QVERIFY(!OnboardingState::hasLocalPasskeys(store));
+    QVERIFY(!OnboardingState::hasLocalPasskeys(QString()));
+    QVERIFY(QDir().mkpath(store + QStringLiteral("/ipa.example.test/anna")));
+    QVERIFY(!OnboardingState::hasLocalPasskeys(store));
+    QFile key(store + QStringLiteral("/ipa.example.test/anna/0011.json"));
+    QVERIFY(key.open(QIODevice::WriteOnly));
+    key.write("{}");
+    key.close();
+    QVERIFY(OnboardingState::hasLocalPasskeys(store));
 }
 
 namespace {

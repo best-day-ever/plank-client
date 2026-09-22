@@ -19,6 +19,9 @@ constexpr int RequestTimeoutMs = 10000;
 // Password + OTP verification goes through FAST-armoured Kerberos on the
 // broker; allow the KDC round trips some slack.
 constexpr int AuthenticationTimeoutMs = 20000;
+// Enrolment steps add IPA directory writes and, for the last code, a full
+// password + code login on top of the Kerberos round trips.
+constexpr int EnrollmentTimeoutMs = 30000;
 
 bool leafMatchesPins(const QSslConfiguration& configuration, const QStringList& pins)
 {
@@ -172,7 +175,9 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
                          &loop, &QEventLoop::quit);
     }
     const bool authentication = path.startsWith(QLatin1String("/v1/auth/"));
-    QTimer::singleShot(authentication ? AuthenticationTimeoutMs : RequestTimeoutMs,
+    const bool enrollment = path.startsWith(QLatin1String("/v1/enroll/"));
+    QTimer::singleShot(enrollment ? EnrollmentTimeoutMs :
+                       authentication ? AuthenticationTimeoutMs : RequestTimeoutMs,
                        &loop, &QEventLoop::quit);
     if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
     if (!reply->isFinished()) reply->abort();
@@ -312,6 +317,11 @@ PlankBrokerClient::PasskeySignIn PlankBrokerClient::signInWithPasskey(const QStr
         if (error.kind() != PlankBrokerError::Denied) throw;
     }
     return outcome;
+}
+
+PlankBrokerClient::Response PlankBrokerClient::post(const QString& path, const QJsonObject& body) const
+{
+    return request("POST", path, &body, QString());
 }
 
 void PlankBrokerClient::throwForBearerStatus(int status, const QByteArray& body)

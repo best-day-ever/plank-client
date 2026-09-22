@@ -224,7 +224,9 @@ SOURCES += \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
+    backend/plankenrollment.cpp \
     backend/plankpasskey.cpp \
+    backend/qrencoder.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
     settings/plankclientpolicy.cpp \
@@ -243,6 +245,7 @@ SOURCES += \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
     gui/remotebroker.cpp \
+    gui/onboardingcontroller.cpp \
     streaming/bandwidth.cpp \
     streaming/streamutils.cpp \
     path.cpp \
@@ -273,7 +276,10 @@ HEADERS += \
     backend/relaywakeclient.h \
     backend/plankbroker.h \
     backend/plankbrokerclient.h \
+    backend/plankenrollment.h \
     backend/plankpasskey.h \
+    backend/qrencoder.h \
+    backend/onboardingstate.h \
     cli/commandlineparser.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
@@ -291,6 +297,7 @@ HEADERS += \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
     gui/remotebroker.h \
+    gui/onboardingcontroller.h \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \

@@ -52,6 +52,7 @@
 #include "utils.h"
 #include "gui/computermodel.h"
 #include "gui/remotebroker.h"
+#include "gui/onboardingcontroller.h"
 #include "backend/computermanager.h"
 #include <QSslSocket>
 #include "backend/systemproperties.h"
@@ -923,6 +924,14 @@ int main(int argc, char *argv[])
                                            [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                return new RemoteBroker(StreamingPreferences::get(qmlEngine));
                                            });
+    // First sign-in wizard ("Welcome to BDE Fernweh"); ends in RemoteBroker's session.
+    qmlRegisterSingletonType<OnboardingController>("Onboarding", 1, 0,
+                                                   "Onboarding",
+                                                   [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
+                                                       auto* broker = qmlEngine->singletonInstance<RemoteBroker*>(
+                                                                   qmlTypeId("RemoteBroker", 1, 0, "RemoteBroker"));
+                                                       return new OnboardingController(broker);
+                                                   });
     qmlRegisterSingletonType<SystemProperties>("SystemProperties", 1, 0,
                                                "SystemProperties",
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
@@ -953,11 +962,15 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     QString initialView;
+    bool showOnboarding = false;
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::NormalStartRequested:
         // BDE build: people sign in through the studio broker (remote.bde.run);
         // LAN bookmarks stay one click away ("Local workstations").
         initialView = "qrc:/gui/RemoteView.qml";
+        // A brand-new installation opens with the first sign-in wizard on
+        // top of it; anyone who used this Mac before never sees it unasked.
+        showOnboarding = OnboardingController::shouldShowOnLaunch(StreamingPreferences::get());
         break;
     case GlobalCommandLineParser::StreamRequested:
         {
@@ -979,6 +992,7 @@ int main(int argc, char *argv[])
     }
 
     engine.rootContext()->setContextProperty("initialView", initialView);
+    engine.rootContext()->setContextProperty("showOnboarding", showOnboarding);
     engine.rootContext()->setContextProperty(
                 "runConfigChecks",
                 commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);

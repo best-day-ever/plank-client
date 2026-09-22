@@ -108,6 +108,15 @@ public:
     PasskeySignIn signInWithPasskey(const QString& username, const QString& rpId,
                                     const PasskeyAssertor& assertor) const;
 
+    // Unauthenticated JSON POST with the same TLS 1.3 + pin rules as every
+    // call (used by the enrolment conversation, section 16). Returns the HTTP
+    // status and body; the caller parses and zeroes the body.
+    struct Response {
+        int status = 0;
+        QByteArray body;
+    };
+    Response post(const QString& path, const QJsonObject& body) const;
+
     // Bearer calls. With a deviceSigner each carries X-Plank-Device-Time and
     // X-Plank-Device-Proof (section 14.2) when the signer produces a proof.
     QVector<PlankBroker::Host> hosts(const QString& sessionToken) const;
@@ -116,11 +125,6 @@ public:
     void logout(const QString& sessionToken) const;
 
 private:
-    struct Response {
-        int status = 0;
-        QByteArray body;
-    };
-
     Response request(const QByteArray& method, const QString& path,
                      const QJsonObject* body, const QString& sessionToken) const;
     static void throwForBearerStatus(int status, const QByteArray& body);
