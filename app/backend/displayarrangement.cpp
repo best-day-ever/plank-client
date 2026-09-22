@@ -300,9 +300,9 @@ Capabilities Capabilities::fleetDefault()
     caps.fingerprint = QStringLiteral("fleet-default");
     caps.maxOutputs = 4;
     caps.virtualHeads = 3;
-    // X screen Virtual 16384x4608 bounded by the NVENC maximum until the
+    // X screen Virtual 16384x8192 bounded by the NVENC maximum until the
     // host packs its capture.
-    caps.maxCanvas = QSize(8192, 4608);
+    caps.maxCanvas = QSize(8192, 8192);
     caps.minOutput = QSize(640, 480);
     // A 2:1 ViewPortIn downscale over the largest carrier (5120x2160).
     caps.maxOutput = QSize(8192, 4320);

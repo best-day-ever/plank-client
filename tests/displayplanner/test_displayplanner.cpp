@@ -352,7 +352,7 @@ void TestDisplayPlanner::fleetDefaultCapabilities()
     // The vectors' fleet-hybrid host, with the canvas the X screen allows
     // until the host packs its capture.
     const DisplayArrangement::Capabilities vector = vectorCapabilities(QStringLiteral("fleet-hybrid"));
-    QCOMPARE(fleet.maxCanvas, QSize(8192, 4608));
+    QCOMPARE(fleet.maxCanvas, QSize(8192, 8192));
     QCOMPARE(fleet.maxOutputs, vector.maxOutputs);
     QCOMPARE(fleet.virtualHeads, vector.virtualHeads);
     // The fleet publishes a 2:1 ViewPortIn downscale over its 5120x2160 carrier.
@@ -576,7 +576,7 @@ void TestDisplayPlanner::ultrawideAndStudioDisplayScaleToTheCanvas()
     QCOMPARE(plan.outputs.at(1).backing, DisplayArrangement::Backing::Virtual);
     // With a canvas that holds both (packed capture later), both are exact.
     DisplayArrangement::Capabilities wide = DisplayArrangement::Capabilities::fleetDefault();
-    wide.maxCanvas = QSize(16384, 4608);
+    wide.maxCanvas = QSize(16384, 8192);
     wide.packedCapture = true;
     const DisplayPlanner::Plan exact = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
                                                             arrangementHost(wide));
