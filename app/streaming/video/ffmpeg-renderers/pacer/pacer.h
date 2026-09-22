@@ -5,6 +5,7 @@
 #include "streaming/clientframeflowtrace.h"
 
 #include <array>
+#include <atomic>
 #include <QQueue>
 #include <QMutex>
 #include <QWaitCondition>
@@ -42,6 +43,8 @@ public:
     void discardQueuedFrames();
 
 private:
+    friend class TestPacerShutdown;
+
     ClientFrameFlowTrace m_FrameFlowTrace {"render"};
     static int vsyncThread(void* context);
 
@@ -73,7 +76,9 @@ private:
     QWaitCondition m_VsyncSignalled;
     SDL_Thread* m_RenderThread;
     SDL_Thread* m_VsyncThread;
-    bool m_Stopping;
+    // Atomic for the worker checks outside m_FrameQueueLock. Shutdown must
+    // still change this predicate under that lock before waking the queues.
+    std::atomic<bool> m_Stopping;
 
     IVsyncSource* m_VsyncSource;
     IFFmpegRenderer* m_VsyncRenderer;
