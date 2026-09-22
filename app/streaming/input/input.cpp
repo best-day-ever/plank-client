@@ -301,7 +301,8 @@ void SdlInputHandler::updateDecodedStreamDimensions(int frameWidth,
     if (current == QSize(frameWidth, frameHeight)) {
         return;
     }
-    // The renderer letterboxes the decoded frames, so input must use their
+    // Only reported for renderers that letterbox the decoded frame size
+    // (IFFmpegRenderer::letterboxesDecodedFrameSize()); input must use that
     // size too or pointer and picture disagree in aspect.
     SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
                 "PLANK input geometry: decoded frames are %dx%d, not the "

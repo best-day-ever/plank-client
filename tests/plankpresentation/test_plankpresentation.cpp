@@ -27,6 +27,8 @@ private slots:
     void clampsAbsolutePositionInsideImage();
     void snapshotRenderersAndMultiOutputKeepLayout();
     void videoRectInWindowPoints();
+    void decodedSizeReportedOnlyForFrameFittingRenderers();
+    void decodedSizeReportedAgainAfterReset();
 
 private:
     static PlankOutputGeometry singleOutput(const QSize& snapshotCanvas,
@@ -455,6 +457,37 @@ void TestPlankPresentation::videoRectInWindowPoints()
                                    QSize(2560, 1080));
     QCOMPARE(PlankPresentation::videoRectInWindow(stream, wide),
              QRectF(320, 0, 1920, 1080));
+}
+
+void TestPlankPresentation::decodedSizeReportedOnlyForFrameFittingRenderers()
+{
+    // A renderer that fits the negotiated size (d3d11va, dxva2, vdpau, mmal)
+    // stretches a 2560x1600 frame into its 16:9 rect: input must stay on the
+    // negotiated size, so nothing is reported.
+    PlankDecodedFrameSizeTracker negotiatedFit;
+    QVERIFY(!negotiatedFit.shouldReport(2560, 1600, false));
+    QVERIFY(!negotiatedFit.shouldReport(2560, 1600, false));
+
+    // A renderer that fits frame->width/height reports once per change.
+    PlankDecodedFrameSizeTracker frameFit;
+    QVERIFY(frameFit.shouldReport(2560, 1600, true));
+    QVERIFY(!frameFit.shouldReport(2560, 1600, true));
+    QVERIFY(frameFit.shouldReport(1920, 1080, true));
+    QVERIFY(!frameFit.shouldReport(0, 1080, true));
+    QVERIFY(!frameFit.shouldReport(1920, -1, true));
+}
+
+void TestPlankPresentation::decodedSizeReportedAgainAfterReset()
+{
+    // Reconnect with a retained decoder: the session re-applies the
+    // negotiated size to input, the decoder resumes with frames of the same
+    // decoded size, and must report it again.
+    PlankDecodedFrameSizeTracker tracker;
+    QVERIFY(tracker.shouldReport(2560, 1600, true));
+    QVERIFY(!tracker.shouldReport(2560, 1600, true));
+    tracker.reset();
+    QVERIFY(tracker.shouldReport(2560, 1600, true));
+    QVERIFY(!tracker.shouldReport(2560, 1600, true));
 }
 
 QTEST_APPLESS_MAIN(TestPlankPresentation)

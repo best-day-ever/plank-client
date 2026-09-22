@@ -166,6 +166,10 @@ bool FFmpegVideoDecoder::resumeAfterReconnect()
         return false;
     }
 
+    // The reconnect re-applied the negotiated size to input
+    // (Session::configurePlankLaunchGeometry); report the decoded size again
+    // on the first resumed frame even if it did not change.
+    m_DecodedFrameSizeTracker.reset();
     m_DecoderThread = SDL_CreateThread(FFmpegVideoDecoder::decoderThreadProcThunk,
                                        "FFDecoder", this);
     if (m_DecoderThread == nullptr) {
@@ -1938,13 +1942,14 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     SDL_assert(m_FrameInfoQueue.size() == m_FramesIn - m_FramesOut);
                     m_FramesOut++;
 
-                    // The renderer letterboxes these frames; input must map
-                    // against the same size (the negotiated size can differ).
+                    // Renderers that fit the decoded frame size letterbox
+                    // these frames, so input must map against the same size
+                    // (the negotiated size can differ). Renderers that fit
+                    // the negotiated size keep input on it.
                     if (!m_TestOnly &&
-                            (frame->width != m_LastDecodedFrameWidth ||
-                             frame->height != m_LastDecodedFrameHeight)) {
-                        m_LastDecodedFrameWidth = frame->width;
-                        m_LastDecodedFrameHeight = frame->height;
+                            m_DecodedFrameSizeTracker.shouldReport(
+                                frame->width, frame->height,
+                                m_FrontendRenderer->letterboxesDecodedFrameSize())) {
                         Session::notifyDecodedFrameSize(frame->width,
                                                         frame->height);
                     }

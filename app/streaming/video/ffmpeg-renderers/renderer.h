@@ -274,6 +274,15 @@ public:
         return false;
     }
 
+    // True when the renderer aspect-fits the decoded frame's own size
+    // (frame->width/height) rather than the negotiated stream size. Only then
+    // may input follow a decoded size that differs from the negotiated one;
+    // renderers that fit the negotiated size stretch the frame into it, so
+    // input must keep the negotiated size to match the picture.
+    virtual bool letterboxesDecodedFrameSize() {
+        return false;
+    }
+
     virtual void prepareToRender() {
         // Allow renderers to perform any final preparations for
         // rendering after they have been selected to render. Such

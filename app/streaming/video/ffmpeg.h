@@ -9,6 +9,7 @@
 #include "decoder.h"
 #include "ffmpeg-renderers/renderer.h"
 #include "ffmpeg-renderers/pacer/pacer.h"
+#include "streaming/plankpresentation.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -129,9 +130,9 @@ private:
     bool m_IdentityGbrEnabled;
     bool m_NeedsSpsFixup;
     bool m_TestOnly;
-    // Decoder-thread only: last decoded frame size reported to the session.
-    int m_LastDecodedFrameWidth = 0;
-    int m_LastDecodedFrameHeight = 0;
+    // Decoder-thread only (reset while the thread is stopped): the decoded
+    // frame size last reported to the session.
+    PlankDecodedFrameSizeTracker m_DecodedFrameSizeTracker;
     SDL_Thread* m_DecoderThread;
     SDL_AtomicInt m_DecoderThreadShouldQuit;
 

@@ -34,6 +34,8 @@ public:
     virtual bool isPixelFormatSupported(int videoFormat, enum AVPixelFormat pixelFormat) override;
     virtual AVPixelFormat getPreferredPixelFormat(int videoFormat) override;
     virtual RendererType getRendererType() override;
+    // renderFrame() slices the mapped frame crop.
+    virtual bool letterboxesDecodedFrameSize() override { return true; }
 
 private:
     enum class SoftwareFrameAllocator {

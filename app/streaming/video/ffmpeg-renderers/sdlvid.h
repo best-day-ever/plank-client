@@ -25,6 +25,8 @@ public:
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO) override;
     // renderFrame() letterboxes against SDL_GetCurrentRenderOutputSize().
     virtual bool letterboxesAgainstLiveDrawable() override { return true; }
+    // renderFrame() fits frame->width/height.
+    virtual bool letterboxesDecodedFrameSize() override { return true; }
 
 private:
     void renderOverlay(Overlay::OverlayType type);

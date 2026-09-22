@@ -43,8 +43,9 @@ public:
     // then maps against the live drawable instead of the layout snapshot.
     void setLiveDrawableGeometry(bool live);
 
-    // The size of the frames the renderer letterboxes, from the decoder. If it
-    // differs from the negotiated stream size, input follows the frames.
+    // The decoded frame size, reported by the decoder only when its renderer
+    // letterboxes the decoded frames (not the negotiated size). If it differs
+    // from the negotiated stream size, input follows the frames.
     void updateDecodedStreamDimensions(int frameWidth, int frameHeight);
 
     // A presentation window changed size, scale or fullscreen state: log the

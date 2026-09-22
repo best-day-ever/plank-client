@@ -48,6 +48,40 @@ struct PlankOutputGeometry
     }
 };
 
+// Decides when the decoder reports a decoded frame size to input.
+//
+// Input must map against the size the renderer letterboxes. Some renderers
+// fit the decoded frame (frame->width/height); others fit the negotiated
+// stream size and stretch the frame into it. Only the first kind may move
+// input to the decoded size. Reports happen on a change only; reset() makes
+// the next frame report again (for example after a reconnect, where the
+// session re-applies the negotiated size to input while a retained decoder
+// keeps decoding frames of the same size).
+class PlankDecodedFrameSizeTracker
+{
+public:
+    bool shouldReport(int width, int height, bool rendererFitsDecodedFrames)
+    {
+        if (!rendererFitsDecodedFrames || width <= 0 || height <= 0 ||
+                (width == m_Width && height == m_Height)) {
+            return false;
+        }
+        m_Width = width;
+        m_Height = height;
+        return true;
+    }
+
+    void reset()
+    {
+        m_Width = 0;
+        m_Height = 0;
+    }
+
+private:
+    int m_Width = 0;
+    int m_Height = 0;
+};
+
 struct PlankPresentationSlice
 {
     QRectF sourceRect;

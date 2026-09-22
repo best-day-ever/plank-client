@@ -825,6 +825,12 @@ public:
         return true;
     }
 
+    bool letterboxesDecodedFrameSize() override
+    {
+        // updateVideoRegionSizeForFrame() fits frame->width/height.
+        return true;
+    }
+
 private:
     bool m_HwAccel;
     SDL_Window* m_Window;
