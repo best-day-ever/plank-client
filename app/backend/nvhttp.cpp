@@ -238,7 +238,8 @@ NvHTTP::startApp(QString verb,
                  QString& plankTransportToken,
                  QString& acceptedCaptureSource,
                  QString& acceptedEncoderBackend,
-                 QString& acceptedEncodingMode)
+                 QString& acceptedEncodingMode,
+                 QString& acceptedFileClipboardMode)
 {
     QString plankOutputArguments;
     if (!captureDisplayMode.isEmpty()) {
@@ -349,6 +350,7 @@ NvHTTP::startApp(QString verb,
     acceptedCaptureSource = getXmlString(response, "PlankCaptureSource");
     acceptedEncoderBackend = getXmlString(response, "PlankEncoderBackend");
     acceptedEncodingMode = getXmlString(response, "PlankEncodingMode");
+    acceptedFileClipboardMode = getXmlString(response, "PlankFileClipboardMode");
     const auto isCanonicalSha256Hex = [](const QString& value) {
         const QByteArray encoded = value.toLatin1();
         const QByteArray decoded = QByteArray::fromHex(encoded);
@@ -376,6 +378,22 @@ NvHTTP::startApp(QString verb,
     if (acceptedEncodingMode.isEmpty() || acceptedEncodingMode != encodingMode) {
         throw GfeHttpResponseException(
                     400, "Host did not accept the requested encoding mode");
+    }
+    if (acceptedFileClipboardMode != QStringLiteral("off") &&
+            acceptedFileClipboardMode != QStringLiteral("client-to-host") &&
+            acceptedFileClipboardMode != QStringLiteral("host-to-client") &&
+            acceptedFileClipboardMode != QStringLiteral("bidirectional")) {
+        throw GfeHttpResponseException(
+                    400, "Host returned an invalid file clipboard policy");
+    }
+    const bool filesNegotiated =
+            (plankFeatureFlags & (NvOutputTopology::ClipboardSyncFeature |
+                                  NvOutputTopology::ClipboardFilesFeature)) ==
+                (NvOutputTopology::ClipboardSyncFeature |
+                 NvOutputTopology::ClipboardFilesFeature);
+    if (filesNegotiated != (acceptedFileClipboardMode != QStringLiteral("off"))) {
+        throw GfeHttpResponseException(
+                    400, "Host returned inconsistent file clipboard negotiation");
     }
 }
 

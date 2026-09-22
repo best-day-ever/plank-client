@@ -138,6 +138,7 @@ private:
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;
     bool m_KeyboardCaptureActive;
+    bool m_FilePasteKeyUpConsumed = false;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
     bool m_MouseCursorCapturedVisibilityState;
 
