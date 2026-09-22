@@ -2281,7 +2281,7 @@ void Session::rebuildPresentationLayout()
                 const DisplayPlanner::Output& planned = m_DisplayPlan.outputs.at(display.planIndex);
                 output.canvasRect = QRect(planned.position, planned.size);
                 QRect desktopRect = output.canvasRect;
-                QRect captureRect = planned.sourceRect.isValid() ? planned.sourceRect : output.canvasRect;
+                QRect captureRect = planned.captureRect.isValid() ? planned.captureRect : output.canvasRect;
                 QSize capture = m_DisplayPlan.capture.isValid() ? m_DisplayPlan.capture : m_DisplayPlan.canvas;
                 QSize desktop = m_DisplayPlan.canvas;
                 if (topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
@@ -2289,8 +2289,7 @@ void Session::rebuildPresentationLayout()
                         if (hostOutput.arrangementIndex == planned.arrangementIndex) {
                             desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
                                                 hostOutput.width, hostOutput.height);
-                            captureRect = QRect(hostOutput.sourceX, hostOutput.sourceY,
-                                                hostOutput.sourceWidth, hostOutput.sourceHeight);
+                            captureRect = hostOutput.captureRect();
                             capture = captureSize;
                             desktop = desktopSize;
                             break;
@@ -2321,9 +2320,7 @@ void Session::rebuildPresentationLayout()
                 output.desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
                                            hostOutput.width, hostOutput.height);
                 output.sourceRect = PlankPresentation::sourceRectInStream(
-                            QRect(hostOutput.sourceX, hostOutput.sourceY,
-                                  hostOutput.sourceWidth, hostOutput.sourceHeight),
-                            captureSize, streamSize);
+                            hostOutput.captureRect(), captureSize, streamSize);
             }
             m_PresentationLayout.desktopSize = desktopSize;
         }
@@ -2339,8 +2336,13 @@ void Session::rebuildPresentationLayout()
             QReadLocker lock(&m_Computer->lock);
             topology = m_Computer->outputTopology;
         }
+        bool packed = false;
+        for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
+            packed = packed || hostOutput.captureRect() !=
+                    QRect(hostOutput.sourceX, hostOutput.sourceY, hostOutput.sourceWidth, hostOutput.sourceHeight);
+        }
         if (!m_ResolvedArrangement.isEmpty() && topology.matchesRequestedArrangement(m_ResolvedArrangement) &&
-                topology.captureSize() != QSize(topology.desktopWidth, topology.desktopHeight)) {
+                (packed || topology.captureSize() != QSize(topology.desktopWidth, topology.desktopHeight))) {
             // One window on a packed capture (left fullscreen): it would show
             // the rows, not the desk, so it shows the primary display, and the
             // pointer maps through it to the desktop.
@@ -2349,9 +2351,8 @@ void Session::rebuildPresentationLayout()
                 output.desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
                                            hostOutput.width, hostOutput.height);
                 output.sourceRect = PlankPresentation::sourceRectInStream(
-                            QRect(hostOutput.sourceX, hostOutput.sourceY, hostOutput.sourceWidth,
-                                  hostOutput.sourceHeight),
-                            topology.captureSize(), QSize(m_StreamConfig.width, m_StreamConfig.height));
+                            hostOutput.captureRect(), topology.captureSize(),
+                            QSize(m_StreamConfig.width, m_StreamConfig.height));
                 m_PresentationLayout.desktopSize = QSize(topology.desktopWidth, topology.desktopHeight);
                 break;
             }

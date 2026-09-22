@@ -294,10 +294,10 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
 
-    // Source rectangles lie in the capture: the desktop, unless a host with
-    // the display arrangement extension publishes capture_size (during an
-    // arrangement lease; packed when it differs from the desktop). Without
-    // the bit the field is ignored and sources stay in the desktop.
+    // The encoded capture: the desktop, unless a host with the display
+    // arrangement extension publishes capture_size (during an arrangement
+    // lease; with each output's capture_rect). source_rect keeps its schema-13
+    // meaning (desktop coordinates) either way. Ignored without the bit.
     parsed.captureWidth = parsed.desktopWidth;
     parsed.captureHeight = parsed.desktopHeight;
     if ((parsed.featureFlags & DisplayArrangementFeature) != 0 && object.contains("capture_size")) {
@@ -349,8 +349,8 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
                 !requireInteger(sourceRect, "height", output.sourceHeight) ||
                 output.sourceX < 0 || output.sourceY < 0 ||
                 output.sourceWidth <= 0 || output.sourceHeight <= 0 ||
-                output.sourceX + output.sourceWidth > parsed.captureWidth ||
-                output.sourceY + output.sourceHeight > parsed.captureHeight ||
+                output.sourceX + output.sourceWidth > parsed.desktopWidth ||
+                output.sourceY + output.sourceHeight > parsed.desktopHeight ||
                 output.virtualOutput != parsed.virtualLayout ||
                 (parsed.virtualLayout &&
                  (parsed.outputs.size() >= parsed.virtualModes.size() ||
@@ -361,6 +361,34 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
                 *error = QStringLiteral("Invalid composite source rectangle or output provenance");
             }
             return false;
+        }
+        // Display arrangement: where the output sits in the encoded capture.
+        // Published with capture_size (during an arrangement lease), and the
+        // same as source_rect unless the capture is packed. Ignored without
+        // the bit, like capture_size.
+        output.captureX = output.sourceX;
+        output.captureY = output.sourceY;
+        output.captureWidth = output.sourceWidth;
+        output.captureHeight = output.sourceHeight;
+        if ((parsed.featureFlags & DisplayArrangementFeature) != 0) {
+            const bool hasCaptureRect = entry.contains("capture_rect");
+            const QJsonObject captureRect = entry.value("capture_rect").toObject();
+            if (hasCaptureRect != parsed.capturePublished ||
+                    (hasCaptureRect &&
+                     (!entry.value("capture_rect").isObject() || captureRect.size() != 4 ||
+                      !requireInteger(captureRect, "x", output.captureX) ||
+                      !requireInteger(captureRect, "y", output.captureY) ||
+                      !requireInteger(captureRect, "width", output.captureWidth) ||
+                      !requireInteger(captureRect, "height", output.captureHeight) ||
+                      output.captureX < 0 || output.captureY < 0 ||
+                      output.captureWidth <= 0 || output.captureHeight <= 0 ||
+                      output.captureX + output.captureWidth > parsed.captureWidth ||
+                      output.captureY + output.captureHeight > parsed.captureHeight))) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("Invalid output capture rectangle");
+                }
+                return false;
+            }
         }
         parsed.outputs.append(output);
     }
@@ -486,6 +514,11 @@ QJsonObject NvOutputTopology::toJson() const
         if (arrangement) {
             entry.insert("backing", output.backing);
             entry.insert("arrangement_index", output.arrangementIndex);
+            if (capturePublished) {
+                entry.insert("capture_rect", QJsonObject {
+                    {"x", output.captureX}, {"y", output.captureY},
+                    {"width", output.captureWidth}, {"height", output.captureHeight}});
+            }
         }
         serializedOutputs.append(entry);
     }

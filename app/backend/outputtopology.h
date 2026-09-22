@@ -31,6 +31,18 @@ struct NvOutput
     // arrangement request, -1 outside one.
     QString backing;
     int arrangementIndex = -1;
+    // Display arrangement only: the output's rectangle in the encoded
+    // capture (capture_rect); source_rect unless the capture is packed.
+    int captureX = 0;
+    int captureY = 0;
+    int captureWidth = 0;
+    int captureHeight = 0;
+
+    QRect captureRect() const
+    {
+        return captureWidth > 0 && captureHeight > 0 ? QRect(captureX, captureY, captureWidth, captureHeight) :
+                                                       QRect(sourceX, sourceY, sourceWidth, sourceHeight);
+    }
 };
 
 struct NvClientDisplay
@@ -218,7 +230,7 @@ struct NvOutputTopology
     QVector<NvOutput> outputs;
     QRectF captureLogicalBounds;
     QString appleEncodingMode = QStringLiteral("hevc-10-420-videotoolbox");
-    // The encoded frame source rectangles refer to: capture_size during an
+    // The encoded frame capture rectangles refer to: capture_size during an
     // arrangement lease (display arrangement only), else the desktop size.
     int captureWidth = 0;
     int captureHeight = 0;

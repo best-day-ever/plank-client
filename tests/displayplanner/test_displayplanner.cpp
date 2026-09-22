@@ -597,7 +597,7 @@ void TestDisplayPlanner::ultrawideAndStudioDisplayScaleToTheCanvas()
     QCOMPARE(exact.canvas, QSize(8560, 2880));
     QVERIFY(exact.packed);
     QCOMPARE(exact.capture, QSize(5120, 4320));
-    QCOMPARE(exact.outputs.at(1).sourceRect, QRect(0, 1440, 5120, 2880));
+    QCOMPARE(exact.outputs.at(1).captureRect, QRect(0, 1440, 5120, 2880));
     QVERIFY(!warningCodes(exact).contains(QStringLiteral("canvas")));
 }
 
@@ -1020,9 +1020,9 @@ void TestDisplayPlanner::threeUhdPackIntoOneStream()
         QCOMPARE(output.badge, QStringLiteral("exact"));
     }
     // Request order packs: the primary, then the left one, then the right one on the second row.
-    QCOMPARE(plan.outputs.at(1).sourceRect, QRect(0, 0, 3840, 2160));
-    QCOMPARE(plan.outputs.at(0).sourceRect, QRect(3840, 0, 3840, 2160));
-    QCOMPARE(plan.outputs.at(2).sourceRect, QRect(0, 2160, 3840, 2160));
+    QCOMPARE(plan.outputs.at(1).captureRect, QRect(0, 0, 3840, 2160));
+    QCOMPARE(plan.outputs.at(0).captureRect, QRect(3840, 0, 3840, 2160));
+    QCOMPARE(plan.outputs.at(2).captureRect, QRect(0, 2160, 3840, 2160));
     const QStringList codes = warningCodes(plan);
     QVERIFY(!codes.contains(QStringLiteral("canvas")));
     QVERIFY(!codes.contains(QStringLiteral("decoder")));
@@ -1111,9 +1111,9 @@ void TestDisplayPlanner::packedWindowsMapToTheDesktop()
     QCOMPARE(plan.capture, QSize(7680, 4320));
     const DisplayPlanner::Output& third = plan.outputs.at(2);
     QCOMPARE(third.position, QPoint(7680, 0));
-    QVERIFY(third.sourceRect.y() >= 2160);
+    QVERIFY(third.captureRect.y() >= 2160);
     PlankPresentationOutput window;
-    window.sourceRect = PlankPresentation::sourceRectInStream(third.sourceRect, plan.capture, plan.capture);
+    window.sourceRect = PlankPresentation::sourceRectInStream(third.captureRect, plan.capture, plan.capture);
     window.desktopRect = QRect(third.position, third.size);
     const auto slice = PlankPresentation::sliceForSource(plan.capture, window.sourceRect, QSize(3840, 2160));
     QVERIFY(slice.visible);

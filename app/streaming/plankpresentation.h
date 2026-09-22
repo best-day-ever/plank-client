@@ -22,9 +22,10 @@ struct PlankPresentationOutput
     QRect canvasRect;
     bool primary = false;
     // When valid, this window shows exactly this rectangle of the stream
-    // (stream pixels: the host's source_rect scaled to the stream), fitted
-    // into its own drawable, and pointer input maps through it to
-    // desktopRect (host desktop coordinates, the host's output rectangle).
+    // (stream pixels: the host's capture_rect, else source_rect, scaled to
+    // the stream), fitted into its own drawable, and pointer input maps
+    // through it to desktopRect (host desktop coordinates, the host's output
+    // rectangle).
     // Otherwise the window shows its canvasRect slice of the canvas.
     QRectF sourceRect;
     QRect desktopRect;
@@ -193,7 +194,7 @@ public:
 
     // ---- Outputs with a source rectangle (PlankPresentationOutput::sourceRect)
 
-    // The host's capture rectangle of one output (source_rect, in capture
+    // The host's capture rectangle of one output (capture_rect, in capture
     // pixels) as stream pixels: the capture may be scaled to the stream.
     static QRectF sourceRectInStream(const QRect& captureRect,
                                      const QSize& captureSize,

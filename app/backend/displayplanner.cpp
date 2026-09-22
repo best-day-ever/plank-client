@@ -537,7 +537,7 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
     for (int position = 0; position < entries.size(); ++position) {
         Output& output = plan.outputs[entries.at(position)];
         output.arrangementIndex = position;
-        output.sourceRect = packing.sourceRects.value(position);
+        output.captureRect = packing.sourceRects.value(position);
         DisplayArrangement::Entry entry;
         entry.rect = QRect(output.position, output.size);
         DisplayArrangement::preferenceFromName(output.preference, entry.preference);

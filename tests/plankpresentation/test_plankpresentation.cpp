@@ -653,16 +653,18 @@ void TestPlankPresentation::layoutRequiresCompleteSourceRects()
 void TestPlankPresentation::packedThreeUhdThirdScreenMapsToTheDesktop()
 {
     // The packing vector "three-uhd-row": an 11520x2160 desktop captured as
-    // 7680x4320, the third screen's pixels on the second row.
+    // 7680x4320, the third screen's pixels on the second row. The host
+    // publishes that slot as capture_rect (source_rect stays the desktop
+    // rectangle); the Session presents the window from it.
     const QSize capture(7680, 4320);
     const QSize desktop(11520, 2160);
     PlankPresentationLayout layout;
     layout.desktopSize = desktop;
     layout.canvasSize = desktop;
-    const QRect sources[3] = {QRect(0, 0, 3840, 2160), QRect(3840, 0, 3840, 2160), QRect(0, 2160, 3840, 2160)};
+    const QRect captureRects[3] = {QRect(0, 0, 3840, 2160), QRect(3840, 0, 3840, 2160), QRect(0, 2160, 3840, 2160)};
     for (int index = 0; index < 3; ++index) {
         PlankPresentationOutput output(nullptr, QRect(3840 * index, 0, 3840, 2160), index == 0);
-        output.sourceRect = PlankPresentation::sourceRectInStream(sources[index], capture, capture);
+        output.sourceRect = PlankPresentation::sourceRectInStream(captureRects[index], capture, capture);
         output.desktopRect = QRect(3840 * index, 0, 3840, 2160);
         layout.outputs.append(output);
     }

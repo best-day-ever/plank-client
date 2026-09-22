@@ -92,7 +92,7 @@ struct Output
     QSize size;                // planned workstation desktop size
     QPoint position;           // planned workstation desktop position
     int arrangementIndex = -1; // entry number in the request
-    QRect sourceRect;          // where it sits in the encoded capture (capture pixels)
+    QRect captureRect;         // where it sits in the encoded capture (the host's capture_rect)
     bool scaled = false;       // stepped down to fit the limits
     QString badge;             // exact | looks-like | preset | custom | scaled | closest
     DisplayArrangement::Backing backing = DisplayArrangement::Backing::None; // expected
