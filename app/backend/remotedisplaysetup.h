@@ -7,6 +7,7 @@
 
 #include "outputtopology.h"
 
+#include <QCoreApplication>
 #include <QPoint>
 #include <QSettings>
 #include <QSize>
@@ -114,13 +115,24 @@ inline bool save(QSettings& settings, const QString& hostId, const Setup& setup)
     return true;
 }
 
+// The virtual modes to offer and match against for one workstation: what its
+// feature flags from the last connect say it accepts, or every qualified mode
+// while nothing is known yet (the Session re-resolves Match client with the
+// flags of the connect itself and refuses a mode the host does not accept).
+inline QStringList candidateModes(bool hostKnown, int hostFeatureFlags)
+{
+    return hostKnown ? NvOutputTopology::virtualModesForHost(hostFeatureFlags) :
+                       NvOutputTopology::qualifiedVirtualModes();
+}
+
 // Best qualified virtual mode for one virtual display on this client: the
 // same ranking Match client uses (exact, else the closest aspect ratio that
 // fits without upscaling), restricted to landscape modes because the
 // ultra-tall halves only make sense as a pair.
-inline QString suggestedMode(const QSize& clientSize)
+inline QString suggestedMode(const QSize& clientSize,
+                             const QStringList& modes = NvOutputTopology::qualifiedVirtualModes())
 {
-    for (const QString& mode : NvOutputTopology::rankedVirtualModes(clientSize)) {
+    for (const QString& mode : NvOutputTopology::rankedVirtualModes(clientSize, modes)) {
         const QSize size = NvOutputTopology::virtualModeSize(mode);
         if (size.width() >= size.height()) return mode;
     }
@@ -130,12 +142,14 @@ inline QString suggestedMode(const QSize& clientSize)
 // Whether "Match my displays" can work for these client displays; the reason
 // is user-facing when it cannot. Any single display or left-to-right pair
 // can: odd sizes are matched to the closest supported mode.
-inline bool canMatchClient(const QVector<NvClientDisplay>& displays, QString* reason = nullptr)
+inline bool canMatchClient(const QVector<NvClientDisplay>& displays, QString* reason = nullptr,
+                           const QStringList& candidates = NvOutputTopology::qualifiedVirtualModes())
 {
     QString layout;
     QStringList modes;
     QString error;
-    const bool ok = NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, &error);
+    const bool ok = NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, &error, nullptr,
+                                                                 candidates);
     if (!ok && reason != nullptr) *reason = error;
     return ok;
 }
@@ -152,15 +166,16 @@ inline NvClientDisplay primaryDisplay(const QVector<NvClientDisplay>& displays)
 
 // First-connect proposal: match the client's displays whenever that works,
 // otherwise one virtual display that fits the main display, scaled to fit.
-inline Setup proposal(const QVector<NvClientDisplay>& displays)
+inline Setup proposal(const QVector<NvClientDisplay>& displays,
+                      const QStringList& candidates = NvOutputTopology::qualifiedVirtualModes())
 {
     Setup setup;
-    const bool canMatch = canMatchClient(displays);
+    const bool canMatch = canMatchClient(displays, nullptr, candidates);
     QString layout;
     QStringList modes;
-    if (canMatch) NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes);
+    if (canMatch) NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, nullptr, nullptr, candidates);
     const QString mode = canMatch ? modes.first() :
-            suggestedMode(NvOutputTopology::clientMatchTarget(primaryDisplay(displays)));
+            suggestedMode(NvOutputTopology::clientMatchTarget(primaryDisplay(displays)), candidates);
     setup.hostLayout = layoutForChoice(canMatch ? MatchClient : SingleVirtual);
     setup.virtualMode1 = mode;
     setup.virtualMode2 = canMatch ? modes.value(1, mode) : mode;
@@ -173,13 +188,14 @@ inline Setup proposal(const QVector<NvClientDisplay>& displays)
 // is really used. Returns false (with a user-facing reason) only when the
 // displays cannot be matched at all.
 inline bool refreshMatchedModes(QSettings& settings, const QString& hostId, Setup& setup,
-                                const QVector<NvClientDisplay>& displays, QString* reason = nullptr)
+                                const QVector<NvClientDisplay>& displays, QString* reason = nullptr,
+                                const QStringList& candidates = NvOutputTopology::qualifiedVirtualModes())
 {
     if (setup.hostLayout != QLatin1String(NvOutputTopology::MatchClientHostLayout)) return true;
     QString layout;
     QStringList modes;
     QString error;
-    if (!NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, &error)) {
+    if (!NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, &error, nullptr, candidates)) {
         if (reason != nullptr) *reason = error;
         return false;
     }
@@ -191,6 +207,27 @@ inline bool refreshMatchedModes(QSettings& settings, const QString& hostId, Setu
         save(settings, hostId, setup);
     }
     return true;
+}
+
+// A saved single or dual virtual layout whose mode this workstation does not
+// accept (its flags from the last connect): the user-facing reason to ask
+// again, or empty when the saved modes are fine or the layout is not virtual.
+inline QString unsupportedModeReason(const Setup& setup, const QStringList& candidates)
+{
+    QStringList used;
+    if (setup.hostLayout == QLatin1String(NvOutputTopology::SingleHostLayout)) {
+        used = {setup.virtualMode1};
+    } else if (setup.hostLayout == QLatin1String(NvOutputTopology::DualHorizontalHostLayout)) {
+        used = {setup.virtualMode1, setup.virtualMode2};
+    }
+    for (const QString& mode : std::as_const(used)) {
+        if (!candidates.contains(mode)) {
+            return QCoreApplication::translate("RemoteDisplaySetup",
+                                               "This workstation does not support %1. Choose another resolution.")
+                    .arg(QString(mode).replace(QLatin1Char('x'), QChar(0x00D7)));
+        }
+    }
+    return QString();
 }
 
 }

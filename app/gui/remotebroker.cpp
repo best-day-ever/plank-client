@@ -624,6 +624,20 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
 
 }
 
+namespace {
+
+// The virtual modes a Linux workstation accepted on its last connect (its
+// cached feature flags); every qualified mode while nothing is known yet or
+// for a Mac workstation, which sizes its desktop from mode 1 freely.
+QStringList hostVirtualModes(QSettings& settings, const QString& hostId)
+{
+    const RemoteStreamSetup::Capabilities caps = RemoteStreamSetup::loadCapabilities(settings, hostId);
+    return RemoteDisplaySetup::candidateModes(caps.known && caps.platform == RemoteStreamSetup::LinuxPlatform,
+                                              caps.featureFlags);
+}
+
+}
+
 QString RemoteBroker::hostNameFor(const QString& hostId) const
 {
     for (const QVariant& value : std::as_const(m_Hosts)) {
@@ -641,14 +655,16 @@ QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
     if (!PlankBroker::isHostId(hostId)) return result;
     QSettings settings;
     RemoteDisplaySetup::Setup setup = RemoteDisplaySetup::load(settings, hostId);
+    // Only the modes this workstation accepted on its last connect.
+    const QStringList modes = hostVirtualModes(settings, hostId);
     // The same probe the streaming Session uses, so the dialog shows and
     // proposes exactly what a connect will do.
     const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
-    const ClientDisplayProbe::MatchPreview match = ClientDisplayProbe::matchPreview(displays);
+    const ClientDisplayProbe::MatchPreview match = ClientDisplayProbe::matchPreview(displays, modes);
     const bool canMatch = match.ok;
     const bool configured = setup.configured;
     if (!configured) {
-        setup = RemoteDisplaySetup::proposal(displays);
+        setup = RemoteDisplaySetup::proposal(displays, modes);
     }
     result.insert(QStringLiteral("configured"), configured);
     result.insert(QStringLiteral("layoutChoice"), RemoteDisplaySetup::choiceForLayout(setup.hostLayout));
@@ -660,7 +676,7 @@ QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
     result.insert(QStringLiteral("matchClientSummary"), ClientDisplayProbe::matchSummary(match));
     result.insert(QStringLiteral("matchClientFitted"), match.fitted);
     result.insert(QStringLiteral("clientResolution"), ClientDisplayProbe::describe(displays));
-    result.insert(QStringLiteral("virtualModes"), NvOutputTopology::qualifiedVirtualModes());
+    result.insert(QStringLiteral("virtualModes"), modes);
     return result;
 }
 
@@ -812,11 +828,18 @@ void RemoteBroker::connectToHost(const QString& hostId)
         emit displaySetupRequired(hostId, hostName, QString());
         return;
     }
+    const QStringList modes = hostVirtualModes(settings, hostId);
     QString matchReason;
     if (!RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display,
-                                                 ClientDisplayProbe::probe(), &matchReason)) {
+                                                 ClientDisplayProbe::probe(), &matchReason, modes)) {
         // Screens changed since the setup was saved (e.g. a third monitor).
         emit displaySetupRequired(hostId, hostName, matchReason);
+        return;
+    }
+    const QString unsupported = RemoteDisplaySetup::unsupportedModeReason(display, modes);
+    if (!unsupported.isEmpty()) {
+        // A saved virtual mode this workstation refused on its last connect.
+        emit displaySetupRequired(hostId, hostName, unsupported);
         return;
     }
     StreamInputs stream;

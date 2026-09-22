@@ -353,6 +353,7 @@ private slots:
     void remoteDisplaySetupMatchesOddScreens();
     void remoteDisplaySetupDialogAndSessionAgree();
     void remoteDisplaySetupMigratesSavedMatchClient();
+    void remoteDisplaySetupFiltersModesByHostFlags();
 
     // Keepalive
     void keepaliveCadence();
@@ -1358,6 +1359,68 @@ void TestPlankBroker::remoteDisplaySetupMigratesSavedMatchClient()
                                                      {screen(0, 1920, 1080), NvClientDisplay {QRect(0, 1080, 1920, 1080), QSize(1920, 1080)}},
                                                      &reason));
     QVERIFY(reason.contains(QStringLiteral("left to right")));
+}
+
+void TestPlankBroker::remoteDisplaySetupFiltersModesByHostFlags()
+{
+    // A workstation whose last connect did not advertise the notch-safe
+    // laptop modes (0x4000000) refuses 3024x1890: nothing may propose it.
+    const QStringList oldHost = RemoteDisplaySetup::candidateModes(true, 0);
+    const QStringList newHost = RemoteDisplaySetup::candidateModes(
+                true, NvOutputTopology::NotchSafeLaptopModesFeature);
+    QVERIFY(!oldHost.contains(QStringLiteral("3024x1890")));
+    QVERIFY(newHost.contains(QStringLiteral("3024x1890")));
+    // Nothing known yet: every qualified mode (the Session re-resolves with
+    // the flags of the connect itself).
+    QCOMPARE(RemoteDisplaySetup::candidateModes(false, 0), NvOutputTopology::qualifiedVirtualModes());
+
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964), oldHost), QStringLiteral("2560x1600"));
+    QCOMPARE(RemoteDisplaySetup::suggestedMode(QSize(3024, 1964), newHost), QStringLiteral("3024x1890"));
+
+    const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
+    QString reason;
+    QVERIFY(RemoteDisplaySetup::canMatchClient({notched}, &reason, oldHost));
+    RemoteDisplaySetup::Setup proposal = RemoteDisplaySetup::proposal({notched}, oldHost);
+    QCOMPARE(proposal.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("2560x1600"));
+    proposal = RemoteDisplaySetup::proposal({notched}, newHost);
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("3024x1890"));
+    // The unmatchable fallback (three monitors) is filtered as well.
+    proposal = RemoteDisplaySetup::proposal({notched, screen(1512, 1920, 1080), screen(3432, 1920, 1080)}, oldHost);
+    QCOMPARE(proposal.hostLayout, QStringLiteral("single"));
+    QCOMPARE(proposal.virtualMode1, QStringLiteral("2560x1600"));
+
+    const ClientDisplayProbe::MatchPreview preview = ClientDisplayProbe::matchPreview({notched}, oldHost);
+    QVERIFY(preview.ok);
+    QVERIFY(preview.fitted);
+    QCOMPARE(preview.modes, QStringList({QStringLiteral("2560x1600")}));
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QStringLiteral("match-client");
+    setup.virtualMode1 = setup.virtualMode2 = QStringLiteral("3024x1890");
+    setup.scalingMode = QStringLiteral("scaled-span");
+    QVERIFY(RemoteDisplaySetup::save(settings, QStringLiteral("ws01.example.test"), setup));
+    QVERIFY(RemoteDisplaySetup::refreshMatchedModes(settings, QStringLiteral("ws01.example.test"), setup,
+                                                    {notched}, &reason, oldHost));
+    QCOMPARE(RemoteDisplaySetup::load(settings, QStringLiteral("ws01.example.test")).virtualMode1,
+             QStringLiteral("2560x1600"));
+    QVERIFY(RemoteDisplaySetup::unsupportedModeReason(setup, oldHost).isEmpty());
+
+    // A saved single virtual 3024x1890 is asked again for the old host only.
+    setup.hostLayout = QStringLiteral("single");
+    setup.virtualMode1 = QStringLiteral("3024x1890");
+    QVERIFY(RemoteDisplaySetup::unsupportedModeReason(setup, oldHost).contains(QStringLiteral("3024")));
+    QVERIFY(RemoteDisplaySetup::unsupportedModeReason(setup, newHost).isEmpty());
+    setup.hostLayout = QStringLiteral("dual-horizontal");
+    setup.virtualMode1 = QStringLiteral("1920x1080");
+    setup.virtualMode2 = QStringLiteral("3024x1890");
+    QVERIFY(!RemoteDisplaySetup::unsupportedModeReason(setup, oldHost).isEmpty());
+    // Physical uses no virtual mode at all.
+    setup.hostLayout = QStringLiteral("physical");
+    QVERIFY(RemoteDisplaySetup::unsupportedModeReason(setup, oldHost).isEmpty());
 }
 
 void TestPlankBroker::tlsRequiresTls13()
