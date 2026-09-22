@@ -225,6 +225,7 @@ NvHTTP::startApp(QString verb,
                  int plankProtocolVersion,
                  int plankFeatureFlags,
                  bool takeOverActiveSession,
+                 QString desktopSignOutOwner,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
@@ -249,6 +250,14 @@ NvHTTP::startApp(QString verb,
         if (takeOverActiveSession &&
                 (plankFeatureFlags & NvOutputTopology::SessionTakeoverFeature) != 0) {
             plankOutputArguments += "&plankTakeover=1";
+        }
+        // The owner must match the host's offer exactly; the host re-checks
+        // that nobody is streaming that desktop before it signs it out.
+        if (!desktopSignOutOwner.isEmpty() &&
+                (plankFeatureFlags & NvOutputTopology::DesktopSignOutFeature) != 0) {
+            plankOutputArguments +=
+                    "&plankSignOutDesktop=1&plankSignOutOwner=" +
+                    QString::fromLatin1(QUrl::toPercentEncoding(desktopSignOutOwner));
         }
         plankOutputArguments +=
                 "&plankCaptureSource=" +
@@ -312,6 +321,17 @@ NvHTTP::startApp(QString verb,
                                    LAUNCH_TIMEOUT_MS);
 
     qInfo() << "PLANK launch response received";
+
+    m_DesktopSignOut = {};
+    if ((plankFeatureFlags & NvOutputTopology::DesktopSignOutFeature) != 0) {
+        QXmlStreamReader xmlReader(response);
+        if (xmlReader.readNextStartElement() && XML_NAME_EQUALS(xmlReader.name(), "root")) {
+            m_DesktopSignOut = PlankDesktopSignOut::fromResponse(
+                        (int)xmlReader.attributes().value("status_code").toUInt(),
+                        getXmlString(response, "PlankDesktopOwner"),
+                        getXmlString(response, "PlankDesktopSignOut"));
+        }
+    }
 
     // Throws if the request failed
     verifyResponseStatus(response);

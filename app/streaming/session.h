@@ -16,6 +16,7 @@
 #include <Limelight.h>
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
+#include "backend/nvhttp.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
@@ -154,6 +155,8 @@ public:
 
     Q_INVOKABLE void respondToActiveSessionTakeover(bool takeOver);
 
+    Q_INVOKABLE void respondToDesktopSignOut(bool signOut);
+
     static
     void getDecoderInfo(SDL_Window* window,
                         bool& isHardwareAccelerated, bool& isFullScreenOnly,
@@ -201,6 +204,8 @@ signals:
 
     void activeSessionTakeoverRequested(QString text);
 
+    void desktopSignOutRequested(QString text);
+
     void displayLaunchError(QString text);
 
     void displayLaunchWarning(QString text);
@@ -244,6 +249,13 @@ private:
     bool isPlankBrokered() const;
     bool hasPlankCredentials() const;
     QString authenticatePlank(NvHTTP& http, bool* greeterConfirmed);
+    bool waitForPlankDecision();
+    bool resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
+                                     const std::function<void()>& startApp,
+                                     PlankDesktopSignOut conflict,
+                                     const GfeHttpResponseException& refusal,
+                                     bool reconnecting,
+                                     QString& signOutOwner);
 
     bool startPlankTransportDataPlane(quint16 port,
                                  const QString& certificateSha256,

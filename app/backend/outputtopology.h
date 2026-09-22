@@ -60,8 +60,11 @@ struct NvOutputTopology
     static const int FixedCaptureFeature = 0x80000;
     static const int MacDesktopPreparationFeature = 0x100000;
     static const int MacEncodingProfileFeature = 0x200000;
-    static const int ClipboardSyncFeature = 0x400000;
-    static const int ClipboardFilesFeature = 0x800000;
+    // Single-user Linux desktop: a launch refused because another account
+    // owns the desktop names that owner and may offer to sign it out.
+    static const int DesktopSignOutFeature = 0x400000;
+    static const int ClipboardSyncFeature = 0x800000;
+    static const int ClipboardFilesFeature = 0x1000000;
     // Only advertise a clipboard receiver/sender when this client implements
     // it. Linux must not cause the host to read or transmit unused clipboard data.
 #ifdef Q_OS_MACOS
@@ -73,7 +76,7 @@ struct NvOutputTopology
 #endif
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
-            MacDesktopPreparationFeature | MacEncodingProfileFeature | ClipboardSyncFeature;
+            MacDesktopPreparationFeature | MacEncodingProfileFeature;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -94,6 +97,7 @@ struct NvOutputTopology
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
                                              WorkerInstanceFeature |
+                                             DesktopSignOutFeature |
                                              PlatformClipboardSyncFeature |
                                              PlatformClipboardFilesFeature;
     static const char* NativeScalingMode;
