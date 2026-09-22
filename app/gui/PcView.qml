@@ -533,6 +533,14 @@ CenteredGridView {
 
             Label {
                 Layout.fillWidth: true
+                visible: editVideoSettings.captureSource !== 2 && editHostLayout.currentIndex === 0
+                text: visible ? ComputerManager.plankMatchClientSummary() : ""
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            Label {
+                Layout.fillWidth: true
                 visible: editVideoSettings.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
                 text: qsTr("This headless workstation does not provide physical displays.")
                 wrapMode: Text.Wrap

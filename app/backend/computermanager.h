@@ -225,6 +225,9 @@ public:
     Q_INVOKABLE void stopPollingAsync();
 
     Q_INVOKABLE QStringList plankVirtualModeChoices() const;
+    // What "Match client displays" does on a Linux workstation for the
+    // current client displays, for the bookmark dialogs (GUI thread).
+    Q_INVOKABLE QString plankMatchClientSummary() const;
     Q_INVOKABLE int probeHostPlatform(QString address);
 
     Q_INVOKABLE void addNewHostManually(QString address, QString nickname = QString(),

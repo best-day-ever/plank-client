@@ -1,6 +1,7 @@
 #include "remotebroker.h"
 
 #include "backend/brokersessionstore.h"
+#include "backend/clientdisplayprobe.h"
 #include "backend/computermanager.h"
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
@@ -12,7 +13,6 @@
 
 #include <QDebug>
 #include <QGuiApplication>
-#include <QScreen>
 #include <QSettings>
 #include <QElapsedTimer>
 #include <QQmlEngine>
@@ -31,24 +31,6 @@ QElapsedTimer& monotonicClock()
 }
 
 qint64 nowMs() { return monotonicClock().elapsed(); }
-
-// GUI thread: the client's screens in native pixels, left to right, as the
-// Session will see them at stream start (an approximation for the dialog).
-QVector<NvClientDisplay> clientDisplaySnapshot()
-{
-    QVector<NvClientDisplay> displays;
-    for (QScreen* screen : QGuiApplication::screens()) {
-        NvClientDisplay display;
-        display.bounds = screen->geometry();
-        display.nativeSize = QSize(qRound(screen->geometry().width() * screen->devicePixelRatio()),
-                                   qRound(screen->geometry().height() * screen->devicePixelRatio()));
-        displays.append(display);
-    }
-    std::sort(displays.begin(), displays.end(), [](const NvClientDisplay& a, const NvClientDisplay& b) {
-        return a.bounds.x() < b.bounds.x();
-    });
-    return displays;
-}
 
 // Maps broker failures onto the exception types the Session re-auth paths
 // already classify (401 while authenticating is terminal, TLS is terminal,
@@ -640,24 +622,14 @@ QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
     if (!PlankBroker::isHostId(hostId)) return result;
     QSettings settings;
     RemoteDisplaySetup::Setup setup = RemoteDisplaySetup::load(settings, hostId);
-    const QVector<NvClientDisplay> displays = clientDisplaySnapshot();
-    QString matchReason;
-    const bool canMatch = RemoteDisplaySetup::canMatchClient(displays, &matchReason);
-    QSize primary(1920, 1080);
-    if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        primary = QSize(qRound(screen->geometry().width() * screen->devicePixelRatio()),
-                        qRound(screen->geometry().height() * screen->devicePixelRatio()));
-    }
+    // The same probe the streaming Session uses, so the dialog shows and
+    // proposes exactly what a connect will do.
+    const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
+    const ClientDisplayProbe::MatchPreview match = ClientDisplayProbe::matchPreview(displays);
+    const bool canMatch = match.ok;
     const bool configured = setup.configured;
     if (!configured) {
-        QVector<NvClientDisplay> primaryFirst;
-        primaryFirst.append(NvClientDisplay { QRect(QPoint(), primary), primary });
-        setup = RemoteDisplaySetup::proposal(canMatch ? displays : primaryFirst);
-        if (!canMatch) setup.hostLayout = RemoteDisplaySetup::layoutForChoice(RemoteDisplaySetup::SingleVirtual);
-    }
-    QStringList resolutions;
-    for (const NvClientDisplay& display : displays) {
-        resolutions.append(QStringLiteral("%1×%2").arg(display.nativeSize.width()).arg(display.nativeSize.height()));
+        setup = RemoteDisplaySetup::proposal(displays);
     }
     result.insert(QStringLiteral("configured"), configured);
     result.insert(QStringLiteral("layoutChoice"), RemoteDisplaySetup::choiceForLayout(setup.hostLayout));
@@ -665,8 +637,10 @@ QVariantMap RemoteBroker::displaySetup(const QString& hostId) const
     result.insert(QStringLiteral("virtualMode2"), setup.virtualMode2);
     result.insert(QStringLiteral("scalingChoice"), RemoteDisplaySetup::choiceForScaling(setup.scalingMode));
     result.insert(QStringLiteral("canMatchClient"), canMatch);
-    result.insert(QStringLiteral("matchClientReason"), matchReason);
-    result.insert(QStringLiteral("clientResolution"), resolutions.join(QStringLiteral(" + ")));
+    result.insert(QStringLiteral("matchClientReason"), match.reason);
+    result.insert(QStringLiteral("matchClientSummary"), ClientDisplayProbe::matchSummary(match));
+    result.insert(QStringLiteral("matchClientFitted"), match.fitted);
+    result.insert(QStringLiteral("clientResolution"), ClientDisplayProbe::describe(displays));
     result.insert(QStringLiteral("virtualModes"), NvOutputTopology::qualifiedVirtualModes());
     return result;
 }
@@ -814,15 +788,15 @@ void RemoteBroker::connectToHost(const QString& hostId)
     if (!signedIn() || busy() || !PlankBroker::isHostId(hostId)) return;
     const QString hostName = hostNameFor(hostId);
     QSettings settings;
-    const RemoteDisplaySetup::Setup display = RemoteDisplaySetup::load(settings, hostId);
+    RemoteDisplaySetup::Setup display = RemoteDisplaySetup::load(settings, hostId);
     if (!display.configured) {
         emit displaySetupRequired(hostId, hostName, QString());
         return;
     }
     QString matchReason;
-    if (display.hostLayout == QLatin1String(NvOutputTopology::MatchClientHostLayout) &&
-            !RemoteDisplaySetup::canMatchClient(clientDisplaySnapshot(), &matchReason)) {
-        // Screens changed since the setup was saved (e.g. an external monitor).
+    if (!RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display,
+                                                 ClientDisplayProbe::probe(), &matchReason)) {
+        // Screens changed since the setup was saved (e.g. a third monitor).
         emit displaySetupRequired(hostId, hostName, matchReason);
         return;
     }

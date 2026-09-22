@@ -3,6 +3,10 @@
 #include <Limelight.h>
 #include <SDL3/SDL.h>
 
+#ifdef Q_OS_MACOS
+#include "streaming/macclipboardsync.h"
+#endif
+
 #define VK_0 0x30
 #define VK_A 0x41
 
@@ -73,8 +77,14 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         // with the text we're going to type.
         raiseAllKeys();
 
-        char* text;
-        if (SDL_HasClipboardText() && (text = SDL_GetClipboardText()) != nullptr) {
+        char* text = nullptr;
+#ifdef Q_OS_MACOS
+        text = macReadGeneralPasteboardTextForSdl();
+#endif
+        if (text == nullptr && SDL_HasClipboardText()) {
+            text = SDL_GetClipboardText();
+        }
+        if (text != nullptr) {
             // Sending both CR and LF will lead to two newlines in the destination for
             // each newline in the source, so we fix up any CRLFs into just a single LF.
             for (char* c = text; *c != 0; c++) {
@@ -142,6 +152,24 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         SDL_assert(event->down);
         return;
     }
+
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+    if (event->scancode == SDL_SCANCODE_V && !event->down &&
+            m_FilePasteKeyUpConsumed) {
+        m_FilePasteKeyUpConsumed = false;
+        return;
+    }
+    if (event->scancode == SDL_SCANCODE_V && event->down &&
+            (event->mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0 &&
+            (event->mod & SDL_KMOD_ALT) == 0 && Session::get() != nullptr &&
+            Session::get()->beginFileClipboardPasteOnMainThread()) {
+        raiseAllKeys();
+        m_FilePasteKeyUpConsumed = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Preparing local file clipboard for remote paste");
+        return;
+    }
+#endif
 
     // Check for our special key combos
     if ((event->down) &&

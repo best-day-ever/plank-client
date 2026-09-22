@@ -108,6 +108,9 @@ public:
     virtual void setHdrMode(bool enabled) = 0;
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) = 0;
 
+    // See IFFmpegRenderer::letterboxesAgainstLiveDrawable().
+    virtual bool letterboxesAgainstLiveDrawable() { return false; }
+
     // PLANK may replace the host media worker when GDM hands the
     // display to an authenticated desktop. Decoders that support it can pause
     // their transport-facing thread while retaining the renderer and its last

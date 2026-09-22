@@ -279,6 +279,65 @@ void SdlInputHandler::setPresentationLayout(
     updatePointerRegionLock();
 }
 
+void SdlInputHandler::setLiveDrawableGeometry(bool live)
+{
+    if (m_LiveDrawableGeometry.exchange(live, std::memory_order_relaxed) ==
+            live) {
+        return;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                "PLANK input geometry: renderer letterboxes against the %s",
+                live ? "live drawable" : "presentation layout snapshot");
+    updatePointerRegionLock();
+}
+
+void SdlInputHandler::updateDecodedStreamDimensions(int frameWidth,
+                                                    int frameHeight)
+{
+    if (frameWidth <= 0 || frameHeight <= 0) {
+        return;
+    }
+    const QSize current = streamDimensions();
+    if (current == QSize(frameWidth, frameHeight)) {
+        return;
+    }
+    // Only reported for renderers that letterbox the decoded frame size
+    // (IFFmpegRenderer::letterboxesDecodedFrameSize()); input must use that
+    // size too or pointer and picture disagree in aspect.
+    SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                "PLANK input geometry: decoded frames are %dx%d, not the "
+                "negotiated %dx%d; mapping input to the decoded size",
+                frameWidth, frameHeight, current.width(), current.height());
+    setStreamDimensions(frameWidth, frameHeight);
+    updatePointerRegionLock();
+}
+
+void SdlInputHandler::notifyWindowGeometryChanged(SDL_Window* window,
+                                                  const char* reason)
+{
+    PlankOutputGeometry geometry;
+    if (window == nullptr || !outputGeometry(window, geometry)) {
+        return;
+    }
+    const QSize streamSize = streamDimensions();
+    const QRect video =
+            PlankPresentation::videoRect(streamSize, geometry.canvasSize);
+    SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                "PLANK input geometry (%s): window=%dx%d canvas=%dx%d%s "
+                "output=%d,%d %dx%d video=%d,%d %dx%d stream=%dx%d",
+                reason,
+                geometry.windowSize.width(), geometry.windowSize.height(),
+                geometry.canvasSize.width(), geometry.canvasSize.height(),
+                geometry.live ? " (live drawable)" : " (layout snapshot)",
+                geometry.canvasRect.x(), geometry.canvasRect.y(),
+                geometry.canvasRect.width(), geometry.canvasRect.height(),
+                video.x(), video.y(), video.width(), video.height(),
+                streamSize.width(), streamSize.height());
+    if (window == m_Window) {
+        updatePointerRegionLock();
+    }
+}
+
 void SdlInputHandler::refreshWaylandTabletCursorParents()
 {
     if (!m_LocalCursorSupported) {
@@ -897,17 +956,15 @@ bool SdlInputHandler::mapRemoteCursorPositionToWindow(
 
     const QPointF streamPoint(position.x, position.y);
     for (const auto& output : m_PresentationLayout.outputs) {
-        int windowWidth = 0;
-        int windowHeight = 0;
-        SDL_GetWindowSize(output.window, &windowWidth, &windowHeight);
+        PlankOutputGeometry geometry;
+        if (!outputGeometry(output.window, geometry)) {
+            continue;
+        }
         QPointF windowPoint;
         if (PlankPresentation::mapStreamPointToWindow(
                     streamPoint,
                     QSize(position.frameWidth, position.frameHeight),
-                    m_PresentationLayout.canvasSize,
-                    output.canvasRect,
-                    QSize(windowWidth, windowHeight),
-                    windowPoint)) {
+                    geometry, windowPoint)) {
             window = output.window;
             x = qRound(windowPoint.x());
             y = qRound(windowPoint.y());
@@ -1066,14 +1123,8 @@ bool SdlInputHandler::mapWindowPointToNormalizedStream(
         SDL_Window* window, float windowX, float windowY,
         float& normalizedX, float& normalizedY) const
 {
-    const auto* output = presentationOutput(window);
-    if (output == nullptr) {
-        return false;
-    }
-    int windowWidth = 0;
-    int windowHeight = 0;
-    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
-    if (windowWidth <= 0 || windowHeight <= 0) {
+    PlankOutputGeometry geometry;
+    if (!outputGeometry(window, geometry)) {
         return false;
     }
 
@@ -1084,9 +1135,7 @@ bool SdlInputHandler::mapWindowPointToNormalizedStream(
 
     QPointF streamPoint;
     if (!PlankPresentation::mapWindowPointToStream(
-                QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
-                streamSize,
-                m_PresentationLayout.canvasSize, output->canvasRect,
+                QPointF(windowX, windowY), geometry, streamSize,
                 streamPoint, /*allowClampedPosition=*/true)) {
         return false;
     }

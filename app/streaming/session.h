@@ -23,9 +23,16 @@
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
 #include "plankreconnectpolicy.h"
+#ifdef Q_OS_MACOS
+#include "clipboardpolltimer.h"
+#endif
 
 class ComputerManager;
 class PlankToolbar;
+class MacClipboardSync;
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+class MacFileClipboard;
+#endif
 #ifdef PLANK_TRANSPORT
 struct PlankTransportNativeEndpoint;
 #endif
@@ -169,6 +176,10 @@ public:
 
     static void postTabletCursorActivationEvent();
 
+    // Called by the decoder thread when the size of the decoded frames
+    // changes; input is re-pointed at that size on the main thread.
+    static void notifyDecodedFrameSize(int width, int height);
+
     void updateRenderedStats(float fps, float videoMbps)
     {
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
@@ -270,6 +281,18 @@ private:
     static int plankTransportNativeInputSender(void* context, uint8_t type,
                                           const unsigned char* payload,
                                           size_t payloadLength);
+#endif
+#ifdef Q_OS_MACOS
+    void startClipboardSync();
+    void stopClipboardSync();
+    void startClipboardPollTimer();
+    void stopClipboardPollTimer();
+    void queueClipboardPollEvent();
+    bool clipboardSyncEnabled() const;
+#ifdef PLANK_TRANSPORT
+    bool beginFileClipboardPasteOnMainThread();
+    void injectRemoteFilePasteOnMainThread();
+#endif
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);
@@ -398,6 +421,8 @@ private:
     bool m_IsFullScreen;
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
+    bool m_MacClipboardNegotiated = false;
+    QString m_FileClipboardMode {QStringLiteral("off")};
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
@@ -447,6 +472,12 @@ private:
         SDL_DisplayID displayId = 0;
         SDL_Rect logicalBounds = {};
         QSize nativeSize;
+        // ClientDisplayProbe::forSessionDisplay view of the same display:
+        // logical bounds, physical panel (nativeSize) and current desktop
+        // backing pixels (backingSize, macOS). Match client resolves with it,
+        // and matchTarget (NvOutputTopology::clientMatchTarget) sizes the stream.
+        NvClientDisplay probeView;
+        QSize matchTarget;
         QSize macBackingSize;
         QRect macMatchedBounds;
         QRect canvasRect;
@@ -479,6 +510,13 @@ private:
 
     Overlay::OverlayManager m_OverlayManager;
     std::unique_ptr<PlankToolbar> m_PlankToolbar;
+#ifdef Q_OS_MACOS
+    std::unique_ptr<MacClipboardSync> m_ClipboardSync;
+    ClipboardPollTimer m_ClipboardPollTimer;
+#ifdef PLANK_TRANSPORT
+    std::unique_ptr<MacFileClipboard> m_FileClipboard;
+#endif
+#endif
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
     VideoFecLossPercent m_CurrentVideoFecLoss;
@@ -489,6 +527,7 @@ private:
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
     std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
     std::atomic<int> m_ConfirmedBitratePeakKbps {0};
+    std::atomic<std::uint64_t> m_DecodedFrameSize {0};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

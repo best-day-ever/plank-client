@@ -179,7 +179,9 @@ Item {
             }
             Label {
                 Layout.fillWidth: true
-                text: qsTr("This computer: %1").arg(displaySetupDialog.setup.clientResolution || "")
+                text: (Qt.platform.os === "osx" ? qsTr("This Mac: %1") : qsTr("This computer: %1"))
+                      .arg(displaySetupDialog.setup.clientResolution || "")
+                wrapMode: Text.Wrap
                 opacity: 0.72
             }
 
@@ -202,6 +204,13 @@ Item {
                     enabled: index !== 0 || displaySetupDialog.setup.canMatchClient === true
                     highlighted: setupLayout.highlightedIndex === index
                 }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: setupLayout.currentIndex === 0 && displaySetupDialog.setup.canMatchClient === true
+                text: qsTr("Match my display → %1").arg(displaySetupDialog.setup.matchClientSummary || "")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
             Label {
                 Layout.fillWidth: true

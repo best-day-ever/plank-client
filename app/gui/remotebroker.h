@@ -63,7 +63,8 @@ public:
     Q_INVOKABLE void connectToHost(const QString& hostId);
     // Per-workstation display setup kept in the Client's local settings.
     // Keys: configured, layoutChoice, virtualMode1, virtualMode2, scalingChoice,
-    // canMatchClient, matchClientReason, clientResolution, virtualModes.
+    // canMatchClient, matchClientReason, matchClientSummary, matchClientFitted,
+    // clientResolution, virtualModes.
     Q_INVOKABLE QVariantMap displaySetup(const QString& hostId) const;
     Q_INVOKABLE bool saveDisplaySetup(const QString& hostId, int layoutChoice, const QString& virtualMode1,
                                       const QString& virtualMode2, int scalingChoice);
