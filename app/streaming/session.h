@@ -447,6 +447,12 @@ private:
         SDL_DisplayID displayId = 0;
         SDL_Rect logicalBounds = {};
         QSize nativeSize;
+        // ClientDisplayProbe view of the same display: physical panel and
+        // current desktop backing pixels (macOS), and the size the stream
+        // and Match client aim for (NvOutputTopology::clientMatchTarget).
+        QSize panelSize;
+        QSize desktopSize;
+        QSize matchTarget;
         QSize macBackingSize;
         QRect macMatchedBounds;
         QRect canvasRect;

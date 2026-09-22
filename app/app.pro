@@ -214,6 +214,7 @@ macx {
 SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
+    backend/clientdisplayprobe.cpp \
     backend/nvapp.cpp \
     main.cpp \
     backend/computerseeker.cpp \
@@ -255,6 +256,7 @@ HEADERS += \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
+    backend/clientdisplayprobe.h \
     backend/nvapp.h \
     utils.h \
     backend/computerseeker.h \
