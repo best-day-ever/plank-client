@@ -35,6 +35,7 @@ private slots:
     void bestFitsOddClientDisplays();
     void bestFitsTwoClientDisplays();
     void keepsHostTopologyParsingStrict();
+    void retriesOnlyAnEmptyModesetSnapshot();
     void parsesDisplayArrangementVector();
     void ignoresArrangementFieldsWithoutTheFeature();
     void rejectsMalformedArrangementFields();
@@ -756,6 +757,33 @@ void TestOutputTopology::keepsHostTopologyParsingStrict()
         QVERIFY2(!NvOutputTopology::fromJson(object, topology), qPrintable(odd));
         QVERIFY(!NvOutputTopology::virtualModeSize(odd).isValid());
     }
+}
+
+void TestOutputTopology::retriesOnlyAnEmptyModesetSnapshot()
+{
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/output-topology-v13.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+
+    QJsonObject layout = object.value("layout").toObject();
+    layout["output_count"] = 0;
+    object["layout"] = layout;
+    object["outputs"] = QJsonArray();
+    QVERIFY(NvOutputTopology::temporarilyEmpty(object));
+    QVERIFY(!NvOutputTopology::fromJson(object, topology));
+
+    object["outputs"] = QJsonArray {QJsonObject {{"id", "x11:broken"}}};
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+    object["outputs"] = QJsonArray();
+    layout["output_count"] = 1;
+    object["layout"] = layout;
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+    layout["output_count"] = 0;
+    object["layout"] = layout;
+    object["schema_version"] = NvOutputTopology::ProtocolVersion + 1;
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
 }
 
 

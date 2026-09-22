@@ -444,8 +444,14 @@ void RemoteBroker::removePasskey(const QString& username)
 
 void RemoteBroker::refreshHosts()
 {
-    if (!signedIn() || busy()) return;
-    setBusy(tr("Loading workstations..."));
+    refreshHostsImpl(true);
+}
+
+void RemoteBroker::refreshHostsImpl(bool showBusy)
+{
+    if (!signedIn() || busy() || m_HostRefreshInFlight) return;
+    m_HostRefreshInFlight = true;
+    if (showBusy) setBusy(tr("Loading workstations..."));
     const PlankBrokerClient::Config config = clientConfig();
     const auto token = m_Token;
     const quint64 generation = m_Generation;
@@ -459,7 +465,9 @@ void RemoteBroker::refreshHosts()
             failure = std::make_shared<PlankBrokerError>(error);
         }
         QMetaObject::invokeMethod(qApp, [self, generation, hosts, failure]() {
-            if (!self || generation != self->m_Generation) return;
+            if (!self) return;
+            self->m_HostRefreshInFlight = false;
+            if (generation != self->m_Generation) return;
             if (failure) {
                 self->handleBrokerError(*failure, false);
                 return;
@@ -1039,6 +1047,16 @@ void RemoteBroker::startKeepalive(const QString& hostId, Session* session)
             stopKeepalive();
             // Show fresh availability after a stream ends.
             refreshHosts();
+            // The host briefly stops answering while GDM hands X to the
+            // desktop worker. The first broker snapshot can catch that gap.
+            // Refresh quietly after the worker has had time to return, so a
+            // person never needs to press Refresh to use the workstation.
+            QTimer::singleShot(6000, this, [this]() {
+                if (m_KeepaliveSession.isNull()) refreshHostsImpl(false);
+            });
+            QTimer::singleShot(18000, this, [this]() {
+                if (m_KeepaliveSession.isNull()) refreshHostsImpl(false);
+            });
         }
     };
     connect(session, &Session::sessionFinished, this, stopForSession);

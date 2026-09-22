@@ -152,9 +152,9 @@ Item {
         }
 
         onAccepted: {
-            if (screens.mode !== "legacy" || screensCustom.checked !== (screens.mode === "custom")) {
-                DisplaySetup.setHostMode(hostId, screensCustom.checked ? "custom" : "follow")
-            }
+            var chosenMode = screensCustom.checked ? "custom" : "follow"
+            if (screens.mode !== chosenMode)
+                DisplaySetup.setHostMode(hostId, chosenMode)
             if (!saveStream()) {
                 remoteView.errorText = qsTr("Those stream settings are not supported.")
                 return

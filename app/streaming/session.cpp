@@ -3683,7 +3683,9 @@ bool Session::startConnectionAsync(bool reconnecting,
                             authenticationRefreshRequired = false;
                             qInfo() << "PLANK authenticated to the replacement display worker";
                         } catch (const GfeHttpResponseException& retryError) {
-                            if (reconnecting && PlankReconnectPolicy::terminalStatus(retryError.getStatusCode(), true))
+                            if (reconnecting && PlankReconnectPolicy::terminalStatus(
+                                    retryError.getStatusCode(), true,
+                                    SDL_GetTicks() < m_DesktopHandoffRetryDeadline.load()))
                                 m_ReconnectCancelled.store(true);
                             throw;
                         } catch (const QtNetworkReplyException& retryError) {
@@ -4311,6 +4313,11 @@ bool Session::beginPlankReconnect(
     m_Reconnecting.store(true);
     m_ReconnectGreeterConfirmed.store(false);
     const bool openingDesktop = m_DesktopHandoffNoticeDeadline.exchange(0) > SDL_GetTicks();
+    // The greeter's worker closes before the user's worker binds to the new
+    // X session. A broker connect or host admission during that short gap can
+    // return 401 even though this user's desktop is opening. Keep the normal
+    // terminal 401 policy outside this bounded, explicit handoff window.
+    m_DesktopHandoffRetryDeadline.store(openingDesktop ? SDL_GetTicks() + 15000 : 0);
     setPlankReconnectStatus(
                 openingDesktop ? "Opening your desktop..." : "Waiting for workstation...", false);
 
@@ -4458,9 +4465,13 @@ bool Session::runPlankReconnect()
         } catch (const GfeHttpResponseException& error) {
             qWarning() << "PLANK reconnect attempt" << attempt
                        << "failed:" << error.toQString();
-            if (PlankReconnectPolicy::terminalStatus(error.getStatusCode(), authenticating)) {
+            const bool openingDesktop = SDL_GetTicks() < m_DesktopHandoffRetryDeadline.load();
+            if (PlankReconnectPolicy::terminalStatus(error.getStatusCode(), authenticating,
+                                                     openingDesktop)) {
                 m_ReconnectCancelled.store(true);
                 emit displayLaunchError(error.toQString());
+            } else if (openingDesktop && authenticating && error.getStatusCode() == 401) {
+                qInfo() << "PLANK desktop worker is changing; retrying broker admission";
             }
             if (error.getStatusCode() == 401) {
                 QWriteLocker lock(&m_Computer->lock);
@@ -4486,7 +4497,8 @@ bool Session::runPlankReconnect()
         LiStopConnection();
         stopPlankTransportDataPlane();
         if (!m_ReconnectCancelled.load()) {
-            constexpr int RetryDelayMs = 1000;
+            const int RetryDelayMs = SDL_GetTicks() < m_DesktopHandoffRetryDeadline.load() ?
+                        2000 : 1000;
             constexpr int CancellationPollMs = 50;
             for (int elapsedMs = 0;
                  elapsedMs < RetryDelayMs && !m_ReconnectCancelled.load();
@@ -4525,6 +4537,7 @@ bool Session::finishPlankReconnect(
     m_Reconnecting.store(false);
     m_ReconnectGreeterConfirmed.store(false);
     m_DesktopHandoffNoticeDeadline.store(0);
+    m_DesktopHandoffRetryDeadline.store(0);
     setPlankReconnectStatus("", false);
     m_ReconnectRequested = false;
     m_ReconnectCancelled.store(false);

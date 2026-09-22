@@ -171,6 +171,18 @@ QSize NvOutputTopology::virtualCanvasSize(const QString& hostLayout,
     return QSize(width, qMax(first.height(), second.height()));
 }
 
+bool NvOutputTopology::temporarilyEmpty(const QJsonObject& object)
+{
+    const QJsonValue outputs = object.value("outputs");
+    const QJsonValue layout = object.value("layout");
+    const QJsonValue count = layout.toObject().value("output_count");
+    return object.value("schema_version").toInt(-1) == ProtocolVersion &&
+            (object.value("feature_flags").toInt() & OutputTopologyFeature) != 0 &&
+            (object.value("feature_flags").toInt() & FixedCaptureFeature) == 0 &&
+            outputs.isArray() && outputs.toArray().isEmpty() &&
+            layout.isObject() && count.isDouble() && count.toInt(-1) == 0;
+}
+
 bool NvOutputTopology::fromJson(const QJsonObject& object,
                                 NvOutputTopology& topology, QString* error)
 {
