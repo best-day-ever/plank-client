@@ -11,6 +11,7 @@
 #include "plankbroker.h"
 #include "plankhttp.h"
 #include "remotedisplaysetup.h"
+#include "displayprofile.h"
 #include "clientdisplayprobe.h"
 #include "remotestreamsetup.h"
 #include "brokersessionstore.h"
@@ -354,6 +355,12 @@ private slots:
     void remoteDisplaySetupDialogAndSessionAgree();
     void remoteDisplaySetupMigratesSavedMatchClient();
     void remoteDisplaySetupFiltersModesByHostFlags();
+    // Display profiles (per monitor set)
+    void displayProfileRoundTrips();
+    void displayProfileRejectsInvalidEntries();
+    void displayProfileMigratesIdempotently();
+    void displayProfileResolutionOrder();
+    void displayProfileListsAndForgetsSavedSets();
 
     // Keepalive
     void keepaliveCadence();
@@ -422,6 +429,7 @@ private slots:
     void remoteStreamSetupSeedsOnlyFromExactBookmark();
     void remoteStreamSetupReportsUnusableChoice();
     void remoteStreamSetupCachesCapabilities();
+    void remoteStreamSetupCachesDisplayCapabilities();
 };
 
 void TestPlankBroker::initTestCase()
@@ -1421,6 +1429,215 @@ void TestPlankBroker::remoteDisplaySetupFiltersModesByHostFlags()
     // Physical uses no virtual mode at all.
     setup.hostLayout = QStringLiteral("physical");
     QVERIFY(RemoteDisplaySetup::unsupportedModeReason(setup, oldHost).isEmpty());
+}
+
+void TestPlankBroker::displayProfileRoundTrips()
+{
+    DisplayProfile::Profile profile;
+    profile.primary = QStringLiteral("uuid:B");
+    profile.presentation = QStringLiteral("single");
+    profile.scaling = QStringLiteral("fit");
+    profile.manual = true;
+    DisplayProfile::MonitorChoice& laptop = profile.choice(QStringLiteral("uuid:A"));
+    laptop.size = DisplayProfile::SizeMode::LooksLike;
+    laptop.on = false;
+    DisplayProfile::MonitorChoice& external = profile.choice(QStringLiteral("uuid:B"));
+    QVERIFY(DisplayProfile::sizeFromText(QStringLiteral("custom:5120x1440"), external));
+    external.hasPosition = true;
+    external.position = QPoint(1512, -200);
+    external.backing = QStringLiteral("virtual");
+    QCOMPARE(profile.monitors.size(), 2);
+    QCOMPARE(&profile.choice(QStringLiteral("uuid:A")), &profile.monitors[0]);
+
+    const QString encoded = DisplayProfile::encode(profile);
+    DisplayProfile::Profile decoded;
+    QVERIFY(DisplayProfile::decode(encoded, decoded));
+    QCOMPARE(DisplayProfile::encode(decoded), encoded);
+    QCOMPARE(decoded.primary, QStringLiteral("uuid:B"));
+    QCOMPARE(decoded.presentation, QStringLiteral("single"));
+    QCOMPARE(decoded.scaling, QStringLiteral("fit"));
+    QVERIFY(decoded.manual);
+    QVERIFY(!decoded.find(QStringLiteral("uuid:A"))->on);
+    QCOMPARE(decoded.find(QStringLiteral("uuid:A"))->size, DisplayProfile::SizeMode::LooksLike);
+    QCOMPARE(decoded.find(QStringLiteral("uuid:B"))->size, DisplayProfile::SizeMode::Custom);
+    QCOMPARE(decoded.find(QStringLiteral("uuid:B"))->fixedSize, QSize(5120, 1440));
+    QCOMPARE(decoded.find(QStringLiteral("uuid:B"))->position, QPoint(1512, -200));
+    QCOMPARE(decoded.find(QStringLiteral("uuid:B"))->backing, QStringLiteral("virtual"));
+    QVERIFY(!decoded.find(QStringLiteral("uuid:A"))->hasPosition);
+    QVERIFY(decoded.find(QStringLiteral("uuid:C")) == nullptr);
+
+    DisplayProfile::MonitorChoice preset;
+    QVERIFY(DisplayProfile::sizeFromText(QStringLiteral("preset:3840x2160"), preset));
+    QCOMPARE(DisplayProfile::sizeText(preset), QStringLiteral("preset:3840x2160"));
+}
+
+void TestPlankBroker::displayProfileRejectsInvalidEntries()
+{
+    DisplayProfile::MonitorChoice monitor;
+    for (const char* bad : {"custom:3841x2160", "custom:03840x2160", "custom:x2160", "preset:3840", "large",
+                            "custom:0x0", "custom:20000x2160", ""}) {
+        QVERIFY2(!DisplayProfile::sizeFromText(QString::fromLatin1(bad), monitor), bad);
+    }
+    DisplayProfile::Profile profile;
+    for (const char* bad : {R"({"v":2,"monitors":[]})", R"({"v":1})",
+                            R"({"v":1,"monitors":[{"key":""}]})",
+                            R"({"v":1,"monitors":[{"key":"a"},{"key":"a"}]})",
+                            R"({"v":1,"monitors":[{"key":"a","size":"huge"}]})",
+                            R"({"v":1,"monitors":[{"key":"a","backing":"dongle"}]})",
+                            R"({"v":1,"monitors":[{"key":"a","pos":"left"}]})",
+                            R"({"v":1,"monitors":[],"presentation":"tiles"})",
+                            R"({"v":1,"monitors":[],"scaling":"stretch"})",
+                            "not json"}) {
+        QVERIFY2(!DisplayProfile::decode(QString::fromLatin1(bad), profile), bad);
+    }
+    QVERIFY(DisplayProfile::decode(QStringLiteral(R"({"v":1,"monitors":[{"key":"a"}]})"), profile));
+    QCOMPARE(profile.monitors.first().size, DisplayProfile::SizeMode::Exact);
+    QVERIFY(profile.monitors.first().on);
+    QCOMPARE(profile.presentation, QStringLiteral("windows"));
+    // Fingerprints are lowercase hex only: nothing else reaches a settings key.
+    QVERIFY(!DisplayProfile::validFingerprint(QStringLiteral("../x")));
+    QVERIFY(!DisplayProfile::validFingerprint(QStringLiteral("ABC")));
+    QVERIFY(DisplayProfile::validFingerprint(QStringLiteral("0123456789abcdef0123")));
+}
+
+void TestPlankBroker::displayProfileMigratesIdempotently()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    const auto oldLayout = [&settings](const char* host, const char* layout) {
+        const QString group = QStringLiteral("remote-hosts/") + QString::fromLatin1(host);
+        settings.setValue(group + QStringLiteral("/host-layout"), QString::fromLatin1(layout));
+        settings.setValue(group + QStringLiteral("/virtual-mode-1"), QStringLiteral("1920x1080"));
+        settings.setValue(group + QStringLiteral("/virtual-mode-2"), QStringLiteral("1920x1080"));
+        settings.setValue(group + QStringLiteral("/scaling-mode"), QStringLiteral("scaled-span"));
+    };
+    oldLayout("match.example.test", "match-client");
+    oldLayout("physical.example.test", "physical");
+    oldLayout("single.example.test", "single");
+    oldLayout("dual.example.test", "dual-horizontal");
+    // Stream settings alone: no display layout to migrate.
+    settings.setValue(QStringLiteral("remote-hosts/stream.example.test/stream/mode"), QStringLiteral("defaults"));
+
+    const QString fp = QStringLiteral("00112233445566778899");
+    DisplayProfile::Profile proposal;
+    proposal.choice(QStringLiteral("uuid:A"));
+    QCOMPARE(DisplayProfile::migrate(settings, fp, QStringLiteral("Built-in"), proposal), 4);
+    QCOMPARE(DisplayProfile::hostMode(settings, QStringLiteral("MATCH.example.test")), DisplayProfile::HostMode::Follow);
+    QCOMPARE(DisplayProfile::hostMode(settings, QStringLiteral("physical.example.test")), DisplayProfile::HostMode::Legacy);
+    QCOMPARE(DisplayProfile::hostMode(settings, QStringLiteral("single.example.test")), DisplayProfile::HostMode::Legacy);
+    QCOMPARE(DisplayProfile::hostMode(settings, QStringLiteral("dual.example.test")), DisplayProfile::HostMode::Legacy);
+    QVERIFY(!DisplayProfile::hostModeSaved(settings, QStringLiteral("stream.example.test")));
+    // Match users get the proposal for the current monitor set and the banner once.
+    DisplayProfile::Profile saved;
+    QVERIFY(DisplayProfile::loadGlobal(settings, fp, saved));
+    QCOMPARE(DisplayProfile::encode(saved), DisplayProfile::encode(proposal));
+    QVERIFY(DisplayProfile::chooseBannerPending(settings));
+    // The old keys are never deleted: legacy workstations keep using them.
+    for (const char* host : {"match.example.test", "physical.example.test", "single.example.test", "dual.example.test"}) {
+        QVERIFY(RemoteDisplaySetup::load(settings, QString::fromLatin1(host)).configured);
+    }
+    QCOMPARE(RemoteDisplaySetup::load(settings, QStringLiteral("physical.example.test")).hostLayout,
+             QStringLiteral("physical"));
+
+    // Idempotent: nothing is migrated twice, a dismissed banner stays dismissed,
+    // and a later user choice is not overwritten.
+    DisplayProfile::clearChooseBanner(settings);
+    DisplayProfile::setHostMode(settings, QStringLiteral("physical.example.test"), DisplayProfile::HostMode::Follow);
+    DisplayProfile::Profile other;
+    other.choice(QStringLiteral("uuid:Z"));
+    QCOMPARE(DisplayProfile::migrate(settings, fp, QStringLiteral("Built-in"), other), 0);
+    QVERIFY(!DisplayProfile::chooseBannerPending(settings));
+    QCOMPARE(DisplayProfile::hostMode(settings, QStringLiteral("physical.example.test")), DisplayProfile::HostMode::Follow);
+    QVERIFY(DisplayProfile::loadGlobal(settings, fp, saved));
+    QCOMPARE(DisplayProfile::encode(saved), DisplayProfile::encode(proposal));
+    // A workstation first seen after the migration is migrated on its own.
+    oldLayout("late.example.test", "single");
+    QCOMPARE(DisplayProfile::migrate(settings, fp, QStringLiteral("Built-in"), other), 1);
+    QCOMPARE(DisplayProfile::hostMode(settings, QStringLiteral("late.example.test")), DisplayProfile::HostMode::Legacy);
+}
+
+void TestPlankBroker::displayProfileResolutionOrder()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    const QString fp = QStringLiteral("aaaaaaaaaaaaaaaaaaaa");
+    const QString host = QStringLiteral("WS01.example.test");
+    // Nothing saved: a new monitor set.
+    QCOMPARE(DisplayProfile::resolveForHost(settings, host, fp).source, DisplayProfile::Resolved::None);
+    QCOMPARE(DisplayProfile::hostMode(settings, host), DisplayProfile::HostMode::Follow);
+
+    DisplayProfile::Profile global;
+    global.choice(QStringLiteral("uuid:A"));
+    DisplayProfile::saveGlobal(settings, fp, QStringLiteral("Built-in"), global);
+    DisplayProfile::Resolved resolved = DisplayProfile::resolveForHost(settings, host, fp);
+    QCOMPARE(resolved.source, DisplayProfile::Resolved::Global);
+    QCOMPARE(DisplayProfile::encode(resolved.profile), DisplayProfile::encode(global));
+    // Another monitor set is still new.
+    QCOMPARE(DisplayProfile::resolveForHost(settings, host, QStringLiteral("bbbbbbbbbbbbbbbbbbbb")).source,
+             DisplayProfile::Resolved::None);
+
+    // Custom for this workstation, on this monitor set only.
+    DisplayProfile::Profile custom;
+    custom.choice(QStringLiteral("uuid:A")).size = DisplayProfile::SizeMode::LooksLike;
+    DisplayProfile::setHostMode(settings, host, DisplayProfile::HostMode::Custom);
+    QCOMPARE(DisplayProfile::resolveForHost(settings, host, fp).source, DisplayProfile::Resolved::Global);
+    DisplayProfile::saveHost(settings, host, fp, custom);
+    resolved = DisplayProfile::resolveForHost(settings, host.toLower(), fp);
+    QCOMPARE(resolved.source, DisplayProfile::Resolved::HostCustom);
+    QCOMPARE(DisplayProfile::encode(resolved.profile), DisplayProfile::encode(custom));
+    // Other workstations follow the global layout.
+    QCOMPARE(DisplayProfile::resolveForHost(settings, QStringLiteral("ws02.example.test"), fp).source,
+             DisplayProfile::Resolved::Global);
+    // Following again ignores (but keeps) the custom layout.
+    DisplayProfile::setHostMode(settings, host, DisplayProfile::HostMode::Follow);
+    QCOMPARE(DisplayProfile::resolveForHost(settings, host, fp).source, DisplayProfile::Resolved::Global);
+    DisplayProfile::Profile kept;
+    QVERIFY(DisplayProfile::loadHost(settings, host, fp, kept));
+    // Legacy wins over everything: the pre-profile keys decide.
+    DisplayProfile::setHostMode(settings, host, DisplayProfile::HostMode::Legacy);
+    QCOMPARE(DisplayProfile::resolveForHost(settings, host, fp).source, DisplayProfile::Resolved::Legacy);
+    // No workstation (a LAN bookmark): the global layout.
+    QCOMPARE(DisplayProfile::resolveForHost(settings, QString(), fp).source, DisplayProfile::Resolved::Global);
+    // Forgetting the custom layout falls back to the global one.
+    DisplayProfile::setHostMode(settings, host, DisplayProfile::HostMode::Custom);
+    DisplayProfile::forgetHost(settings, host, fp);
+    QCOMPARE(DisplayProfile::resolveForHost(settings, host, fp).source, DisplayProfile::Resolved::Global);
+
+    // Settings defaults: ask when screens change, never accept silently.
+    QVERIFY(DisplayProfile::askOnChange(settings));
+    QVERIFY(!DisplayProfile::autoAccept(settings));
+    DisplayProfile::setAskOnChange(settings, false);
+    DisplayProfile::setAutoAccept(settings, true);
+    QVERIFY(!DisplayProfile::askOnChange(settings));
+    QVERIFY(DisplayProfile::autoAccept(settings));
+}
+
+void TestPlankBroker::displayProfileListsAndForgetsSavedSets()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    DisplayProfile::Profile profile;
+    profile.choice(QStringLiteral("uuid:A"));
+    DisplayProfile::saveGlobal(settings, QStringLiteral("aaaaaaaaaaaaaaaaaaaa"), QStringLiteral("Built-in"), profile);
+    DisplayProfile::saveGlobal(settings, QStringLiteral("bbbbbbbbbbbbbbbbbbbb"), QStringLiteral("Built-in + LG"), profile);
+    // An unreadable entry is not listed.
+    settings.setValue(QStringLiteral("display-profiles/sets/cccccccccccccccccccc/profile"), QStringLiteral("{"));
+    // Nor is an invalid fingerprint ever written.
+    DisplayProfile::saveGlobal(settings, QStringLiteral("../../x"), QStringLiteral("x"), profile);
+    QVector<DisplayProfile::SavedSet> sets = DisplayProfile::savedSets(settings);
+    QCOMPARE(sets.size(), 2);
+    QStringList labels;
+    for (const auto& set : sets) labels.append(set.label);
+    labels.sort();
+    QCOMPARE(labels, QStringList({QStringLiteral("Built-in"), QStringLiteral("Built-in + LG")}));
+    DisplayProfile::forgetGlobal(settings, QStringLiteral("aaaaaaaaaaaaaaaaaaaa"));
+    sets = DisplayProfile::savedSets(settings);
+    QCOMPARE(sets.size(), 1);
+    QCOMPARE(sets.first().fingerprint, QStringLiteral("bbbbbbbbbbbbbbbbbbbb"));
+    QVERIFY(!sets.first().saved.isEmpty());
 }
 
 void TestPlankBroker::tlsRequiresTls13()
@@ -3390,6 +3607,24 @@ void TestPlankBroker::remoteStreamSetupCachesCapabilities()
     }
     QCOMPARE(StreamingPreferences::plankEncodingMode(StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444),
              QStringLiteral("hevc-10-444-nvenc"));
+}
+
+void TestPlankBroker::remoteStreamSetupCachesDisplayCapabilities()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("client.ini")), QSettings::IniFormat);
+    const QString host = QStringLiteral("ws01.example.test");
+    RemoteStreamSetup::Capabilities caps = linuxHost(0, {});
+    caps.displayCapabilities = QStringLiteral(R"({"version":1})");
+    RemoteStreamSetup::saveCapabilities(settings, host, caps);
+    QCOMPARE(RemoteStreamSetup::loadCapabilities(settings, host).displayCapabilities, caps.displayCapabilities);
+    QCOMPARE(settings.value(QStringLiteral("remote-hosts/ws01.example.test/host/display-caps")).toString(),
+             caps.displayCapabilities);
+    // A host that stops publishing them (downgraded) forgets the cache.
+    caps.displayCapabilities.clear();
+    RemoteStreamSetup::saveCapabilities(settings, host, caps);
+    QVERIFY(RemoteStreamSetup::loadCapabilities(settings, host).displayCapabilities.isEmpty());
+    QVERIFY(!settings.contains(QStringLiteral("remote-hosts/ws01.example.test/host/display-caps")));
 }
 
 QTEST_GUILESS_MAIN(TestPlankBroker)

@@ -19,6 +19,7 @@ HEADERS += \
     ../../app/backend/onboardingstate.h \
     ../../app/backend/plankhttp.h \
     ../../app/backend/remotedisplaysetup.h \
+    ../../app/backend/displayprofile.h \
     ../../app/backend/remotestreamsetup.h \
     ../../app/backend/clientdisplayprobe.h \
     ../../app/backend/brokersessionstore.h \

@@ -61,6 +61,9 @@ struct Capabilities
     int featureFlags = 0;
     // Host's PlankEncodingModes; empty when it does not advertise them.
     QStringList encodingModes;
+    // The topology's display_capabilities (display arrangement, 0x8000000)
+    // as compact JSON; empty when the host does not publish them.
+    QString displayCapabilities;
 };
 
 // A LAN bookmark that may seed a new workstation's first proposal.
@@ -272,6 +275,7 @@ inline Capabilities loadCapabilities(QSettings& settings, const QString& hostId)
         caps.featureFlags = settings.value(QStringLiteral("feature-flags")).toInt();
         const QString modes = settings.value(QStringLiteral("encoding-modes")).toString();
         caps.encodingModes = modes.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        caps.displayCapabilities = settings.value(QStringLiteral("display-caps")).toString();
     }
     settings.endGroup();
     return caps;
@@ -284,6 +288,11 @@ inline void saveCapabilities(QSettings& settings, const QString& hostId, const C
     settings.setValue(QStringLiteral("platform"), caps.platform);
     settings.setValue(QStringLiteral("feature-flags"), caps.featureFlags);
     settings.setValue(QStringLiteral("encoding-modes"), caps.encodingModes.join(QLatin1Char(',')));
+    if (caps.displayCapabilities.isEmpty()) {
+        settings.remove(QStringLiteral("display-caps"));
+    } else {
+        settings.setValue(QStringLiteral("display-caps"), caps.displayCapabilities);
+    }
     settings.endGroup();
 }
 
