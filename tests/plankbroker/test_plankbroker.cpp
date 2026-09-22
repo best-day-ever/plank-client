@@ -1166,18 +1166,53 @@ void TestPlankBroker::remoteDisplaySetupDialogAndSessionAgree()
     QCOMPARE(proposal.hostLayout, QStringLiteral("match-client"));
     QCOMPARE(proposal.virtualMode1, QStringLiteral("1920x1200"));
 
-    // The Session hands the resolver {logical bounds, panel, desktop} from the
-    // same probe; the answer and the stream-size target must be identical.
-    const NvClientDisplay session {QRect(0, 0, 1920, 1200), QSize(3024, 1964), QSize(1920, 1200)};
+    // The Session maps each SDL display (logical bounds, SDL native mode = the
+    // panel) through ClientDisplayProbe::forSessionDisplay against the same
+    // probe list and resolves with the result. It must not fall back to the
+    // panel as the desktop: that was the 3024x1964 -> 2560x1600 regression.
+    const QVector<NvClientDisplay> probed {oneX};
+    const NvClientDisplay session = ClientDisplayProbe::forSessionDisplay(
+                QRect(0, 0, 1920, 1200), QSize(3024, 1964), probed);
+    QCOMPARE(session.bounds, oneX.bounds);
+    QCOMPARE(session.nativeSize, QSize(3024, 1964));
+    QCOMPARE(session.backingSize, QSize(1920, 1200));
     QString layout;
     QStringList modes;
     bool fitted = true;
     QVERIFY(NvOutputTopology::resolveClientDisplayLayout({session}, layout, modes, nullptr, &fitted));
+    QCOMPARE(layout, dialog.hostLayout);
     QCOMPARE(modes, dialog.modes);
     QCOMPARE(fitted, dialog.fitted);
+    QCOMPARE(NvOutputTopology::clientMatchTarget(session), NvOutputTopology::clientMatchTarget(oneX));
     QCOMPARE(NvOutputTopology::clientMatchTarget(session), QSize(1920, 1200));
     QCOMPARE(ClientDisplayProbe::logLine(session, modes.first(), !fitted),
              QStringLiteral("PLANK client display: panel=3024x1964 desktop=1920x1200@1 target=1920x1200 match=1920x1200 (exact)"));
+
+    // Two displays in any SDL order: each finds its own probe entry by bounds,
+    // and the Session's list resolves exactly like the dialog's.
+    const NvClientDisplay external {QRect(1920, 0, 2560, 1440), QSize(2560, 1440), QSize(2560, 1440)};
+    const QVector<NvClientDisplay> probedPair {oneX, external};
+    const ClientDisplayProbe::MatchPreview pairDialog = ClientDisplayProbe::matchPreview(probedPair);
+    QVERIFY(pairDialog.ok);
+    QVector<NvClientDisplay> sessionPair {
+        ClientDisplayProbe::forSessionDisplay(QRect(1920, 0, 2560, 1440), QSize(2560, 1440), probedPair),
+        ClientDisplayProbe::forSessionDisplay(QRect(0, 0, 1920, 1200), QSize(3024, 1964), probedPair)};
+    QCOMPARE(sessionPair.at(0).backingSize, external.backingSize);
+    QCOMPARE(sessionPair.at(1).backingSize, oneX.backingSize);
+    std::swap(sessionPair[0], sessionPair[1]);
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(sessionPair, layout, modes, nullptr, &fitted));
+    QCOMPARE(layout, pairDialog.hostLayout);
+    QCOMPARE(modes, pairDialog.modes);
+    QCOMPARE(fitted, pairDialog.fitted);
+
+    // No probe entry for these bounds (no probe on this platform, or the
+    // display moved): the SDL native size is the panel, the desktop unknown.
+    const NvClientDisplay unprobed = ClientDisplayProbe::forSessionDisplay(
+                QRect(0, 0, 1512, 982), QSize(3024, 1964), probed);
+    QCOMPARE(unprobed.bounds, QRect(0, 0, 1512, 982));
+    QCOMPARE(unprobed.nativeSize, QSize(3024, 1964));
+    QVERIFY(!unprobed.backingSize.isValid());
+    QCOMPARE(NvOutputTopology::clientMatchTarget(unprobed), QSize(3024, 1964));
 
     // Default Retina (1512x982 points @2x) and "More Space" (1800x1169 @2x):
     // both aim at the 3024x1964 panel and get 2560x1600, letterboxed.

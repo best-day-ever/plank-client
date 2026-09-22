@@ -27,6 +27,24 @@ namespace ClientDisplayProbe {
 // (safe from any thread); other platforms use QScreen (GUI thread only).
 QVector<NvClientDisplay> probe();
 
+// The Session's view of one SDL display, from the same probe the dialogs use:
+// the probed entry with the same logical bounds gives the panel (nativeSize)
+// and the desktop backing (backingSize). With no matching entry (no probe on
+// this platform, or the display changed in between) the SDL native size is the
+// panel and the desktop size is unknown. The Session resolves Match client and
+// sizes the stream with exactly this, so the dialog and the stream cannot
+// disagree about which size is the panel and which is the desktop.
+inline NvClientDisplay forSessionDisplay(const QRect& sdlLogicalBounds, const QSize& sdlNativeSize,
+                                         const QVector<NvClientDisplay>& probed)
+{
+    for (const NvClientDisplay& display : probed) {
+        if (display.bounds == sdlLogicalBounds) {
+            return {sdlLogicalBounds, display.nativeSize, display.backingSize};
+        }
+    }
+    return {sdlLogicalBounds, sdlNativeSize, QSize()};
+}
+
 inline QSize desktopPixels(const NvClientDisplay& display)
 {
     return display.backingSize.isValid() ? display.backingSize : display.nativeSize;

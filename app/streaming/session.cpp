@@ -1902,9 +1902,12 @@ bool Session::snapshotClientDisplays()
     const int targetIndex = getTargetDisplayIndex();
     m_TargetDisplayId = StreamUtils::getDisplayId(targetIndex);
     const int displayCount = StreamUtils::getDisplayCount();
-#ifdef Q_OS_DARWIN
     // The same probe the display dialogs use, so they agree with the stream.
+    // Elsewhere the probe needs the GUI thread; SDL's native size stands in.
+#ifdef Q_OS_DARWIN
     const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
+#else
+    const QVector<NvClientDisplay> probed;
 #endif
     for (int index = 0; index < displayCount; ++index) {
         ClientDisplaySnapshot snapshot;
@@ -1922,18 +1925,11 @@ bool Session::snapshotClientDisplays()
             return false;
         }
         snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
-        snapshot.panelSize = snapshot.nativeSize;
-#ifdef Q_OS_DARWIN
-        for (const NvClientDisplay& display : probed) {
-            if (display.bounds == QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
-                                        snapshot.logicalBounds.w, snapshot.logicalBounds.h)) {
-                snapshot.panelSize = display.nativeSize;
-                snapshot.desktopSize = display.backingSize;
-                break;
-            }
-        }
-#endif
-        snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.desktopSize, snapshot.panelSize);
+        snapshot.probeView = ClientDisplayProbe::forSessionDisplay(
+                    QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
+                          snapshot.logicalBounds.w, snapshot.logicalBounds.h),
+                    snapshot.nativeSize, probed);
+        snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.probeView);
 #ifdef Q_OS_DARWIN
         if (matchMacDesktop) {
             SDL_DisplayMode currentMode;
@@ -1989,7 +1985,7 @@ bool Session::snapshotClientDisplays()
                     display.logicalBounds.w, display.logicalBounds.h,
                     display.logicalBounds.x, display.logicalBounds.y,
                     display.nativeSize.width(), display.nativeSize.height(),
-                    display.desktopSize.width(), display.desktopSize.height(),
+                    display.probeView.backingSize.width(), display.probeView.backingSize.height(),
                     display.matchTarget.width(), display.matchTarget.height(),
                     display.canvasRect.width(), display.canvasRect.height(),
                     display.canvasRect.x(), display.canvasRect.y(),
@@ -2271,7 +2267,7 @@ bool Session::configurePlankHostLayout()
                                 display.logicalBounds.w, display.logicalBounds.h);
             displays.append({display.macMatchedBounds.isValid() ? display.macMatchedBounds : logical,
                              display.nativeSize, display.macBackingSize});
-            probedDisplays.append({logical, display.panelSize, display.desktopSize});
+            probedDisplays.append(display.probeView);
         }
 
         QString error;
