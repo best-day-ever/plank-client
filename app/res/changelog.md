@@ -1,3 +1,16 @@
+## 1.0.153
+
+### Client
+
+- Remember each Host's identity before sending login credentials.
+- Ask before trusting a replacement Host; cancelling keeps the previous identity.
+- Keep Host trust when bookmarks are deleted or recreated.
+
+### Host
+
+- macOS: keep one machine identity across the login screen and different desktop users.
+- Preserve machine identity when renewing Host certificates.
+
 ## 1.0.152
 
 ### Client
