@@ -522,6 +522,19 @@ void TestOutputTopology::computesClientMatchTarget()
     QVERIFY(!NvOutputTopology::clientMatchTarget(QSize(), QSize()).isValid());
     const NvClientDisplay display {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338)};
     QCOMPARE(NvOutputTopology::clientMatchTarget(display), QSize(3024, 1964));
+    // Notched 14" in the default "looks like 1512x982": native fullscreen is 1512x945 pt below the camera
+    // housing, so the target is the 16:10 viewport and the closest mode fits it without letterboxing.
+    const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(notched), QSize(3024, 1890));
+    QString layout;
+    QStringList modes;
+    bool fitted = false;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({notched}, layout, modes, nullptr, &fitted));
+    QCOMPARE(modes, QStringList {QStringLiteral("2560x1600")});
+    QVERIFY(fitted);
+    // "More Space" 1800x1169 pt: the viewport 3600x2260 is capped to the panel.
+    const NvClientDisplay moreSpace {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338), QSize(3600, 2260)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(moreSpace), QSize(3024, 1898));
 }
 
 void TestOutputTopology::bestFitsOddClientDisplays_data()

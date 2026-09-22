@@ -31,6 +31,8 @@ struct NvClientDisplay
     QRect bounds;
     QSize nativeSize;     // physical panel pixels where the platform knows them
     QSize backingSize {}; // macOS current compositor pixels; absent on other platforms
+    QSize fullscreenSize {}; // macOS native-fullscreen viewport in backing pixels: the desktop below the
+                             // camera housing on notched MacBooks (e.g. 3024x1890 on a 14" panel)
 };
 
 struct NvOutputTopology

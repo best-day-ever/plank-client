@@ -3,6 +3,9 @@
 #include <algorithm>
 
 #ifdef Q_OS_DARWIN
+#include "streaming/macdisplaygeometry.h"
+#include "streaming/macwindow.h"
+
 #include <ApplicationServices/ApplicationServices.h>
 #else
 #include <QGuiApplication>
@@ -47,6 +50,16 @@ QVector<NvClientDisplay> ClientDisplayProbe::probe()
             display.backingSize = QSize(int(CGDisplayModeGetPixelWidth(current)),
                                         int(CGDisplayModeGetPixelHeight(current)));
             CGDisplayModeRelease(current);
+        }
+        // Native fullscreen sits below the camera housing: the viewport a fullscreen stream really gets.
+        // Same geometry the Mac-host Match path uses (StreamUtils::getMacCurrentDisplayMode).
+        int top = 0;
+        int logicalHeight = display.bounds.height();
+        int pixelHeight = display.backingSize.height();
+        if (display.backingSize.isValid() && MacWindow::fullscreenTopInset(ids[index], &top) && top > 0 &&
+                MacDisplayGeometry::insetTop(display.bounds.width(), logicalHeight,
+                                             display.backingSize.width(), pixelHeight, top)) {
+            display.fullscreenSize = QSize(display.backingSize.width(), pixelHeight);
         }
         display.nativeSize = nativePanelPixels(ids[index]);
         if (!display.nativeSize.isValid()) display.nativeSize = display.backingSize;

@@ -9,6 +9,8 @@
 //   nativeSize  physical panel pixels (macOS: the CoreGraphics native mode);
 //               elsewhere the current desktop pixels
 //   backingSize current desktop backing pixels (macOS only)
+//   fullscreenSize the native-fullscreen viewport in backing pixels (macOS only):
+//               the desktop minus the camera-housing safe area on notched panels
 // NvOutputTopology::clientMatchTarget turns that into the size matched.
 //
 // The formatting helpers are header-only so the unit tests can exercise them.
@@ -39,7 +41,7 @@ inline NvClientDisplay forSessionDisplay(const QRect& sdlLogicalBounds, const QS
 {
     for (const NvClientDisplay& display : probed) {
         if (display.bounds == sdlLogicalBounds) {
-            return {sdlLogicalBounds, display.nativeSize, display.backingSize};
+            return {sdlLogicalBounds, display.nativeSize, display.backingSize, display.fullscreenSize};
         }
     }
     return {sdlLogicalBounds, sdlNativeSize, QSize()};
@@ -115,7 +117,7 @@ inline MatchPreview matchPreview(const QVector<NvClientDisplay>& displays)
     return preview;
 }
 
-// "2560 × 1600 (closest supported, letterboxed)" or "1920 × 1200 (exact)".
+// "2560 × 1600 (closest supported size)" or "1920 × 1200 (exact)".
 inline QString matchSummary(const MatchPreview& preview)
 {
     if (!preview.ok) return QString();
@@ -123,7 +125,7 @@ inline QString matchSummary(const MatchPreview& preview)
     for (const QString& mode : preview.modes) modes.append(modeText(mode));
     const QString joined = modes.join(QStringLiteral(" + "));
     return preview.fitted ?
-                QCoreApplication::translate("ClientDisplayProbe", "%1 (closest supported, letterboxed)").arg(joined) :
+                QCoreApplication::translate("ClientDisplayProbe", "%1 (closest supported size)").arg(joined) :
                 QCoreApplication::translate("ClientDisplayProbe", "%1 (exact)").arg(joined);
 }
 

@@ -1222,11 +1222,23 @@ void TestPlankBroker::remoteDisplaySetupDialogAndSessionAgree()
         QVERIFY(preview.ok);
         QVERIFY(preview.fitted);
         QCOMPARE(preview.modes, QStringList({QStringLiteral("2560x1600")}));
-        QCOMPARE(ClientDisplayProbe::matchSummary(preview), QStringLiteral("2560 × 1600 (closest supported, letterboxed)"));
+        QCOMPARE(ClientDisplayProbe::matchSummary(preview), QStringLiteral("2560 × 1600 (closest supported size)"));
         QVERIFY(ClientDisplayProbe::describe(retina).contains(QStringLiteral("(2×)")));
         QVERIFY(ClientDisplayProbe::logLine(retina, preview.modes.first(), false).endsWith(
                     QStringLiteral("target=3024x1964 match=2560x1600 (fitted)")));
     }
+    // Notched 14" at the default 1512x982 pt: native fullscreen is the 3024x1890 viewport below the camera
+    // housing. The Session inherits it from the probe, so both aim at the 16:10 viewport, not the panel.
+    const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
+    const QVector<NvClientDisplay> probedNotched {notched};
+    const NvClientDisplay notchedSession = ClientDisplayProbe::forSessionDisplay(
+                QRect(0, 0, 1512, 982), QSize(3024, 1964), probedNotched);
+    QCOMPARE(notchedSession.fullscreenSize, QSize(3024, 1890));
+    QCOMPARE(NvOutputTopology::clientMatchTarget(notchedSession), QSize(3024, 1890));
+    const ClientDisplayProbe::MatchPreview notchedPreview = ClientDisplayProbe::matchPreview(probedNotched);
+    QCOMPARE(notchedPreview.modes, QStringList({QStringLiteral("2560x1600")}));
+    QVERIFY(ClientDisplayProbe::logLine(notchedSession, notchedPreview.modes.first(), false).endsWith(
+                QStringLiteral("target=3024x1890 match=2560x1600 (fitted)")));
     // A plain external monitor describes as its size.
     QCOMPARE(ClientDisplayProbe::describe({screen(0, 2560, 1440), screen(2560, 1920, 1080)}),
              QStringLiteral("2560 × 1440 + 1920 × 1080"));

@@ -527,7 +527,10 @@ QSize NvOutputTopology::clientMatchTarget(const QSize& desktopPixels, const QSiz
 
 QSize NvOutputTopology::clientMatchTarget(const NvClientDisplay& display)
 {
-    return clientMatchTarget(display.backingSize, display.nativeSize);
+    // Streams are presented in native fullscreen, which macOS places below the camera housing: match that
+    // viewport (16:10 on notched MacBooks) rather than the full desktop, or it is always letterboxed.
+    const QSize desktop = display.fullscreenSize.isValid() ? display.fullscreenSize : display.backingSize;
+    return clientMatchTarget(desktop, display.nativeSize);
 }
 
 QStringList NvOutputTopology::rankedVirtualModes(const QSize& target)
