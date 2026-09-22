@@ -59,6 +59,9 @@ public:
 
     // <application dir>/plank-passkey on macOS, empty elsewhere.
     static QString bundledProgram();
+    // Where the helper keeps its passkeys (read only, to tell whether this
+    // Mac has any); empty where there is no helper.
+    static QString localStoreRoot();
     bool available() const;
     const QString& program() const { return m_Program; }
 

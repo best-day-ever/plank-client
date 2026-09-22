@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.3
 
 import RemoteBroker 1.0
 import ComputerManager 1.0
+import Onboarding 1.0
 import StreamingPreferences 1.0
 
 // Remote (broker) mode: sign in once with username, password and
@@ -28,8 +29,18 @@ Item {
     StackView.onActivated: {
         RemoteBroker.initialize(ComputerManager)
         RemoteBroker.refreshPasskeys()
+        // Back from the first sign-in wizard without a session: continue
+        // with the user name typed there.
+        var prefill = Onboarding.takeSignInUsername()
         if (RemoteBroker.signedIn) {
             RemoteBroker.refreshHosts()
+        } else if (prefill !== "") {
+            usernameField.text = prefill
+            if (remoteView.passkeyReady) {
+                usernameField.forceActiveFocus()
+            } else {
+                passwordField.forceActiveFocus()
+            }
         } else {
             usernameField.forceActiveFocus()
         }
@@ -466,6 +477,20 @@ Item {
                              (remoteView.passkeyReady ||
                               (passwordField.text.length > 0 && otpField.text.length === 6))
                     onClicked: remoteView.submitSignIn()
+                }
+            }
+
+            // First sign-in (one-time password from the studio): the wizard.
+            Button {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 4
+                visible: RemoteBroker.configured
+                text: qsTr("New to BDE Fernweh? Set up your account")
+                flat: true
+                enabled: !RemoteBroker.busy
+                onClicked: {
+                    remoteView.errorText = ""
+                    stackView.push("qrc:/gui/OnboardingView.qml")
                 }
             }
         }

@@ -5,6 +5,7 @@
 #include "backend/computermanager.h"
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
+#include "backend/onboardingstate.h"
 #include "backend/outputtopology.h"
 #include "backend/remotedisplaysetup.h"
 #include "backend/remotestreamsetup.h"
@@ -249,10 +250,28 @@ void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser)
     // Password + code and Touch ID both end here: remember the session.
     BrokerSessionStore::save(brokerAddress(), confirmedUser, token);
     token.fill(QChar('\0'));
+    // Lasting proof this Mac was used before, beyond the Keychain session
+    // that sign-out and an expired session clear: no wizard on next launch.
+    {
+        QSettings settings;
+        OnboardingState::recordBrokerSignIn(settings);
+    }
     m_Username = confirmedUser;
     setBusy(QString());
     emit stateChanged();
     refreshHosts();
+}
+
+void RemoteBroker::adoptSession(QString token, const QString& confirmedUser)
+{
+    if (token.isEmpty() || confirmedUser.isEmpty()) {
+        token.fill(QChar('\0'));
+        return;
+    }
+    // Anything still in flight belongs to the previous state.
+    ++m_Generation;
+    finishSignIn(token, confirmedUser);
+    token.fill(QChar('\0'));
 }
 
 void RemoteBroker::signInWithPasskey(const QString& username)

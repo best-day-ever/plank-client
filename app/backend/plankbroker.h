@@ -475,6 +475,64 @@ inline const Prompt* passkeyPrompt(const QVector<Prompt>& prompts)
     return &prompts.at(0);
 }
 
+// {"conversation_id", "prompts":[...]} of a challenge (section 10.1; also
+// the enrolment start reply). Sets reply.kind to Challenge only when valid.
+inline bool parseChallenge(const QJsonObject& object, AuthReply& reply)
+{
+    const QString conversationId = object.value(QStringLiteral("conversation_id")).toString();
+    const QJsonValue promptsValue = object.value(QStringLiteral("prompts"));
+    if (!isPrintableAscii(conversationId, MaximumTokenLength) || !promptsValue.isArray()) return false;
+    const QJsonArray prompts = promptsValue.toArray();
+    if (prompts.isEmpty() || prompts.size() > MaximumPrompts) return false;
+    QVector<Prompt> parsed;
+    for (const QJsonValue& value : prompts) {
+        if (!value.isObject()) return false;
+        const QJsonObject promptObject = value.toObject();
+        Prompt prompt;
+        prompt.id = promptObject.value(QStringLiteral("id")).toString();
+        prompt.style = promptObject.value(QStringLiteral("style")).toString();
+        prompt.text = promptObject.value(QStringLiteral("text")).toString();
+        if (!isPrintableAscii(prompt.id, 64) || !isDisplayText(prompt.text, 200) ||
+                (prompt.style != QLatin1String("secret") && prompt.style != QLatin1String("otp") &&
+                 prompt.style != QLatin1String("text") && prompt.style != QLatin1String("info") &&
+                 prompt.style != QLatin1String("passkey"))) {
+            return false;
+        }
+        if (prompt.style == QLatin1String("passkey") &&
+                !parsePasskeyRequest(promptObject.value(QStringLiteral("passkey")), prompt.passkey)) {
+            return false;
+        }
+        parsed.append(prompt);
+    }
+    reply.prompts = parsed;
+    reply.conversationId = conversationId;
+    reply.kind = ReplyKind::Challenge;
+    return true;
+}
+
+// The fields of a successful sign-in ({"state":"authenticated",...}); shared
+// by /v1/auth/respond and the enrolment reply that ends in a session. Sets
+// reply.kind to Authenticated only when every field is well-formed.
+inline bool parseAuthenticated(const QJsonObject& object, AuthReply& reply)
+{
+    const QString token = object.value(QStringLiteral("session_token")).toString();
+    const QJsonValue expires = object.value(QStringLiteral("expires_in"));
+    const QString username = object.value(QStringLiteral("username")).toString();
+    if (!isPrintableAscii(token, MaximumTokenLength) ||
+            (!expires.isUndefined() && (!expires.isDouble() || expires.toDouble() < 1)) ||
+            !isDisplayText(username, 255)) {
+        reply.prompts.clear();
+        return false;
+    }
+    reply.sessionToken = token;
+    reply.expiresIn = expires.isUndefined() ? 0 : expires.toInt();
+    reply.username = username;
+    // Informational only: tolerated when absent or not a boolean.
+    reply.deviceBound = object.value(QStringLiteral("device_bound")).toBool(false);
+    reply.kind = ReplyKind::Authenticated;
+    return true;
+}
+
 // Maps HTTP status + body of /v1/auth/start and /v1/auth/respond. Every auth
 // failure is HTTP 200 {"state":"denied"}; rate limiting is HTTP 429.
 inline AuthReply parseAuthReply(int httpStatus, const QByteArray& body)
@@ -495,50 +553,11 @@ inline AuthReply parseAuthReply(int httpStatus, const QByteArray& body)
         return reply;
     }
     if (state == QLatin1String("challenge")) {
-        const QString conversationId = object.value(QStringLiteral("conversation_id")).toString();
-        const QJsonValue promptsValue = object.value(QStringLiteral("prompts"));
-        if (!isPrintableAscii(conversationId, MaximumTokenLength) || !promptsValue.isArray()) return reply;
-        const QJsonArray prompts = promptsValue.toArray();
-        if (prompts.isEmpty() || prompts.size() > MaximumPrompts) return reply;
-        for (const QJsonValue& value : prompts) {
-            if (!value.isObject()) return reply;
-            const QJsonObject promptObject = value.toObject();
-            Prompt prompt;
-            prompt.id = promptObject.value(QStringLiteral("id")).toString();
-            prompt.style = promptObject.value(QStringLiteral("style")).toString();
-            prompt.text = promptObject.value(QStringLiteral("text")).toString();
-            if (!isPrintableAscii(prompt.id, 64) || !isDisplayText(prompt.text, 200) ||
-                    (prompt.style != QLatin1String("secret") && prompt.style != QLatin1String("otp") &&
-                     prompt.style != QLatin1String("text") && prompt.style != QLatin1String("info") &&
-                     prompt.style != QLatin1String("passkey"))) {
-                return reply;
-            }
-            if (prompt.style == QLatin1String("passkey") &&
-                    !parsePasskeyRequest(promptObject.value(QStringLiteral("passkey")), prompt.passkey)) {
-                return reply;
-            }
-            reply.prompts.append(prompt);
-        }
-        reply.conversationId = conversationId;
-        reply.kind = ReplyKind::Challenge;
+        parseChallenge(object, reply);
         return reply;
     }
     if (state == QLatin1String("authenticated")) {
-        const QString token = object.value(QStringLiteral("session_token")).toString();
-        const QJsonValue expires = object.value(QStringLiteral("expires_in"));
-        const QString username = object.value(QStringLiteral("username")).toString();
-        if (!isPrintableAscii(token, MaximumTokenLength) ||
-                (!expires.isUndefined() && (!expires.isDouble() || expires.toDouble() < 1)) ||
-                !isDisplayText(username, 255)) {
-            reply.prompts.clear();
-            return reply;
-        }
-        reply.sessionToken = token;
-        reply.expiresIn = expires.isUndefined() ? 0 : expires.toInt();
-        reply.username = username;
-        // Informational only: tolerated when absent or not a boolean.
-        reply.deviceBound = object.value(QStringLiteral("device_bound")).toBool(false);
-        reply.kind = ReplyKind::Authenticated;
+        parseAuthenticated(object, reply);
         return reply;
     }
     return reply;
