@@ -45,8 +45,14 @@ class HostTlsGuardTest : public QObject
     {
         QProcess process;
         process.setWorkingDirectory(files.path());
+#ifdef Q_OS_MACOS
+        process.start("/usr/bin/openssl", args);
+#else
         process.start("openssl", args);
-        return process.waitForFinished(20000) && process.exitCode() == 0;
+#endif
+        const bool ok = process.waitForFinished(20000) && process.exitCode() == 0;
+        if (!ok) qWarning() << "Synthetic TLS fixture failed:" << process.errorString() << process.readAllStandardError();
+        return ok;
     }
     QByteArray read(const QString& name)
     {
@@ -88,7 +94,7 @@ private slots:
                 "-addext", "keyUsage=critical,digitalSignature,keyCertSign",
                 "-keyout", name + ".key", "-out", name + ".pem"}));
         }
-        QVERIFY(crypto({"req", "-x509", "-key", "machine.key", "-days", "3", "-sha256",
+        QVERIFY(crypto({"req", "-new", "-x509", "-key", "machine.key", "-days", "3", "-sha256",
             "-subj", "/CN=Renewed", "-addext", "subjectAltName=DNS:plank-host", "-out", "renewed.pem"}));
         QVERIFY(crypto({"req", "-new", "-newkey", "rsa:3072", "-nodes", "-subj", "/CN=worker",
             "-keyout", "worker.key", "-out", "worker.csr"}));
