@@ -2,23 +2,119 @@
 
 #include <QtMath>
 
+#include <cmath>
+
+QRect PlankPresentation::aspectFitRect(const QSize& sourceSize,
+                                        const QRect& destination)
+{
+    if (sourceSize.width() <= 0 || sourceSize.height() <= 0 ||
+            destination.width() <= 0 || destination.height() <= 0) {
+        return QRect();
+    }
+
+    // Keep this arithmetic (single-precision, ceil, integer halving) exactly
+    // as the renderers have always letterboxed: the Metal, SDL and D3D/VA
+    // renderers reach it through StreamUtils::scaleSourceToDestinationSurface.
+    const int fittedHeight = static_cast<int>(std::ceil(
+        static_cast<float>(destination.width()) * sourceSize.height() /
+            sourceSize.width()));
+    const int fittedWidth = static_cast<int>(std::ceil(
+        static_cast<float>(destination.height()) * sourceSize.width() /
+            sourceSize.height()));
+
+    if (fittedHeight > destination.height()) {
+        return QRect(destination.x() + (destination.width() - fittedWidth) / 2,
+                     destination.y(), fittedWidth, destination.height());
+    }
+    return QRect(destination.x(),
+                 destination.y() + (destination.height() - fittedHeight) / 2,
+                 destination.width(), fittedHeight);
+}
+
 QRect PlankPresentation::videoRect(const QSize& streamSize,
-                                             const QSize& canvasSize)
+                                   const QSize& canvasSize)
 {
     if (!streamSize.isValid() || !canvasSize.isValid()) {
         return QRect();
     }
+    return aspectFitRect(streamSize, QRect(QPoint(0, 0), canvasSize));
+}
 
-    const qreal widthScale = static_cast<qreal>(canvasSize.width()) /
-            streamSize.width();
-    const qreal heightScale = static_cast<qreal>(canvasSize.height()) /
-            streamSize.height();
-    const qreal scale = qMin(widthScale, heightScale);
-    const int width = qMax(1, qRound(streamSize.width() * scale));
-    const int height = qMax(1, qRound(streamSize.height() * scale));
-    return QRect((canvasSize.width() - width) / 2,
-                 (canvasSize.height() - height) / 2,
-                 width, height);
+PlankOutputGeometry PlankPresentation::outputGeometry(
+        const PlankPresentationLayout& layout,
+        const PlankPresentationOutput& output,
+        const QSize& windowSize,
+        const QSize& drawableSize,
+        bool liveDrawable)
+{
+    PlankOutputGeometry geometry;
+    geometry.windowSize = windowSize;
+    if (liveDrawable && !layout.isMultiOutput() &&
+            drawableSize.width() > 0 && drawableSize.height() > 0) {
+        geometry.canvasSize = drawableSize;
+        geometry.canvasRect = QRect(QPoint(0, 0), drawableSize);
+        geometry.live = true;
+    }
+    else {
+        geometry.canvasSize = layout.canvasSize;
+        geometry.canvasRect = output.canvasRect;
+    }
+    return geometry;
+}
+
+QRectF PlankPresentation::videoRectInWindow(
+        const QSize& streamSize, const PlankOutputGeometry& geometry)
+{
+    if (!geometry.isValid() || !streamSize.isValid() ||
+            streamSize.isEmpty()) {
+        return QRectF();
+    }
+    const QRect visible = videoRect(streamSize, geometry.canvasSize)
+            .intersected(geometry.canvasRect);
+    if (visible.isEmpty()) {
+        return QRectF();
+    }
+    const qreal scaleX = static_cast<qreal>(geometry.windowSize.width()) /
+            geometry.canvasRect.width();
+    const qreal scaleY = static_cast<qreal>(geometry.windowSize.height()) /
+            geometry.canvasRect.height();
+    return QRectF((visible.left() - geometry.canvasRect.left()) * scaleX,
+                  (visible.top() - geometry.canvasRect.top()) * scaleY,
+                  visible.width() * scaleX,
+                  visible.height() * scaleY);
+}
+
+bool PlankPresentation::mapWindowPointToStream(
+        const QPointF& windowPoint,
+        const PlankOutputGeometry& geometry,
+        const QSize& streamSize,
+        QPointF& streamPoint,
+        bool allowClampedPosition)
+{
+    return mapWindowPointToStream(windowPoint, geometry.windowSize,
+                                  streamSize, geometry.canvasSize,
+                                  geometry.canvasRect, streamPoint,
+                                  allowClampedPosition);
+}
+
+bool PlankPresentation::mapStreamPointToWindow(
+        const QPointF& streamPoint,
+        const QSize& streamSize,
+        const PlankOutputGeometry& geometry,
+        QPointF& windowPoint)
+{
+    return mapStreamPointToWindow(streamPoint, streamSize,
+                                  geometry.canvasSize, geometry.canvasRect,
+                                  geometry.windowSize, windowPoint);
+}
+
+QPoint PlankPresentation::absoluteStreamPosition(const QPointF& streamPoint,
+                                                 const QSize& streamSize)
+{
+    return QPoint(qBound(0, qRound(streamPoint.x()),
+                         qMax(0, streamSize.width() - 1)),
+                  qBound(0, qRound(streamPoint.y()),
+                         qMax(0, streamSize.height() - 1)));
 }
 
 PlankPresentationSlice PlankPresentation::sliceForOutput(
@@ -56,8 +152,8 @@ bool PlankPresentation::mapWindowPointToStream(
         QPointF& streamPoint,
         bool allowClampedPosition)
 {
-    if (!windowSize.isValid() || !streamSize.isValid() ||
-            !canvasSize.isValid() || !outputCanvasRect.isValid()) {
+    if (windowSize.isEmpty() || streamSize.isEmpty() ||
+            canvasSize.isEmpty() || !outputCanvasRect.isValid()) {
         return false;
     }
 
@@ -67,6 +163,9 @@ bool PlankPresentation::mapWindowPointToStream(
         outputCanvasRect.top() +
             windowPoint.y() * outputCanvasRect.height() / windowSize.height());
     const QRect destination = videoRect(streamSize, canvasSize);
+    if (destination.isEmpty()) {
+        return false;
+    }
     const bool inside = destination.contains(qFloor(canvasPoint.x()),
                                              qFloor(canvasPoint.y()));
     if (!inside && !allowClampedPosition) {
@@ -90,12 +189,15 @@ bool PlankPresentation::mapStreamPointToWindow(
         const QSize& windowSize,
         QPointF& windowPoint)
 {
-    if (!windowSize.isValid() || !streamSize.isValid() ||
-            !canvasSize.isValid() || !outputCanvasRect.isValid()) {
+    if (windowSize.isEmpty() || streamSize.isEmpty() ||
+            canvasSize.isEmpty() || !outputCanvasRect.isValid()) {
         return false;
     }
 
     const QRect destination = videoRect(streamSize, canvasSize);
+    if (destination.isEmpty()) {
+        return false;
+    }
     const QPointF canvasPoint(
         destination.left() + streamPoint.x() * destination.width() /
             streamSize.width(),

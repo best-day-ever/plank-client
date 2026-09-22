@@ -26,6 +26,8 @@ public:
     virtual AVPixelFormat getPreferredPixelFormat(int videoFormat) override;
     virtual int getDecoderColorspace() override;
     virtual int getDecoderColorRange() override;
+    // renderFrame() slices frame->width/height.
+    virtual bool letterboxesDecodedFrameSize() override { return true; }
 
 private:
 

@@ -66,6 +66,7 @@
 #define SDL_CODE_PLANK_CLIPBOARD_POLL 112
 #define SDL_CODE_PLANK_FILE_CLIPBOARD_READY 113
 #define SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH 114
+#define SDL_CODE_PLANK_DECODED_FRAME_SIZE 115
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -341,6 +342,22 @@ void Session::clCursorPosition(const unsigned char* data, unsigned int length)
         event.user.code = SDL_CODE_PLANK_CURSOR_POSITION;
         SDL_PushEvent(&event);
     }
+}
+
+void Session::notifyDecodedFrameSize(int width, int height)
+{
+    Session* session = s_ActiveSession;
+    if (session == nullptr || width <= 0 || height <= 0) {
+        return;
+    }
+    session->m_DecodedFrameSize.store(
+                (static_cast<std::uint64_t>(width) << 32) |
+                static_cast<std::uint32_t>(height),
+                std::memory_order_relaxed);
+    SDL_Event event = {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_PLANK_DECODED_FRAME_SIZE;
+    SDL_PushEvent(&event);
 }
 
 void Session::postTabletCursorActivationEvent()
@@ -4481,6 +4498,15 @@ void Session::execInternal()
                 m_InputHandler->applyPendingRemoteCursorPosition();
             }
             return true;
+        case SDL_CODE_PLANK_DECODED_FRAME_SIZE:
+            if (m_InputHandler != nullptr) {
+                const std::uint64_t size =
+                        m_DecodedFrameSize.load(std::memory_order_relaxed);
+                m_InputHandler->updateDecodedStreamDimensions(
+                            static_cast<int>(size >> 32),
+                            static_cast<int>(size & 0xffffffffu));
+            }
+            return true;
         case SDL_CODE_PLANK_CLIPBOARD:
 #ifdef Q_OS_MACOS
             if (m_ClipboardSync != nullptr) {
@@ -4715,6 +4741,11 @@ void Session::execInternal()
                 if (m_PlankToolbar) {
                     m_PlankToolbar->notifyWindowChanged();
                 }
+                if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                    m_InputHandler->notifyWindowGeometryChanged(
+                                windowForEvent(event.window.windowID),
+                                "pixel-size");
+                }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (!anyPresentationWindowFocused()) {
@@ -4807,6 +4838,10 @@ void Session::execInternal()
         case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
             if (SDL_Window* window = windowForEvent(event.window.windowID)) {
                 MacWindow::logGeometry(window);
+                m_InputHandler->notifyWindowGeometryChanged(
+                            window,
+                            event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ?
+                                "enter-fullscreen" : "leave-fullscreen");
                 m_InputHandler->updateKeyboardGrabState();
                 if (m_PlankToolbar) {
                     m_PlankToolbar->notifyWindowChanged();
@@ -4832,6 +4867,10 @@ void Session::execInternal()
                 MacWindow::logGeometry(eventWindow);
             }
 #endif
+            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                m_InputHandler->notifyWindowGeometryChanged(eventWindow,
+                                                            "pixel-size");
+            }
             if (m_PlankToolbar && eventWindow == m_Window &&
                     event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 m_PlankToolbar->notifyWindowChanged();
@@ -5027,6 +5066,13 @@ void Session::execInternal()
                     emit displayLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
                     goto DispatchDeferredCleanup;
                 }
+
+                // Input maps against what this renderer actually letterboxes
+                // against: the live drawable, or the layout it copied.
+                m_InputHandler->setLiveDrawableGeometry(
+                            m_VideoDecoder->letterboxesAgainstLiveDrawable());
+                m_InputHandler->notifyWindowGeometryChanged(m_Window,
+                                                            "renderer");
 
                 // As of SDL 2.0.12, SDL_RecreateWindow() doesn't carry over mouse capture
                 // or mouse hiding state to the new window. By capturing after the decoder
