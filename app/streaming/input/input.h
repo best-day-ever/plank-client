@@ -38,6 +38,20 @@ public:
 
     void setPresentationLayout(const PlankPresentationLayout& layout);
 
+    // The active renderer letterboxes against the live drawable
+    // (IVideoDecoder::letterboxesAgainstLiveDrawable()). Single-output input
+    // then maps against the live drawable instead of the layout snapshot.
+    void setLiveDrawableGeometry(bool live);
+
+    // The decoded frame size, reported by the decoder only when its renderer
+    // letterboxes the decoded frames (not the negotiated size). If it differs
+    // from the negotiated stream size, input follows the frames.
+    void updateDecodedStreamDimensions(int frameWidth, int frameHeight);
+
+    // A presentation window changed size, scale or fullscreen state: log the
+    // geometry input now maps against and re-apply pointer confinement.
+    void notifyWindowGeometryChanged(SDL_Window* window, const char* reason);
+
     void refreshWaylandTabletCursorParents();
 
     void handleKeyEvent(SDL_KeyboardEvent* event);
@@ -94,10 +108,8 @@ public:
 
     void setCaptureActive(bool active);
 
-    bool isMouseInVideoRegion(int mouseX, int mouseY,
-                              Uint32 windowId = 0,
-                              int windowWidth = -1,
-                              int windowHeight = -1);
+    bool isMouseInVideoRegion(float mouseX, float mouseY,
+                              Uint32 windowId = 0);
 
     void updateKeyboardGrabState();
 
@@ -138,6 +150,7 @@ private:
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;
     bool m_KeyboardCaptureActive;
+    bool m_FilePasteKeyUpConsumed = false;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
     bool m_MouseCursorCapturedVisibilityState;
 
@@ -197,8 +210,12 @@ private:
     void updateTabletCursorVisibility();
     QSize streamDimensions() const;
     bool sendAbsoluteMousePosition(SDL_Window* window,
-                                   int windowX, int windowY,
+                                   float windowX, float windowY,
                                    bool allowClampedPosition);
+    // Geometry of one presentation window at event time: live drawable for a
+    // single output whose renderer letterboxes live, snapshot otherwise.
+    bool outputGeometry(SDL_Window* window,
+                        PlankOutputGeometry& geometry) const;
 
     SDL_Window* presentationWindow(Uint32 windowId) const;
     const PlankPresentationOutput* presentationOutput(
@@ -219,6 +236,7 @@ private:
     } m_SpecialKeyCombos[KeyComboMax];
 
     std::atomic_uint64_t m_StreamDimensions;
+    std::atomic_bool m_LiveDrawableGeometry{false};
 
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;

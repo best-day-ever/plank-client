@@ -408,7 +408,6 @@ CenteredGridView {
         property int originalProfile: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
         property int originalCaptureSource: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
         property var originalProfileBitratesKbps: []
-        property var profileBitratesKbps: []
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         height: Math.min(implicitHeight, parent.height - 20)
@@ -418,28 +417,7 @@ CenteredGridView {
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         function currentVideoProfile() {
-            if (editEncodingProfile.currentIndex >= 0 &&
-                    editEncodingProfile.currentIndex < editEncodingProfile.model.count) {
-                return editEncodingProfile.model.get(
-                            editEncodingProfile.currentIndex).val
-            }
-            return StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-        }
-
-        function applyProfileBitrate() {
-            var profile = currentVideoProfile()
-            var saved = profileBitratesKbps[profile]
-            editBitrateSlider.value = saved === undefined ?
-                        StreamingPreferences.plankDefaultBitrateKbps(profile) : saved
-        }
-
-        function rememberProfileBitrate() {
-            var values = []
-            for (var i = 0; i < profileBitratesKbps.length; ++i) {
-                values.push(profileBitratesKbps[i])
-            }
-            values[currentVideoProfile()] = Math.round(editBitrateSlider.value)
-            profileBitratesKbps = values
+            return editVideoSettings.videoProfile
         }
 
         function virtualModeSupported(mode) {
@@ -448,7 +426,7 @@ CenteredGridView {
         }
 
         function ensureVirtualModesCompatible() {
-            if (editCaptureSource.captureSource === 2) return
+            if (editVideoSettings.captureSource === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -472,24 +450,11 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
             hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
-            editCaptureSource.selectCaptureSource(originalCaptureSource)
+            editVideoSettings.load(originalCaptureSource, originalProfile,
+                                   originalProfileBitratesKbps, [])
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
-            for (var i = 0; i < editEncodingProfile.model.count; i++) {
-                if (editEncodingProfile.model.get(i).val === originalProfile) {
-                    editEncodingProfile.currentIndex = i
-                    break
-                }
-            }
-            var loadedBitrates = []
-            for (var bitrateIndex = 0;
-                 bitrateIndex < originalProfileBitratesKbps.length;
-                 ++bitrateIndex) {
-                loadedBitrates.push(originalProfileBitratesKbps[bitrateIndex])
-            }
-            profileBitratesKbps = loadedBitrates
-            applyProfileBitrate()
             ensureVirtualModesCompatible()
             editAddressText.forceActiveFocus()
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
@@ -503,7 +468,6 @@ CenteredGridView {
             editNicknameText.clear()
             hostDisplayPolicy = -1
             originalProfileBitratesKbps = []
-            profileBitratesKbps = []
         }
         onAccepted: {
             if (!computerModel.editComputerBookmark(pcIndex,
@@ -513,10 +477,9 @@ CenteredGridView {
                                                     editHostLayout.currentIndex,
                                                     editVirtualMode1.currentIndex,
                                                     editVirtualMode2.currentIndex,
-                                                    editEncodingProfile.model.get(
-                                                        editEncodingProfile.currentIndex).val,
-                                                    editCaptureSource.captureSource,
-                                                    profileBitratesKbps)) {
+                                                    editVideoSettings.videoProfile,
+                                                    editVideoSettings.captureSource,
+                                                    editVideoSettings.officeBitratesKbps)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.open()
             }
@@ -543,116 +506,14 @@ CenteredGridView {
                 Layout.fillWidth: true
             }
 
-            Label {
-                text: qsTr("Capture source")
-                font.bold: true
-            }
-            PlankCaptureSourceBox {
-                id: editCaptureSource
+            PlankVideoSettings {
+                id: editVideoSettings
                 Layout.fillWidth: true
                 hostAddress: editAddressText.text
                 probingEnabled: editBookmarkDialog.visible
-                onCaptureSourceChanged: {
-                    editHostLayout.currentIndex = 0
-                    editEncodingProfile.currentIndex = captureSource === 0 ? 3 : 0
-                    Qt.callLater(editBookmarkDialog.applyProfileBitrate)
-                }
-            }
-
-            Label {
-                text: qsTr("Encoding profile")
-                font.bold: true
-            }
-            PlankComboBox {
-                id: editEncodingProfile
-                Layout.fillWidth: true
-                textRole: "text"
-                model: editCaptureSource.captureSource === 2 ? editAppleEncodingProfileModel :
-                       editCaptureSource.captureSource === 0 ?
-                           editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
-                onActivated: {
-                    editBookmarkDialog.applyProfileBitrate()
-                    editBookmarkDialog.ensureVirtualModesCompatible()
-                }
-            }
-
-            ListModel {
-                id: editNvfbcEncodingProfileModel
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:2:2")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_422
-                }
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:2:2")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_422
-                }
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_H264_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-                }
-            }
-
-            ListModel {
-                id: editAppleEncodingProfileModel
-                ListElement {
-                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox (Preview)")
-                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_420
-                }
-                ListElement {
-                    text: qsTr("HEVC 10-bit 4:4:4 — Apple VideoToolbox (Preview)")
-                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_444
-                }
-            }
-
-            ListModel {
-                id: editNativeEncodingProfileModel
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR) — x264")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-                }
-            }
-
-            Label {
-                text: qsTr("Startup encoder target: %1 Mbps").arg(
-                          (editBitrateSlider.value / 1000.0).toFixed(1))
-                font.bold: true
-            }
-
-            Slider {
-                id: editBitrateSlider
-                Layout.fillWidth: true
-                from: StreamingPreferences.plankBitrateMinimumKbps()
-                to: StreamingPreferences.plankBitrateMaximumKbps()
-                stepSize: StreamingPreferences.plankBitrateStepKbps()
-                snapMode: Slider.SnapAlways
-                onMoved: editBookmarkDialog.rememberProfileBitrate()
-            }
-
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.")
-                wrapMode: Text.Wrap
-                opacity: 0.72
+                nvfbcDefaultProfile: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
+                onCaptureSourceEdited: editHostLayout.currentIndex = 0
+                onProfileActivated: editBookmarkDialog.ensureVirtualModesCompatible()
             }
 
             Label {
@@ -662,7 +523,7 @@ CenteredGridView {
             PlankComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
-                model: editCaptureSource.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
+                model: editVideoSettings.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
@@ -672,21 +533,29 @@ CenteredGridView {
 
             Label {
                 Layout.fillWidth: true
-                visible: editCaptureSource.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
+                visible: editVideoSettings.captureSource !== 2 && editHostLayout.currentIndex === 0
+                text: visible ? ComputerManager.plankMatchClientSummary() : ""
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: editVideoSettings.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
                 text: qsTr("This headless workstation does not provide physical displays.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }
 
             Label {
-                text: editCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
+                text: editVideoSettings.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2) ? 1.0 : 0.5
+                opacity: (editVideoSettings.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2) ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode1
                 Layout.fillWidth: true
-                enabled: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2)
+                enabled: (editVideoSettings.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2)
                 model: editBookmarkDialog.virtualModeChoices
                 delegate: ItemDelegate {
                     width: editVirtualMode1.width
@@ -697,14 +566,14 @@ CenteredGridView {
             }
 
             Label {
-                visible: editCaptureSource.captureSource !== 2
+                visible: editVideoSettings.captureSource !== 2
                 text: qsTr("Virtual display 2 resolution")
                 font.bold: true
                 opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode2
-                visible: editCaptureSource.captureSource !== 2
+                visible: editVideoSettings.captureSource !== 2
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
                 model: editBookmarkDialog.virtualModeChoices

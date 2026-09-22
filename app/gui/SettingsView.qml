@@ -320,6 +320,16 @@ Flickable {
                         }
                 }
 
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    text: qsTr("PLANK workstations always stream at %1 FPS; this applies to other hosts only.")
+                          .arg(StreamingPreferences.plankFramesPerSecond())
+                }
+
                 PlankSettingLabel {
                     id: windowModeTitle
                     text: qsTr("Window Mode")
@@ -959,6 +969,62 @@ Flickable {
             title: qsTr("Remote Access")
 
             PlankSettingsGrid {
+
+                // Stream quality for remote workstations without their own
+                // settings (each workstation's Settings… can override it).
+                PlankSettingLabel {
+                    text: qsTr("Default stream quality")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    id: remoteDefaults
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 6
+
+                    function reload() {
+                        var defaults = RemoteBroker.remoteStreamDefaults()
+                        remoteDefaultsVideo.load(defaults.captureSource, defaults.videoProfile,
+                                                 defaults.officeBitratesKbps, defaults.internetBitratesKbps)
+                    }
+
+                    Component.onCompleted: reload()
+
+                    PlankVideoSettings {
+                        id: remoteDefaultsVideo
+                        Layout.fillWidth: true
+                        // Linux workstations; remote Macs keep their own default.
+                        hostPlatform: 1
+                        showRoutes: true
+                        onEdited: {
+                            if (!RemoteBroker.saveRemoteStreamDefaults(captureSource, videoProfile,
+                                                                       officeBitratesKbps, internetBitratesKbps)) {
+                                remoteDefaults.reload()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("Restore defaults")
+                            onClicked: {
+                                RemoteBroker.resetRemoteStreamDefaults()
+                                remoteDefaults.reload()
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    text: qsTr("Used for every remote workstation that has no stream settings of its own. The built-in default is H.265 10-bit 4:4:4 (NVENC) at 50 Mbps on both routes.")
+                }
 
                 PlankSettingLabel {
                     text: qsTr("Broker server")

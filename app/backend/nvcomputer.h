@@ -118,6 +118,9 @@ public:
     QString sessionToken;
     int plankTopologyVersion = 0;
     int plankFeatureFlags = 0;
+    // Encoding modes the host advertises (PlankEncodingModes); empty when
+    // it does not advertise them.
+    QStringList plankEncodingModes;
     NvOutputTopology outputTopology;
     // Remote (broker) mode, never persisted: non-empty means every connection
     // to this host must present exactly this leaf (section 10.2).

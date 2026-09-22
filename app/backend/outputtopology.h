@@ -29,8 +29,10 @@ struct NvOutput
 struct NvClientDisplay
 {
     QRect bounds;
-    QSize nativeSize;
+    QSize nativeSize;     // physical panel pixels where the platform knows them
     QSize backingSize {}; // macOS current compositor pixels; absent on other platforms
+    QSize fullscreenSize {}; // macOS native-fullscreen viewport in backing pixels: the desktop below the
+                             // camera housing on notched MacBooks (e.g. 3024x1890 on a 14" panel)
 };
 
 struct NvOutputTopology
@@ -63,6 +65,17 @@ struct NvOutputTopology
     // Single-user Linux desktop: a launch refused because another account
     // owns the desktop names that owner and may offer to sign it out.
     static const int DesktopSignOutFeature = 0x400000;
+    static const int ClipboardSyncFeature = 0x800000;
+    static const int ClipboardFilesFeature = 0x1000000;
+    // Only advertise a clipboard receiver/sender when this client implements
+    // it. Linux must not cause the host to read or transmit unused clipboard data.
+#ifdef Q_OS_MACOS
+    static const int PlatformClipboardSyncFeature = ClipboardSyncFeature;
+    static const int PlatformClipboardFilesFeature = ClipboardFilesFeature;
+#else
+    static const int PlatformClipboardSyncFeature = 0;
+    static const int PlatformClipboardFilesFeature = 0;
+#endif
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -86,7 +99,9 @@ struct NvOutputTopology
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
                                              WorkerInstanceFeature |
-                                             DesktopSignOutFeature;
+                                             DesktopSignOutFeature |
+                                             PlatformClipboardSyncFeature |
+                                             PlatformClipboardFilesFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -103,10 +118,28 @@ struct NvOutputTopology
                          QString* error = nullptr);
     QJsonObject toJson() const;
 
+    // Match client displays on a Linux host. Each display is matched to the
+    // best qualified virtual mode for its match target: an exact hit when
+    // there is one, otherwise the closest supported mode (see
+    // rankedVirtualModes). fitted reports whether any display was not an
+    // exact hit, so the stream is presented scaled to fit (letterboxed).
     static bool resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                            QString& hostLayout,
                                            QStringList& virtualModes,
-                                           QString* error = nullptr);
+                                           QString* error = nullptr,
+                                           bool* fitted = nullptr);
+    // The pixel size "Match client displays" aims for: the current desktop
+    // backing pixels (what the client presents into), capped at the physical
+    // panel with the aspect ratio kept. A macOS "More Space" backing larger
+    // than the panel would only spend bitrate on pixels that are thrown away.
+    static QSize clientMatchTarget(const QSize& desktopPixels, const QSize& panelPixels);
+    static QSize clientMatchTarget(const NvClientDisplay& display);
+    // Qualified virtual modes in order of preference for one client display:
+    // the exact mode first; then modes that fit inside the target (no
+    // upscale) by closest aspect ratio, then largest area; then, only when
+    // nothing fits, modes by closest aspect ratio, then smallest area.
+    // Ultra-tall halves are only candidates for portrait targets.
+    static QStringList rankedVirtualModes(const QSize& target);
     static QStringList qualifiedVirtualModes();
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
                                                QString* error = nullptr, int* scale = nullptr);
