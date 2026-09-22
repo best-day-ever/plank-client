@@ -432,6 +432,31 @@ void TestOutputTopology::negotiatesNotchSafeLaptopMode()
     document["feature_flags"] = document.value("feature_flags").toInt() &
             ~NvOutputTopology::NotchSafeLaptopModesFeature;
     QVERIFY(!NvOutputTopology::fromJson(document, topology));
+
+    // Match client: a 14" in its default scaling, as ClientDisplayProbe sees it.
+    QCOMPARE(NvOutputTopology::virtualModesForHost(NvOutputTopology::SupportedFeatureFlags),
+             NvOutputTopology::qualifiedVirtualModes());
+    QVERIFY(!NvOutputTopology::virtualModesForHost(withoutFeature).contains(viewport));
+    QCOMPARE(NvOutputTopology::virtualModesForHost(withoutFeature).size(),
+             NvOutputTopology::qualifiedVirtualModes().size() - 1);
+    const NvClientDisplay laptop {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964),
+                                  QSize(3024, 1890)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(laptop), QSize(3024, 1890));
+    QString layout;
+    QStringList modes;
+    bool fitted = true;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                {laptop}, layout, modes, &error, &fitted,
+                NvOutputTopology::virtualModesForHost(NvOutputTopology::SupportedFeatureFlags)));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(modes, QStringList({viewport}));
+    QVERIFY(!fitted);
+    // An older host: the closest mode it accepts, presented scaled to fit.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                {laptop}, layout, modes, &error, &fitted,
+                NvOutputTopology::virtualModesForHost(withoutFeature)));
+    QCOMPARE(modes, QStringList({QStringLiteral("2560x1600")}));
+    QVERIFY(fitted);
 }
 
 void TestOutputTopology::enforcesHostDisplayPolicy()

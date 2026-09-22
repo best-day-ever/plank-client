@@ -131,7 +131,8 @@ struct NvOutputTopology
                                            QString& hostLayout,
                                            QStringList& virtualModes,
                                            QString* error = nullptr,
-                                           bool* fitted = nullptr);
+                                           bool* fitted = nullptr,
+                                           const QStringList& candidateModes = qualifiedVirtualModes());
     // The pixel size "Match client displays" aims for: the current desktop
     // backing pixels (what the client presents into), capped at the physical
     // panel with the aspect ratio kept. A macOS "More Space" backing larger
@@ -143,10 +144,15 @@ struct NvOutputTopology
     // upscale) by closest aspect ratio, then largest area; then, only when
     // nothing fits, modes by closest aspect ratio, then smallest area.
     // Ultra-tall halves are only candidates for portrait targets.
-    static QStringList rankedVirtualModes(const QSize& target);
+    // candidateModes: qualifiedVirtualModes(), or virtualModesForHost() once
+    // the host's feature flags are known.
+    static QStringList rankedVirtualModes(const QSize& target,
+                                          const QStringList& candidateModes = qualifiedVirtualModes());
     static QStringList qualifiedVirtualModes();
     // Whether a host advertising these feature flags accepts the mode.
     static bool hostAcceptsVirtualMode(const QString& mode, int hostFeatureFlags);
+    // The qualified modes a host advertising these feature flags accepts.
+    static QStringList virtualModesForHost(int hostFeatureFlags);
     static QString resolveMacClientDisplayMode(const QVector<NvClientDisplay>& displays,
                                                QString* error = nullptr, int* scale = nullptr);
     static QJsonObject macDisplayRequest(const QString& mode, const QString& encodingMode, int scale);

@@ -2466,7 +2466,8 @@ bool Session::configurePlankHostLayout()
             // matched to the closest qualified mode and letterboxed.
             bool fitted = false;
             const bool resolved = NvOutputTopology::resolveClientDisplayLayout(
-                        probedDisplays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, &fitted);
+                        probedDisplays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, &fitted,
+                        NvOutputTopology::virtualModesForHost(hostFeatureFlags));
             for (int index = 0; index < probedDisplays.size(); ++index) {
                 const QSize target = NvOutputTopology::clientMatchTarget(probedDisplays.at(index));
                 const QString mode = m_ResolvedVirtualModes.value(index);

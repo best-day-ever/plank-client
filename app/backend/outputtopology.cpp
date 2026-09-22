@@ -129,6 +129,17 @@ bool NvOutputTopology::hostAcceptsVirtualMode(const QString& mode, int hostFeatu
             (hostFeatureFlags & NotchSafeLaptopModesFeature) != 0;
 }
 
+QStringList NvOutputTopology::virtualModesForHost(int hostFeatureFlags)
+{
+    QStringList modes;
+    for (const QString& mode : qualifiedVirtualModes()) {
+        if (hostAcceptsVirtualMode(mode, hostFeatureFlags)) {
+            modes.append(mode);
+        }
+    }
+    return modes;
+}
+
 QSize NvOutputTopology::virtualModeSize(const QString& mode)
 {
     const QStringList parts = mode.split(QLatin1Char('x'));
@@ -543,7 +554,7 @@ QSize NvOutputTopology::clientMatchTarget(const NvClientDisplay& display)
     return clientMatchTarget(desktop, display.nativeSize);
 }
 
-QStringList NvOutputTopology::rankedVirtualModes(const QSize& target)
+QStringList NvOutputTopology::rankedVirtualModes(const QSize& target, const QStringList& candidateModes)
 {
     if (!target.isValid() || target.isEmpty()) {
         return {};
@@ -559,8 +570,11 @@ QStringList NvOutputTopology::rankedVirtualModes(const QSize& target)
     const double targetAspect = double(target.width()) / target.height();
     QVector<Candidate> candidates;
     QStringList ranked;
-    for (const QString& mode : qualifiedVirtualModes()) {
+    for (const QString& mode : candidateModes) {
         const QSize size = virtualModeSize(mode);
+        if (!size.isValid()) {
+            continue;
+        }
         if (mode == exact) {
             ranked.append(mode);
             continue;
@@ -595,7 +609,8 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,
                                                   QString* error,
-                                                  bool* fitted)
+                                                  bool* fitted,
+                                                  const QStringList& candidateModes)
 {
     hostLayout.clear();
     virtualModes.clear();
@@ -632,7 +647,7 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
     QVector<int> choice;
     for (const NvClientDisplay& display : std::as_const(displays)) {
         const QSize target = clientMatchTarget(display);
-        const QStringList ranked = rankedVirtualModes(target);
+        const QStringList ranked = rankedVirtualModes(target, candidateModes);
         if (ranked.isEmpty()) {
             if (error != nullptr) {
                 *error = QStringLiteral("The size of a client monitor could not be detected.");
