@@ -264,6 +264,7 @@ HEADERS += \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
     backend/remotedisplaysetup.h \
+    backend/remotestreamsetup.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \
     backend/computermanager.h \

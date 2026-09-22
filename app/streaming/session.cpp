@@ -730,21 +730,13 @@ Session::Session(NvComputer* computer, NvApp& app,
         PlankAvSync::resetVideoClock();
 
         // PLANK is a qualified workstation protocol, not a generic
-        // game-streaming profile. Its stream size is selected after SDL video
-        // initialization from the target client display or explicit override.
-        // The bookmark owns one startup encoder target for each exact encoding
-        // profile. The selected value is a session-local copy, and the toolbar
-        // never writes changes back to the bookmark.
-        m_Preferences->fps = 60;
-        m_Preferences->identityGbrBitDepth =
-                (m_PlankVideoProfile ==
-                     StreamingPreferences::PLANK_PROFILE_H264_8BIT_422 ||
-                 m_PlankVideoProfile ==
-                     StreamingPreferences::PLANK_PROFILE_H264_8BIT_444 ||
-                 m_PlankVideoProfile ==
-                     StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444 ||
-                 m_PlankVideoProfile ==
-                     StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444) ? 8 : 10;
+        // game-streaming profile: it always streams at 60 fps (applied in
+        // initialize() without touching the shared preferences). Its
+        // stream size is selected after SDL video initialization from the
+        // target client display or explicit override. The bookmark (or the
+        // remote workstation's stream settings) owns one startup encoder
+        // target for each exact encoding profile. The selected value is a
+        // session-local copy, and the toolbar never writes changes back.
         // Decoder selection is internal and exact-profile constrained. Hardware
         // is accepted only after a test frame proves the requested bit depth,
         // chroma sampling, and identity mapping; otherwise the same profile
@@ -1567,6 +1559,17 @@ bool Session::initialize()
         emit displayLaunchError(error);
         return false;
     }
+    if (!m_Computer->plankEncodingModes.isEmpty() &&
+            !m_Computer->plankEncodingModes.contains(
+                StreamingPreferences::plankEncodingMode(m_PlankVideoProfile))) {
+        // The host advertises what it can encode; fail before launch instead
+        // of substituting another profile.
+        const QString error = tr("This workstation can't use the selected encoding profile (%1). Choose another encoding in its settings.")
+                .arg(StreamingPreferences::plankEncodingMode(m_PlankVideoProfile));
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
+    }
 
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -1613,8 +1616,9 @@ bool Session::initialize()
     LiInitializeVideoCallbacks(&m_VideoCallbacks);
     m_VideoCallbacks.setup = drSetup;
 
-    m_StreamConfig.fps = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ?
-                60 : m_Preferences->fps;
+    m_StreamConfig.fps = (m_Computer->plankAuthentication ||
+                          m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) ?
+                StreamingPreferences::PlankFramesPerSecond : m_Preferences->fps;
     m_StreamConfig.bitrate = m_PlankBitrateKbps;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -2691,36 +2695,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                 StreamingPreferences::isPlankNvencProfile(
                     m_PlankVideoProfile) ?
                     QStringLiteral("nvenc-direct") : QStringLiteral("software-cuda");
-        QString encodingMode;
-        switch (m_PlankVideoProfile) {
-        case StreamingPreferences::PLANK_PROFILE_H264_8BIT_422:
-            encodingMode = QStringLiteral("h264-8-422-software");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_H264_8BIT_444:
-            encodingMode = QStringLiteral("h264-8-444-software");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_H264_10BIT_422:
-            encodingMode = QStringLiteral("h264-10-422-software");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_444:
-            encodingMode = QStringLiteral("h264-8-444-nvenc");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_8BIT_444:
-            encodingMode = QStringLiteral("hevc-8-444-nvenc");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444:
-            encodingMode = QStringLiteral("hevc-10-444-nvenc");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_H264_10BIT_444:
-            encodingMode = QStringLiteral("h264-10-444-software");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420:
-            encodingMode = QStringLiteral("hevc-10-420-videotoolbox");
-            break;
-        case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444:
-            encodingMode = QStringLiteral("hevc-10-444-videotoolbox");
-            break;
-        default:
+        const QString encodingMode = StreamingPreferences::plankEncodingMode(m_PlankVideoProfile);
+        if (encodingMode.isEmpty()) {
             emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));
             return false;
         }

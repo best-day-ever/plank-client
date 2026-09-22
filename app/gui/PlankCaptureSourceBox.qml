@@ -10,6 +10,10 @@ PlankComboBox {
     property string hostAddress: ""
     property bool probingEnabled: false
     property int hostPlatform: 0
+    // A platform already known without probing (remote workstations: from
+    // their last connect); 0 = use the probe result.
+    property int fixedPlatform: 0
+    readonly property int effectivePlatform: fixedPlatform > 0 ? fixedPlatform : hostPlatform
     property int captureSource: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
     property int requestId: 0
     property bool rebuilding: false
@@ -24,11 +28,11 @@ PlankComboBox {
         rebuilding = true
         var desired = captureSource
         choices.clear()
-        if (hostPlatform !== 2) {
+        if (effectivePlatform !== 2) {
             choices.append({text: qsTr("NvFBC — 8-bit source"), val: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT})
             choices.append({text: qsTr("Native X11/XShm — 10-bit (Experimental)"), val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10})
         }
-        if (hostPlatform !== 1) {
+        if (effectivePlatform !== 1) {
             choices.append({text: qsTr("ScreenCaptureKit — macOS (Experimental)"), val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT})
         }
         var selection = 0
@@ -48,6 +52,7 @@ PlankComboBox {
         if (!rebuilding && currentIndex >= 0 && currentIndex < choices.count)
             captureSource = choices.get(currentIndex).val
     }
+    onFixedPlatformChanged: rebuild()
     onHostAddressChanged: scheduleProbe()
     onProbingEnabledChanged: scheduleProbe()
     Component.onCompleted: rebuild()

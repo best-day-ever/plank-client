@@ -404,7 +404,6 @@ ApplicationWindow {
         id: addPcDialog
         title: qsTr("Add workstation bookmark")
         property var virtualModeChoices: ComputerManager.plankVirtualModeChoices()
-        property var profileBitratesKbps: []
 
         // Give both connection fields enough room for real hostnames while
         // keeping the dialog inside smaller launcher windows. The dialog still
@@ -422,28 +421,7 @@ ApplicationWindow {
         }
 
         function currentVideoProfile() {
-            if (addEncodingProfile.currentIndex >= 0 &&
-                    addEncodingProfile.currentIndex < addEncodingProfile.model.count) {
-                return addEncodingProfile.model.get(
-                            addEncodingProfile.currentIndex).val
-            }
-            return StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-        }
-
-        function applyProfileBitrate() {
-            var profile = currentVideoProfile()
-            var saved = profileBitratesKbps[profile]
-            addBitrateSlider.value = saved === undefined ?
-                        StreamingPreferences.plankDefaultBitrateKbps(profile) : saved
-        }
-
-        function rememberProfileBitrate() {
-            var values = []
-            for (var i = 0; i < profileBitratesKbps.length; ++i) {
-                values.push(profileBitratesKbps[i])
-            }
-            values[currentVideoProfile()] = Math.round(addBitrateSlider.value)
-            profileBitratesKbps = values
+            return addVideoSettings.videoProfile
         }
 
         function virtualModeSupported(mode) {
@@ -452,7 +430,7 @@ ApplicationWindow {
         }
 
         function ensureVirtualModesCompatible() {
-            if (addCaptureSource.captureSource === 2) return
+            if (addVideoSettings.captureSource === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -476,9 +454,9 @@ ApplicationWindow {
         onOpened: {
             // Force keyboard focus on the textbox so keyboard navigation works
             addressText.forceActiveFocus()
-            profileBitratesKbps =
-                    StreamingPreferences.plankDefaultProfileBitratesKbps()
-            applyProfileBitrate()
+            addVideoSettings.load(StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT,
+                                  StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444,
+                                  StreamingPreferences.plankDefaultProfileBitratesKbps(), [])
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return addressText.text.trim() !== "" && nicknameText.text.trim() !== ""
             })
@@ -492,9 +470,6 @@ ApplicationWindow {
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
             addScalingChoice.currentIndex = 1
-            addCaptureSource.selectCaptureSource(0)
-            addEncodingProfile.currentIndex = 6
-            profileBitratesKbps = []
         }
 
         onAccepted: {
@@ -505,10 +480,9 @@ ApplicationWindow {
                                                    addVirtualMode1.currentIndex,
                                                    addVirtualMode2.currentIndex,
                                                    addScalingChoice.currentIndex,
-                                                   addEncodingProfile.model.get(
-                                                       addEncodingProfile.currentIndex).val,
-                                                   addCaptureSource.captureSource,
-                                                   profileBitratesKbps)
+                                                   addVideoSettings.videoProfile,
+                                                   addVideoSettings.captureSource,
+                                                   addVideoSettings.officeBitratesKbps)
             }
         }
 
@@ -561,119 +535,14 @@ ApplicationWindow {
                 }
             }
 
-            Label {
-                text: qsTr("Capture source")
-                font.bold: true
-            }
-
-            PlankCaptureSourceBox {
-                id: addCaptureSource
+            PlankVideoSettings {
+                id: addVideoSettings
                 Layout.fillWidth: true
                 hostAddress: addressText.text
                 probingEnabled: addPcDialog.visible
-                onCaptureSourceChanged: {
-                    addHostLayout.currentIndex = 0
-                    addEncodingProfile.currentIndex = captureSource === 0 ? 6 : 0
-                    Qt.callLater(addPcDialog.applyProfileBitrate)
-                }
-            }
-
-            Label {
-                text: qsTr("Encoding profile")
-                font.bold: true
-            }
-
-            PlankComboBox {
-                id: addEncodingProfile
-                Layout.fillWidth: true
-                textRole: "text"
-                currentIndex: 6
-                model: addCaptureSource.captureSource === 2 ? addAppleEncodingProfileModel :
-                       addCaptureSource.captureSource === 0 ?
-                           addNvfbcEncodingProfileModel : addNativeEncodingProfileModel
-                onActivated: {
-                    addPcDialog.applyProfileBitrate()
-                    addPcDialog.ensureVirtualModesCompatible()
-                }
-            }
-
-            ListModel {
-                id: addNvfbcEncodingProfileModel
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:2:2")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_422
-                }
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:2:2")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_422
-                }
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_H264_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-                }
-            }
-
-            ListModel {
-                id: addAppleEncodingProfileModel
-                ListElement {
-                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox (Preview)")
-                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_420
-                }
-                ListElement {
-                    text: qsTr("HEVC 10-bit 4:4:4 — Apple VideoToolbox (Preview)")
-                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_444
-                }
-            }
-
-            ListModel {
-                id: addNativeEncodingProfileModel
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR) — x264")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-                }
-            }
-
-            Label {
-                text: qsTr("Startup encoder target: %1 Mbps").arg(
-                          (addBitrateSlider.value / 1000.0).toFixed(1))
-                font.bold: true
-            }
-
-            Slider {
-                id: addBitrateSlider
-                Layout.fillWidth: true
-                from: StreamingPreferences.plankBitrateMinimumKbps()
-                to: StreamingPreferences.plankBitrateMaximumKbps()
-                stepSize: StreamingPreferences.plankBitrateStepKbps()
-                snapMode: Slider.SnapAlways
-                onMoved: addPcDialog.rememberProfileBitrate()
-            }
-
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.")
-                wrapMode: Text.Wrap
-                opacity: 0.72
+                nvfbcDefaultProfile: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
+                onCaptureSourceEdited: addHostLayout.currentIndex = 0
+                onProfileActivated: addPcDialog.ensureVirtualModesCompatible()
             }
 
             Label {
@@ -684,7 +553,7 @@ ApplicationWindow {
             PlankComboBox {
                 id: addHostLayout
                 Layout.fillWidth: true
-                model: addCaptureSource.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
+                model: addVideoSettings.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
                     qsTr("Physical displays"),
                     qsTr("One virtual display"),
@@ -693,15 +562,15 @@ ApplicationWindow {
             }
 
             Label {
-                text: addCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
+                text: addVideoSettings.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: (addCaptureSource.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2) ? 1.0 : 0.5
+                opacity: (addVideoSettings.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2) ? 1.0 : 0.5
             }
 
             PlankComboBox {
                 id: addVirtualMode1
                 Layout.fillWidth: true
-                enabled: (addCaptureSource.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2)
+                enabled: (addVideoSettings.captureSource === 2 ? addHostLayout.currentIndex === 1 : addHostLayout.currentIndex >= 2)
                 currentIndex: 9
                 model: addPcDialog.virtualModeChoices
                 delegate: ItemDelegate {
@@ -713,7 +582,7 @@ ApplicationWindow {
             }
 
             Label {
-                visible: addCaptureSource.captureSource !== 2
+                visible: addVideoSettings.captureSource !== 2
                 text: qsTr("Virtual display 2 resolution")
                 font.bold: true
                 opacity: addHostLayout.currentIndex === 3 ? 1.0 : 0.5
@@ -721,7 +590,7 @@ ApplicationWindow {
 
             PlankComboBox {
                 id: addVirtualMode2
-                visible: addCaptureSource.captureSource !== 2
+                visible: addVideoSettings.captureSource !== 2
                 Layout.fillWidth: true
                 enabled: addHostLayout.currentIndex === 3
                 currentIndex: 1
