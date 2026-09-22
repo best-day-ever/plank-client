@@ -109,11 +109,12 @@ struct MatchPreview
     QString reason;
 };
 
-inline MatchPreview matchPreview(const QVector<NvClientDisplay>& displays)
+inline MatchPreview matchPreview(const QVector<NvClientDisplay>& displays,
+                                 const QStringList& candidateModes = NvOutputTopology::qualifiedVirtualModes())
 {
     MatchPreview preview;
     preview.ok = NvOutputTopology::resolveClientDisplayLayout(displays, preview.hostLayout, preview.modes,
-                                                              &preview.reason, &preview.fitted);
+                                                              &preview.reason, &preview.fitted, candidateModes);
     return preview;
 }
 
