@@ -131,8 +131,13 @@ Item {
         }
 
         onOpened: {
+            // Right after the workstation refused a choice (streamReason) its
+            // capabilities were just probed, so an unusable choice cannot be
+            // saved. Otherwise they come from an earlier connect and may be
+            // stale (host upgraded, encoder fixed): the choice is only
+            // flagged, and the connect checks it against the live host.
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
-                return streamUseDefaults.checked || streamVideoSettings.problemText === ""
+                return streamReason === "" || streamVideoSettings.problemText === ""
             })
         }
 
@@ -278,6 +283,13 @@ Item {
                 enabled: !streamUseDefaults.checked
                 showRoutes: true
                 profileProblem: displaySetupDialog.streamProblem
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: displaySetupDialog.streamReason === "" && streamVideoSettings.problemText !== ""
+                text: qsTr("This is what the workstation reported on the last connect. Connecting checks it again.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
             }
         }
     }

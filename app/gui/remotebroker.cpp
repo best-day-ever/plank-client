@@ -831,18 +831,11 @@ void RemoteBroker::connectToHost(const QString& hostId)
     stream.defaults = RemoteStreamSetup::loadDefaults(settings);
     stream.seeded = stream.host.mode == RemoteStreamSetup::Unset &&
             bookmarkSeedFor(hostId, hostName, stream.seed);
-    {
-        // What the last connect learned about the workstation: a choice it
-        // cannot use is asked about before taking a lease.
-        const RemoteStreamSetup::Capabilities cached = RemoteStreamSetup::loadCapabilities(settings, hostId);
-        const RemoteStreamSetup::Resolution resolution = RemoteStreamSetup::resolve(
-                    stream.host, stream.seeded ? &stream.seed : nullptr, stream.defaults, cached.platform);
-        const QString problem = RemoteStreamSetup::problemFor(resolution.setup, cached);
-        if (!problem.isEmpty()) {
-            emit streamSetupRequired(hostId, hostName, problem);
-            return;
-        }
-    }
+    // Capabilities cached by an earlier connect are advisory only (the
+    // settings dialog flags choices with them): the workstation may have been
+    // upgraded or its encoder probe may have recovered since, and refusing
+    // here would keep the cache from ever being refreshed. The check after
+    // the probe below is authoritative and refreshes the cache.
 
     setBusy(tr("Connecting to %1...").arg(hostName));
     const PlankBrokerClient::Config config = clientConfig();

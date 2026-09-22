@@ -26,6 +26,10 @@ ColumnLayout {
     // Optional function(captureSource, videoProfile) returning why the host
     // cannot use a choice ("" when it can).
     property var profileProblem: null
+    // Bumped by load() and refreshProblems(): profileProblem may read state
+    // QML cannot track (e.g. capabilities cached in QSettings), so every
+    // load re-asks it instead of keeping an answer from an earlier opening.
+    property int problemRevision: 0
 
     property var officeBitratesKbps: []
     property var internetBitratesKbps: []
@@ -40,11 +44,20 @@ ColumnLayout {
     signal captureSourceEdited()
 
     property bool loading: false
+    // Set once load() ran, so the initial default below never replaces a
+    // loaded choice (a parent may load before this component completes).
+    property bool loaded: false
 
     spacing: 6
 
     function problemFor(capture, profile) {
+        // Read so bindings re-evaluate when the revision changes.
+        var revision = problemRevision
         return profileProblem ? profileProblem(capture, profile) : ""
+    }
+
+    function refreshProblems() {
+        problemRevision = problemRevision + 1
     }
 
     function copyList(values) {
@@ -90,7 +103,9 @@ ColumnLayout {
         internetBitratesKbps = copyList(internetBitrates)
         captureBox.selectCaptureSource(capture)
         selectProfile(profile)
+        loaded = true
         loading = false
+        refreshProblems()
     }
 
     function remember(values, value) {
@@ -102,7 +117,9 @@ ColumnLayout {
         return result
     }
 
-    Component.onCompleted: selectProfile(nvfbcDefaultProfile)
+    Component.onCompleted: {
+        if (!loaded) selectProfile(nvfbcDefaultProfile)
+    }
 
     Label {
         text: qsTr("Capture source")
@@ -110,6 +127,7 @@ ColumnLayout {
     }
     PlankCaptureSourceBox {
         id: captureBox
+        objectName: "captureSource"
         Layout.fillWidth: true
         hostAddress: root.hostAddress
         probingEnabled: root.probingEnabled
@@ -129,13 +147,13 @@ ColumnLayout {
     }
     PlankComboBox {
         id: profileBox
+        objectName: "encodingProfile"
         Layout.fillWidth: true
         textRole: "text"
         delegate: ItemDelegate {
             width: profileBox.width
             text: model.text + (root.problemFor(captureBox.captureSource, model.val) !== "" ?
                                     qsTr(" (not offered by this workstation)") : "")
-            enabled: root.problemFor(captureBox.captureSource, model.val) === ""
             highlighted: profileBox.highlightedIndex === index
         }
         onActivated: {
