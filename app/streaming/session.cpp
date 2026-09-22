@@ -512,6 +512,12 @@ int Session::drSetup(int videoFormat, int width, int height, int frameRate, void
                     "BT.709 full-range YCbCr presentation",
                     videoFormat == VIDEO_FORMAT_H264_HIGH10_422 ? "10-bit" : "8-bit");
     }
+    else if (StreamingPreferences::isPlankNvenc420Profile(s_ActiveSession->m_PlankVideoProfile)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Video precision: 8-bit NvFBC source -> %s 4:2:0 NVENC -> "
+                    "BT.709 limited-range YCbCr (sRGB transfer) presentation",
+                    videoFormat == VIDEO_FORMAT_H265_MAIN10 ? "10-bit HEVC Main10" : "8-bit H.264 High");
+    }
 
     return 0;
 }
@@ -662,9 +668,11 @@ bool Session::populateDecoderProperties(SDL_Window* window)
         m_VideoCallbacks.submitDecodeUnit = drSubmitDecodeUnit;
     }
 
-    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
-        // This profile has an exact, negotiated color contract. An environment
+    if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT ||
+            StreamingPreferences::isPlankNvenc420Profile(m_PlankVideoProfile)) {
+        // These profiles have an exact, negotiated color contract. An environment
         // override must not reinterpret its YCbCr samples as full-range or RGB.
+        // The Linux host refuses an NVENC 4:2:0 launch with any other value.
         m_StreamConfig.colorSpace = COLORSPACE_REC_709;
         m_StreamConfig.colorRange = COLOR_RANGE_LIMITED;
     }
@@ -884,6 +892,9 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
     int chroma = 1;
     bool tenBit = false;
     switch (negotiatedVideoFormat) {
+    case VIDEO_FORMAT_H264:
+        chroma = 0;
+        break;
     case VIDEO_FORMAT_H264_HIGH8_422:
         chroma = 2;
         break;
@@ -1736,6 +1747,14 @@ bool Session::initialize()
         emit displayLaunchError(error);
         return false;
     }
+    if (StreamingPreferences::isPlankNvenc420Profile(m_PlankVideoProfile) &&
+            (m_Computer->plankFeatureFlags &
+             NvOutputTopology::NvfbcNvenc420Feature) == 0) {
+        const QString error = tr("This workstation does not offer the NVENC 4:2:0 profiles yet. Choose another encoding profile or update PLANK on the workstation.");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+        emit displayLaunchError(error);
+        return false;
+    }
     if (!m_Computer->plankEncodingModes.isEmpty() &&
             !m_Computer->plankEncodingModes.contains(
                 StreamingPreferences::plankEncodingMode(m_PlankVideoProfile))) {
@@ -1861,6 +1880,12 @@ bool Session::initialize()
         break;
     case StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444:
         selectedVideoFormat = VIDEO_FORMAT_H265_REXT10_444;
+        break;
+    case StreamingPreferences::PLANK_PROFILE_NVENC_H264_8BIT_420:
+        selectedVideoFormat = VIDEO_FORMAT_H264;
+        break;
+    case StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_420:
+        selectedVideoFormat = VIDEO_FORMAT_H265_MAIN10;
         break;
     default:
         emit displayLaunchError(tr("The bookmark contains an invalid encoding profile."));

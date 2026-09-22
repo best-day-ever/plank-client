@@ -76,6 +76,9 @@ struct NvOutputTopology
     static const int PlatformClipboardSyncFeature = 0;
     static const int PlatformClipboardFilesFeature = 0;
 #endif
+    // Linux host: NvFBC into direct NVENC 4:2:0 (H.264 High 8-bit, HEVC
+    // Main10), limited-range BT.709, for bandwidth-limited links.
+    static const int NvfbcNvenc420Feature = 0x2000000;
     // Virtual modes matching a notched Apple laptop's fullscreen viewport
     // (3024x1890). Offered and accepted only when the host advertises it.
     static const int NotchSafeLaptopModesFeature = 0x4000000;
@@ -105,6 +108,7 @@ struct NvOutputTopology
                                              DesktopSignOutFeature |
                                              PlatformClipboardSyncFeature |
                                              PlatformClipboardFilesFeature |
+                                             NvfbcNvenc420Feature |
                                              NotchSafeLaptopModesFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
