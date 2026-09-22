@@ -65,6 +65,7 @@
 #define SDL_CODE_PLANK_CLIPBOARD 111
 #define SDL_CODE_PLANK_CLIPBOARD_POLL 112
 #define SDL_CODE_PLANK_FILE_CLIPBOARD_READY 113
+#define SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH 114
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -1571,6 +1572,13 @@ void Session::startClipboardSync()
                         SDL_Event event {};
                         event.type = SDL_EVENT_USER;
                         event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_READY;
+                        event.user.timestamp = SDL_GetTicks();
+                        return SDL_PushEvent(&event);
+                    },
+                    [] {
+                        SDL_Event event {};
+                        event.type = SDL_EVENT_USER;
+                        event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH;
                         event.user.timestamp = SDL_GetTicks();
                         return SDL_PushEvent(&event);
                     });
@@ -4262,6 +4270,13 @@ void Session::execInternal()
         case SDL_CODE_PLANK_FILE_CLIPBOARD_READY:
 #if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
             injectRemoteFilePasteOnMainThread();
+#endif
+            return true;
+        case SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH:
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+            if (m_FileClipboard != nullptr) {
+                m_FileClipboard->publishPendingHostFilesOnMainThread();
+            }
 #endif
             return true;
         default:

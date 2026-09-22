@@ -19,10 +19,12 @@ struct PlankTransportNativeEndpoint;
 class MacFileClipboard {
 public:
     using ReadyCallback = std::function<void()>;
+    using PublishCallback = std::function<bool()>;
 
     MacFileClipboard(PlankTransportNativeEndpoint* endpoint,
                      std::string mode,
-                     ReadyCallback readyCallback);
+                     ReadyCallback readyCallback,
+                     PublishCallback publishCallback);
     ~MacFileClipboard();
 
     void start();
@@ -35,6 +37,8 @@ public:
      * has staged and published the files.
      */
     bool beginPasteOnMainThread();
+    /** Publish a completed Host transfer to the general pasteboard. */
+    bool publishPendingHostFilesOnMainThread();
 
 private:
     struct PasteboardSnapshot {
@@ -44,11 +48,14 @@ private:
 
     void workerLoop();
     bool transferSnapshot(const PasteboardSnapshot& snapshot);
+    bool receiveHostOffer(std::vector<std::uint8_t> firstRecord);
     bool clientToHostAllowed() const;
+    bool hostToClientAllowed() const;
 
     PlankTransportNativeEndpoint* m_Endpoint;
     std::string m_Mode;
     ReadyCallback m_ReadyCallback;
+    PublishCallback m_PublishCallback;
     std::mutex m_Mutex;
     std::condition_variable m_Changed;
     std::thread m_Worker;
@@ -57,4 +64,8 @@ private:
     bool m_PasteRequested = false;
     PasteboardSnapshot m_Current;
     PasteboardSnapshot m_Requested;
+    std::vector<std::string> m_PendingHostPaths;
+    bool m_HostPublishPending = false;
+    bool m_HostPublishComplete = false;
+    bool m_HostPublishSuccess = false;
 };
