@@ -1026,7 +1026,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
                        length - offset,
                        "Capture source: %s\n",
                        m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit ?
-                           "ScreenCaptureKit (Experimental)" :
+                           "ScreenCaptureKit" :
                        m_CaptureSource == DecoderCaptureSource::NativeX11_10Bit ?
                            "Native X11/XShm (10-bit)" :
                            "NvFBC (8-bit)");

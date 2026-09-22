@@ -29,7 +29,7 @@ PlankComboBox {
             choices.append({text: qsTr("Native X11/XShm — 10-bit (Experimental)"), val: StreamingPreferences.PLANK_CAPTURE_X11_NATIVE10})
         }
         if (hostPlatform !== 1) {
-            choices.append({text: qsTr("ScreenCaptureKit — macOS (Experimental)"), val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT})
+            choices.append({text: qsTr("ScreenCaptureKit — macOS"), val: StreamingPreferences.PLANK_CAPTURE_SCREENCAPTUREKIT})
         }
         var selection = 0
         for (var i = 0; i < choices.count; ++i) if (choices.get(i).val === desired) selection = i
