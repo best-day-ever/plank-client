@@ -85,6 +85,9 @@ class HostTlsGuardTest : public QObject
 private slots:
     void initTestCase()
     {
+        // Match app/main.cpp: Apple's legacy SecureTransport backend cannot
+        // exercise PLANK's TLS 1.3 contract. Never lower the test protocol.
+        QVERIFY(QSslSocket::setActiveBackend(QStringLiteral("openssl")));
         QVERIFY(QSslSocket::supportsSsl());
         QVERIFY(files.isValid());
         for (const QString& name : {QString("machine"), QString("stranger")}) {
