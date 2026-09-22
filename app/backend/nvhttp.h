@@ -250,7 +250,7 @@ private:
                    QString command,
                    QString arguments,
                    int timeoutMs,
-                   NvLogLevel logLevel, bool establishTrust = false);
+                   NvLogLevel logLevel, HostTlsGuard::Mode trustMode = HostTlsGuard::Mode::Observe);
 
     QJsonObject postPlankJson(QString command, const QJsonObject& body);
     QJsonObject postPinnedMacJson(const QString& path, const QJsonObject& body,

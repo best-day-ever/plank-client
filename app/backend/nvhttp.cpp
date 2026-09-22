@@ -7,6 +7,7 @@
 #include <Limelight.h>
 
 #include <utility>
+#include <memory>
 
 #include <QDebug>
 #include <QDateTime>
@@ -499,7 +500,8 @@ void NvHTTP::establishHostTrust(AuthenticationIntent intent)
     for (int attempt = 0; attempt < 2; ++attempt) {
         try {
             QScopedPointer<QNetworkReply> reply(openConnection(m_BaseUrlHttps, "serverinfo", {},
-                REQUEST_TIMEOUT_MS, NVLL_NONE, intent == AuthenticationIntent::ExplicitConnection));
+                REQUEST_TIMEOUT_MS, NVLL_NONE, intent == AuthenticationIntent::ExplicitConnection ?
+                    HostTlsGuard::Mode::Enroll : HostTlsGuard::Mode::RequireKnown));
             verifyResponseStatus(QString::fromUtf8(reply->readAll()));
             m_IdentityKey = HostTlsGuard::identityKey(negotiatedPlankTls(reply.data()).peerCertificateChain());
             return;
@@ -600,7 +602,7 @@ bool NvHTTP::probeWorkerReplacement(const QString& instance, const QString& cert
     if (!m_SessionToken.isEmpty()) return false;
     QScopedPointer<QNetworkReply> reply(openConnection(m_BaseUrlHttps, "serverinfo", nullptr,
                                                       1000, NvLogLevel::NVLL_NONE));
-    const QByteArray certificate = reply->sslConfiguration().peerCertificate().digest(QCryptographicHash::Sha256);
+    const QByteArray certificate = negotiatedPlankTls(reply.data()).peerCertificate().digest(QCryptographicHash::Sha256);
     const QString response = QString::fromUtf8(reply->readAll());
     verifyResponseStatus(response);
     return PlankHostRecovery::replacementConfirmed(instance,
@@ -861,7 +863,7 @@ NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
                        QString arguments,
                        int timeoutMs,
-                       NvLogLevel logLevel, bool establishTrust)
+                       NvLogLevel logLevel, HostTlsGuard::Mode trustMode)
 {
     waitForRequestPermission();
     // Port must be set
@@ -901,15 +903,15 @@ NvHTTP::openConnection(QUrl baseUrl,
     request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
 #endif
 
-    const auto mode = establishTrust ? (m_RequestGate ? HostTlsGuard::Mode::RequireKnown : HostTlsGuard::Mode::Enroll) :
-        m_SessionToken.isEmpty() ? HostTlsGuard::Mode::Observe : HostTlsGuard::Mode::RequireKnown;
+    const auto mode = !m_SessionToken.isEmpty() || (m_RequestGate && trustMode == HostTlsGuard::Mode::Enroll) ?
+        HostTlsGuard::Mode::RequireKnown : trustMode;
     HostTlsGuard guard(*m_Nam, m_TrustStore, m_TrustEndpoint, mode,
-                       establishTrust ? QByteArray() : m_IdentityKey);
-    QScopedPointer<QNetworkReply> reply(m_Nam->get(request));
+                       mode == HostTlsGuard::Mode::Enroll ? QByteArray() : m_IdentityKey);
+    std::unique_ptr<QNetworkReply> reply(m_Nam->get(request));
 
     // Run the request with a timeout if requested
     QEventLoop loop;
-    connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(reply.get(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
     if (timeoutMs) {
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
@@ -967,5 +969,5 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (status >= 300 && status < 400)
         throw GfeHttpResponseException(status, "PLANK redirects are not accepted");
 
-    return reply.take();
+    return reply.release();
 }
