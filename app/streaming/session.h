@@ -17,6 +17,7 @@
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
 #include "backend/nvhttp.h"
+#include "backend/displayplanner.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
@@ -331,6 +332,19 @@ private:
 
     bool configurePlankHostLayout();
 
+    // Display arrangement (0x8000000) for Match client: plans the client's
+    // monitors with the display profile and the host's capabilities.
+    bool planDisplayArrangement(const QVector<NvClientDisplay>& displays, int hostFeatureFlags,
+                                const NvOutputTopology& topology, bool& matchedExactly);
+    // The display profile for these monitors on this workstation (legacy:
+    // the workstation keeps its pre-profile layout, so no arrangement).
+    DisplayProfile::Resolved displayProfileFor(const QVector<NvClientDisplay>& displays) const;
+    // The host shows what this launch asked for (arrangement or legacy layout).
+    bool topologyMatchesRequest(const NvOutputTopology& topology) const;
+    // The largest stream this client and the host's encoder carry for the
+    // arrangement; invalid for no limit.
+    QSize arrangementStreamLimit() const;
+
     QSize configurePlankDisplayMode();
 
     bool configurePlankLaunchGeometry();
@@ -467,6 +481,10 @@ private:
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
+    // Display arrangement: the canonical request (m_ResolvedHostLayout is
+    // then "arrangement") and the plan behind it.
+    QString m_ResolvedArrangement;
+    DisplayPlanner::Plan m_DisplayPlan;
 
     struct ClientDisplaySnapshot {
         SDL_DisplayID displayId = 0;

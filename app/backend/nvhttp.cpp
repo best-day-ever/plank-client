@@ -14,6 +14,7 @@
 #include <QtNetwork/QNetworkReply>
 #include <QEventLoop>
 #include <QTimer>
+#include <QRegularExpression>
 #include <QXmlStreamReader>
 #include <QSslKey>
 #include <QSslCipher>
@@ -229,6 +230,7 @@ NvHTTP::startApp(QString verb,
                  QString hostLayout,
                  QString virtualMode1,
                  QString virtualMode2,
+                 QString displayArrangement,
                  QString captureSource,
                  QString encoderBackend,
                  QString encodingMode,
@@ -274,7 +276,15 @@ NvHTTP::startApp(QString verb,
                     "&plankQuicUdpPayloadMtu=" +
                     QString::number(quicUdpPayloadMtu);
         }
-        if ((plankFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
+        if ((plankFeatureFlags & NvOutputTopology::DisplayArrangementFeature) != 0 &&
+                !displayArrangement.isEmpty()) {
+            // Replaces the host layout and virtual modes; the host refuses
+            // a launch that carries both.
+            plankOutputArguments +=
+                    "&plankDisplayArrangement=" +
+                    QString::fromLatin1(QUrl::toPercentEncoding(displayArrangement));
+        }
+        else if ((plankFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
             plankOutputArguments +=
                     "&plankHostLayout=" +
@@ -322,6 +332,15 @@ NvHTTP::startApp(QString verb,
 
     qInfo() << "PLANK launch response received";
 
+    m_DisplayArrangementError.clear();
+    if ((plankFeatureFlags & NvOutputTopology::DisplayArrangementFeature) != 0) {
+        // A short code from the contract; anything else is not trusted as one.
+        const QString code = getXmlString(response, "PlankDisplayArrangementError").trimmed();
+        static const QRegularExpression codeShape(QStringLiteral("^[a-z_]{1,32}$"));
+        if (codeShape.match(code).hasMatch()) {
+            m_DisplayArrangementError = code;
+        }
+    }
     m_DesktopSignOut = {};
     if ((plankFeatureFlags & NvOutputTopology::DesktopSignOutFeature) != 0) {
         QXmlStreamReader xmlReader(response);

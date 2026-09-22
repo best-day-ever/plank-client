@@ -9,6 +9,7 @@
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
+#include "backend/displayprofile.h"
 #ifdef Q_OS_MACOS
 #include "macclipboardsync.h"
 #ifdef PLANK_TRANSPORT
@@ -22,6 +23,7 @@
 #endif
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
+#include "streaming/macdisplayinfo.h"
 #endif
 
 #include <Limelight.h>
@@ -83,6 +85,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QSettings>
 
 #ifdef PLANK_TRANSPORT
 #include "plank_transport.h"
@@ -2433,9 +2436,16 @@ bool Session::configurePlankHostLayout()
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
     int hostFeatureFlags = 0;
+    NvOutputTopology topologySnapshot;
+    bool arrangementPublished = false;
     {
         QReadLocker lock(&m_Computer->lock);
         hostFeatureFlags = m_Computer->outputTopology.featureFlags;
+        topologySnapshot = m_Computer->outputTopology;
+        // Only when this launch negotiates it too.
+        arrangementPublished = topologySnapshot.displayArrangementPublished() &&
+                (m_Computer->plankFeatureFlags & NvOutputTopology::SupportedFeatureFlags &
+                 NvOutputTopology::DisplayArrangementFeature) != 0;
         layoutPolicy = m_Computer->plankHostLayout;
         scalingMode = m_Computer->plankScalingMode;
         virtualMode1 = m_Computer->plankVirtualMode1;
@@ -2457,6 +2467,8 @@ bool Session::configurePlankHostLayout()
 
     m_ResolvedHostLayout.clear();
     m_ResolvedVirtualModes.clear();
+    m_ResolvedArrangement.clear();
+    m_DisplayPlan = {};
     if (scalingMode != NvOutputTopology::NativeScalingMode &&
             scalingMode != NvOutputTopology::ScaledSpanMode) {
         const QString error = tr("The bookmark contains an unsupported client scaling mode.");
@@ -2488,6 +2500,18 @@ bool Session::configurePlankHostLayout()
                 return false;
             }
             m_ResolvedHostLayout = QStringLiteral("fixed");
+        }
+        else if (displayProfileFor(probedDisplays).source != DisplayProfile::Resolved::Legacy) {
+            // Linux host, planned from the display setup: with the display
+            // arrangement extension every monitor at its own size where the
+            // setup puts it; without it the primary and one side neighbour
+            // from the qualified modes, as the setup previewed.
+            if (!planDisplayArrangement(probedDisplays,
+                                        arrangementPublished ? hostFeatureFlags :
+                                                               hostFeatureFlags & ~NvOutputTopology::DisplayArrangementFeature,
+                                        topologySnapshot, matchedExactly)) {
+                return false;
+            }
         }
         else {
             // Linux host: the panel and desktop from ClientDisplayProbe, the
@@ -2561,15 +2585,139 @@ bool Session::configurePlankHostLayout()
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK host layout: policy=%s resolved=%s modes=%s scaling=%s%s",
+                "PLANK host layout: policy=%s resolved=%s modes=%s arrangement=%s scaling=%s%s",
                 qPrintable(layoutPolicy), qPrintable(m_ResolvedHostLayout),
                 qPrintable(m_ResolvedVirtualModes.join(',')),
+                qPrintable(m_ResolvedArrangement.isEmpty() ? QStringLiteral("-") : m_ResolvedArrangement),
                 qPrintable(m_ResolvedScalingMode), matchedExactly ? "" : " fitted");
     return true;
 }
 
+DisplayProfile::Resolved Session::displayProfileFor(const QVector<NvClientDisplay>& displays) const
+{
+    QString hostId;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        hostId = m_Computer->brokerHostId;
+    }
+    // The display setup saves the profile before it connects; a LAN bookmark
+    // (no workstation id) uses the global profile for these monitors.
+    QSettings settings;
+    DisplayProfile::Resolved resolved =
+            DisplayProfile::resolveForHost(settings, hostId, ClientDisplayProbe::fingerprint(displays));
+    if (resolved.source == DisplayProfile::Resolved::None) {
+        resolved.profile = DisplayPlanner::proposal(displays);
+    }
+    return resolved;
+}
+
+bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, int hostFeatureFlags,
+                                     const NvOutputTopology& topology, bool& matchedExactly)
+{
+    DisplayPlanner::HostInfo host;
+    host.known = true;
+    host.platform = 1;
+    host.featureFlags = hostFeatureFlags;
+    host.capabilities = topology.displayCapabilities;
+    host.encodingMode = StreamingPreferences::plankEncodingMode(m_PlankVideoProfile);
+    DisplayPlanner::Limits limits;
+#ifdef Q_OS_DARWIN
+    limits.separateSpaces = MacDisplayInfo::screensHaveSeparateSpaces();
+#endif
+    const DisplayProfile::Resolved resolved = displayProfileFor(displays);
+    m_DisplayPlan = DisplayPlanner::plan(displays, resolved.profile, host, limits);
+    for (const DisplayPlanner::Output& output : std::as_const(m_DisplayPlan.outputs)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK display plan: client=%dx%d%+d%+d exact=%dx%d on=%d entry=%d size=%dx%d%+d%+d backing=%s%s badge=%s%s",
+                    output.clientBounds.width(), output.clientBounds.height(),
+                    output.clientBounds.x(), output.clientBounds.y(),
+                    output.exactSize.width(), output.exactSize.height(), output.on ? 1 : 0,
+                    output.arrangementIndex, output.size.width(), output.size.height(),
+                    output.position.x(), output.position.y(),
+                    qPrintable(DisplayArrangement::backingName(output.backing)),
+                    m_DisplayPlan.backingExpected ? " (expected)" : "",
+                    qPrintable(output.badge), output.primary ? " primary" : "");
+    }
+    for (const DisplayPlanner::Warning& warning : std::as_const(m_DisplayPlan.warnings)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK display plan warning: %s", qPrintable(warning.code));
+    }
+    if (!m_DisplayPlan.ok) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(m_DisplayPlan.error));
+        emit displayLaunchError(m_DisplayPlan.error);
+        return false;
+    }
+    if (m_DisplayPlan.legacy) {
+        // No extension: today's layout request for the planned displays.
+        m_ResolvedHostLayout = m_DisplayPlan.legacyHostLayout;
+        m_ResolvedVirtualModes = m_DisplayPlan.legacyModes;
+        matchedExactly = !m_DisplayPlan.legacyFitted;
+        if (m_DisplayPlan.legacyFitted && m_ResolvedScalingMode != NvOutputTopology::ScaledSpanMode) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PLANK match client fitted a closest supported mode; scaling to fit");
+            m_ResolvedScalingMode = NvOutputTopology::ScaledSpanMode;
+        }
+        return true;
+    }
+    m_ResolvedHostLayout = QStringLiteral("arrangement");
+    m_ResolvedArrangement = m_DisplayPlan.arrangement;
+    // The stream is the workstation desktop 1:1; presentation fits it into
+    // the windows when they differ.
+    m_ResolvedScalingMode = NvOutputTopology::NativeScalingMode;
+    matchedExactly = true;
+    for (const DisplayPlanner::Output& output : std::as_const(m_DisplayPlan.outputs)) {
+        matchedExactly = matchedExactly && !output.scaled;
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK display arrangement: request=%s canvas=%dx%d presentation=%s profile=%s",
+                qPrintable(m_ResolvedArrangement), m_DisplayPlan.canvas.width(), m_DisplayPlan.canvas.height(),
+                qPrintable(m_DisplayPlan.presentation),
+                resolved.source == DisplayProfile::Resolved::HostCustom ? "workstation" :
+                resolved.source == DisplayProfile::Resolved::Global ? "saved" : "proposal");
+    return true;
+}
+
+bool Session::topologyMatchesRequest(const NvOutputTopology& topology) const
+{
+    if (!m_ResolvedArrangement.isEmpty()) {
+        return topology.matchesRequestedArrangement(m_ResolvedArrangement);
+    }
+    return topology.matchesRequestedHostLayout(m_ResolvedHostLayout, m_ResolvedVirtualModes);
+}
+
+QSize Session::arrangementStreamLimit() const
+{
+    QSize limit;
+    const QString mode = StreamingPreferences::plankEncodingMode(m_PlankVideoProfile);
+    NvOutputTopology topology;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        topology = m_Computer->outputTopology;
+    }
+    const auto entry = topology.displayCapabilities.encodingLimits.constFind(mode);
+    if (entry != topology.displayCapabilities.encodingLimits.constEnd() && entry->maximum.isValid()) {
+        limit = entry->maximum;
+    }
+    return limit;
+}
+
 QSize Session::configurePlankDisplayMode()
 {
+    if (!m_ResolvedArrangement.isEmpty()) {
+        // The workstation desktop, 1:1: the plan already fitted it to the
+        // host's canvas, its encoder and this client.
+        QString error;
+        const QSize selected = PlankDisplayMode::resolveClient(m_DisplayPlan.canvas, arrangementStreamLimit(), &error);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK client physical resolution: arrangement canvas=%dx%d selected=%dx%d resolution-policy=desktop",
+                    m_DisplayPlan.canvas.width(), m_DisplayPlan.canvas.height(),
+                    selected.width(), selected.height());
+        if (!selected.isValid()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
+            emit displayLaunchError(error);
+        }
+        return selected;
+    }
+
     QSize detectedResolution;
 
     if (m_UseMultiDisplayPresentation) {
@@ -3004,6 +3152,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                           m_ResolvedHostLayout,
                           m_ResolvedVirtualModes.value(0),
                           m_ResolvedVirtualModes.value(1),
+                          m_ResolvedArrangement,
                           captureSource,
                           encoderBackend,
                           encodingMode,
@@ -3020,11 +3169,31 @@ bool Session::startConnectionAsync(bool reconnecting,
             startApp();
         } catch (const GfeHttpResponseException& e) {
             const QString statusMessage = QString::fromUtf8(e.getStatusMessage());
+            const QString arrangementError = http->displayArrangementError();
+            if (m_Computer->plankAuthentication && !m_ResolvedArrangement.isEmpty() &&
+                    !arrangementError.isEmpty() && (e.getStatusCode() == 400 || e.getStatusCode() == 409)) {
+                // The workstation cannot show this arrangement, now or ever:
+                // say why instead of waiting or retrying.
+                NvOutputTopology topology;
+                {
+                    QReadLocker lock(&m_Computer->lock);
+                    topology = m_Computer->outputTopology;
+                }
+                const QString error = DisplayPlanner::errorText(arrangementError, topology.displayCapabilities);
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PLANK display arrangement refused (%d %s): %s",
+                             e.getStatusCode(), qPrintable(arrangementError), qPrintable(m_ResolvedArrangement));
+                if (reconnecting) {
+                    m_ReconnectCancelled.store(true);
+                }
+                emit displayLaunchError(error);
+                return false;
+            }
             const bool displayTransitionStarted =
                     m_Computer->plankAuthentication &&
                     ((e.getStatusCode() == 425 &&
-                      statusMessage ==
-                          QStringLiteral("PLANK host display transition started")) ||
+                      (statusMessage ==
+                           QStringLiteral("PLANK host display transition started") ||
+                       !m_ResolvedArrangement.isEmpty())) ||
                      (takeOverActiveSession &&
                       e.getStatusCode() == 503 &&
                       statusMessage ==
@@ -3116,16 +3285,47 @@ bool Session::startConnectionAsync(bool reconnecting,
                             emit sessionCleanupWaitChanged(false, QString());
                             return false;
                         }
-                        if (!topology.matchesRequestedHostLayout(
-                                    m_ResolvedHostLayout,
-                                    m_ResolvedVirtualModes)) {
+                        if (!m_ResolvedArrangement.isEmpty() &&
+                                topology.arrangementRequest == m_ResolvedArrangement &&
+                                topology.arrangementState == QLatin1String("failed")) {
+                            // The host tried and restored its previous layout.
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            qWarning() << "PLANK display arrangement failed on the host:"
+                                       << topology.arrangementReason;
+                            emit displayLaunchError(
+                                        tr("The workstation could not apply the display layout (%1). It went back to its previous screens.")
+                                            .arg(topology.arrangementReason.isEmpty() ?
+                                                     tr("no reason given") : topology.arrangementReason));
+                            return false;
+                        }
+                        if (!topologyMatchesRequest(topology)) {
                             qInfo() << "PLANK display transition is still pending:"
-                                    << topology.layoutKind << topology.virtualModes;
+                                    << topology.layoutKind << topology.virtualModes
+                                    << topology.arrangementRequest << topology.arrangementState;
                             continue;
                         }
                         startApp();
                         started = true;
                     } catch (const GfeHttpResponseException& retryError) {
+                        if (!m_ResolvedArrangement.isEmpty() &&
+                                !http->displayArrangementError().isEmpty() &&
+                                (retryError.getStatusCode() == 400 || retryError.getStatusCode() == 409)) {
+                            // Refused while waiting: stop at once with the reason.
+                            m_WaitingForSessionCleanup.store(false);
+                            emit sessionCleanupWaitChanged(false, QString());
+                            NvOutputTopology topology;
+                            {
+                                QReadLocker lock(&m_Computer->lock);
+                                topology = m_Computer->outputTopology;
+                            }
+                            if (reconnecting) {
+                                m_ReconnectCancelled.store(true);
+                            }
+                            emit displayLaunchError(DisplayPlanner::errorText(http->displayArrangementError(),
+                                                                              topology.displayCapabilities));
+                            return false;
+                        }
                         if (retryError.getStatusCode() == 423) {
                             m_WaitingForSessionCleanup.store(false);
                             emit sessionCleanupWaitChanged(false, QString());

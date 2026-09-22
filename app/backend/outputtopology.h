@@ -1,5 +1,7 @@
 #pragma once
 
+#include "displayarrangement.h"
+
 #include <QJsonObject>
 #include <QRect>
 #include <QSize>
@@ -24,6 +26,11 @@ struct NvOutput
     int sourceY = 0;
     int sourceWidth = 0;
     int sourceHeight = 0;
+    // Display arrangement (0x8000000) only: how the host backs this output
+    // (physical, physical-viewport, virtual) and its entry in the live
+    // arrangement request, -1 outside one.
+    QString backing;
+    int arrangementIndex = -1;
 };
 
 struct NvClientDisplay
@@ -92,6 +99,10 @@ struct NvOutputTopology
     // Virtual modes matching a notched Apple laptop's fullscreen viewport
     // (3024x1890). Offered and accepted only when the host advertises it.
     static const int NotchSafeLaptopModesFeature = 0x4000000;
+    // Linux host: up to four desktop outputs of any size in client positions
+    // (plankDisplayArrangement), backed by a physical output at an exact mode
+    // or a virtual display. protocol/output-topology.md.
+    static const int DisplayArrangementFeature = DisplayArrangement::Feature;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -119,7 +130,8 @@ struct NvOutputTopology
                                              PlatformClipboardSyncFeature |
                                              PlatformClipboardFilesFeature |
                                              NvfbcNvenc420Feature |
-                                             NotchSafeLaptopModesFeature;
+                                             NotchSafeLaptopModesFeature |
+                                             DisplayArrangementFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -134,6 +146,9 @@ struct NvOutputTopology
     static int hostPlatform(int version, int featureFlags);
     static bool fromJson(const QJsonObject& object, NvOutputTopology& topology,
                          QString* error = nullptr);
+    // The display arrangement fields (feature 0x8000000), strict.
+    static bool parseDisplayArrangement(const QJsonObject& object, const QJsonObject& layout,
+                                        NvOutputTopology& topology, QString* error);
     QJsonObject toJson() const;
 
     // Match client displays on a Linux host. Each display is matched to the
@@ -178,6 +193,14 @@ struct NvOutputTopology
     bool allowsBookmarkHostLayout(const QString& layout) const;
     bool matchesRequestedHostLayout(const QString& layout,
                                     const QStringList& modes) const;
+    // The host applied exactly this canonical arrangement: the live request,
+    // an applied transition, and one output per entry at the requested
+    // rectangle (relative to the desktop origin).
+    bool matchesRequestedArrangement(const QString& arrangement) const;
+    bool displayArrangementPublished() const
+    {
+        return (featureFlags & DisplayArrangementFeature) != 0 && displayCapabilities.valid;
+    }
     bool contains(QString outputId) const;
 
     int schemaVersion = 0;
@@ -195,4 +218,10 @@ struct NvOutputTopology
     QVector<NvOutput> outputs;
     QRectF captureLogicalBounds;
     QString appleEncodingMode = QStringLiteral("hevc-10-420-videotoolbox");
+    // Display arrangement (0x8000000) only; ignored without the bit.
+    DisplayArrangement::Capabilities displayCapabilities;
+    QString startupPolicy;           // physical | virtual | hybrid
+    QString arrangementRequest;      // the live canonical request, or ""
+    QString arrangementState;        // idle | pending | applied | failed
+    QString arrangementReason;       // a short code, or ""
 };

@@ -168,6 +168,9 @@ public:
     QString workerInstance() const { return m_WorkerInstance; }
     // Owner and sign-out offer from the last refused launch or resume.
     PlankDesktopSignOut desktopSignOut() const { return m_DesktopSignOut; }
+    // PlankDisplayArrangementError of the last refused launch or resume
+    // (400 or 409 with the display arrangement extension), else empty.
+    QString displayArrangementError() const { return m_DisplayArrangementError; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
     NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1);
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
@@ -198,6 +201,7 @@ public:
              QString hostLayout,
              QString virtualMode1,
              QString virtualMode2,
+             QString displayArrangement,
              QString captureSource,
              QString encoderBackend,
              QString encodingMode,
@@ -246,5 +250,6 @@ private:
     QString m_SessionToken;
     QString m_WorkerInstance;
     PlankDesktopSignOut m_DesktopSignOut;
+    QString m_DisplayArrangementError;
     std::function<bool(bool)> m_RequestGate;
 };

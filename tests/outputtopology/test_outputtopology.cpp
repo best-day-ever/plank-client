@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <functional>
 #include <QJsonArray>
 #include <QJsonDocument>
 
@@ -34,6 +35,10 @@ private slots:
     void bestFitsOddClientDisplays();
     void bestFitsTwoClientDisplays();
     void keepsHostTopologyParsingStrict();
+    void parsesDisplayArrangementVector();
+    void ignoresArrangementFieldsWithoutTheFeature();
+    void rejectsMalformedArrangementFields();
+    void matchesRequestedArrangement();
 };
 
 void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
@@ -750,6 +755,197 @@ void TestOutputTopology::keepsHostTopologyParsingStrict()
         QVERIFY2(!NvOutputTopology::fromJson(object, topology), qPrintable(odd));
         QVERIFY(!NvOutputTopology::virtualModeSize(odd).isValid());
     }
+}
+
+
+namespace {
+
+QJsonObject arrangementVector()
+{
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/output-topology-v13-arrangement.json");
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+}
+
+void TestOutputTopology::parsesDisplayArrangementVector()
+{
+    const QJsonObject vector = arrangementVector();
+    QVERIFY2(!vector.isEmpty(), "PLANK_REPO_ROOT must identify the repository root");
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(vector, topology, &error), qPrintable(error));
+    QVERIFY(topology.featureFlags & NvOutputTopology::DisplayArrangementFeature);
+    QVERIFY(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::DisplayArrangementFeature);
+    QVERIFY(topology.displayArrangementPublished());
+    QCOMPARE(topology.startupPolicy, QStringLiteral("hybrid"));
+    QCOMPARE(topology.arrangementRequest, QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:auto"));
+    QCOMPARE(topology.arrangementState, QStringLiteral("applied"));
+    QVERIFY(topology.arrangementReason.isEmpty());
+    // The legacy view of the same document: physical, no virtual modes.
+    QCOMPARE(topology.layoutKind, QStringLiteral("physical"));
+    QVERIFY(!topology.virtualLayout);
+    QVERIFY(topology.virtualModes.isEmpty());
+    QCOMPARE(topology.outputs.size(), 2);
+    QCOMPARE(topology.outputs.at(0).backing, QStringLiteral("virtual"));
+    QCOMPARE(topology.outputs.at(0).arrangementIndex, 0);
+    QCOMPARE(topology.outputs.at(1).backing, QStringLiteral("physical"));
+    QCOMPARE(topology.outputs.at(1).arrangementIndex, 1);
+    QCOMPARE(topology.outputs.at(0).sourceY, 270);
+    QCOMPARE(topology.displayCapabilities.maxOutputs, 4);
+    QCOMPARE(topology.displayCapabilities.physicalOutputs.first().id, QStringLiteral("x11:HDMI-0"));
+    // Round trip: the document serialises back to itself.
+    QCOMPARE(topology.toJson(), vector);
+    NvOutputTopology again;
+    QVERIFY(NvOutputTopology::fromJson(topology.toJson(), again));
+    QCOMPARE(again.toJson(), vector);
+}
+
+void TestOutputTopology::ignoresArrangementFieldsWithoutTheFeature()
+{
+    // A 1.0.129 client (and this one when the host lacks the bit): the same
+    // document parses, and none of the new fields is read or kept.
+    QJsonObject vector = arrangementVector();
+    vector["feature_flags"] = vector.value("feature_flags").toInt() & ~NvOutputTopology::DisplayArrangementFeature;
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(vector, topology, &error), qPrintable(error));
+    QVERIFY(!topology.displayArrangementPublished());
+    QVERIFY(!topology.displayCapabilities.valid);
+    QVERIFY(topology.startupPolicy.isEmpty());
+    QVERIFY(topology.arrangementRequest.isEmpty());
+    for (const NvOutput& output : topology.outputs) {
+        QVERIFY(output.backing.isEmpty());
+        QCOMPARE(output.arrangementIndex, -1);
+    }
+    QVERIFY(!topology.toJson().contains("display_capabilities"));
+    QVERIFY(!topology.toJson().value("layout").toObject().contains("arrangement"));
+    // Garbage in the additive fields is ignored without the bit, as before.
+    vector["display_capabilities"] = QStringLiteral("garbage");
+    QJsonObject layout = vector["layout"].toObject();
+    layout["arrangement"] = 7;
+    vector["layout"] = layout;
+    QVERIFY(NvOutputTopology::fromJson(vector, topology));
+    QVERIFY(!topology.matchesRequestedArrangement(QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:auto")));
+    // The legacy strict checks still apply to the legacy fields.
+    layout = vector["layout"].toObject();
+    layout["virtual"] = true;
+    vector["layout"] = layout;
+    QVERIFY(!NvOutputTopology::fromJson(vector, topology));
+}
+
+void TestOutputTopology::rejectsMalformedArrangementFields()
+{
+    const QJsonObject vector = arrangementVector();
+    NvOutputTopology topology;
+    const auto rejects = [&vector, &topology](const std::function<void(QJsonObject&)>& edit) {
+        QJsonObject object = vector;
+        edit(object);
+        return !NvOutputTopology::fromJson(object, topology);
+    };
+    QVERIFY(rejects([](QJsonObject& o) { o.remove("display_capabilities"); }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject caps = o["display_capabilities"].toObject();
+        caps["max_outputs"] = 9;
+        o["display_capabilities"] = caps;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        layout["startup_policy"] = "dongle";
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        layout.remove("arrangement");
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        QJsonObject arrangement = layout["arrangement"].toObject();
+        arrangement["request"] = "1:3024x1890+0+270";
+        layout["arrangement"] = arrangement;
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        QJsonObject arrangement = layout["arrangement"].toObject();
+        arrangement["transition"] = QJsonObject {{"state", "done"}, {"reason", ""}};
+        layout["arrangement"] = arrangement;
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[0].toObject();
+        output["backing"] = "dongle";
+        outputs[0] = output;
+        o["outputs"] = outputs;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[0].toObject();
+        output.remove("arrangement_index");
+        outputs[0] = output;
+        o["outputs"] = outputs;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[1].toObject();
+        output["arrangement_index"] = 0;
+        outputs[1] = output;
+        o["outputs"] = outputs;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[1].toObject();
+        output["arrangement_index"] = 4;
+        outputs[1] = output;
+        o["outputs"] = outputs;
+    }));
+    // Outside an arrangement: an empty request, idle, every index -1.
+    QVERIFY(!rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        layout["arrangement"] = QJsonObject {{"request", ""}, {"transition", QJsonObject {{"state", "idle"}, {"reason", ""}}}};
+        o["layout"] = layout;
+        QJsonArray outputs = o["outputs"].toArray();
+        for (int index = 0; index < outputs.size(); ++index) {
+            QJsonObject output = outputs[index].toObject();
+            output["arrangement_index"] = -1;
+            outputs[index] = output;
+        }
+        o["outputs"] = outputs;
+    }));
+}
+
+void TestOutputTopology::matchesRequestedArrangement()
+{
+    const QJsonObject vector = arrangementVector();
+    const QString request = QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:auto");
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(vector, topology));
+    QVERIFY(topology.matchesRequestedArrangement(request));
+    // Another request, another preference, or none: not (yet) applied.
+    QVERIFY(!topology.matchesRequestedArrangement(QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:virtual")));
+    QVERIFY(!topology.matchesRequestedArrangement(QStringLiteral("1:3840x2160+0+0:auto")));
+    QVERIFY(!topology.matchesRequestedArrangement(QString()));
+    NvOutputTopology pending = topology;
+    pending.arrangementState = QStringLiteral("pending");
+    QVERIFY(!pending.matchesRequestedArrangement(request));
+    // The outputs must really be where the request put them.
+    NvOutputTopology moved = topology;
+    moved.outputs[0].y = 0;
+    QVERIFY(!moved.matchesRequestedArrangement(request));
+    NvOutputTopology missing = topology;
+    missing.outputs.removeLast();
+    QVERIFY(!missing.matchesRequestedArrangement(request));
+    NvOutputTopology swapped = topology;
+    std::swap(swapped.outputs[0].arrangementIndex, swapped.outputs[1].arrangementIndex);
+    QVERIFY(!swapped.matchesRequestedArrangement(request));
+    // A desktop that does not start at 0,0 is compared relative to its origin.
+    NvOutputTopology shifted = topology;
+    shifted.desktopX = 100;
+    for (NvOutput& output : shifted.outputs) output.x += 100;
+    QVERIFY(shifted.matchesRequestedArrangement(request));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)

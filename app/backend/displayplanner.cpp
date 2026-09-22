@@ -294,21 +294,27 @@ void planLegacy(Plan& plan, const QVector<NvClientDisplay>& displays, int primar
 {
     // The primary plus one neighbour on its left or right: older hosts only
     // know one display or two side by side, from the qualified mode list.
+    // A neighbour is the nearest display entirely to the right (else to the
+    // left) that shares some height with the primary, the pairs today's
+    // Match client accepts.
     QVector<int> selected {primary};
+    const QRect main = displays.at(primary).bounds;
+    int right = -1;
     int left = -1;
     for (int index = 0; index < plan.outputs.size(); ++index) {
-        Side side;
+        const QRect other = displays.at(index).bounds;
         if (index == primary || !plan.outputs.at(index).on ||
-                !touching(displays.at(primary).bounds, displays.at(index).bounds, side)) {
+                !(main.top() <= other.bottom() && other.top() <= main.bottom())) {
             continue;
         }
-        if (side == Side::Right) {
-            selected.append(index);
-            break;
+        if (other.left() > main.right() && (right < 0 || other.left() < displays.at(right).bounds.left())) {
+            right = index;
+        } else if (other.right() < main.left() && (left < 0 || other.right() > displays.at(left).bounds.right())) {
+            left = index;
         }
-        if (side == Side::Left && left < 0) left = index;
     }
-    if (selected.size() == 1 && left >= 0) selected.append(left);
+    if (right >= 0) selected.append(right);
+    else if (left >= 0) selected.append(left);
     std::sort(selected.begin(), selected.end(), [&displays](int a, int b) {
         return displays.at(a).bounds.x() < displays.at(b).bounds.x();
     });

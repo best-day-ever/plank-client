@@ -14,6 +14,7 @@
 
 #include <QDebug>
 #include <QGuiApplication>
+#include <QJsonDocument>
 #include <QSettings>
 #include <QElapsedTimer>
 #include <QQmlEngine>
@@ -608,6 +609,11 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
     if (topologySupported) {
         topology = macHost ? http.prepareMacDisplay(desktopMode, appleEncodingMode, 1) :
                              http.getOutputTopology();
+        if (!macHost && topology.displayArrangementPublished()) {
+            // Cached so the display setup can preview this workstation.
+            capabilities.displayCapabilities = QString::fromUtf8(
+                        QJsonDocument(topology.displayCapabilities.toJson()).toJson(QJsonDocument::Compact));
+        }
     }
     const QVector<NvApp> apps = http.getAppList();
     {

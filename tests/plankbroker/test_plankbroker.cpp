@@ -3620,7 +3620,11 @@ void TestPlankBroker::remoteStreamSetupCachesDisplayCapabilities()
     QCOMPARE(RemoteStreamSetup::loadCapabilities(settings, host).displayCapabilities, caps.displayCapabilities);
     QCOMPARE(settings.value(QStringLiteral("remote-hosts/ws01.example.test/host/display-caps")).toString(),
              caps.displayCapabilities);
-    // A host that stops publishing them (downgraded) forgets the cache.
+    // A connect that failed before the topology was read keeps the cache...
+    RemoteStreamSetup::Capabilities early = linuxHost(RemoteStreamSetup::DisplayArrangementFeature, {});
+    RemoteStreamSetup::saveCapabilities(settings, host, early);
+    QCOMPARE(RemoteStreamSetup::loadCapabilities(settings, host).displayCapabilities, caps.displayCapabilities);
+    // ...a host that stops publishing them (downgraded) forgets it.
     caps.displayCapabilities.clear();
     RemoteStreamSetup::saveCapabilities(settings, host, caps);
     QVERIFY(RemoteStreamSetup::loadCapabilities(settings, host).displayCapabilities.isEmpty());

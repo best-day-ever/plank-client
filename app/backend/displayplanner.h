@@ -48,7 +48,8 @@ struct HostInfo
     bool unknownHost() const { return !known || platform == 0; }
     bool supportsArrangement() const
     {
-        return unknownHost() || (isLinux() && (featureFlags & DisplayArrangement::Feature) != 0);
+        return unknownHost() ||
+                (isLinux() && (featureFlags & DisplayArrangement::Feature) != 0 && capabilities.valid);
     }
 };
 

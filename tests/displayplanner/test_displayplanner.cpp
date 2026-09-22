@@ -735,6 +735,16 @@ void TestDisplayPlanner::legacyHostFallback()
                                                          nullptr, NvOutputTopology::virtualModesForHost(old.featureFlags)));
     QCOMPARE(layout, plan.legacyHostLayout);
     QCOMPARE(modes, plan.legacyModes);
+    // A pair with a gap between them (possible off macOS) is still a pair,
+    // exactly as today's Match client resolves it.
+    displays = {mac(QStringLiteral("uuid:A"), QRect(0, 0, 1920, 1080), QSize(1920, 1080), true),
+                mac(QStringLiteral("uuid:B"), QRect(2000, 100, 2560, 1440), QSize(2560, 1440))};
+    plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), old);
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(displays, layout, modes, nullptr, nullptr,
+                                                         NvOutputTopology::virtualModesForHost(old.featureFlags)));
+    QCOMPARE(plan.legacyHostLayout, layout);
+    QCOMPARE(plan.legacyModes, modes);
     // Stacked monitors: the primary alone.
     displays = {mac(QStringLiteral("uuid:UHD"), QRect(0, -1080, 1920, 1080), QSize(3840, 2160)), macBook14()};
     plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), old);

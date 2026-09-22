@@ -15,6 +15,7 @@ private slots:
     void fallsBackWhenDetectionFails();
     void fitsClosestSupportedModeWithoutUpscale();
     void keepsStreamDimensionsEven();
+    void streamsArrangementCanvasOneToOne();
 };
 
 void TestPlankDisplayMode::usesDetectedClientResolution()
@@ -83,6 +84,24 @@ void TestPlankDisplayMode::keepsStreamDimensionsEven()
             QVERIFY(stream.width() <= target.width() && stream.height() <= target.height());
         }
     }
+}
+
+void TestPlankDisplayMode::streamsArrangementCanvasOneToOne()
+{
+    // A display arrangement streams the workstation desktop as it is, far
+    // past the legacy 3840x2160 ceiling.
+    QCOMPARE(PlankDisplayMode::resolveClient(QSize(6864, 2160), QSize(8192, 8192)), QSize(6864, 2160));
+    QCOMPARE(PlankDisplayMode::resolveClient(QSize(7680, 4320), QSize()), QSize(7680, 4320));
+    QCOMPARE(PlankDisplayMode::qualifiedMaximum(), QSize(3840, 2160));
+    // Never scaled silently: too large or odd is an error with a reason.
+    QString error;
+    QVERIFY(!PlankDisplayMode::resolveClient(QSize(9600, 4320), QSize(8192, 8192), &error).isValid());
+    QVERIFY(error.contains(QStringLiteral("9600x4320")));
+    QVERIFY(!PlankDisplayMode::resolveClient(QSize(6864, 2160), QSize(4096, 4096), &error).isValid());
+    QVERIFY(!PlankDisplayMode::resolveClient(QSize(3025, 1890), QSize(), &error).isValid());
+    QVERIFY(!PlankDisplayMode::resolveClient(QSize(), QSize(), &error).isValid());
+    QCOMPARE(PlankDisplayMode::resolveClient(QSize(3024, 1890), QSize(3024, 1890), &error), QSize(3024, 1890));
+    QVERIFY(error.isEmpty());
 }
 
 QTEST_APPLESS_MAIN(TestPlankDisplayMode)
