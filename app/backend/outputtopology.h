@@ -63,6 +63,17 @@ struct NvOutputTopology
     // Single-user Linux desktop: a launch refused because another account
     // owns the desktop names that owner and may offer to sign it out.
     static const int DesktopSignOutFeature = 0x400000;
+    static const int ClipboardSyncFeature = 0x800000;
+    static const int ClipboardFilesFeature = 0x1000000;
+    // Only advertise a clipboard receiver/sender when this client implements
+    // it. Linux must not cause the host to read or transmit unused clipboard data.
+#ifdef Q_OS_MACOS
+    static const int PlatformClipboardSyncFeature = ClipboardSyncFeature;
+    static const int PlatformClipboardFilesFeature = ClipboardFilesFeature;
+#else
+    static const int PlatformClipboardSyncFeature = 0;
+    static const int PlatformClipboardFilesFeature = 0;
+#endif
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
             MacDesktopPreparationFeature | MacEncodingProfileFeature;
@@ -86,7 +97,9 @@ struct NvOutputTopology
                                              DesktopHandoffNoticeFeature |
                                              AuthenticatedDesktopStageFeature |
                                              WorkerInstanceFeature |
-                                             DesktopSignOutFeature;
+                                             DesktopSignOutFeature |
+                                             PlatformClipboardSyncFeature |
+                                             PlatformClipboardFilesFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
