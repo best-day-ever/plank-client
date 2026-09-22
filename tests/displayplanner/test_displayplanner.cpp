@@ -97,6 +97,9 @@ private slots:
     void capabilitiesParseStrictly();
     void fleetDefaultCapabilities();
     void carrierRule();
+    void requestNumbersStayWithin32Bits();
+    void refusalsReadAsSentences();
+    void unlistedEncodingUsesTheOlderLayout();
 
     // Planner
     void exactAndLooksLikeSizes();
@@ -352,14 +355,95 @@ void TestDisplayPlanner::fleetDefaultCapabilities()
     QCOMPARE(fleet.maxCanvas, QSize(8192, 4608));
     QCOMPARE(fleet.maxOutputs, vector.maxOutputs);
     QCOMPARE(fleet.virtualHeads, vector.virtualHeads);
-    QCOMPARE(fleet.maxOutput, vector.maxOutput);
+    // The fleet publishes a 2:1 ViewPortIn downscale over its 5120x2160 carrier.
+    QCOMPARE(fleet.maxOutput, QSize(8192, 4320));
     QCOMPARE(fleet.maxPixels, vector.maxPixels);
     QCOMPARE(fleet.physicalOutputs.first().id, vector.physicalOutputs.first().id);
     QCOMPARE(fleet.physicalOutputs.first().preferred, vector.physicalOutputs.first().preferred);
     for (const QSize& mode : fleet.physicalOutputs.first().modes) {
         QVERIFY(vector.physicalOutputs.first().modes.contains(mode));
     }
+    QCOMPARE(fleet.physicalOutputs.first().modes, vector.physicalOutputs.first().modes);
     QVERIFY(!fleet.physicalOutputs.first().modes.contains(QSize(800, 600)));
+    QVERIFY(!fleet.physicalOutputs.first().modes.contains(QSize(1440, 900)));
+    // Every NVENC mode the fleet probes, with its encoder limit.
+    for (const char* mode : {"hevc-10-444-nvenc", "hevc-10-420-nvenc", "h264-8-444-nvenc", "h264-8-420-nvenc"}) {
+        QVERIFY2(fleet.encodingLimits.contains(QString::fromLatin1(mode)), mode);
+    }
+}
+
+void TestDisplayPlanner::requestNumbersStayWithin32Bits()
+{
+    const DisplayArrangement::Capabilities caps = vectorCapabilities(QStringLiteral("fleet-hybrid"));
+    // Beyond a signed 32-bit value: never canonical.
+    QCOMPARE(DisplayArrangement::validate(QStringLiteral("1:3840x2160+2147483648+0:auto"), caps),
+             QStringLiteral("not_canonical"));
+    QCOMPARE(DisplayArrangement::validate(QStringLiteral("1:3840x21600000000+0+0:auto"), caps),
+             QStringLiteral("not_canonical"));
+    // At the limit the checks run in order without overflowing.
+    QCOMPARE(DisplayArrangement::validate(QStringLiteral("1:1920x1080+2147483646+0:auto"), caps),
+             QStringLiteral("origin_not_zero"));
+    QCOMPARE(DisplayArrangement::validate(QStringLiteral("1:1920x1080+0+0:auto,1920x1080+2147483646+0:auto"), caps),
+             QStringLiteral("canvas_too_large"));
+    QCOMPARE(DisplayArrangement::validate(QStringLiteral("1:2147483646x1080+0+0:auto"), caps),
+             QStringLiteral("output_too_large"));
+    QVector<DisplayArrangement::Entry> entries;
+    QCOMPARE(DisplayArrangement::parse(QStringLiteral("1:1920x1080+0+0:auto,1920x1080+2147483646+0:auto"), entries),
+             QStringLiteral("canvas_too_large"));
+    QVERIFY(entries.isEmpty());
+    // Large but ordinary numbers are canonical and fail on the limits.
+    QCOMPARE(DisplayArrangement::validate(QStringLiteral("1:100000x1080+0+0:auto"), caps),
+             QStringLiteral("output_too_large"));
+}
+
+void TestDisplayPlanner::refusalsReadAsSentences()
+{
+    const DisplayArrangement::Capabilities caps = DisplayArrangement::Capabilities::fleetDefault();
+    const QString generic = DisplayPlanner::errorText(QStringLiteral("something_new"), caps);
+    QVERIFY(!generic.isEmpty());
+    QVERIFY(!generic.contains(QStringLiteral("something_new")));
+    QStringList seen;
+    for (const char* code : {"malformed", "not_canonical", "odd_value", "origin_not_zero"}) {
+        QCOMPARE(DisplayPlanner::errorText(QString::fromLatin1(code), caps), generic);
+    }
+    for (const char* code : {"output_too_small", "output_too_large", "canvas_too_large", "too_many_displays",
+                             "no_physical_output", "no_virtual_output", "overlap", "not_negotiated",
+                             "verify_failed", "visibility_failed", "snapshot_failed", "apply_failed",
+                             "state_failed", "busy", "unavailable", "no_inventory"}) {
+        const QString text = DisplayPlanner::errorText(QString::fromLatin1(code), caps);
+        QVERIFY2(text != generic && !text.contains(QLatin1Char('_')), code);
+        QVERIFY2(!seen.contains(text), code);
+        seen.append(text);
+    }
+    QVERIFY(DisplayPlanner::errorText(QStringLiteral("output_too_large"), caps).contains(QStringLiteral("8192 × 4320")));
+}
+
+void TestDisplayPlanner::unlistedEncodingUsesTheOlderLayout()
+{
+    // A host lists only the NVENC modes that passed its encoder probe; the
+    // stream's own encoding is never swapped, the older layout is used and
+    // the wizard offers H.265 4:4:4.
+    const QVector<NvClientDisplay> displays {macBook14()};
+    DisplayArrangement::Capabilities caps = DisplayArrangement::Capabilities::fleetDefault();
+    caps.encodingLimits.remove(QStringLiteral("h264-8-444-nvenc"));
+    DisplayPlanner::Plan plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
+                                                     arrangementHost(caps, QStringLiteral("h264-8-444-nvenc")));
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QVERIFY(plan.legacy);
+    QVERIFY(plan.arrangement.isEmpty());
+    QCOMPARE(plan.legacyModes, QStringList({QStringLiteral("3024x1890")}));
+    const int warning = warningCodes(plan).indexOf(QStringLiteral("encoding"));
+    QVERIFY(warning >= 0);
+    QCOMPARE(plan.warnings.at(warning).action, QStringLiteral("use-hevc"));
+    QVERIFY(!warningCodes(plan).contains(QStringLiteral("old-host")));
+    // A software mode on a host that lists only NVENC: the same.
+    plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays),
+                                arrangementHost(caps, QStringLiteral("h264-10-444-software")));
+    QVERIFY(plan.legacy);
+    // HEVC 4:4:4 is listed: exact sizes.
+    plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), arrangementHost(caps));
+    QVERIFY(!plan.legacy);
+    QCOMPARE(plan.arrangement, QStringLiteral("1:3024x1890+0+0:auto"));
 }
 
 void TestDisplayPlanner::carrierRule()

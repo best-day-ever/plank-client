@@ -304,7 +304,8 @@ Capabilities Capabilities::fleetDefault()
     // host packs its capture.
     caps.maxCanvas = QSize(8192, 4608);
     caps.minOutput = QSize(640, 480);
-    caps.maxOutput = QSize(8192, 8192);
+    // A 2:1 ViewPortIn downscale over the largest carrier (5120x2160).
+    caps.maxOutput = QSize(8192, 4320);
     caps.maxPixels = 33177600;
     caps.refreshMillihz = {60000};
     PhysicalOutput dongle;
@@ -312,11 +313,14 @@ Capabilities Capabilities::fleetDefault()
     dongle.name = QStringLiteral("HDMI-0");
     dongle.displayName = QStringLiteral("MEC-O-3-H");
     dongle.preferred = QSize(3840, 2160);
-    dongle.modes = {QSize(4096, 2160), QSize(3840, 2160), QSize(1920, 1080), QSize(1440, 900), QSize(1280, 1024),
+    // The dummy plug's 60 Hz modes (59.9-60.1 Hz; its 800x600 and 1440x900 are not).
+    dongle.modes = {QSize(4096, 2160), QSize(3840, 2160), QSize(1920, 1080), QSize(1280, 1024),
                     QSize(1280, 720), QSize(1024, 768), QSize(720, 480), QSize(640, 480)};
     caps.physicalOutputs = {dongle};
     caps.encodingLimits.insert(QStringLiteral("hevc-10-444-nvenc"), {QSize(8192, 8192), QSize(7680, 4320)});
     caps.encodingLimits.insert(QStringLiteral("h264-8-444-nvenc"), {QSize(4096, 4096), QSize(4096, 2160)});
+    caps.encodingLimits.insert(QStringLiteral("hevc-10-420-nvenc"), {QSize(8192, 8192), QSize(7680, 4320)});
+    caps.encodingLimits.insert(QStringLiteral("h264-8-420-nvenc"), {QSize(4096, 4096), QSize(4096, 2160)});
     return caps;
 }
 
@@ -341,7 +345,31 @@ QSize boundingSize(const QVector<Entry>& entries)
     return QSize(width, height);
 }
 
-QString parse(const QString& request, QVector<Entry>& entries)
+namespace {
+
+// One entry as parsed: 64-bit so that every value a canonical request can
+// carry (up to a signed 32-bit maximum) survives sums like x + width.
+struct RawEntry
+{
+    qint64 width = 0;
+    qint64 height = 0;
+    qint64 x = 0;
+    qint64 y = 0;
+    Preference preference = Preference::Auto;
+};
+
+QString serializeRaw(const QVector<RawEntry>& entries)
+{
+    QStringList parts;
+    for (const RawEntry& entry : entries) {
+        parts.append(QStringLiteral("%1x%2+%3+%4:%5").arg(entry.width).arg(entry.height)
+                     .arg(entry.x).arg(entry.y).arg(preferenceName(entry.preference)));
+    }
+    return QStringLiteral("1:") + parts.join(QLatin1Char(','));
+}
+
+// Checks 1-6.
+QString parseRaw(const QString& request, QVector<RawEntry>& entries)
 {
     entries.clear();
     // 1. Length.
@@ -385,71 +413,123 @@ QString parse(const QString& request, QVector<Entry>& entries)
     }
     // 3. Count.
     if (raws.size() > MaximumEntries) return QStringLiteral("too_many_displays");
-    // 4. Canonical form: no leading zeros (a lone "0" is canonical).
+    // 4. Canonical form: no leading zeros (a lone "0" is canonical), and a
+    // value that fits a signed 32-bit integer (anything larger has no
+    // canonical form).
+    QVector<RawEntry> parsed;
     for (const Raw& raw : std::as_const(raws)) {
-        for (const QByteArray& number : raw.numbers) {
+        qint64 values[4] = {};
+        for (int index = 0; index < 4; ++index) {
+            const QByteArray& number = raw.numbers[index];
             if (number.size() > 1 && number.startsWith('0')) return QStringLiteral("not_canonical");
-            // Five digits cover every limit; anything longer cannot be a real size.
-            if (number.size() > 5) return QStringLiteral("malformed");
+            if (number.size() > 10 || number.toLongLong() > std::numeric_limits<qint32>::max()) {
+                return QStringLiteral("not_canonical");
+            }
+            values[index] = number.toLongLong();
         }
-    }
-    QVector<Entry> parsed;
-    for (const Raw& raw : std::as_const(raws)) {
-        Entry entry;
-        entry.rect = QRect(raw.numbers[2].toInt(), raw.numbers[3].toInt(),
-                           raw.numbers[0].toInt(), raw.numbers[1].toInt());
+        RawEntry entry;
+        entry.width = values[0];
+        entry.height = values[1];
+        entry.x = values[2];
+        entry.y = values[3];
         preferenceFromName(QString::fromLatin1(raw.preference), entry.preference);
         parsed.append(entry);
     }
-    if (serialize(parsed) != request) return QStringLiteral("not_canonical");
+    if (serializeRaw(parsed) != request) return QStringLiteral("not_canonical");
     // 5. Odd values.
-    for (const Entry& entry : std::as_const(parsed)) {
-        if ((entry.rect.width() | entry.rect.height() | entry.rect.x() | entry.rect.y()) & 1) {
-            return QStringLiteral("odd_value");
-        }
+    for (const RawEntry& entry : std::as_const(parsed)) {
+        if ((entry.width | entry.height | entry.x | entry.y) & 1) return QStringLiteral("odd_value");
     }
     // 6. Origin.
-    int minX = std::numeric_limits<int>::max();
-    int minY = std::numeric_limits<int>::max();
-    for (const Entry& entry : std::as_const(parsed)) {
-        minX = qMin(minX, entry.rect.x());
-        minY = qMin(minY, entry.rect.y());
+    qint64 minX = std::numeric_limits<qint64>::max();
+    qint64 minY = std::numeric_limits<qint64>::max();
+    for (const RawEntry& entry : std::as_const(parsed)) {
+        minX = qMin(minX, entry.x);
+        minY = qMin(minY, entry.y);
     }
     if (minX != 0 || minY != 0) return QStringLiteral("origin_not_zero");
     entries = parsed;
     return QString();
 }
 
-QString validate(const QString& request, const Capabilities& caps, QVector<Entry>* out)
+// Checks 7-10.
+QString checkRaw(const QVector<RawEntry>& entries, const Capabilities& caps)
 {
-    QVector<Entry> entries;
-    const QString error = parse(request, entries);
-    if (!error.isEmpty()) return error;
     // 7. Per-entry limits, in entry order.
-    for (const Entry& entry : std::as_const(entries)) {
-        const qint64 pixels = qint64(entry.rect.width()) * entry.rect.height();
-        if (entry.rect.width() < caps.minOutput.width() || entry.rect.height() < caps.minOutput.height()) {
+    for (const RawEntry& entry : entries) {
+        if (entry.width < caps.minOutput.width() || entry.height < caps.minOutput.height()) {
             return QStringLiteral("output_too_small");
         }
-        if (entry.rect.width() > caps.maxOutput.width() || entry.rect.height() > caps.maxOutput.height() ||
-                pixels > caps.maxPixels) {
+        if (entry.width > caps.maxOutput.width() || entry.height > caps.maxOutput.height() ||
+                entry.width * entry.height > caps.maxPixels) {
             return QStringLiteral("output_too_large");
         }
     }
     // 8. Overlap (touching edges and gaps are fine).
     for (int a = 0; a < entries.size(); ++a) {
         for (int b = a + 1; b < entries.size(); ++b) {
-            if (entries.at(a).rect.intersects(entries.at(b).rect)) return QStringLiteral("overlap");
+            const RawEntry& first = entries.at(a);
+            const RawEntry& second = entries.at(b);
+            if (first.x < second.x + second.width && second.x < first.x + first.width &&
+                    first.y < second.y + second.height && second.y < first.y + first.height) {
+                return QStringLiteral("overlap");
+            }
         }
     }
     // 9. Canvas.
-    const QSize canvas = boundingSize(entries);
-    if (canvas.width() > caps.maxCanvas.width() || canvas.height() > caps.maxCanvas.height()) {
+    qint64 canvasWidth = 0;
+    qint64 canvasHeight = 0;
+    for (const RawEntry& entry : entries) {
+        canvasWidth = qMax(canvasWidth, entry.x + entry.width);
+        canvasHeight = qMax(canvasHeight, entry.y + entry.height);
+    }
+    if (canvasWidth > caps.maxCanvas.width() || canvasHeight > caps.maxCanvas.height()) {
         return QStringLiteral("canvas_too_large");
     }
     // 10. Outputs.
     if (entries.size() > caps.maxOutputs) return QStringLiteral("too_many_displays");
-    if (out != nullptr) *out = entries;
+    return QString();
+}
+
+QVector<Entry> toEntries(const QVector<RawEntry>& raws)
+{
+    QVector<Entry> entries;
+    for (const RawEntry& raw : raws) {
+        Entry entry;
+        entry.rect = QRect(int(raw.x), int(raw.y), int(raw.width), int(raw.height));
+        entry.preference = raw.preference;
+        entries.append(entry);
+    }
+    return entries;
+}
+
+}
+
+QString parse(const QString& request, QVector<Entry>& entries)
+{
+    entries.clear();
+    QVector<RawEntry> raws;
+    const QString error = parseRaw(request, raws);
+    if (!error.isEmpty()) return error;
+    for (const RawEntry& raw : std::as_const(raws)) {
+        // A rectangle must end within int: such a desktop fits no canvas anyway.
+        if (raw.x + raw.width > std::numeric_limits<int>::max() ||
+                raw.y + raw.height > std::numeric_limits<int>::max()) {
+            return QStringLiteral("canvas_too_large");
+        }
+    }
+    entries = toEntries(raws);
+    return QString();
+}
+
+QString validate(const QString& request, const Capabilities& caps, QVector<Entry>* out)
+{
+    QVector<RawEntry> raws;
+    QString error = parseRaw(request, raws);
+    if (error.isEmpty()) error = checkRaw(raws, caps);
+    if (!error.isEmpty()) return error;
+    // Every value now fits the canvas, so QRect cannot overflow.
+    if (out != nullptr) *out = toEntries(raws);
     return QString();
 }
 

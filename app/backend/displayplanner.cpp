@@ -578,10 +578,30 @@ QString errorText(const QString& code, const DisplayArrangement::Capabilities& c
         return tr("A screen is set to use a virtual display, but the workstation has none free.");
     }
     if (code == QLatin1String("overlap")) return tr("Two screens overlap.");
+    // Reasons of a failed transition (409).
+    if (code == QLatin1String("verify_failed")) {
+        return tr("The workstation could not confirm the new screen layout and went back to its previous screens.");
+    }
+    if (code == QLatin1String("visibility_failed")) {
+        return tr("The workstation could not switch its screens on and off for this layout.");
+    }
+    if (code == QLatin1String("snapshot_failed")) {
+        return tr("The workstation could not save its current screens before changing them.");
+    }
+    if (code == QLatin1String("apply_failed")) return tr("The workstation could not apply the screen layout.");
+    if (code == QLatin1String("state_failed")) return tr("The workstation could not record the screen layout.");
+    if (code == QLatin1String("busy")) {
+        return tr("The workstation is still changing its screens. Try again in a moment.");
+    }
+    if (code == QLatin1String("unavailable")) return tr("The workstation cannot change its screens right now.");
+    if (code == QLatin1String("no_inventory")) {
+        return tr("The workstation has not finished detecting its screens yet. Try again in a minute.");
+    }
     if (code == QLatin1String("not_negotiated")) {
         return tr("The workstation did not accept the display layout. Update PLANK on the workstation.");
     }
-    return tr("The workstation refused the display layout (%1).").arg(code.isEmpty() ? tr("no reason") : code);
+    Q_UNUSED(code);
+    return tr("The workstation could not show this screen layout.");
 }
 
 QSize evenSize(const QSize& size)
@@ -753,10 +773,22 @@ Plan plan(const QVector<NvClientDisplay>& displays, const DisplayProfile::Profil
     }
     result.outputs[primary].primary = true;
 
+    // An encoding the host does not list for arrangements (a mode that did
+    // not pass its encoder probe, or a software mode): the older layout, and
+    // say so. The stream's profile is never swapped silently.
+    const bool encodingUnavailable = host.supportsArrangement() && !host.encodingMode.isEmpty() &&
+            !caps.encodingLimits.contains(host.encodingMode);
     if (host.isMac()) {
         planMac(result, displays, profile.presentation);
-    } else if (!host.supportsArrangement()) {
+    } else if (!host.supportsArrangement() || encodingUnavailable) {
         planLegacy(result, displays, primary, host);
+        if (encodingUnavailable) {
+            result.warnings.removeIf([](const Warning& warning) { return warning.code == QLatin1String("old-host"); });
+            warn(result, QStringLiteral("encoding"),
+                 tr("The workstation cannot stream this encoding at your screens' exact sizes, so it uses its older "
+                    "layout. H.265 4:4:4 works with every layout."),
+                 QStringLiteral("use-hevc"), tr("Use H.265 4:4:4"));
+        }
     } else {
         planArrangement(result, displays, primary, host, limits, profile);
     }
