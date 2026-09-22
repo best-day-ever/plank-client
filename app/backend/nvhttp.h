@@ -4,6 +4,7 @@
 #include "nvaddress.h"
 #include "outputtopology.h"
 #include "macpreviewlaunch.h"
+#include "hosttlsguard.h"
 
 #include <Limelight.h>
 
@@ -112,6 +113,17 @@ private:
     QString m_SessionId;
 };
 
+class HostIdentityChangedException : public QtNetworkReplyException
+{
+public:
+    HostIdentityChangedException(QString endpoint, QByteArray previous, QByteArray replacement) :
+        QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
+            "Host identity changed. Connect again to review the replacement before signing in."),
+        endpoint(std::move(endpoint)), previousKey(std::move(previous)), replacementKey(std::move(replacement)) {}
+    const QString endpoint;
+    const QByteArray previousKey, replacementKey;
+};
+
 class NvHTTP : public QObject
 {
     Q_OBJECT
@@ -157,13 +169,22 @@ public:
 
     void setAddress(NvAddress address);
 
-    void setPlankSessionToken(QString sessionToken);
+    void setPlankSessionToken(QString sessionToken, QByteArray identityKey);
+    void setTrustAddress(NvAddress address);
+    QByteArray hostIdentityKey() const { return m_IdentityKey; }
+    void setTrustPrompt(std::function<bool(const HostIdentityChangedException&)> prompt) {
+        m_TrustPrompt = std::move(prompt);
+    }
 
     // Used only by the session recovery worker; ordinary discovery/login has
     // no gate. False cancels, while the callback may wait for a local decision.
     void setRequestGate(std::function<bool(bool)> gate) { m_RequestGate = std::move(gate); }
 
-    QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
+    // Automatic handoff/reconnect is never first use, even if local trust was
+    // removed while this process was streaming.
+    enum class AuthenticationIntent { ExplicitConnection, Recovery };
+    QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr,
+                         AuthenticationIntent intent = AuthenticationIntent::ExplicitConnection);
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
@@ -221,15 +242,15 @@ public:
     QUrl m_BaseUrlHttps;
 private:
     void waitForRequestPermission(bool authenticating = false);
-    void
-    handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
+    void establishHostTrust(AuthenticationIntent intent);
+    void checkTlsGuard(const HostTlsGuard& guard);
 
     QNetworkReply*
     openConnection(QUrl baseUrl,
                    QString command,
                    QString arguments,
                    int timeoutMs,
-                   NvLogLevel logLevel);
+                   NvLogLevel logLevel, bool establishTrust = false);
 
     QJsonObject postPlankJson(QString command, const QJsonObject& body);
     QJsonObject postPinnedMacJson(const QString& path, const QJsonObject& body,
@@ -239,5 +260,9 @@ private:
     QNetworkAccessManager* m_Nam;
     QString m_SessionToken;
     QString m_WorkerInstance;
+    HostTrustStore m_TrustStore;
+    QString m_TrustEndpoint;
+    QByteArray m_IdentityKey;
+    std::function<bool(const HostIdentityChangedException&)> m_TrustPrompt;
     std::function<bool(bool)> m_RequestGate;
 };

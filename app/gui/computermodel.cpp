@@ -28,6 +28,7 @@ ComputerModel::ComputerModel(QObject* object)
 ComputerModel::~ComputerModel()
 {
     if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(false);
+    if (m_HostTrustDecision) m_HostTrustDecision->respond(false);
 }
 
 void ComputerModel::initialize(ComputerManager* computerManager)
@@ -49,7 +50,17 @@ void ComputerModel::initialize(ComputerManager* computerManager)
         if (computer != m_AuthenticatingComputer) return;
         m_AuthenticatingComputer = nullptr;
         m_AuthenticationTakeover.clear();
+        m_HostTrustDecision.clear();
         emit authenticationCancelled();
+    });
+
+    connect(m_ComputerManager, &ComputerManager::authenticationTrustRequested, this,
+            [this](NvComputer* computer, QString endpoint, QString previous, QString replacement,
+                   AuthenticationTakeover decision) {
+        if (computer != m_AuthenticatingComputer) return;
+        if (m_HostTrustDecision) m_HostTrustDecision->respond(false);
+        m_HostTrustDecision = decision;
+        emit authenticationTrustRequested(endpoint, previous, replacement);
     });
 
     m_Computers = m_ComputerManager->getComputers();
@@ -343,6 +354,7 @@ void ComputerModel::handleAuthenticationCompleted(NvComputer* computer, QString 
     if (computer != m_AuthenticatingComputer) return;
     m_AuthenticatingComputer = nullptr;
     m_AuthenticationTakeover.clear();
+    m_HostTrustDecision.clear();
     const int index = m_Computers.indexOf(computer);
     if (index < 0 && error.isEmpty()) error = tr("The bookmark was removed during sign-in.");
     emit authenticationCompleted(error.isEmpty() ? QVariant() : error, index);
@@ -351,6 +363,11 @@ void ComputerModel::handleAuthenticationCompleted(NvComputer* computer, QString 
 void ComputerModel::respondToAuthenticationTakeover(bool accepted)
 {
     if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(accepted);
+}
+
+void ComputerModel::respondToHostTrust(bool accepted)
+{
+    if (m_HostTrustDecision) m_HostTrustDecision->respond(accepted);
 }
 
 void ComputerModel::handleComputerStateChanged(NvComputer* computer)

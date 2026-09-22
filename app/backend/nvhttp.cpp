@@ -42,18 +42,6 @@ private:
     QString& m_Value;
 };
 
-bool isPlankCertificate(const QSslCertificate& certificate)
-{
-    const auto alternativeNames = certificate.subjectAlternativeNames();
-    const QDateTime now = QDateTime::currentDateTimeUtc();
-    return !certificate.isNull() && certificate.isSelfSigned() &&
-            certificate.publicKey().algorithm() == QSsl::Rsa &&
-            certificate.publicKey().length() >= 3072 &&
-            !alternativeNames.values(QSsl::DnsEntry).isEmpty() &&
-            alternativeNames.values(QSsl::IpAddressEntry).isEmpty() &&
-            certificate.effectiveDate() <= now && certificate.expiryDate() > now;
-}
-
 QSslConfiguration plankSslConfiguration()
 {
     QSslConfiguration configuration = QSslConfiguration::defaultConfiguration();
@@ -61,21 +49,9 @@ QSslConfiguration plankSslConfiguration()
     return configuration;
 }
 
-// Qt can clear the live socket's negotiated TLS details when a close-delimited
-// HTTP response finishes. Preserve the completed handshake on that reply, not
-// globally on the manager (which may connect to another certificate later).
-QMetaObject::Connection rememberPlankTls(QNetworkAccessManager* manager, QObject* context)
-{
-    return QObject::connect(manager, &QNetworkAccessManager::encrypted, context,
-                            [](QNetworkReply* reply) {
-        reply->setProperty("plankNegotiatedTls", QVariant::fromValue(reply->sslConfiguration()));
-    });
-}
-
 QSslConfiguration negotiatedPlankTls(QNetworkReply* reply)
 {
-    const QVariant saved = reply->property("plankNegotiatedTls");
-    return saved.isValid() ? saved.value<QSslConfiguration>() : reply->sslConfiguration();
+    return HostTlsGuard::negotiated(reply);
 }
 }
 
@@ -91,6 +67,7 @@ NvHTTP::NvHTTP(NvAddress address, QNetworkAccessManager* nam) :
     m_BaseUrlHttps.setScheme("https");
 
     setAddress(address);
+    setTrustAddress(address);
 
     // Never use a proxy server
     QNetworkProxy noProxy(QNetworkProxy::NoProxy);
@@ -100,7 +77,8 @@ NvHTTP::NvHTTP(NvAddress address, QNetworkAccessManager* nam) :
 NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
     NvHTTP(computer->activeAddress, nam)
 {
-    setPlankSessionToken(computer->sessionToken);
+    setTrustAddress(computer->manualAddress.isNull() ? computer->activeAddress : computer->manualAddress);
+    setPlankSessionToken(computer->sessionToken, computer->sessionIdentityKey);
 }
 
 void NvHTTP::setAddress(NvAddress address)
@@ -113,9 +91,19 @@ void NvHTTP::setAddress(NvAddress address)
     m_BaseUrlHttps.setPort(address.port());
 }
 
-void NvHTTP::setPlankSessionToken(QString sessionToken)
+void NvHTTP::setTrustAddress(NvAddress address)
+{
+    QUrl url;
+    url.setScheme(QStringLiteral("https"));
+    url.setHost(address.address());
+    url.setPort(address.port());
+    m_TrustEndpoint = HostTrustStore::endpoint(url);
+}
+
+void NvHTTP::setPlankSessionToken(QString sessionToken, QByteArray identityKey)
 {
     m_SessionToken = std::move(sessionToken);
+    m_IdentityKey = std::move(identityKey);
 }
 
 NvAddress NvHTTP::address()
@@ -494,35 +482,39 @@ NvHTTP::getXmlString(QString xml,
     return QString();
 }
 
-void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
+void NvHTTP::checkTlsGuard(const HostTlsGuard& guard)
 {
-    const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
-    if (!isPlankCertificate(certificate)) {
-        const auto alternativeNames = certificate.subjectAlternativeNames();
-        qWarning() << "Rejecting a TLS certificate outside the PLANK profile"
-                   << "null" << certificate.isNull()
-                   << "selfSigned" << certificate.isSelfSigned()
-                   << "keyAlgorithm" << certificate.publicKey().algorithm()
-                   << "keyBits" << certificate.publicKey().length()
-                   << "dnsSans" << alternativeNames.values(QSsl::DnsEntry).size()
-                   << "ipSans" << alternativeNames.values(QSsl::IpAddressEntry).size()
-                   << "effective" << certificate.effectiveDate()
-                   << "expiry" << certificate.expiryDate();
-        return;
+    const auto& result = guard.result();
+    if (result.status == HostTrustStore::Status::Changed) {
+        throw HostIdentityChangedException(m_TrustEndpoint, result.previousKey, guard.key());
     }
-    for (const QSslError& error : errors) {
-        switch (error.error()) {
-        case QSslError::SelfSignedCertificate:
-        case QSslError::CertificateUntrusted:
-        case QSslError::UnableToGetLocalIssuerCertificate:
-        case QSslError::UnableToVerifyFirstCertificate:
-        case QSslError::HostNameMismatch:
-            break;
-        default:
+    if (!result.error.isEmpty() || result.status == HostTrustStore::Status::Unknown) {
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
+            result.error.isEmpty() ? QStringLiteral("Host identity is not established. Sign in again.") : result.error);
+    }
+}
+
+void NvHTTP::establishHostTrust(AuthenticationIntent intent)
+{
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        try {
+            QScopedPointer<QNetworkReply> reply(openConnection(m_BaseUrlHttps, "serverinfo", {},
+                REQUEST_TIMEOUT_MS, NVLL_NONE, intent == AuthenticationIntent::ExplicitConnection));
+            verifyResponseStatus(QString::fromUtf8(reply->readAll()));
+            m_IdentityKey = HostTlsGuard::identityKey(negotiatedPlankTls(reply.data()).peerCertificateChain());
             return;
+        } catch (const HostIdentityChangedException& change) {
+            // Only before auth/start; never resume a PAM conversation or carry
+            // an old bearer token across replacement approval. The worker may
+            // wait for consent, never a Qt SSL callback or the GUI thread.
+            if (attempt || !m_TrustPrompt || m_RequestGate || intent != AuthenticationIntent::ExplicitConnection) throw;
+            if (!m_TrustPrompt(change))
+                throw QtNetworkReplyException(QNetworkReply::OperationCanceledError, "Host identity replacement cancelled.");
+            const auto result = m_TrustStore.replace(change.endpoint, change.previousKey, change.replacementKey);
+            if (result.status != HostTrustStore::Status::Trusted)
+                throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, result.error);
         }
     }
-    reply->ignoreSslErrors(errors);
 }
 
 QString
@@ -561,45 +553,41 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setSslConfiguration(plankSslConfiguration());
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 #endif
 
-    const auto sslErrorsConnection = connect(
-        m_Nam, &QNetworkAccessManager::sslErrors,
-        this, &NvHTTP::handleSslErrors);
-    const auto encryptedConnection = rememberPlankTls(m_Nam, this);
-    QNetworkReply* reply = m_Nam->post(
-        request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    if (m_IdentityKey.size() != 32)
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "Host identity is not established.");
+    HostTlsGuard guard(*m_Nam, m_TrustStore, m_TrustEndpoint,
+                       HostTlsGuard::Mode::RequireKnown, m_IdentityKey);
+    QScopedPointer<QNetworkReply> reply(m_Nam->post(
+        request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
     QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
             &loop, &QEventLoop::quit);
     QTimer::singleShot(REQUEST_TIMEOUT_MS, &loop, &QEventLoop::quit);
-    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
     if (!reply->isFinished()) {
         reply->abort();
     }
-    m_Nam->clearAccessCache();
-    disconnect(sslErrorsConnection);
-    disconnect(encryptedConnection);
+    checkTlsGuard(guard);
     if (reply->error() != QNetworkReply::NoError) {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto error = reply->error();
         const QString message = reply->errorString();
-        delete reply;
         if (status >= 400) throw GfeHttpResponseException(status, "PLANK authentication request rejected");
         throw QtNetworkReplyException(error, message);
     }
-    const QSslConfiguration negotiatedSsl = negotiatedPlankTls(reply);
-    if (!isPlankCertificate(negotiatedSsl.peerCertificate()) ||
-            negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
-        delete reply;
+    if (!guard.checked()) {
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
                                       "PLANK TLS validation failed");
     }
     const QJsonDocument document = QJsonDocument::fromJson(reply->readAll());
-    delete reply;
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status != 200) throw GfeHttpResponseException(status, "PLANK authentication request rejected");
     if (!document.isObject()) {
         throw GfeHttpResponseException(400, "Malformed PLANK authentication response");
     }
@@ -620,13 +608,17 @@ bool NvHTTP::probeWorkerReplacement(const QString& instance, const QString& cert
                 QByteArray::fromHex(certificateSha256.toLatin1()), certificate);
 }
 
-QString NvHTTP::authenticate(QString username, QString password, bool* greeterConfirmed)
+QString NvHTTP::authenticate(QString username, QString password, bool* greeterConfirmed, AuthenticationIntent intent)
 {
     if (greeterConfirmed != nullptr) *greeterConfirmed = false;
     SecureStringGuard passwordGuard(password);
     if (!m_SessionToken.isEmpty() || username.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
     }
+
+    // A recovered session already has an expected identity. Its credential-free
+    // preflight may observe a worker change, but must not learn a new authority.
+    establishHostTrust(intent);
 
     QJsonObject result = postPlankJson("start", {{"username", username}});
     for (int round = 0; round < 16; ++round) {
@@ -789,25 +781,10 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     // token to a replacement certificate merely because it has PLANK's shape.
     QNetworkAccessManager manager;
     manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
-    rememberPlankTls(&manager, &manager);
-    bool certificateChecked = false;
-    bool certificateRejected = false;
-    auto matchesPin = [&pin](QNetworkReply* reply) {
-        const auto ssl = negotiatedPlankTls(reply);
-        return isPlankCertificate(ssl.peerCertificate()) &&
-                ssl.sessionProtocol() == QSsl::TlsV1_3 &&
-                ssl.peerCertificate().digest(QCryptographicHash::Sha256) == pin;
-    };
-    connect(&manager, &QNetworkAccessManager::sslErrors, &manager,
-            [this, &pin](QNetworkReply* reply, const QList<QSslError>& errors) {
-        if (reply->sslConfiguration().peerCertificate().digest(QCryptographicHash::Sha256) == pin) {
-            handleSslErrors(reply, errors);
-        }
-    });
-    connect(&manager, &QNetworkAccessManager::encrypted, &manager, [&](QNetworkReply* reply) {
-        certificateChecked = matchesPin(reply);
-        if (!certificateChecked) { certificateRejected = true; reply->abort(); }
-    });
+    if (m_IdentityKey.size() != 32)
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "Host identity is not established.");
+    HostTlsGuard guard(manager, m_TrustStore, m_TrustEndpoint,
+                       HostTlsGuard::Mode::RequireKnown, m_IdentityKey, pin);
     QScopedPointer<QNetworkReply> reply(manager.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)));
     constexpr qint64 MaximumReplyBytes = 32768;
     reply->setReadBufferSize(MaximumReplyBytes + 1);
@@ -829,12 +806,13 @@ QJsonObject NvHTTP::postPinnedMacJson(const QString& path, const QJsonObject& bo
     if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
     if (!reply->isFinished()) reply->abort();
     if (!oversized) drain();
-    if (!certificateChecked && !certificateRejected &&
+    checkTlsGuard(guard);
+    if (!guard.checked() &&
             reply->error() != QNetworkReply::NoError &&
             reply->error() != QNetworkReply::SslHandshakeFailedError) {
         throw QtNetworkReplyException(reply->error(), "Mac control connection failed or timed out");
     }
-    if (!certificateChecked || !matchesPin(reply.data())) {
+    if (!guard.checked()) {
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
                                       "Mac preview TLS certificate changed or was rejected");
     }
@@ -883,7 +861,7 @@ NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
                        QString arguments,
                        int timeoutMs,
-                       NvLogLevel logLevel)
+                       NvLogLevel logLevel, bool establishTrust)
 {
     waitForRequestPermission();
     // Port must be set
@@ -898,6 +876,11 @@ NvHTTP::openConnection(QUrl baseUrl,
     url.setQuery(arguments);
 
     QNetworkRequest request(url);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+
+    if (baseUrl.scheme() != QLatin1String("https") ||
+            (!m_SessionToken.isEmpty() && m_IdentityKey.size() != 32))
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "Host identity is not established.");
 
     if (baseUrl.scheme() == "https") {
         request.setSslConfiguration(plankSslConfiguration());
@@ -918,13 +901,15 @@ NvHTTP::openConnection(QUrl baseUrl,
     request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
 #endif
 
-    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
-    const auto encryptedConnection = rememberPlankTls(m_Nam, this);
-    QNetworkReply* reply = m_Nam->get(request);
+    const auto mode = establishTrust ? (m_RequestGate ? HostTlsGuard::Mode::RequireKnown : HostTlsGuard::Mode::Enroll) :
+        m_SessionToken.isEmpty() ? HostTlsGuard::Mode::Observe : HostTlsGuard::Mode::RequireKnown;
+    HostTlsGuard guard(*m_Nam, m_TrustStore, m_TrustEndpoint, mode,
+                       establishTrust ? QByteArray() : m_IdentityKey);
+    QScopedPointer<QNetworkReply> reply(m_Nam->get(request));
 
     // Run the request with a timeout if requested
     QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
     if (timeoutMs) {
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
@@ -932,7 +917,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (logLevel >= NvLogLevel::NVLL_VERBOSE) {
         qInfo() << "Executing request:" << url.toString();
     }
-    loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
 
     // Abort the request if it timed out
     if (!reply->isFinished())
@@ -947,9 +932,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     // If we couldn't use fine-grained connection idle timeouts, kill them all now
     m_Nam->clearAccessCache();
 #endif
-    disconnect(sslErrorsConnection);
-
-    disconnect(encryptedConnection);
+    checkTlsGuard(guard);
 
     // Handle error
     if (reply->error() != QNetworkReply::NoError)
@@ -961,42 +944,28 @@ NvHTTP::openConnection(QUrl baseUrl,
 
         if (reply->error() == QNetworkReply::SslHandshakeFailedError) {
             QtNetworkReplyException exception(QNetworkReply::SslHandshakeFailedError, "PLANK TLS validation failed");
-            delete reply;
             throw exception;
         }
         else if (reply->error() == QNetworkReply::OperationCanceledError) {
             QtNetworkReplyException exception(QNetworkReply::TimeoutError, "Request timed out");
-            delete reply;
             throw exception;
         }
         else {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             if (status >= 400 && (command == QLatin1String("plank/topology") ||
                                  command == QLatin1String("applist"))) {
-                delete reply;
                 throw GfeHttpResponseException(status, "PLANK desktop readiness request rejected");
             }
             QtNetworkReplyException exception(reply->error(), reply->errorString());
-            delete reply;
             throw exception;
         }
     }
 
-    const bool plankTls = baseUrl.scheme() == "https";
-    const bool approvedCertificate = !plankTls ||
-            isPlankCertificate(negotiatedPlankTls(reply).peerCertificate());
-    const bool approvedProtocol = !plankTls ||
-            negotiatedPlankTls(reply).sessionProtocol() == QSsl::TlsV1_3;
-    if (!approvedCertificate || !approvedProtocol) {
-        qWarning() << "Rejecting PLANK TLS session"
-                   << "certificate" << approvedCertificate
-                   << "tls13" << approvedProtocol
-                   << "protocol" << reply->sslConfiguration().sessionProtocol()
-                   << "cipherProtocol" << reply->sslConfiguration().sessionCipher().protocol();
-        QtNetworkReplyException exception(QNetworkReply::SslHandshakeFailedError, "Invalid PLANK TLS session");
-        delete reply;
-        throw exception;
-    }
+    if (!guard.checked())
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "Invalid PLANK TLS session");
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status >= 300 && status < 400)
+        throw GfeHttpResponseException(status, "PLANK redirects are not accepted");
 
-    return reply;
+    return reply.take();
 }

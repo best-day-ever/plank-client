@@ -267,6 +267,8 @@ signals:
 
     void authenticationCompleted(NvComputer* computer, QString error);
     void authenticationTakeoverRequested(NvComputer* computer, AuthenticationTakeover decision);
+    void authenticationTrustRequested(NvComputer* computer, QString endpoint, QString previousKey,
+                                      QString replacementKey, AuthenticationTakeover decision);
     void authenticationCancelled(NvComputer* computer);
 
     void computerAddCompleted(QVariant success);

@@ -2945,10 +2945,11 @@ bool Session::startConnectionAsync(bool reconnecting,
                             if (reconnecting) http->setRequestGate([this](bool auth) { return waitForPlankReconnectRequest(auth); });
                             const QString token = http->authenticate(
                                         m_PlankUsername,
-                                        m_PlankPassword);
+                                        m_PlankPassword, nullptr, NvHTTP::AuthenticationIntent::Recovery);
                             {
                                 QWriteLocker lock(&m_Computer->lock);
                                 m_Computer->sessionToken = token;
+                                m_Computer->sessionIdentityKey = http->hostIdentityKey();
                                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             }
                             authenticationRefreshRequired = false;
@@ -3384,11 +3385,13 @@ bool Session::runPlankReconnect()
             if (token.isEmpty()) {
                 authenticating = true;
                 bool greeterConfirmed = false;
-                token = http.authenticate(m_PlankUsername, m_PlankPassword, &greeterConfirmed);
+                token = http.authenticate(m_PlankUsername, m_PlankPassword, &greeterConfirmed,
+                                          NvHTTP::AuthenticationIntent::Recovery);
                 authenticating = false;
                 {
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->sessionToken = token;
+                    m_Computer->sessionIdentityKey = http.hostIdentityKey();
                     m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 }
                 if (greeterConfirmed &&
@@ -3427,6 +3430,7 @@ bool Session::runPlankReconnect()
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
+                m_Computer->sessionIdentityKey = http.hostIdentityKey();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;

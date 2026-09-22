@@ -48,6 +48,7 @@ CenteredGridView {
     function authenticationComplete(error, pcIndex)
     {
         authenticationTakeoverDialog.close()
+        hostTrustDialog.close()
         loginDialog.close()
         if (error !== undefined) {
             errorDialog.text = error
@@ -90,8 +91,15 @@ CenteredGridView {
         model.initialize(ComputerManager)
         model.authenticationCompleted.connect(authenticationComplete)
         model.authenticationTakeoverRequested.connect(function() { authenticationTakeoverDialog.open() })
+        model.authenticationTrustRequested.connect(function(endpoint, previousKey, replacementKey) {
+            hostTrustDialog.endpoint = endpoint
+            hostTrustDialog.previousKey = previousKey
+            hostTrustDialog.replacementKey = replacementKey
+            hostTrustDialog.open()
+        })
         model.authenticationCancelled.connect(function() {
             authenticationTakeoverDialog.close()
+            hostTrustDialog.close()
             loginDialog.close()
         })
         model.relayWakeCompleted.connect(function(error) {
@@ -349,6 +357,13 @@ CenteredGridView {
         id: authenticationTakeoverDialog
         onAccepted: computerModel.respondToAuthenticationTakeover(true)
         onRejected: computerModel.respondToAuthenticationTakeover(false)
+    }
+
+    HostTrustDialog {
+        id: hostTrustDialog
+        onAccepted: computerModel.respondToHostTrust(true)
+        onRejected: computerModel.respondToHostTrust(false)
+        onClosed: computerModel.respondToHostTrust(false)
     }
 
     NavigableDialog {

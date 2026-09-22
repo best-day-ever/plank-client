@@ -56,20 +56,26 @@ private slots:
     void responsiveConsent_data()
     {
         QTest::addColumn<QString>("buttonText");
+        QTest::addColumn<QString>("componentName");
         QTest::addColumn<bool>("accepted");
-        QTest::newRow("take-over") << QString("Take Over") << true;
-        QTest::newRow("cancel") << QString("Cancel") << false;
-        QTest::newRow("escape") << QString() << false;
+        QTest::newRow("take-over") << QString("Take Over") << QString("SessionTakeoverDialog") << true;
+        QTest::newRow("cancel") << QString("Cancel") << QString("SessionTakeoverDialog") << false;
+        QTest::newRow("escape") << QString() << QString("SessionTakeoverDialog") << false;
+        QTest::newRow("trust-replacement") << QString("Trust Replacement Host") << QString("HostTrustDialog") << true;
+        QTest::newRow("trust-cancel") << QString("Cancel") << QString("HostTrustDialog") << false;
+        QTest::newRow("trust-escape") << QString() << QString("HostTrustDialog") << false;
+        QTest::newRow("trust-default-return") << QString("Return") << QString("HostTrustDialog") << false;
     }
 
     void responsiveConsent()
     {
         QFETCH(QString, buttonText);
+        QFETCH(QString, componentName);
         QFETCH(bool, accepted);
         QQmlEngine engine;
         QSignalSpy warnings(&engine, &QQmlEngine::warnings);
         QQmlComponent component(&engine);
-        component.setData(R"(
+        QByteArray qml = R"(
             import QtQuick 2.15
             import QtQuick.Controls 2.15
             import "qrc:/gui"
@@ -85,7 +91,9 @@ private slots:
                     onRejected: choice = 0
                 }
             }
-        )", QUrl("qrc:/takeover-test.qml"));
+        )";
+        qml.replace("SessionTakeoverDialog", componentName.toUtf8());
+        component.setData(qml, QUrl("qrc:/takeover-test.qml"));
         QScopedPointer<QObject> root(component.create());
         QVERIFY2(root, qPrintable(component.errorString()));
         auto *window = qobject_cast<QQuickWindow*>(root.data());
@@ -101,6 +109,7 @@ private slots:
         QTRY_VERIFY(root->property("ticks").toInt() >= ticks + 3);
         QVERIFY(waiting.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout);
         if (buttonText.isEmpty()) QTest::keyClick(window, Qt::Key_Escape);
+        else if (buttonText == "Return") QTest::keyClick(window, Qt::Key_Return);
         else {
             auto *footer = qvariant_cast<QObject*>(dialog->property("footer"));
             QVERIFY(footer);

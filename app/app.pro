@@ -219,6 +219,8 @@ SOURCES += \
     backend/computerseeker.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
+    backend/hosttruststore.cpp \
+    backend/hosttlsguard.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     cli/commandlineparser.cpp \
@@ -258,6 +260,8 @@ HEADERS += \
     backend/nvcomputer.h \
     backend/planknetwork.h \
     backend/nvhttp.h \
+    backend/hosttruststore.h \
+    backend/hosttlsguard.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \
     backend/computermanager.h \
