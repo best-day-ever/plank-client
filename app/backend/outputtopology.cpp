@@ -519,13 +519,89 @@ QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisp
     return mode;
 }
 
+QSize NvOutputTopology::clientMatchTarget(const QSize& desktopPixels, const QSize& panelPixels)
+{
+    const QSize base = desktopPixels.isValid() ? desktopPixels : panelPixels;
+    if (!base.isValid() || base.isEmpty()) {
+        return QSize();
+    }
+    if (!panelPixels.isValid() || panelPixels.isEmpty() ||
+            (base.width() <= panelPixels.width() && base.height() <= panelPixels.height())) {
+        return base;
+    }
+    const double scale = qMin(double(panelPixels.width()) / base.width(),
+                              double(panelPixels.height()) / base.height());
+    return QSize(qBound(1, int(std::lround(base.width() * scale)), panelPixels.width()),
+                 qBound(1, int(std::lround(base.height() * scale)), panelPixels.height()));
+}
+
+QSize NvOutputTopology::clientMatchTarget(const NvClientDisplay& display)
+{
+    // Streams are presented in native fullscreen, which macOS places below the camera housing: match that
+    // viewport (16:10 on notched MacBooks) rather than the full desktop, or it is always letterboxed.
+    const QSize desktop = display.fullscreenSize.isValid() ? display.fullscreenSize : display.backingSize;
+    return clientMatchTarget(desktop, display.nativeSize);
+}
+
+QStringList NvOutputTopology::rankedVirtualModes(const QSize& target)
+{
+    if (!target.isValid() || target.isEmpty()) {
+        return {};
+    }
+    struct Candidate {
+        QString mode;
+        bool fits;
+        double aspectError;
+        qint64 area;
+    };
+    const QString exact = QStringLiteral("%1x%2").arg(target.width()).arg(target.height());
+    const bool portrait = target.height() > target.width();
+    const double targetAspect = double(target.width()) / target.height();
+    QVector<Candidate> candidates;
+    QStringList ranked;
+    for (const QString& mode : qualifiedVirtualModes()) {
+        const QSize size = virtualModeSize(mode);
+        if (mode == exact) {
+            ranked.append(mode);
+            continue;
+        }
+        // The ultra-tall halves (1024/1280/2560x2160, narrower than 4:3) are
+        // made for pairs: a landscape display only gets a landscape mode, a
+        // portrait display only a portrait one.
+        const bool landscapeMode = size.width() * 3 >= size.height() * 4;
+        const bool portraitMode = size.height() > size.width();
+        if (portrait ? !portraitMode : !landscapeMode) {
+            continue;
+        }
+        candidates.append({mode,
+                           size.width() <= target.width() && size.height() <= target.height(),
+                           std::fabs(std::log((double(size.width()) / size.height()) / targetAspect)),
+                           qint64(size.width()) * size.height()});
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.fits != b.fits) return a.fits;
+        // 1920x1200 and 2560x1600 share one aspect ratio; compare with a
+        // tolerance so rounding never decides between them.
+        if (std::fabs(a.aspectError - b.aspectError) > 1e-9) return a.aspectError < b.aspectError;
+        return a.fits ? a.area > b.area : a.area < b.area;
+    });
+    for (const Candidate& candidate : std::as_const(candidates)) {
+        ranked.append(candidate.mode);
+    }
+    return ranked;
+}
+
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,
-                                                  QString* error)
+                                                  QString* error,
+                                                  bool* fitted)
 {
     hostLayout.clear();
     virtualModes.clear();
+    if (fitted != nullptr) {
+        *fitted = false;
+    }
     if (displays.size() < 1 || displays.size() > 2) {
         if (error != nullptr) {
             *error = QStringLiteral("Match client displays requires exactly one or two active client monitors.");
@@ -551,19 +627,65 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
         }
     }
 
-    for (const NvClientDisplay& display : displays) {
-        const QString mode = QStringLiteral("%1x%2")
-                .arg(display.nativeSize.width()).arg(display.nativeSize.height());
-        if (!qualifiedVirtualModes().contains(mode)) {
+    QVector<QStringList> rankings;
+    QStringList targets;
+    QVector<int> choice;
+    for (const NvClientDisplay& display : std::as_const(displays)) {
+        const QSize target = clientMatchTarget(display);
+        const QStringList ranked = rankedVirtualModes(target);
+        if (ranked.isEmpty()) {
             if (error != nullptr) {
-                *error = QStringLiteral("Client monitor resolution %1 is not a qualified PLANK virtual mode.")
-                        .arg(mode);
+                *error = QStringLiteral("The size of a client monitor could not be detected.");
             }
-            hostLayout.clear();
-            virtualModes.clear();
             return false;
         }
+        rankings.append(ranked);
+        targets.append(QStringLiteral("%1x%2").arg(target.width()).arg(target.height()));
+        choice.append(0);
+    }
+
+    // Two displays share one virtual canvas; step the wider display down its
+    // own ranking until the pair fits the host's canvas limit.
+    const auto canvasWidth = [&]() {
+        int width = 0;
+        for (int index = 0; index < rankings.size(); ++index) {
+            width += virtualModeSize(rankings[index][choice[index]]).width();
+        }
+        return width;
+    };
+    while (canvasWidth() > MaximumVirtualCanvasWidth) {
+        int widest = -1;
+        for (int index = 0; index < rankings.size(); ++index) {
+            const int width = virtualModeSize(rankings[index][choice[index]]).width();
+            bool narrower = false;
+            for (int next = choice[index] + 1; next < rankings[index].size(); ++next) {
+                narrower = narrower || virtualModeSize(rankings[index][next]).width() < width;
+            }
+            if (narrower && (widest < 0 ||
+                             width > virtualModeSize(rankings[widest][choice[widest]]).width())) {
+                widest = index;
+            }
+        }
+        if (widest < 0) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The client monitors are too wide together for a matched virtual layout.");
+            }
+            return false;
+        }
+        const int width = virtualModeSize(rankings[widest][choice[widest]]).width();
+        do {
+            ++choice[widest];
+        } while (virtualModeSize(rankings[widest][choice[widest]]).width() >= width);
+    }
+
+    bool anyFitted = false;
+    for (int index = 0; index < rankings.size(); ++index) {
+        const QString& mode = rankings[index][choice[index]];
+        anyFitted = anyFitted || mode != targets[index];
         virtualModes.append(mode);
+    }
+    if (fitted != nullptr) {
+        *fitted = anyFitted;
     }
     hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
                                        QString::fromLatin1(DualHorizontalHostLayout);

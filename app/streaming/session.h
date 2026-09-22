@@ -176,6 +176,10 @@ public:
 
     static void postTabletCursorActivationEvent();
 
+    // Called by the decoder thread when the size of the decoded frames
+    // changes; input is re-pointed at that size on the main thread.
+    static void notifyDecodedFrameSize(int width, int height);
+
     void updateRenderedStats(float fps, float videoMbps)
     {
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
@@ -468,6 +472,12 @@ private:
         SDL_DisplayID displayId = 0;
         SDL_Rect logicalBounds = {};
         QSize nativeSize;
+        // ClientDisplayProbe::forSessionDisplay view of the same display:
+        // logical bounds, physical panel (nativeSize) and current desktop
+        // backing pixels (backingSize, macOS). Match client resolves with it,
+        // and matchTarget (NvOutputTopology::clientMatchTarget) sizes the stream.
+        NvClientDisplay probeView;
+        QSize matchTarget;
         QSize macBackingSize;
         QRect macMatchedBounds;
         QRect canvasRect;
@@ -517,6 +527,7 @@ private:
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
     std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
     std::atomic<int> m_ConfirmedBitratePeakKbps {0};
+    std::atomic<std::uint64_t> m_DecodedFrameSize {0};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

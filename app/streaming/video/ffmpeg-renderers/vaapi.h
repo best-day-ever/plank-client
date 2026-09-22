@@ -59,6 +59,8 @@ public:
     virtual bool canExportDrmPrime() override;
     virtual bool mapDrmPrimeFrame(AVFrame* frame, AVDRMFrameDescriptor* drmDescriptor) override;
     virtual void unmapDrmPrimeFrame(AVDRMFrameDescriptor* drmDescriptor) override;
+    // renderFrame() fits frame->width/height when presenting directly.
+    virtual bool letterboxesDecodedFrameSize() override { return true; }
 #endif
 
 private:

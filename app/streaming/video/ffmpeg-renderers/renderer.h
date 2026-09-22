@@ -265,6 +265,24 @@ public:
         return false;
     }
 
+    // True when a single-output renderer letterboxes every frame against the
+    // window's live drawable size (SDL_GetWindowSizeInPixels or the live
+    // render output size) instead of the presentation layout captured at
+    // initialize(). Input then maps against the same live drawable, so it
+    // stays aligned across resizes and asynchronous fullscreen transitions.
+    virtual bool letterboxesAgainstLiveDrawable() {
+        return false;
+    }
+
+    // True when the renderer aspect-fits the decoded frame's own size
+    // (frame->width/height) rather than the negotiated stream size. Only then
+    // may input follow a decoded size that differs from the negotiated one;
+    // renderers that fit the negotiated size stretch the frame into it, so
+    // input must keep the negotiated size to match the picture.
+    virtual bool letterboxesDecodedFrameSize() {
+        return false;
+    }
+
     virtual void prepareToRender() {
         // Allow renderers to perform any final preparations for
         // rendering after they have been selected to render. Such
