@@ -2267,25 +2267,6 @@ QByteArray requestTarget(const QByteArray& raw)
 QString passkeyMapping()
 {
     return QStringLiteral("passkey:%1,%2").arg(PasskeyCredential, DeviceSpki);
-namespace {
-
-RemoteStreamSetup::Setup customStream(int capture, int profile)
-{
-    RemoteStreamSetup::Setup setup;
-    setup.mode = RemoteStreamSetup::Custom;
-    setup.captureSource = capture;
-    setup.videoProfile = profile;
-    return setup;
-}
-
-RemoteStreamSetup::Capabilities linuxHost(int flags, const QStringList& modes)
-{
-    RemoteStreamSetup::Capabilities caps;
-    caps.known = true;
-    caps.platform = RemoteStreamSetup::LinuxPlatform;
-    caps.featureFlags = flags;
-    caps.encodingModes = modes;
-    return caps;
 }
 
 }
@@ -2945,6 +2926,31 @@ void TestPlankBroker::onboardingReadsSettingsAndPasskeys()
     key.write("{}");
     key.close();
     QVERIFY(OnboardingState::hasLocalPasskeys(store));
+}
+
+namespace {
+
+RemoteStreamSetup::Setup customStream(int capture, int profile)
+{
+    RemoteStreamSetup::Setup setup;
+    setup.mode = RemoteStreamSetup::Custom;
+    setup.captureSource = capture;
+    setup.videoProfile = profile;
+    return setup;
+}
+
+RemoteStreamSetup::Capabilities linuxHost(int flags, const QStringList& modes)
+{
+    RemoteStreamSetup::Capabilities caps;
+    caps.known = true;
+    caps.platform = RemoteStreamSetup::LinuxPlatform;
+    caps.featureFlags = flags;
+    caps.encodingModes = modes;
+    return caps;
+}
+
+}
+
 void TestPlankBroker::remoteStreamSetupPersistsPerHost()
 {
     QTemporaryDir dir;
