@@ -1,3 +1,20 @@
+## 1.0.154
+
+### Client
+
+- Upgrade loss recovery to RaptorQ 2.0.1; requires a matching updated Host.
+- Reject malformed or oversized incoming transport messages safely.
+- Cancel connection startup promptly and prevent a render-thread shutdown hang.
+- Preserve the correct audio/video packet when receive queues overflow.
+- Remove the Experimental label from macOS capture.
+
+### Host
+
+- Upgrade loss recovery to RaptorQ 2.0.1; update Host and Client together.
+- Remove the unused application datagram pacer; retain Quinn scheduling and transport headroom.
+- Bound malformed incoming data and cancel stalled connection setup.
+- Linux: keep stalled operating-system authentication from blocking other requests.
+
 ## 1.0.153
 
 ### Client
