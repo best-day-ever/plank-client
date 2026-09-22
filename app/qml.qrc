@@ -5,6 +5,9 @@
         <file>gui/RemoteView.qml</file>
         <file>gui/OnboardingView.qml</file>
         <file>gui/OnboardingQrCode.qml</file>
+        <file>gui/DisplaySetupPanel.qml</file>
+        <file>gui/DisplaySetupDialog.qml</file>
+        <file>gui/DisplayAdvancedPage.qml</file>
         <file>gui/PlankCaptureSourceBox.qml</file>
         <file>gui/PlankVideoSettings.qml</file>
         <file>gui/SettingsView.qml</file>

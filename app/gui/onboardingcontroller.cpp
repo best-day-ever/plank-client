@@ -1,6 +1,8 @@
 #include "onboardingcontroller.h"
 
 #include "backend/brokersessionstore.h"
+#include "backend/clientdisplayprobe.h"
+#include "backend/displayprofile.h"
 #include "backend/onboardingstate.h"
 #include "backend/plankpasskey.h"
 #include "backend/qrencoder.h"
@@ -97,7 +99,7 @@ QString OnboardingController::step() const
     case Step::Authenticator: return QStringLiteral("authenticator");
     case Step::NextCode: return QStringLiteral("nextCode");
     case Step::Passkey: return QStringLiteral("passkey");
-    case Step::Done: default: return QStringLiteral("done");
+    case Step::Done: default: return m_DisplaysPending ? QStringLiteral("displays") : QStringLiteral("done");
     }
 }
 
@@ -105,6 +107,25 @@ void OnboardingController::setStep(Step step)
 {
     m_Step = step;
     if (step != Step::Authenticator) clearAuthenticator();
+    // The broker steps are over: before "done", this computer's screens get
+    // a display setup unless they already have one.
+    m_DisplaysPending = step == Step::Done && displaysNeedSetup();
+}
+
+bool OnboardingController::displaysNeedSetup()
+{
+    const QString fingerprint = ClientDisplayProbe::fingerprint(ClientDisplayProbe::probe());
+    if (fingerprint.isEmpty()) return false;
+    QSettings settings;
+    DisplayProfile::Profile profile;
+    return !DisplayProfile::loadGlobal(settings, fingerprint, profile);
+}
+
+void OnboardingController::finishDisplays()
+{
+    if (!m_DisplaysPending) return;
+    m_DisplaysPending = false;
+    emit changed();
 }
 
 void OnboardingController::clearAuthenticator()
@@ -143,6 +164,7 @@ void OnboardingController::reset()
     m_PasskeyWarning = false;
     m_Policy = PlankEnrollment::PasswordPolicy();
     m_Step = Step::Welcome;
+    m_DisplaysPending = false;
     emit changed();
 }
 

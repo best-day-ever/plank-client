@@ -7,6 +7,7 @@ import StreamingPreferences 1.0
 import ComputerManager 1.0
 import SystemProperties 1.0
 import RemoteBroker 1.0
+import DisplaySetup 1.0
 
 Flickable {
     id: settingsPage
@@ -72,6 +73,9 @@ Flickable {
             }
         }
     }
+
+    // Settings > Displays shows what is saved for the screens connected now.
+    StackView.onActivated: DisplaySetup.begin("", "", "")
 
     StackView.onDeactivating: {
         // Save the prefs so the Session can observe the changes
@@ -959,6 +963,110 @@ Flickable {
 
                 PlankSettingHelp {
                     text: qsTr("The stream window and toolbar remain responsive while PLANK retries the host.")
+                }
+            }
+        }
+
+        PlankSection {
+            id: displaysGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            title: qsTr("Displays")
+
+            PlankSettingsGrid {
+                PlankSettingLabel {
+                    text: qsTr("Screens connected now")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 6
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: DisplaySetup.label
+                        color: theme.textPrimary
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: DisplaySetup.hasSavedLayout ? DisplaySetup.summary :
+                                                            qsTr("No display setup for these screens yet.")
+                        color: theme.textSecondary
+                        wrapMode: Text.Wrap
+                        font.pointSize: 10
+                    }
+                    Button {
+                        text: DisplaySetup.hasSavedLayout ? qsTr("Run display setup again…") : qsTr("Set up displays…")
+                        onClicked: screensDialog.openFor("", "", "", false, 0)
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Saved layouts")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 2
+
+                    Label {
+                        visible: DisplaySetup.savedLayouts.length === 0
+                        text: qsTr("None yet")
+                        color: theme.textSecondary
+                    }
+                    Repeater {
+                        model: DisplaySetup.savedLayouts
+
+                        delegate: RowLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.spaceMedium
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.current ? qsTr("%1 (connected now)").arg(modelData.label) : modelData.label
+                                color: theme.textPrimary
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: modelData.saved
+                                color: theme.textSecondary
+                                font.pointSize: 10
+                            }
+                            Button {
+                                text: qsTr("Forget")
+                                flat: true
+                                onClicked: DisplaySetup.forget(modelData.fingerprint)
+                            }
+                        }
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("When your screens change")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 0
+
+                    PlankCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Ask when my screens change")
+                        checked: DisplaySetup.askOnChange
+                        onToggled: DisplaySetup.askOnChange = checked
+                    }
+                    PlankCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Always use the suggested layout for new screens")
+                        checked: DisplaySetup.autoAccept
+                        onToggled: DisplaySetup.autoAccept = checked
+                    }
                 }
             }
         }

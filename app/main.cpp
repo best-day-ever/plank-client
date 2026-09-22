@@ -53,6 +53,7 @@
 #include "gui/computermodel.h"
 #include "gui/remotebroker.h"
 #include "gui/onboardingcontroller.h"
+#include "gui/displaysetupcontroller.h"
 #include "backend/computermanager.h"
 #include <QSslSocket>
 #include "backend/systemproperties.h"
@@ -932,6 +933,12 @@ int main(int argc, char *argv[])
                                                                    qmlTypeId("RemoteBroker", 1, 0, "RemoteBroker"));
                                                        return new OnboardingController(broker);
                                                    });
+    // Display setup: the wizard, Settings > Displays and the change banner.
+    qmlRegisterSingletonType<DisplaySetupController>("DisplaySetup", 1, 0,
+                                                     "DisplaySetup",
+                                                     [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                         return new DisplaySetupController();
+                                                     });
     qmlRegisterSingletonType<SystemProperties>("SystemProperties", 1, 0,
                                                "SystemProperties",
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {

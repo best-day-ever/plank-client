@@ -249,6 +249,7 @@ SOURCES += \
     gui/computermodel.cpp \
     gui/remotebroker.cpp \
     gui/onboardingcontroller.cpp \
+    gui/displaysetupcontroller.cpp \
     streaming/bandwidth.cpp \
     streaming/streamutils.cpp \
     path.cpp \
@@ -305,6 +306,7 @@ HEADERS += \
     gui/computermodel.h \
     gui/remotebroker.h \
     gui/onboardingcontroller.h \
+    gui/displaysetupcontroller.h \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \

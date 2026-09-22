@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.3
 
 import RemoteBroker 1.0
 import ComputerManager 1.0
+import DisplaySetup 1.0
 import Onboarding 1.0
 import StreamingPreferences 1.0
 
@@ -71,7 +72,9 @@ Item {
             stackView.push(segue)
         }
         function onDisplaySetupRequired(hostId, hostName, reason) {
-            displaySetupDialog.openFor(hostId, hostName, true, reason)
+            // New screens: the display setup. A fixed layout that no longer
+            // fits (older workstation, remote Mac): its manual page.
+            screensDialog.openFor(hostId, hostName, reason, true, reason === "new-screens" ? 0 : 1)
         }
         function onStreamSetupRequired(hostId, hostName, reason) {
             displaySetupDialog.openFor(hostId, hostName, true, "", reason)
@@ -87,8 +90,8 @@ Item {
         property string hostName: ""
         property bool connectAfter: false
         property string reason: ""
-        property var setup: ({})
-        property var modes: []
+        // DisplaySetup.hostSummary: mode (follow, custom, legacy), summary.
+        property var screens: ({})
         property string streamReason: ""
         property var stream: ({})
         title: qsTr("Settings for %1").arg(hostName)
@@ -99,24 +102,20 @@ Item {
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
 
-        function modeLabel(mode) {
-            return mode.replace("x", "×")
-        }
-
         function openFor(hostId, hostName, connectAfter, reason, streamReason) {
             displaySetupDialog.streamReason = streamReason || ""
             displaySetupDialog.hostId = hostId
             displaySetupDialog.hostName = hostName
             displaySetupDialog.connectAfter = connectAfter
             displaySetupDialog.reason = reason
-            displaySetupDialog.setup = RemoteBroker.displaySetup(hostId)
-            displaySetupDialog.modes = displaySetupDialog.setup.virtualModes
-            setupLayout.currentIndex = displaySetupDialog.setup.layoutChoice
-            setupMode1.currentIndex = Math.max(0, displaySetupDialog.modes.indexOf(displaySetupDialog.setup.virtualMode1))
-            setupMode2.currentIndex = Math.max(0, displaySetupDialog.modes.indexOf(displaySetupDialog.setup.virtualMode2))
-            setupScaling.currentIndex = displaySetupDialog.setup.scalingChoice
+            displaySetupDialog.loadScreens()
             displaySetupDialog.loadStream()
             displaySetupDialog.open()
+        }
+
+        function loadScreens() {
+            screens = DisplaySetup.hostSummary(hostId)
+            screensFollow.checked = screens.mode !== "custom"
         }
 
         function loadStream() {
@@ -153,13 +152,8 @@ Item {
         }
 
         onAccepted: {
-            var saved = RemoteBroker.saveDisplaySetup(hostId, setupLayout.currentIndex,
-                                                      modes[setupMode1.currentIndex],
-                                                      modes[setupMode2.currentIndex],
-                                                      setupScaling.currentIndex)
-            if (!saved) {
-                remoteView.errorText = qsTr("That display setup is not supported.")
-                return
+            if (screens.mode !== "legacy" || screensCustom.checked !== (screens.mode === "custom")) {
+                DisplaySetup.setHostMode(hostId, screensCustom.checked ? "custom" : "follow")
             }
             if (!saveStream()) {
                 remoteView.errorText = qsTr("Those stream settings are not supported.")
@@ -175,100 +169,55 @@ Item {
             anchors.fill: parent
             spacing: 10
 
+            // ------------------------------------------------------- screens
             Label {
-                Layout.fillWidth: true
-                visible: displaySetupDialog.connectAfter && !displaySetupDialog.setup.configured
-                text: qsTr("Choose how %1 should present its desktop to this computer. You can change it later with Settings….").arg(displaySetupDialog.hostName)
-                wrapMode: Text.Wrap
+                text: qsTr("Screens")
+                font.bold: true
+                font.pointSize: 13
             }
             Label {
                 Layout.fillWidth: true
-                visible: displaySetupDialog.reason !== ""
-                text: qsTr("Your saved setup no longer fits this computer's screens: %1").arg(displaySetupDialog.reason)
-                color: theme.warning
-                wrapMode: Text.Wrap
-            }
-            Label {
-                Layout.fillWidth: true
-                text: (Qt.platform.os === "osx" ? qsTr("This Mac: %1") : qsTr("This computer: %1"))
-                      .arg(displaySetupDialog.setup.clientResolution || "")
+                text: displaySetupDialog.screens.summary || ""
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }
-
-            Label {
-                text: qsTr("Layout")
-                font.bold: true
-            }
-            PlankComboBox {
-                id: setupLayout
+            RowLayout {
                 Layout.fillWidth: true
-                model: [
-                    qsTr("Match my display(s)"),
-                    qsTr("Workstation's physical displays"),
-                    qsTr("One virtual display"),
-                    qsTr("Two virtual displays (side by side)")
-                ]
-                delegate: ItemDelegate {
-                    width: setupLayout.width
-                    text: modelData
-                    enabled: index !== 0 || displaySetupDialog.setup.canMatchClient === true
-                    highlighted: setupLayout.highlightedIndex === index
+                spacing: theme.spaceMedium
+
+                ColumnLayout {
+                    spacing: 0
+                    Layout.fillWidth: true
+
+                    RadioButton {
+                        id: screensFollow
+                        text: qsTr("Use my display setup")
+                    }
+                    RadioButton {
+                        id: screensCustom
+                        text: qsTr("Custom for this workstation")
+                        checked: !screensFollow.checked
+                    }
+                    Label {
+                        visible: displaySetupDialog.screens.mode === "legacy"
+                        Layout.fillWidth: true
+                        text: qsTr("This workstation uses a fixed layout. Saving a display setup for it replaces the fixed layout.")
+                        wrapMode: Text.Wrap
+                        opacity: 0.72
+                        font.pointSize: 10
+                    }
                 }
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: setupLayout.currentIndex === 0 && displaySetupDialog.setup.canMatchClient === true
-                text: qsTr("Match my display → %1").arg(displaySetupDialog.setup.matchClientSummary || "")
-                wrapMode: Text.Wrap
-                opacity: 0.72
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: displaySetupDialog.setup.canMatchClient !== true
-                text: qsTr("Matching is unavailable: %1").arg(displaySetupDialog.setup.matchClientReason || "")
-                wrapMode: Text.Wrap
-                opacity: 0.72
-            }
-
-            Label {
-                text: setupLayout.currentIndex === 3 ? qsTr("Virtual display 1 resolution") : qsTr("Virtual display resolution")
-                font.bold: true
-                opacity: setupLayout.currentIndex >= 2 ? 1.0 : 0.5
-            }
-            PlankComboBox {
-                id: setupMode1
-                Layout.fillWidth: true
-                enabled: setupLayout.currentIndex >= 2
-                model: displaySetupDialog.modes.map(displaySetupDialog.modeLabel)
-            }
-
-            Label {
-                visible: setupLayout.currentIndex === 3
-                text: qsTr("Virtual display 2 resolution")
-                font.bold: true
-            }
-            PlankComboBox {
-                id: setupMode2
-                visible: setupLayout.currentIndex === 3
-                Layout.fillWidth: true
-                model: displaySetupDialog.modes.map(displaySetupDialog.modeLabel)
-            }
-
-            Label {
-                text: qsTr("Scaling")
-                font.bold: true
-            }
-            PlankComboBox {
-                id: setupScaling
-                Layout.fillWidth: true
-                model: [qsTr("Native (1:1 pixels)"), qsTr("Scale to fit my screen")]
-            }
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Native shows one workstation pixel per screen pixel. Scale to fit shows the whole workstation desktop on this screen.")
-                wrapMode: Text.Wrap
-                opacity: 0.72
+                Button {
+                    text: qsTr("Screens…")
+                    Layout.alignment: Qt.AlignTop
+                    onClicked: {
+                        var hostId = displaySetupDialog.hostId
+                        var hostName = displaySetupDialog.hostName
+                        displaySetupDialog.close()
+                        screensDialog.openFor(hostId, hostName, "", false,
+                                              displaySetupDialog.screens.mode === "legacy" ? 1 : 0)
+                    }
+                }
             }
 
             // ------------------------------------------------ stream quality

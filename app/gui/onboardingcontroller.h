@@ -25,7 +25,9 @@ class StreamingPreferences;
 class OnboardingController : public QObject
 {
     Q_OBJECT
-    // welcome, credentials, newPassword, authenticator, nextCode, passkey, done
+    // welcome, credentials, newPassword, authenticator, nextCode, passkey,
+    // displays (client only: shown instead of done while this computer's
+    // screens have no display setup yet), done
     Q_PROPERTY(QString step READ step NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString busyText READ busyText NOTIFY changed)
@@ -64,6 +66,8 @@ public:
     Q_INVOKABLE void copySecret();
     Q_INVOKABLE void setUpTouchId();
     Q_INVOKABLE void skipTouchId();
+    // Leaves the displays step (saved or skipped) for done.
+    Q_INVOKABLE void finishDisplays();
     // Leave to the normal sign-in (keeps signInUsername for the prefill).
     Q_INVOKABLE void leaveToSignIn();
     // The wizard view is going away: end any conversation, forget secrets.
@@ -97,6 +101,7 @@ private:
     void endConversation();
     void markCompleted();
     bool touchIdPossible() const;
+    static bool displaysNeedSetup();
 
     QPointer<RemoteBroker> m_Broker;
     std::shared_ptr<PlankEnrollment::Conversation> m_Conversation;
@@ -114,4 +119,6 @@ private:
     QString m_QrModules;
     bool m_PasskeyWarning = false;
     QString m_SignInUsername;
+    // Done was reached and the screens still need a display setup.
+    bool m_DisplaysPending = false;
 };

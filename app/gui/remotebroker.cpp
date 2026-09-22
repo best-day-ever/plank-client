@@ -3,6 +3,8 @@
 #include "backend/brokersessionstore.h"
 #include "backend/clientdisplayprobe.h"
 #include "backend/computermanager.h"
+#include "backend/displayplanner.h"
+#include "backend/displayprofile.h"
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
 #include "backend/onboardingstate.h"
@@ -829,24 +831,50 @@ void RemoteBroker::connectToHost(const QString& hostId)
     if (!signedIn() || busy() || !PlankBroker::isHostId(hostId)) return;
     const QString hostName = hostNameFor(hostId);
     QSettings settings;
-    RemoteDisplaySetup::Setup display = RemoteDisplaySetup::load(settings, hostId);
-    if (!display.configured) {
-        emit displaySetupRequired(hostId, hostName, QString());
-        return;
-    }
     const QStringList modes = hostVirtualModes(settings, hostId);
-    QString matchReason;
-    if (!RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display,
-                                                 ClientDisplayProbe::probe(), &matchReason, modes)) {
-        // Screens changed since the setup was saved (e.g. a third monitor).
-        emit displaySetupRequired(hostId, hostName, matchReason);
-        return;
-    }
-    const QString unsupported = RemoteDisplaySetup::unsupportedModeReason(display, modes);
-    if (!unsupported.isEmpty()) {
-        // A saved virtual mode this workstation refused on its last connect.
-        emit displaySetupRequired(hostId, hostName, unsupported);
-        return;
+    const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
+    const QString fingerprint = ClientDisplayProbe::fingerprint(displays);
+    const RemoteStreamSetup::Capabilities cached = RemoteStreamSetup::loadCapabilities(settings, hostId);
+    const bool macHost = cached.known && cached.platform == RemoteStreamSetup::MacPlatform;
+    const DisplayProfile::Resolved profile = DisplayProfile::resolveForHost(settings, hostId, fingerprint);
+    RemoteDisplaySetup::Setup display;
+    if (macHost || profile.source == DisplayProfile::Resolved::Legacy) {
+        // A fixed layout (older workstations, remote Macs): the settings
+        // saved for this workstation, as before display profiles.
+        display = RemoteDisplaySetup::load(settings, hostId);
+        if (!display.configured) {
+            emit displaySetupRequired(hostId, hostName, QString());
+            return;
+        }
+        QString matchReason;
+        if (!RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display, displays, &matchReason, modes)) {
+            // Screens changed since the setup was saved (e.g. a third monitor).
+            emit displaySetupRequired(hostId, hostName, matchReason);
+            return;
+        }
+        const QString unsupported = RemoteDisplaySetup::unsupportedModeReason(display, modes);
+        if (!unsupported.isEmpty()) {
+            // A saved virtual mode this workstation refused on its last connect.
+            emit displaySetupRequired(hostId, hostName, unsupported);
+            return;
+        }
+    } else {
+        if (profile.source == DisplayProfile::Resolved::None) {
+            // Screens this computer has no display setup for yet.
+            if (!DisplayProfile::autoAccept(settings)) {
+                emit displaySetupRequired(hostId, hostName, QStringLiteral("new-screens"));
+                return;
+            }
+            DisplayProfile::saveGlobal(settings, fingerprint, ClientDisplayProbe::label(displays),
+                                       DisplayPlanner::proposal(displays));
+            settings.sync();
+        }
+        // Match client: the Session plans it from the display profile. A
+        // Mac workstation seen for the first time takes mode 1 as its desktop.
+        display = RemoteDisplaySetup::proposal(displays, modes);
+        display.configured = true;
+        display.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+        display.scalingMode = QString::fromLatin1(NvOutputTopology::ScaledSpanMode);
     }
     StreamInputs stream;
     stream.host = RemoteStreamSetup::loadHost(settings, hostId);
