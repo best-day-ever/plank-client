@@ -3530,8 +3530,10 @@ bool Session::startConnectionAsync(bool reconnecting,
         } catch (const GfeHttpResponseException& e) {
             const QString statusMessage = QString::fromUtf8(e.getStatusMessage());
             const QString arrangementError = http->displayArrangementError();
-            if (m_Computer->plankAuthentication && !m_ResolvedArrangement.isEmpty() &&
-                    !arrangementError.isEmpty() && (e.getStatusCode() == 400 || e.getStatusCode() == 409)) {
+            if (m_Computer->plankAuthentication && !arrangementError.isEmpty() &&
+                    (e.getStatusCode() == 400 || e.getStatusCode() == 409)) {
+                // Also a legacy layout's stream the host's encoder cannot
+                // carry (400 canvas_too_large with the bit negotiated).
                 // The workstation cannot show this arrangement, now or ever:
                 // say why instead of waiting or retrying.
                 NvOutputTopology topology;
@@ -3541,7 +3543,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                 }
                 const QString error = DisplayPlanner::errorText(arrangementError, topology.displayCapabilities);
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "PLANK display arrangement refused (%d %s): %s",
-                             e.getStatusCode(), qPrintable(arrangementError), qPrintable(m_ResolvedArrangement));
+                             e.getStatusCode(), qPrintable(arrangementError),
+                             qPrintable(m_ResolvedArrangement.isEmpty() ? m_ResolvedHostLayout : m_ResolvedArrangement));
                 if (reconnecting) {
                     m_ReconnectCancelled.store(true);
                 }
@@ -3574,7 +3577,9 @@ bool Session::startConnectionAsync(bool reconnecting,
             }
             else if (displayTransitionStarted) {
                 constexpr int RetryIntervalMs = 500;
-                constexpr int MaximumWaitMs = 45000;
+                // A host keeps a pending arrangement for up to 120 s (a
+                // greeter restart may be part of it); layouts take 45 s at most.
+                const int MaximumWaitMs = m_ResolvedArrangement.isEmpty() ? 45000 : 120000;
                 constexpr int CancellationPollMs = 50;
                 bool started = false;
 
@@ -3653,10 +3658,10 @@ bool Session::startConnectionAsync(bool reconnecting,
                             emit sessionCleanupWaitChanged(false, QString());
                             qWarning() << "PLANK display arrangement failed on the host:"
                                        << topology.arrangementReason;
-                            emit displayLaunchError(
-                                        tr("The workstation could not apply the display layout (%1). It went back to its previous screens.")
-                                            .arg(topology.arrangementReason.isEmpty() ?
-                                                     tr("no reason given") : topology.arrangementReason));
+                            emit displayLaunchError(DisplayPlanner::errorText(
+                                        topology.arrangementReason.isEmpty() ? QStringLiteral("apply_failed") :
+                                                                               topology.arrangementReason,
+                                        topology.displayCapabilities));
                             return false;
                         }
                         if (!topologyMatchesRequest(topology)) {
@@ -3668,8 +3673,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                         startApp();
                         started = true;
                     } catch (const GfeHttpResponseException& retryError) {
-                        if (!m_ResolvedArrangement.isEmpty() &&
-                                !http->displayArrangementError().isEmpty() &&
+                        if (!http->displayArrangementError().isEmpty() &&
                                 (retryError.getStatusCode() == 400 || retryError.getStatusCode() == 409)) {
                             // Refused while waiting: stop at once with the reason.
                             m_WaitingForSessionCleanup.store(false);
@@ -3721,7 +3725,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                 if (!started) {
                     if (!reconnecting) {
                         emit displayLaunchError(
-                                    tr("The workstation display layout did not become ready within 45 seconds."));
+                                    tr("The workstation display layout did not become ready within %n second(s).",
+                                       nullptr, MaximumWaitMs / 1000));
                     }
                     return false;
                 }
