@@ -1,5 +1,6 @@
 QT += core testlib
-CONFIG += testcase c++17
+CONFIG += console testcase c++17
+CONFIG -= app_bundle
 TEMPLATE = app
 
 SOURCES += \
@@ -10,5 +11,3 @@ HEADERS += ../../app/streaming/plankpresentation.h
 
 INCLUDEPATH += ../../app
 
-PKGCONFIG += sdl3
-CONFIG += link_pkgconfig

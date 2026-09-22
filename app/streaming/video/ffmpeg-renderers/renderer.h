@@ -265,6 +265,15 @@ public:
         return false;
     }
 
+    // True when a single-output renderer letterboxes every frame against the
+    // window's live drawable size (SDL_GetWindowSizeInPixels or the live
+    // render output size) instead of the presentation layout captured at
+    // initialize(). Input then maps against the same live drawable, so it
+    // stays aligned across resizes and asynchronous fullscreen transitions.
+    virtual bool letterboxesAgainstLiveDrawable() {
+        return false;
+    }
+
     virtual void prepareToRender() {
         // Allow renderers to perform any final preparations for
         // rendering after they have been selected to render. Such

@@ -169,6 +169,10 @@ public:
 
     static void postTabletCursorActivationEvent();
 
+    // Called by the decoder thread when the size of the decoded frames
+    // changes; input is re-pointed at that size on the main thread.
+    static void notifyDecodedFrameSize(int width, int height);
+
     void updateRenderedStats(float fps, float videoMbps)
     {
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
@@ -489,6 +493,7 @@ private:
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
     std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
     std::atomic<int> m_ConfirmedBitratePeakKbps {0};
+    std::atomic<std::uint64_t> m_DecodedFrameSize {0};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

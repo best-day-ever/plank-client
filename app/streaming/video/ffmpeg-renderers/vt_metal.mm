@@ -818,6 +818,13 @@ public:
         return unhandledStateFlags == 0;
     }
 
+    bool letterboxesAgainstLiveDrawable() override
+    {
+        // updateVideoRegionSizeForFrame() letterboxes each frame against the
+        // live SDL_GetWindowSizeInPixels() drawable.
+        return true;
+    }
+
 private:
     bool m_HwAccel;
     SDL_Window* m_Window;

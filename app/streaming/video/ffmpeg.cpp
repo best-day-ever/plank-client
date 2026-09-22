@@ -126,6 +126,12 @@ bool FFmpegVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
     return m_FrontendRenderer->notifyWindowChanged(info);
 }
 
+bool FFmpegVideoDecoder::letterboxesAgainstLiveDrawable()
+{
+    return m_FrontendRenderer != nullptr &&
+            m_FrontendRenderer->letterboxesAgainstLiveDrawable();
+}
+
 bool FFmpegVideoDecoder::suspendForReconnect()
 {
     if (m_TestOnly || m_DecoderThread == nullptr || m_VideoDecoderCtx == nullptr) {
@@ -1931,6 +1937,17 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     }
                     SDL_assert(m_FrameInfoQueue.size() == m_FramesIn - m_FramesOut);
                     m_FramesOut++;
+
+                    // The renderer letterboxes these frames; input must map
+                    // against the same size (the negotiated size can differ).
+                    if (!m_TestOnly &&
+                            (frame->width != m_LastDecodedFrameWidth ||
+                             frame->height != m_LastDecodedFrameHeight)) {
+                        m_LastDecodedFrameWidth = frame->width;
+                        m_LastDecodedFrameHeight = frame->height;
+                        Session::notifyDecodedFrameSize(frame->width,
+                                                        frame->height);
+                    }
 
                     // Attach HDR metadata to the frame if it's not already present. We will defer to
                     // any metadata contained in the bitstream itself since that is guaranteed to be

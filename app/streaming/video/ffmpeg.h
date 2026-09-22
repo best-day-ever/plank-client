@@ -30,6 +30,7 @@ public:
     virtual void renderFrameOnMainThread() override;
     virtual void setHdrMode(bool enabled) override;
     virtual bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info) override;
+    virtual bool letterboxesAgainstLiveDrawable() override;
     virtual bool suspendForReconnect() override;
     virtual bool resumeAfterReconnect() override;
 
@@ -128,6 +129,9 @@ private:
     bool m_IdentityGbrEnabled;
     bool m_NeedsSpsFixup;
     bool m_TestOnly;
+    // Decoder-thread only: last decoded frame size reported to the session.
+    int m_LastDecodedFrameWidth = 0;
+    int m_LastDecodedFrameHeight = 0;
     SDL_Thread* m_DecoderThread;
     SDL_AtomicInt m_DecoderThreadShouldQuit;
 
