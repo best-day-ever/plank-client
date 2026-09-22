@@ -9,6 +9,12 @@
 #include "streaming/planktoolbar.h"
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
+#ifdef Q_OS_MACOS
+#include "macclipboardsync.h"
+#ifdef PLANK_TRANSPORT
+#include "macfileclipboard.h"
+#endif
+#endif
 #include "backend/computermanager.h"
 #include "backend/nvaddress.h"
 #ifdef Q_OS_MACOS
@@ -57,6 +63,11 @@
 #define SDL_CODE_PLANK_TABLET_CURSOR 108
 #define SDL_CODE_PLANK_CURSOR_POSITION 109
 #define SDL_CODE_PLANK_REPLANK_COMPLETE 110
+#define SDL_CODE_PLANK_CLIPBOARD 111
+#define SDL_CODE_PLANK_CLIPBOARD_POLL 112
+#define SDL_CODE_PLANK_FILE_CLIPBOARD_READY 113
+#define SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH 114
+#define SDL_CODE_PLANK_DECODED_FRAME_SIZE 115
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -77,6 +88,7 @@
 #include "plank_transport.h"
 #include "plank_transport_control.h"
 #include "plank_transport_event.h"
+#include "plank_transport_input.h"
 #include "plank_transport_setup.h"
 #endif
 
@@ -331,6 +343,22 @@ void Session::clCursorPosition(const unsigned char* data, unsigned int length)
         event.user.code = SDL_CODE_PLANK_CURSOR_POSITION;
         SDL_PushEvent(&event);
     }
+}
+
+void Session::notifyDecodedFrameSize(int width, int height)
+{
+    Session* session = s_ActiveSession;
+    if (session == nullptr || width <= 0 || height <= 0) {
+        return;
+    }
+    session->m_DecodedFrameSize.store(
+                (static_cast<std::uint64_t>(width) << 32) |
+                static_cast<std::uint32_t>(height),
+                std::memory_order_relaxed);
+    SDL_Event event = {};
+    event.type = SDL_EVENT_USER;
+    event.user.code = SDL_CODE_PLANK_DECODED_FRAME_SIZE;
+    SDL_PushEvent(&event);
 }
 
 void Session::postTabletCursorActivationEvent()
@@ -808,6 +836,7 @@ bool Session::startPlankTransportDataPlane(quint16 port,
     config.idle_timeout_ms = 30000;
     config.keep_alive_interval_ms = 5000;
     config.max_udp_payload_size = quicUdpPayloadMtu;
+    config.file_clipboard_enabled = m_FileClipboardMode != QStringLiteral("off");
     qInfo() << "Using the negotiated fixed maximum QUIC UDP payload:"
             << config.max_udp_payload_size << "bytes";
     config.remote_address = remoteAddressUtf8.constData();
@@ -1010,6 +1039,8 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
                 QStringLiteral("host_feature_flags")).toInt();
     const int referenceFrameInvalidation = response.value(
                 QStringLiteral("reference_frame_invalidation")).toInt(-1);
+    const QString fileClipboardMode = response.value(
+                QStringLiteral("file_clipboard_mode")).toString();
     if (responseVideoFormat != negotiatedVideoFormat || sampleRate != 48000 ||
             responseChannels != audioChannels || responseChannels <= 0 ||
             responseChannels > AUDIO_CONFIGURATION_MAX_CHANNEL_COUNT ||
@@ -1018,6 +1049,7 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
             responsePacketDuration <= 0 || responsePacketDuration > 120 ||
             (hostFeatureFlags & LI_FF_LOCAL_CURSOR) == 0 ||
             (referenceFrameInvalidation != 0 && referenceFrameInvalidation != 1) ||
+            fileClipboardMode != m_FileClipboardMode ||
             mapping.size() != responseChannels) {
         errorMessage = tr("The host returned unsupported native audio or video values.");
         return false;
@@ -1134,6 +1166,9 @@ void Session::startPlankTransportMediaReceivers()
     m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
     m_LastPlankVideoReceived.store(0);
     m_PlankTransportReceiversStopping.store(false);
+#ifdef Q_OS_MACOS
+    startClipboardSync();
+#endif
     m_PlankTransportVideoThread = std::thread([this]() {
         plankTransportVideoReceiveLoop();
     });
@@ -1149,6 +1184,9 @@ void Session::startPlankTransportMediaReceivers()
 
 void Session::stopPlankTransportMediaReceivers()
 {
+#ifdef Q_OS_MACOS
+    stopClipboardPollTimer();
+#endif
     m_PlankTransportReceiversStopping.store(true);
     if (m_PlankTransportVideoThread.joinable()) {
         m_PlankTransportVideoThread.join();
@@ -1159,6 +1197,9 @@ void Session::stopPlankTransportMediaReceivers()
     if (m_PlankTransportDataThread.joinable()) {
         m_PlankTransportDataThread.join();
     }
+#ifdef Q_OS_MACOS
+    stopClipboardSync();
+#endif
 }
 
 void Session::plankTransportVideoReceiveLoop()
@@ -1426,6 +1467,21 @@ void Session::plankTransportDataReceiveLoop()
             LiNotifyPlankCursorPosition(
                         event.payload, event.payload_size);
             break;
+        case PLANK_TRANSPORT_EVENT_CLIPBOARD_OFFER:
+            if (event.payload_size < sizeof(PLANK_CLIPBOARD_WIRE_HEADER) ||
+                    event.payload_size > sizeof(PLANK_CLIPBOARD_WIRE_HEADER) +
+                        PLANK_CLIPBOARD_MAX_EVENT_CHUNK_SIZE) {
+                LiNotifyPlankHostTermination(-1);
+                return;
+            }
+#ifdef Q_OS_MACOS
+            if (m_ClipboardSync && clipboardSyncEnabled() &&
+                    !m_ClipboardSync->handleHostOffer(event.payload, event.payload_size)) {
+                LiNotifyPlankHostTermination(-1);
+                return;
+            }
+#endif
+            break;
         default:
             qWarning() << "Rejected unexpected native KyProto event type"
                        << event.type;
@@ -1483,6 +1539,126 @@ int Session::plankTransportNativeInputSender(void* context, uint8_t type,
                 static_cast<PlankTransportNativeEndpoint*>(context), type,
                 payload, payloadLength);
 }
+#endif
+
+#ifdef Q_OS_MACOS
+bool Session::clipboardSyncEnabled() const
+{
+    return m_Computer != nullptr &&
+            (!(m_Computer->plankFeatureFlags & NvOutputTopology::FixedCaptureFeature) || m_MacClipboardNegotiated) &&
+            (m_Computer->plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0;
+}
+
+void Session::startClipboardSync()
+{
+#ifdef PLANK_TRANSPORT
+    if (!clipboardSyncEnabled() || m_PlankTransportEndpoint == nullptr) {
+        return;
+    }
+    if (!m_ClipboardSync) {
+        m_ClipboardSync = std::make_unique<MacClipboardSync>(
+                    [this](const std::uint8_t* payload, std::size_t size) {
+                        return plankTransportNativeInputSender(
+                                   m_PlankTransportEndpoint,
+                                   PLANK_TRANSPORT_INPUT_CLIPBOARD_OFFER,
+                                   payload,
+                                   size) == PLANK_TRANSPORT_OK;
+                    },
+                    [this] { return anyPresentationWindowFocused(); },
+                    [this] { return clipboardSyncEnabled(); },
+                    [] {
+                        SDL_Event event {};
+                        event.type = SDL_EVENT_USER;
+                        event.user.code = SDL_CODE_PLANK_CLIPBOARD;
+                        event.user.timestamp = SDL_GetTicks();
+                        if (!SDL_PushEvent(&event)) {
+                            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                                         "Unable to queue host clipboard offer: %s",
+                                         SDL_GetError());
+                            return false;
+                        }
+                        return true;
+                    });
+    }
+    m_ClipboardSync->start();
+#ifdef PLANK_TRANSPORT
+    if (m_FileClipboardMode != QStringLiteral("off") && !m_FileClipboard) {
+        m_FileClipboard = std::make_unique<MacFileClipboard>(
+                    m_PlankTransportEndpoint,
+                    m_FileClipboardMode.toStdString(),
+                    [] {
+                        SDL_Event event {};
+                        event.type = SDL_EVENT_USER;
+                        event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_READY;
+                        event.user.timestamp = SDL_GetTicks();
+                        return SDL_PushEvent(&event);
+                    },
+                    [] {
+                        SDL_Event event {};
+                        event.type = SDL_EVENT_USER;
+                        event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH;
+                        event.user.timestamp = SDL_GetTicks();
+                        return SDL_PushEvent(&event);
+                    });
+    }
+    if (m_FileClipboard) m_FileClipboard->start();
+#endif
+    qInfo() << "Started PLANK clipboard sync";
+#endif
+}
+
+void Session::stopClipboardSync()
+{
+    stopClipboardPollTimer();
+    if (m_ClipboardSync) {
+        m_ClipboardSync->stop();
+    }
+#ifdef PLANK_TRANSPORT
+    if (m_FileClipboard) {
+        m_FileClipboard->stop();
+        m_FileClipboard.reset();
+    }
+#endif
+}
+
+#ifdef PLANK_TRANSPORT
+bool Session::beginFileClipboardPasteOnMainThread()
+{
+    return m_FileClipboard != nullptr && anyPresentationWindowFocused() &&
+            m_FileClipboard->beginPasteOnMainThread();
+}
+
+void Session::injectRemoteFilePasteOnMainThread()
+{
+    constexpr short LeftControl = 0xA2;
+    constexpr short V = 0x56;
+    LiSendKeyboardEvent(LeftControl, KEY_ACTION_DOWN, MODIFIER_CTRL);
+    LiSendKeyboardEvent(V, KEY_ACTION_DOWN, MODIFIER_CTRL);
+    LiSendKeyboardEvent(V, KEY_ACTION_UP, MODIFIER_CTRL);
+    LiSendKeyboardEvent(LeftControl, KEY_ACTION_UP, 0);
+}
+#endif
+
+void Session::queueClipboardPollEvent()
+{
+    ClipboardPollTimer::queue(SDL_CODE_PLANK_CLIPBOARD_POLL);
+}
+
+void Session::startClipboardPollTimer()
+{
+    if (m_ClipboardSync != nullptr &&
+            !m_ClipboardPollTimer.start(SDL_CODE_PLANK_CLIPBOARD_POLL)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to start clipboard poll timer: %s",
+                    SDL_GetError());
+    }
+}
+
+void Session::stopClipboardPollTimer()
+{
+    m_ClipboardPollTimer.stop();
+}
+
 #endif
 
 void Session::clearPlankReconnectCredentials()
@@ -2686,6 +2862,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     QString acceptedCaptureSource;
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
+    QString acceptedFileClipboardMode {QStringLiteral("off")};
     const bool macCapture = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
     MacPreviewLaunch::Reply macLaunch;
     quint32 routeInterfaceMtu = 0;
@@ -2787,6 +2964,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                     m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
                 }
                 macLaunch = http->startMacPreview(topology, pin, m_StreamConfig.bitrate, quicUdpPayloadMtu);
+                m_MacClipboardNegotiated = macLaunch.clipboard;
                 plankTransportPort = http->controlPort();
                 plankTransportCertificateSha256 = pin;
                 plankTransportToken = QString::fromLatin1(macLaunch.transportToken);
@@ -2795,6 +2973,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 acceptedCaptureSource = captureSource;
                 acceptedEncoderBackend = encoderBackend;
                 acceptedEncodingMode = encodingMode;
+                acceptedFileClipboardMode = QStringLiteral("off");
                 return;
             }
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
@@ -2821,7 +3000,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                           plankTransportToken,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
-                          acceptedEncodingMode);
+                          acceptedEncodingMode,
+                          acceptedFileClipboardMode);
         };
         try {
             startApp();
@@ -3151,6 +3331,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     LiSetPlankNativeControlSender(nullptr, nullptr);
     LiSetPlankNativeInputSender(nullptr, nullptr);
 #endif
+    m_FileClipboardMode = acceptedFileClipboardMode;
     if (!startPlankTransportDataPlane(plankTransportPort,
                                  plankTransportCertificateSha256,
                                  plankTransportToken,
@@ -3724,6 +3905,11 @@ bool Session::finishPlankReconnect(
     if (state.inputCaptureWasActive) {
         m_InputHandler->setCaptureActive(true);
     }
+#ifdef Q_OS_MACOS
+    // Receiver teardown removes this timer on every reconnect attempt. Resume
+    // periodic polling only after success, back on the SDL/AppKit main thread.
+    startClipboardPollTimer();
+#endif
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "PLANK reconnect completed (%s renderer)",
                 resumedRenderer ? "retained" : "recreated");
@@ -3993,6 +4179,10 @@ void Session::execInternal()
         QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
         return;
     }
+
+#ifdef Q_OS_MACOS
+    startClipboardPollTimer();
+#endif
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
@@ -4352,6 +4542,46 @@ void Session::execInternal()
                 m_InputHandler->applyPendingRemoteCursorPosition();
             }
             return true;
+        case SDL_CODE_PLANK_DECODED_FRAME_SIZE:
+            if (m_InputHandler != nullptr) {
+                const std::uint64_t size =
+                        m_DecodedFrameSize.load(std::memory_order_relaxed);
+                m_InputHandler->updateDecodedStreamDimensions(
+                            static_cast<int>(size >> 32),
+                            static_cast<int>(size & 0xffffffffu));
+            }
+            return true;
+        case SDL_CODE_PLANK_CLIPBOARD:
+#ifdef Q_OS_MACOS
+            if (m_ClipboardSync != nullptr) {
+                m_ClipboardSync->applyPendingHostTextOnMainThread();
+            }
+#endif
+            return true;
+        case SDL_CODE_PLANK_CLIPBOARD_POLL:
+#ifdef Q_OS_MACOS
+            if (m_ClipboardSync != nullptr) {
+                m_ClipboardSync->pollLocalClipboardOnMainThread();
+            }
+#ifdef PLANK_TRANSPORT
+            if (m_FileClipboard != nullptr) {
+                m_FileClipboard->pollLocalClipboardOnMainThread();
+            }
+#endif
+#endif
+            return true;
+        case SDL_CODE_PLANK_FILE_CLIPBOARD_READY:
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+            injectRemoteFilePasteOnMainThread();
+#endif
+            return true;
+        case SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH:
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+            if (m_FileClipboard != nullptr) {
+                m_FileClipboard->publishPendingHostFilesOnMainThread();
+            }
+#endif
+            return true;
         default:
             return false;
         }
@@ -4555,6 +4785,11 @@ void Session::execInternal()
                 if (m_PlankToolbar) {
                     m_PlankToolbar->notifyWindowChanged();
                 }
+                if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                    m_InputHandler->notifyWindowGeometryChanged(
+                                windowForEvent(event.window.windowID),
+                                "pixel-size");
+                }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 if (!anyPresentationWindowFocused()) {
@@ -4566,6 +4801,9 @@ void Session::execInternal()
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 m_InputHandler->notifyFocusGained();
+#ifdef Q_OS_MACOS
+                queueClipboardPollEvent();
+#endif
                 break;
             default:
                 break;
@@ -4644,6 +4882,10 @@ void Session::execInternal()
         case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
             if (SDL_Window* window = windowForEvent(event.window.windowID)) {
                 MacWindow::logGeometry(window);
+                m_InputHandler->notifyWindowGeometryChanged(
+                            window,
+                            event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ?
+                                "enter-fullscreen" : "leave-fullscreen");
                 m_InputHandler->updateKeyboardGrabState();
                 if (m_PlankToolbar) {
                     m_PlankToolbar->notifyWindowChanged();
@@ -4669,6 +4911,10 @@ void Session::execInternal()
                 MacWindow::logGeometry(eventWindow);
             }
 #endif
+            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                m_InputHandler->notifyWindowGeometryChanged(eventWindow,
+                                                            "pixel-size");
+            }
             if (m_PlankToolbar && eventWindow == m_Window &&
                     event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
                 m_PlankToolbar->notifyWindowChanged();
@@ -4691,6 +4937,9 @@ void Session::execInternal()
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
+#ifdef Q_OS_MACOS
+                queueClipboardPollEvent();
+#endif
                 break;
             case SDL_EVENT_WINDOW_MOUSE_LEAVE:
                 m_InputHandler->notifyMouseLeave();
@@ -4861,6 +5110,13 @@ void Session::execInternal()
                     emit displayLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
                     goto DispatchDeferredCleanup;
                 }
+
+                // Input maps against what this renderer actually letterboxes
+                // against: the live drawable, or the layout it copied.
+                m_InputHandler->setLiveDrawableGeometry(
+                            m_VideoDecoder->letterboxesAgainstLiveDrawable());
+                m_InputHandler->notifyWindowGeometryChanged(m_Window,
+                                                            "renderer");
 
                 // As of SDL 2.0.12, SDL_RecreateWindow() doesn't carry over mouse capture
                 // or mouse hiding state to the new window. By capturing after the decoder

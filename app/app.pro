@@ -487,7 +487,15 @@ macx {
         streaming/macquitshortcut.h \
         streaming/macwindow.h \
         streaming/macdisplaygeometry.h \
-        streaming/video/ffmpeg-renderers/vt.h
+        streaming/video/ffmpeg-renderers/vt.h \
+        streaming/macclipboardsync.h \
+        streaming/clipboardpolltimer.h \
+        streaming/plankclipboard.h
+    OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    contains(CONFIG, plank-transport) {
+        HEADERS += streaming/macfileclipboard.h
+        OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
+    }
 }
 embedded {
     message(Embedded build)

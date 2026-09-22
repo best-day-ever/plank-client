@@ -126,6 +126,12 @@ bool FFmpegVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
     return m_FrontendRenderer->notifyWindowChanged(info);
 }
 
+bool FFmpegVideoDecoder::letterboxesAgainstLiveDrawable()
+{
+    return m_FrontendRenderer != nullptr &&
+            m_FrontendRenderer->letterboxesAgainstLiveDrawable();
+}
+
 bool FFmpegVideoDecoder::suspendForReconnect()
 {
     if (m_TestOnly || m_DecoderThread == nullptr || m_VideoDecoderCtx == nullptr) {
@@ -160,6 +166,10 @@ bool FFmpegVideoDecoder::resumeAfterReconnect()
         return false;
     }
 
+    // The reconnect re-applied the negotiated size to input
+    // (Session::configurePlankLaunchGeometry); report the decoded size again
+    // on the first resumed frame even if it did not change.
+    m_DecodedFrameSizeTracker.reset();
     m_DecoderThread = SDL_CreateThread(FFmpegVideoDecoder::decoderThreadProcThunk,
                                        "FFDecoder", this);
     if (m_DecoderThread == nullptr) {
@@ -1931,6 +1941,18 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     }
                     SDL_assert(m_FrameInfoQueue.size() == m_FramesIn - m_FramesOut);
                     m_FramesOut++;
+
+                    // Renderers that fit the decoded frame size letterbox
+                    // these frames, so input must map against the same size
+                    // (the negotiated size can differ). Renderers that fit
+                    // the negotiated size keep input on it.
+                    if (!m_TestOnly &&
+                            m_DecodedFrameSizeTracker.shouldReport(
+                                frame->width, frame->height,
+                                m_FrontendRenderer->letterboxesDecodedFrameSize())) {
+                        Session::notifyDecodedFrameSize(frame->width,
+                                                        frame->height);
+                    }
 
                     // Attach HDR metadata to the frame if it's not already present. We will defer to
                     // any metadata contained in the bitstream itself since that is guaranteed to be
