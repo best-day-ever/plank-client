@@ -6,12 +6,17 @@ TEMPLATE = app
 SOURCES += \
     test_plankbroker.cpp \
     ../../app/backend/plankbrokerclient.cpp \
+    ../../app/backend/plankenrollment.cpp \
+    ../../app/backend/qrencoder.cpp \
     ../../app/backend/plankpasskey.cpp \
     ../../app/backend/outputtopology.cpp
 
 HEADERS += \
     ../../app/backend/plankbroker.h \
     ../../app/backend/plankbrokerclient.h \
+    ../../app/backend/plankenrollment.h \
+    ../../app/backend/qrencoder.h \
+    ../../app/backend/onboardingstate.h \
     ../../app/backend/plankhttp.h \
     ../../app/backend/remotedisplaysetup.h \
     ../../app/backend/remotestreamsetup.h \
