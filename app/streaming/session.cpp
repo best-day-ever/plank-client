@@ -162,7 +162,7 @@ void Session::clConnectionTerminated(int errorCode)
         s_ActiveSession->m_ReconnectCancelled.store(true);
         s_ActiveSession->m_UnexpectedTermination = false;
         emit s_ActiveSession->displayLaunchError(
-                    tr("This PLANK session was transferred to another client."));
+                    tr("This BDE fernweh session was transferred to another client."));
 
         SDL_Event event = {};
         event.type = SDL_EVENT_QUIT;
@@ -884,11 +884,11 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
 {
 #ifndef PLANK_TRANSPORT
     Q_UNUSED(sessionPort)
-    errorMessage = tr("Native PLANK session negotiation is unavailable.");
+    errorMessage = tr("Native BDE fernweh session negotiation is unavailable.");
     return false;
 #else
     if (m_PlankTransportEndpoint == nullptr) {
-        errorMessage = tr("The native PLANK transport is not connected.");
+        errorMessage = tr("The native BDE fernweh transport is not connected.");
         return false;
     }
 
@@ -925,7 +925,7 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
         tenBit = true;
         break;
     default:
-        errorMessage = tr("The selected PLANK video profile has no native negotiation mapping.");
+        errorMessage = tr("The selected BDE fernweh video profile has no native negotiation mapping.");
         return false;
     }
 
@@ -991,7 +991,7 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
             plank_transport_native_data_send(
                 m_PlankTransportEndpoint, packet.data(), packetSize) !=
                 PLANK_TRANSPORT_OK) {
-        errorMessage = tr("The native PLANK launch request could not be sent.");
+        errorMessage = tr("The native BDE fernweh launch request could not be sent.");
         return false;
     }
 
@@ -1088,7 +1088,7 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
                 static_cast<unsigned char>(channel);
     }
     if (LiSetPlankNativeSessionConfiguration(&nativeConfiguration) != 0) {
-        errorMessage = tr("The native PLANK session values were rejected locally.");
+        errorMessage = tr("The native BDE fernweh session values were rejected locally.");
         return false;
     }
 
@@ -1760,7 +1760,7 @@ bool Session::initialize()
     if (StreamingPreferences::isPlankNvenc420Profile(m_PlankVideoProfile) &&
             (m_Computer->plankFeatureFlags &
              NvOutputTopology::NvfbcNvenc420Feature) == 0) {
-        const QString error = tr("This workstation does not offer the NVENC 4:2:0 profiles yet. Choose another encoding profile or update PLANK on the workstation.");
+        const QString error = tr("This workstation does not offer the NVENC 4:2:0 profiles yet. Choose another encoding profile or update BDE fernweh on the workstation.");
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
         emit displayLaunchError(error);
         return false;
@@ -1959,7 +1959,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     m_SupportedVideoFormats.removeByMask(
                 ~m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport));
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("The selected PLANK encoding profile is not supported by both this host and client."));
+        emit displayLaunchError(tr("The selected BDE fernweh encoding profile is not supported by both this host and client."));
         return false;
     }
 
@@ -1983,7 +1983,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         }
     }
     if (m_SupportedVideoFormats.isEmpty()) {
-        emit displayLaunchError(tr("This client cannot decode the selected PLANK encoding profile."));
+        emit displayLaunchError(tr("This client cannot decode the selected BDE fernweh encoding profile."));
         return false;
     }
 
@@ -2924,7 +2924,7 @@ bool Session::configurePlankHostLayout()
     }
     for (const QString& mode : std::as_const(m_ResolvedVirtualModes)) {
         if (!NvOutputTopology::hostAcceptsVirtualMode(mode, hostFeatureFlags)) {
-            const QString error = tr("This workstation does not support %1 yet. Update PLANK on the workstation or choose another resolution.")
+            const QString error = tr("This workstation does not support %1 yet. Update BDE fernweh on the workstation or choose another resolution.")
                     .arg(QString(mode).replace(QLatin1Char('x'), QChar(0x00D7)));
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
             emit displayLaunchError(error);
@@ -3491,7 +3491,7 @@ bool Session::startConnectionAsync(bool reconnecting,
         const quint32 minimumMtu = PlankNetwork::MinimumQuicUdpPayloadMtu +
                 overhead + PlankNetwork::AutomaticPathSafetyMargin;
         if (routeInterfaceMtu && routeInterfaceMtu < minimumMtu) {
-            emit displayLaunchError(tr("The network interface MTU is %1 bytes. PLANK requires at least %2 bytes for %3, including protocol headers and its safety margin.")
+            emit displayLaunchError(tr("The network interface MTU is %1 bytes. BDE fernweh requires at least %2 bytes for %3, including protocol headers and its safety margin.")
                                     .arg(routeInterfaceMtu).arg(minimumMtu)
                                     .arg(routeIsIpv6 ? QStringLiteral("IPv6") : QStringLiteral("IPv4")));
         }
@@ -3802,7 +3802,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                     m_CanReconnect.store(false);
                     m_ReconnectCancelled.store(true);
                     emit displayLaunchError(
-                                tr("This PLANK session was transferred to another client."));
+                                tr("This BDE fernweh session was transferred to another client."));
                     qInfo() << "PLANK reconnect stopped because another client owns the active session";
                     return false;
                 }
@@ -3810,7 +3810,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                         (m_Computer->plankFeatureFlags &
                          NvOutputTopology::SessionTakeoverFeature) == 0) {
                     emit displayLaunchError(
-                                tr("The workstation has an active PLANK session that cannot be transferred."));
+                                tr("The workstation has an active BDE fernweh session that cannot be transferred."));
                     return false;
                 }
 
@@ -3818,7 +3818,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 m_ActiveSessionTakeoverDecision.store(0);
                 m_WaitingForActiveSessionTakeoverDecision.store(true);
                 emit activeSessionTakeoverRequested(
-                            tr("This workstation already has an active PLANK session. Disconnect the existing client and continue?"));
+                            tr("This workstation already has an active BDE fernweh session. Disconnect the existing client and continue?"));
                 while (m_ActiveSessionTakeoverDecision.load() == 0 &&
                        !m_ConnectionStartCancelled.load()) {
                     SDL_Delay(DecisionPollMs);
@@ -3982,7 +3982,7 @@ bool Session::startConnectionAsync(bool reconnecting,
         plankTransportToken.fill(QChar('\0'));
         if (!reconnecting) {
             emit displayLaunchError(
-                        tr("The experimental PLANK data plane could not be established."));
+                        tr("The experimental BDE fernweh data plane could not be established."));
         }
         return false;
     }
@@ -4042,7 +4042,7 @@ bool Session::startConnectionAsync(bool reconnecting,
         LiStopConnection();
         stopPlankTransportDataPlane();
         emit displayLaunchError(
-                    tr("This workstation does not support the required PLANK local cursor protocol."));
+                    tr("This workstation does not support the required BDE fernweh local cursor protocol."));
         return false;
     }
 
@@ -4927,7 +4927,7 @@ void Session::execInternal()
 #ifdef Q_OS_DARWIN
     std::string windowName = QString(m_Computer->name).toStdString();
 #else
-    std::string windowName = QString(m_Computer->name + " - PLANK").toStdString();
+    std::string windowName = QString(m_Computer->name + " - BDE fernweh").toStdString();
 #endif
 
     m_Window = SDL_CreateWindow(windowName.c_str(),

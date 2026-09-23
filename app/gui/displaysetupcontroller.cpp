@@ -78,7 +78,7 @@ DisplaySetupController::DisplaySetupController(QObject* parent)
     }
     if (DisplayProfile::chooseBannerPending(settings)) {
         setBanner(QStringLiteral("choose"),
-                  tr("BDE Fernweh can now show every one of your screens on the workstation, each at its exact size. "
+                  tr("BDE fernweh can now show every one of your screens on the workstation, each at its exact size. "
                      "Your current layout was kept."));
     }
     begin(QString(), QString(), QString());

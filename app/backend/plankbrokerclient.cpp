@@ -2,8 +2,10 @@
 #include "plankenrollment.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QEventLoop>
+#include <QFile>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
@@ -329,6 +331,96 @@ PlankBrokerClient::PasskeySignIn PlankBrokerClient::signInWithPasskey(const QStr
 PlankBrokerClient::Response PlankBrokerClient::post(const QString& path, const QJsonObject& body) const
 {
     return request("POST", path, &body, QString());
+}
+
+PlankBrokerClient::Response PlankBrokerClient::get(const QString& path) const
+{
+    return request("GET", path, nullptr, QString());
+}
+
+void PlankBrokerClient::download(const QString& path, const QString& destination,
+                                 qint64 expectedSize, const QByteArray& expectedSha256) const
+{
+    checkConfigured();
+    if (!path.startsWith(QStringLiteral("/v1/client-updates/macos-arm64/")) ||
+            path.contains(QStringLiteral("..")) || expectedSize <= 0 ||
+            expectedSize > 2LL * 1024 * 1024 * 1024 || expectedSha256.size() != 64) {
+        throw PlankBrokerError(PlankBrokerError::Protocol);
+    }
+
+    QUrl url;
+    url.setScheme(QStringLiteral("https"));
+    url.setHost(m_Config.host);
+    url.setPort(m_Config.port);
+    url.setPath(path, QUrl::StrictMode);
+    QNetworkRequest request(url);
+    QSslConfiguration ssl = QSslConfiguration::defaultConfiguration();
+    ssl.setProtocol(QSsl::TlsV1_3OrLater);
+    ssl.setCaCertificates({});
+    ssl.setPeerVerifyMode(QSslSocket::VerifyPeer);
+    request.setSslConfiguration(ssl);
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+    request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
+    request.setRawHeader("Accept", "application/x-apple-diskimage");
+
+    QFile output(destination);
+    if (!output.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+        throw PlankBrokerError(PlankBrokerError::Network);
+    }
+    output.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    QNetworkAccessManager manager;
+    manager.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    bool verified = false;
+    bool rejected = false;
+    const QStringList pins = m_Config.pins;
+    QObject::connect(&manager, &QNetworkAccessManager::sslErrors, &manager,
+                     [&](QNetworkReply* reply, const QList<QSslError>& errors) {
+        if (leafMatchesPins(reply->sslConfiguration(), pins)) reply->ignoreSslErrors(errors);
+        else rejected = true;
+    });
+    QObject::connect(&manager, &QNetworkAccessManager::encrypted, &manager, [&](QNetworkReply* reply) {
+        const auto negotiated = reply->sslConfiguration();
+        if (leafMatchesPins(negotiated, pins) && negotiated.sessionProtocol() == QSsl::TlsV1_3) {
+            verified = true;
+        } else {
+            rejected = true;
+            reply->abort();
+        }
+    });
+    QScopedPointer<QNetworkReply> reply(manager.get(request));
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    qint64 received = 0;
+    bool invalid = false;
+    auto drain = [&]() {
+        const QByteArray chunk = reply->readAll();
+        received += chunk.size();
+        if (received > expectedSize || output.write(chunk) != chunk.size()) {
+            invalid = true;
+            reply->abort();
+        } else {
+            hash.addData(chunk);
+        }
+    };
+    QEventLoop loop;
+    QObject::connect(reply.data(), &QNetworkReply::readyRead, &loop, drain);
+    QObject::connect(reply.data(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QTimer::singleShot(10 * 60 * 1000, &loop, &QEventLoop::quit);
+    if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!reply->isFinished()) reply->abort();
+    if (!invalid) drain();
+    output.close();
+    const bool ok = verified && !rejected && !invalid &&
+                    reply->error() == QNetworkReply::NoError &&
+                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 200 &&
+                    received == expectedSize && hash.result().toHex() == expectedSha256;
+    if (!ok) {
+        QFile::remove(destination);
+        throw PlankBrokerError(rejected ? PlankBrokerError::Tls :
+                               invalid || (verified && reply->error() == QNetworkReply::NoError) ?
+                                   PlankBrokerError::Protocol : PlankBrokerError::Network);
+    }
 }
 
 void PlankBrokerClient::throwForBearerStatus(int status, const QByteArray& body)

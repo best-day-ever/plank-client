@@ -55,6 +55,7 @@
 #include "gui/onboardingcontroller.h"
 #include "gui/displaysetupcontroller.h"
 #include "backend/computermanager.h"
+#include "backend/fernwehupdater.h"
 #include <QSslSocket>
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
@@ -404,7 +405,7 @@ int main(int argc, char *argv[])
     // Set the SDL3 application identity before any subsystem can initialize.
     // On Wayland, GNOME uses this ID to match the stream window to our desktop
     // entry and persist the user's keyboard-shortcut inhibitor decision.
-    SDL_SetAppMetadata("BDE Fernweh Client",
+    SDL_SetAppMetadata("BDE fernweh",
                        PLANK_VERSION_STR,
                        "la.instinctual.Plank.Client");
 
@@ -569,7 +570,7 @@ int main(int argc, char *argv[])
 
             if (!QFile("/dev/dri").exists()) {
                 qWarning() << "Unable to find a KMSDRM display device!";
-                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use BDE Fernweh Client outside of the GUI environment.";
+                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use BDE fernweh outside of the GUI environment.";
             }
             else if (!qEnvironmentVariableIsSet("QT_QPA_EGLFS_KMS_CONFIG")) {
                 // HACK: Remove this when Qt is fixed to properly check for display support before picking a card
@@ -775,7 +776,7 @@ int main(int argc, char *argv[])
     qInfo() << "PLANK TLS backend:" << QSslSocket::activeBackend()
             << QSslSocket::sslLibraryVersionString();
 #endif
-    QGuiApplication::setApplicationDisplayName("BDE Fernweh Client");
+    QGuiApplication::setApplicationDisplayName("BDE fernweh");
 
 #ifdef Q_OS_DARWIN
     // macOS defaults "Keyboard navigation" to text fields and lists only, which
@@ -925,6 +926,11 @@ int main(int argc, char *argv[])
                                            [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                return new RemoteBroker(StreamingPreferences::get(qmlEngine));
                                            });
+    qmlRegisterSingletonType<FernwehUpdater>("FernwehUpdater", 1, 0,
+                                             "FernwehUpdater",
+                                             [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
+                                                 return new FernwehUpdater(StreamingPreferences::get(qmlEngine));
+                                             });
     // First sign-in wizard ("Welcome to BDE Fernweh"); ends in RemoteBroker's session.
     qmlRegisterSingletonType<OnboardingController>("Onboarding", 1, 0,
                                                    "Onboarding",

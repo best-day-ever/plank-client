@@ -287,7 +287,7 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         visible: DisplaySetup.hostKind === "legacy"
-        text: qsTr("This workstation's PLANK only knows one screen or two side by side, from a fixed list of sizes.")
+        text: qsTr("This workstation's BDE fernweh only knows one screen or two side by side, from a fixed list of sizes.")
         color: theme.textSecondary
         wrapMode: Text.Wrap
         font.pointSize: 10

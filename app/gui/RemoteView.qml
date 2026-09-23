@@ -495,7 +495,7 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: 4
                 visible: RemoteBroker.configured
-                text: qsTr("New to BDE Fernweh? Set up your account")
+                text: qsTr("New to BDE fernweh? Set up your account")
                 flat: true
                 enabled: !RemoteBroker.busy
                 onClicked: {

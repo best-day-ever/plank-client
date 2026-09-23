@@ -8,6 +8,7 @@ import ComputerManager 1.0
 import SystemProperties 1.0
 import RemoteBroker 1.0
 import DisplaySetup 1.0
+import FernwehUpdater 1.0
 
 Flickable {
     id: settingsPage
@@ -330,7 +331,7 @@ Flickable {
                 }
 
                 PlankSettingHelp {
-                    text: qsTr("PLANK workstations always stream at %1 FPS; this applies to other hosts only.")
+                    text: qsTr("BDE fernweh workstations always stream at %1 FPS; this applies to other hosts only.")
                           .arg(StreamingPreferences.plankFramesPerSecond())
                 }
 
@@ -693,7 +694,7 @@ Flickable {
                         if (StreamingPreferences.language !== new_language) {
                             StreamingPreferences.language = languageListModel.get(currentIndex).val
                             if (!StreamingPreferences.retranslate()) {
-                                ToolTip.show(qsTr("You must restart BDE Fernweh Client for this change to take effect"), 5000)
+                                ToolTip.show(qsTr("You must restart BDE fernweh for this change to take effect"), 5000)
                             }
                             else {
                                 // Signal other controls to adjust their text
@@ -778,7 +779,7 @@ Flickable {
                         ToolTip.timeout: 10000
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("This enables the capture of system-wide keyboard shortcuts like Alt+Tab that would normally be handled by the client OS while streaming.") + "\n\n" +
-                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including BDE Fernweh Client.")
+                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including BDE fernweh.")
                     }
 
                     AutoResizingComboBox {
@@ -962,7 +963,7 @@ Flickable {
                 }
 
                 PlankSettingHelp {
-                    text: qsTr("The stream window and toolbar remain responsive while PLANK retries the host.")
+                    text: qsTr("The stream window and toolbar remain responsive while BDE fernweh retries the host.")
                 }
             }
         }
@@ -1430,6 +1431,25 @@ Flickable {
             title: qsTr("Advanced Settings")
 
             PlankSettingsGrid {
+
+                PlankSettingLabel {
+                    visible: FernwehUpdater.supported
+                    text: qsTr("BDE fernweh updates")
+                }
+
+                ColumnLayout {
+                    visible: FernwehUpdater.supported
+                    Layout.fillWidth: true
+                    Button {
+                        text: FernwehUpdater.available ? qsTr("Update to %1").arg(FernwehUpdater.version) : qsTr("Check for updates")
+                        enabled: !FernwehUpdater.busy
+                        onClicked: FernwehUpdater.available ? FernwehUpdater.install() : FernwehUpdater.check(true)
+                    }
+                    PlankSettingHelp {
+                        visible: FernwehUpdater.status !== ""
+                        text: FernwehUpdater.status
+                    }
+                }
 
                 PlankSettingLabel {
                     text: qsTr("Automatically find PCs on the local network")

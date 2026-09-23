@@ -117,7 +117,7 @@ Item {
                         Layout.fillWidth: true
                         text: {
                             switch (onboardingView.step) {
-                            case "welcome": return qsTr("Welcome to BDE Fernweh")
+                            case "welcome": return qsTr("Welcome to BDE fernweh")
                             case "credentials": return qsTr("Set up your account")
                             case "newPassword": return qsTr("Choose your password")
                             case "authenticator": return qsTr("Add your authenticator app")
@@ -141,7 +141,7 @@ Item {
 
                         Label {
                             Layout.fillWidth: true
-                            text: qsTr("BDE Fernweh connects you to your studio workstation from wherever you are. Setting up takes about two minutes: you choose your password and add an authenticator app on your phone.")
+                            text: qsTr("BDE fernweh connects you to your studio workstation from wherever you are. Setting up takes about two minutes: you choose your password and add an authenticator app on your phone.")
                             color: theme.textSecondary
                             wrapMode: Text.Wrap
                         }

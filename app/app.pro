@@ -227,6 +227,7 @@ SOURCES += \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
+    backend/fernwehupdater.cpp \
     backend/plankenrollment.cpp \
     backend/plankpasskey.cpp \
     backend/qrencoder.cpp \
@@ -284,6 +285,7 @@ HEADERS += \
     backend/relaywakeclient.h \
     backend/plankbroker.h \
     backend/plankbrokerclient.h \
+    backend/fernwehupdater.h \
     backend/plankenrollment.h \
     backend/plankpasskey.h \
     backend/qrencoder.h \
@@ -655,8 +657,8 @@ unix:!macx: {
 win32 {
     RC_ICONS = moonlight.ico
     QMAKE_TARGET_COMPANY = Instinctual
-    QMAKE_TARGET_DESCRIPTION = BDE Fernweh Client
-    QMAKE_TARGET_PRODUCT = PLANK
+    QMAKE_TARGET_DESCRIPTION = BDE fernweh
+    QMAKE_TARGET_PRODUCT = BDE fernweh
 
     CONFIG -= embed_manifest_exe
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest

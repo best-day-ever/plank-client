@@ -343,6 +343,7 @@ private slots:
 
     // Real TLS through the active Qt TLS backend
     void tlsPinnedRoundTrip();
+    void tlsUpdateDownloadChecksPinAndHash();
     void tlsWrongPinSendsNothing();
     void tlsRateLimitOnBearerCall();
     void tlsRequiresTls13();
@@ -1022,6 +1023,44 @@ void TestPlankBroker::tlsPinnedRoundTrip()
     QVERIFY(server.request.startsWith("POST /v1/auth/start HTTP/1.1\r\n"));
     QVERIFY(server.request.endsWith("{\"username\":\"anna\"}"));
     QVERIFY(!server.request.contains("Authorization:"));
+}
+
+void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.body = QByteArrayLiteral("not-a-real-dmg");
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = QStringLiteral("/v1/client-updates/macos-arm64/1.0.139.dmg");
+    const QByteArray digest = QCryptographicHash::hash(server.body, QCryptographicHash::Sha256).toHex();
+    const QString output = dir.filePath(QStringLiteral("release.dmg"));
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    client.download(path, output, server.body.size(), digest);
+    QFile file(output);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), server.body);
+    QVERIFY(server.requestLog.last().startsWith("GET /v1/client-updates/macos-arm64/1.0.139.dmg HTTP/1.1\r\n"));
+
+    QVERIFY(QFile::remove(output));
+    try {
+        client.download(path, output, server.body.size(), QByteArray(64, '0'));
+        QFAIL("A mismatched release hash must be rejected");
+    } catch (const PlankBrokerError& error) {
+        QCOMPARE(error.kind(), PlankBrokerError::Protocol);
+    }
+    QVERIFY(!QFile::exists(output));
+
+    server.request.clear();
+    try {
+        PlankBrokerClient(localConfig(server.port(), {QString::fromLatin1(RsaSpkiSha256)}))
+                .download(path, output, server.body.size(), digest);
+        QFAIL("An unpinned release server must be rejected");
+    } catch (const PlankBrokerError& error) {
+        QCOMPARE(error.kind(), PlankBrokerError::Tls);
+    }
+    QVERIFY(server.request.isEmpty());
+    QVERIFY(!QFile::exists(output));
 }
 
 void TestPlankBroker::tlsWrongPinSendsNothing()

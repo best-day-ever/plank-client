@@ -8,12 +8,20 @@ import ComputerManager 1.0
 import DisplaySetup 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
+import FernwehUpdater 1.0
 
 ApplicationWindow {
     property bool pollingActive: false
 
+    Timer {
+        interval: 6 * 60 * 60 * 1000
+        running: FernwehUpdater.supported
+        repeat: true
+        onTriggered: FernwehUpdater.check()
+    }
+
     id: window
-    title: qsTr("BDE Fernweh Client")
+    title: qsTr("BDE fernweh")
     width: 1280
     height: 1200
     minimumHeight: 900
@@ -31,6 +39,7 @@ ApplicationWindow {
     Component.onCompleted: {
         // The PLANK launcher is always a normal desktop window.
         window.show()
+        FernwehUpdater.check()
 
         // A brand-new installation starts with the first sign-in wizard on
         // top of the remote sign-in (main.cpp / OnboardingController decide).
@@ -310,12 +319,19 @@ ApplicationWindow {
 
             Label {
                 id: plankVersionLabel
-                text: SystemProperties.plankVersionString
+                text: qsTr("BDE fernweh %1").arg(SystemProperties.plankVersionString)
                 color: theme.textSecondary
                 font.pointSize: 9
                 font.weight: Font.Medium
                 horizontalAlignment: Qt.AlignLeft
                 verticalAlignment: Qt.AlignVCenter
+            }
+
+            Button {
+                visible: FernwehUpdater.available
+                enabled: !FernwehUpdater.busy
+                text: qsTr("Update to %1").arg(FernwehUpdater.version)
+                onClicked: FernwehUpdater.install()
             }
 
             // This label will appear when the window gets too small and
@@ -423,7 +439,7 @@ ApplicationWindow {
 
     ErrorMessageDialog {
         id: noHwDecoderDialog
-        text: qsTr("No functioning hardware accelerated video decoder was detected by PLANK. " +
+        text: qsTr("No functioning hardware accelerated video decoder was detected by BDE fernweh. " +
                    "Your streaming performance may be severely degraded in this configuration.")
     }
 
@@ -436,7 +452,7 @@ ApplicationWindow {
     NavigableMessageDialog {
         id: wow64Dialog
         standardButtons: Dialog.Ok
-        text: qsTr("This PLANK build isn't optimized for your PC. Please install the '%1' PLANK package for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
+        text: qsTr("This BDE fernweh build isn't optimized for your PC. Please install the '%1' package for the best streaming performance.").arg(SystemProperties.friendlyNativeArchName)
     }
 
     // This dialog appears when quitting via keyboard.
