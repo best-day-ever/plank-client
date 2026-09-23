@@ -719,9 +719,15 @@ int main(int argc, char *argv[])
     // the mouse motion exactly how it was given to us.
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
 
-    // We handle capturing the mouse ourselves when it leaves the window, so we don't need
-    // SDL doing it for us behind our backs.
-    SDL_SetHint("SDL_MOUSE_AUTO_CAPTURE", "0");
+#ifdef Q_OS_MACOS
+    // Cocoa keeps a held drag addressed to its starting window. Auto-capture
+    // lets SDL deliver coordinates beyond that window so the presentation
+    // input router can continue the drag onto another display. The old SDL2
+    // manual capture-on-leave path is no longer active.
+    SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "1");
+#else
+    SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
+#endif
 
     // PLANK is a Wayland desktop client. Prefer libdecor so windowed
     // streams consistently receive a title bar and resize borders on GNOME.

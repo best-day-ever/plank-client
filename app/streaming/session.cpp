@@ -2252,6 +2252,7 @@ void Session::rebuildPresentationLayout()
         int canvasHeight = 0;
         int secondaryIndex = 0;
         const bool arrangement = !m_ResolvedArrangement.isEmpty();
+        const bool plannedLayout = m_DisplayPlan.ok;
         NvOutputTopology topology;
         {
             QReadLocker lock(&m_Computer->lock);
@@ -2263,7 +2264,7 @@ void Session::rebuildPresentationLayout()
         const QSize captureSize = topology.captureSize();
         const QSize desktopSize(topology.desktopWidth, topology.desktopHeight);
         for (const auto& display : std::as_const(m_ClientDisplays)) {
-            if (arrangement && display.planIndex < 0) {
+            if (plannedLayout && display.planIndex < 0) {
                 // Stays local: no window (createSecondaryWindows skips it too).
                 continue;
             }
@@ -2280,7 +2281,7 @@ void Session::rebuildPresentationLayout()
                 continue;
             }
             PlankPresentationOutput output {window, display.canvasRect, window == m_Window};
-            if (arrangement) {
+            if (plannedLayout) {
                 // The host's own rectangles for this entry when it published
                 // them (the truth after launch), else the plan's.
                 const DisplayPlanner::Output& planned = m_DisplayPlan.outputs.at(display.planIndex);
@@ -2289,7 +2290,7 @@ void Session::rebuildPresentationLayout()
                 QRect captureRect = planned.captureRect.isValid() ? planned.captureRect : output.canvasRect;
                 QSize capture = m_DisplayPlan.capture.isValid() ? m_DisplayPlan.capture : m_DisplayPlan.canvas;
                 QSize desktop = m_DisplayPlan.canvas;
-                if (topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
+                if (arrangement && topology.matchesRequestedArrangement(m_ResolvedArrangement)) {
                     for (const NvOutput& hostOutput : std::as_const(topology.outputs)) {
                         if (hostOutput.arrangementIndex == planned.arrangementIndex) {
                             desktopRect = QRect(hostOutput.x - topology.desktopX, hostOutput.y - topology.desktopY,
@@ -2380,10 +2381,9 @@ void Session::rebuildPresentationLayout()
 bool Session::createSecondaryWindows(Uint32 defaultWindowFlags, const std::string& windowName)
 {
     const bool cocoa = strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0;
-    const bool arrangement = !m_ResolvedArrangement.isEmpty();
     for (const auto& display : std::as_const(m_ClientDisplays)) {
         if (display.displayId == m_TargetDisplayId ||
-                (arrangement && display.planIndex < 0)) {
+                (m_DisplayPlan.ok && display.planIndex < 0)) {
             continue;
         }
 
@@ -2849,7 +2849,7 @@ bool Session::configurePlankHostLayout()
             }
             m_ResolvedHostLayout = QStringLiteral("fixed");
         }
-        else if (displayProfileFor(probedDisplays).source != DisplayProfile::Resolved::Legacy) {
+        else {
             // Linux host, planned from the display setup: with the display
             // arrangement extension every monitor at its own size where the
             // setup puts it; without it the primary and one side neighbour
@@ -2859,36 +2859,6 @@ bool Session::configurePlankHostLayout()
                                                                hostFeatureFlags & ~NvOutputTopology::DisplayArrangementFeature,
                                         topologySnapshot, matchedExactly)) {
                 return false;
-            }
-        }
-        else {
-            // Linux host: the panel and desktop from ClientDisplayProbe, the
-            // same view the display dialogs showed. An odd client size is
-            // matched to the closest qualified mode and letterboxed.
-            bool fitted = false;
-            const bool resolved = NvOutputTopology::resolveClientDisplayLayout(
-                        probedDisplays, m_ResolvedHostLayout, m_ResolvedVirtualModes, &error, &fitted,
-                        NvOutputTopology::virtualModesForHost(hostFeatureFlags));
-            for (int index = 0; index < probedDisplays.size(); ++index) {
-                const QSize target = NvOutputTopology::clientMatchTarget(probedDisplays.at(index));
-                const QString mode = m_ResolvedVirtualModes.value(index);
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s",
-                            qPrintable(ClientDisplayProbe::logLine(
-                                probedDisplays.at(index), mode,
-                                mode == QStringLiteral("%1x%2").arg(target.width()).arg(target.height()))));
-            }
-            if (!resolved) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", qPrintable(error));
-                emit displayLaunchError(error);
-                return false;
-            }
-            matchedExactly = !fitted;
-            if (fitted && m_ResolvedScalingMode != NvOutputTopology::ScaledSpanMode) {
-                // A closest-supported mode differs from the client's pixels,
-                // so 1:1 would not fit: present it scaled to fit instead.
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "PLANK match client fitted a closest supported mode; scaling to fit");
-                m_ResolvedScalingMode = NvOutputTopology::ScaledSpanMode;
             }
         }
     }
@@ -2975,9 +2945,18 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
     limits.decoderMaximum = DecoderCaps::maximum(host.encodingMode);
 #endif
     const char* driver = SDL_GetCurrentVideoDriver();
-    limits.separateWindows = m_IsFullScreen && driver != nullptr &&
-            (strcmp(driver, "cocoa") == 0 || strcmp(driver, "wayland") == 0);
-    const DisplayProfile::Resolved resolved = displayProfileFor(displays);
+    // Cocoa can prepare hidden per-display windows even when starting
+    // windowed. The green button or toolbar can enter fullscreen later.
+    limits.separateWindows = driver != nullptr &&
+            (strcmp(driver, "cocoa") == 0 || (m_IsFullScreen && strcmp(driver, "wayland") == 0));
+    DisplayProfile::Resolved resolved = displayProfileFor(displays);
+    if (resolved.source == DisplayProfile::Resolved::Legacy) {
+        // Keep the saved Match client request on the qualified older modes,
+        // but still plan its local windows. The old direct resolver bypassed
+        // presentation entirely and left Cocoa showing one combined surface.
+        host.featureFlags &= ~NvOutputTopology::DisplayArrangementFeature;
+        resolved.profile = DisplayPlanner::proposal(displays);
+    }
     m_DisplayPlan = DisplayPlanner::plan(displays, resolved.profile, host, limits);
     for (const DisplayPlanner::Output& output : std::as_const(m_DisplayPlan.outputs)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -3009,6 +2988,7 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
                         "PLANK match client fitted a closest supported mode; scaling to fit");
             m_ResolvedScalingMode = NvOutputTopology::ScaledSpanMode;
         }
+        applyArrangementPresentation();
         return true;
     }
     m_ResolvedHostLayout = QStringLiteral("arrangement");
@@ -3035,27 +3015,20 @@ void Session::applyArrangementPresentation()
 {
     // Which client display shows which planned workstation display. The plan
     // was made from these very snapshots (probeView), so bounds identify them.
-    int shown = 0;
-    SDL_DisplayID primary = 0;
-    for (auto& display : m_ClientDisplays) {
-        display.planIndex = -1;
-        for (int index = 0; index < m_DisplayPlan.outputs.size(); ++index) {
-            const DisplayPlanner::Output& output = m_DisplayPlan.outputs.at(index);
-            if (output.included && output.clientBounds == display.probeView.bounds) {
-                display.planIndex = index;
-                ++shown;
-                if (output.primary) {
-                    primary = display.displayId;
-                }
-                break;
-            }
-        }
-    }
     const char* driver = SDL_GetCurrentVideoDriver();
     const bool separateWindows = driver != nullptr &&
-            (strcmp(driver, "cocoa") == 0 || strcmp(driver, "wayland") == 0);
-    const bool multi = m_IsFullScreen && separateWindows && shown > 1 &&
-            m_DisplayPlan.presentation == QLatin1String("windows");
+            (strcmp(driver, "cocoa") == 0 || (m_IsFullScreen && strcmp(driver, "wayland") == 0));
+    QVector<NvClientDisplay> displays;
+    for (const auto& display : std::as_const(m_ClientDisplays)) displays.append(display.probeView);
+    const auto targets = DisplayPlanner::presentationTargets(m_DisplayPlan, displays, separateWindows);
+    int shown = 0;
+    for (int index = 0; index < m_ClientDisplays.size(); ++index) {
+        m_ClientDisplays[index].planIndex = targets.planIndices.at(index);
+        shown += targets.planIndices.at(index) >= 0 ? 1 : 0;
+    }
+    const SDL_DisplayID primary = targets.primaryDisplay >= 0 ?
+                m_ClientDisplays.at(targets.primaryDisplay).displayId : 0;
+    const bool multi = targets.separateWindows;
     if (m_Window != nullptr) {
         // The windows exist (in-session reconnect on another thread): the SDL
         // thread applies the new presentation when the reconnect finishes.
@@ -5530,6 +5503,22 @@ void Session::execInternal()
         case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
         case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
             if (SDL_Window* window = windowForEvent(event.window.windowID)) {
+                // AppKit's green button bypasses toggleFullscreen(). Keep the
+                // session's presentation and the other display windows in
+                // step with a native transition of the primary window too.
+                const bool fullscreen = event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN;
+                const bool actualFullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+                if (window == m_Window && fullscreen == actualFullscreen &&
+                        fullscreen != m_PresentationFullscreen) {
+                    SDL_LockSpinlock(&m_DecoderLock);
+                    delete m_VideoDecoder;
+                    m_VideoDecoder = nullptr;
+                    SDL_UnlockSpinlock(&m_DecoderLock);
+                    setPresentationWindowsFullscreen(fullscreen);
+                    SDL_Event resetEvent = {};
+                    resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
+                    SDL_PushEvent(&resetEvent);
+                }
                 MacWindow::logGeometry(window);
                 m_InputHandler->notifyWindowGeometryChanged(
                             window,

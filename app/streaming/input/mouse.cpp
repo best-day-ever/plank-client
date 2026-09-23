@@ -5,6 +5,38 @@
 #include <SDL3/SDL.h>
 #include "streaming/streamutils.h"
 
+void SdlInputHandler::routePresentationPointer(SDL_Window*& window, float& x, float& y) const
+{
+#ifdef Q_OS_MACOS
+    if (!m_PresentationLayout.isMultiOutput()) return;
+    int originX, originY;
+    if (!SDL_GetWindowPosition(window, &originX, &originY)) return;
+    QVector<QRect> bounds;
+    for (const auto& output : m_PresentationLayout.outputs) {
+        int left, top, width, height;
+        if ((SDL_GetWindowFlags(output.window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0 &&
+                SDL_GetWindowPosition(output.window, &left, &top) &&
+                SDL_GetWindowSize(output.window, &width, &height)) {
+            bounds.append(QRect(left, top, width, height));
+        } else {
+            bounds.append(QRect());
+        }
+    }
+    QPointF local;
+    const int target = PlankPresentation::capturedPointerTarget(
+                QPointF(x, y), QPoint(originX, originY), bounds, local);
+    if (target >= 0) {
+        window = m_PresentationLayout.outputs.at(target).window;
+        x = float(local.x());
+        y = float(local.y());
+    }
+#else
+    Q_UNUSED(window);
+    Q_UNUSED(x);
+    Q_UNUSED(y);
+#endif
+}
+
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 {
     int button;
@@ -17,6 +49,10 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore synthetic mouse events
         return;
     }
+    SDL_MouseButtonEvent routedEvent = *event;
+    routePresentationPointer(window, routedEvent.x, routedEvent.y);
+    routedEvent.windowID = SDL_GetWindowID(window);
+    event = &routedEvent;
     activateCompositorCursor();
     if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
@@ -66,8 +102,9 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     // Button packets carry no coordinates. Reassert the SDL button event's
     // absolute position immediately before the button so a stale tablet or
     // coalesced motion sample cannot make the remote click land elsewhere.
-    if (event->down && !sendAbsoluteMousePosition(
-                window, event->x, event->y, false)) {
+    const bool positioned = sendAbsoluteMousePosition(
+                window, event->x, event->y, !event->down);
+    if (event->down && !positioned) {
         return;
     }
 
@@ -118,6 +155,11 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
 
     // We should not reference the original event anymore
     event = nullptr;
+
+    // Cocoa/SDL auto-capture keeps a drag addressed to its starting window.
+    // Route the coordinates across our windows without releasing the button
+    // or transferring native capture/focus between them.
+    routePresentationPointer(window, x, y);
 
     const bool mouseInVideoRegion = isMouseInVideoRegion(
                 x, y, SDL_GetWindowID(window));

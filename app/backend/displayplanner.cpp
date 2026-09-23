@@ -593,6 +593,31 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
     plan.ok = true;
 }
 
+} // namespace
+
+PresentationTargets presentationTargets(const Plan& plan, const QVector<NvClientDisplay>& displays,
+                                         bool supportsSeparateWindows)
+{
+    PresentationTargets targets;
+    int shown = 0;
+    for (int display = 0; display < displays.size(); ++display) {
+        int planIndex = -1;
+        if (plan.ok) {
+            for (int index = 0; index < plan.outputs.size(); ++index) {
+                const Output& output = plan.outputs.at(index);
+                if (output.included && output.clientBounds == displays.at(display).bounds) {
+                    planIndex = index;
+                    ++shown;
+                    if (output.primary) targets.primaryDisplay = display;
+                    break;
+                }
+            }
+        }
+        targets.planIndices.append(planIndex);
+    }
+    targets.separateWindows = supportsSeparateWindows && shown > 1 &&
+            plan.presentation == QLatin1String("windows");
+    return targets;
 }
 
 QString errorText(const QString& code, const DisplayArrangement::Capabilities& caps)

@@ -123,6 +123,13 @@ struct PlankPresentationSlice
 class PlankPresentation
 {
 public:
+    // Captured drags stay relative to the window where the button went
+    // down, even after crossing into another presentation window. Return
+    // the window under that point and its local coordinates, or -1 outside
+    // the presentation. Bounds and points are logical desktop coordinates.
+    static int capturedPointerTarget(const QPointF& point, const QPoint& origin,
+                                     const QVector<QRect>& windows, QPointF& localPoint);
+
     // Aspect-fit source into destination and centre it. This is the one
     // letterbox computation shared by every renderer
     // (StreamUtils::scaleSourceToDestinationSurface delegates here) and by

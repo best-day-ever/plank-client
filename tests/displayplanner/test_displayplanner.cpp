@@ -121,6 +121,9 @@ private slots:
     void honoursProfileChoices();
     void manualPlacement();
     void legacyHostFallback();
+    void legacyPresentationUsesOneWindowPerSelectedMonitor();
+    void arrangementPresentationBindsTheLiveDisplayOrder();
+    void presentationHonoursSingleWindowAndSpacesLimits();
     void macHostMatchesTheDesktop();
     void warnsWithActions();
     void backingPreviewUsesTheHost();
@@ -849,6 +852,69 @@ void TestDisplayPlanner::legacyHostFallback()
     plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), old);
     QVERIFY2(plan.ok, qPrintable(plan.error));
     QCOMPARE(plan.legacyHostLayout, QStringLiteral("single"));
+}
+
+void TestDisplayPlanner::legacyPresentationUsesOneWindowPerSelectedMonitor()
+{
+    // Saved "Match my displays (older layout)" and hosts without the
+    // arrangement extension must still produce separate local windows.
+    const QVector<NvClientDisplay> displays {
+        mac(QStringLiteral("uuid:L"), QRect(-1920, 0, 1920, 1080), QSize(3840, 2160)),
+        mac(QStringLiteral("uuid:M"), QRect(0, 0, 1920, 1080), QSize(3840, 2160), true),
+        mac(QStringLiteral("uuid:R"), QRect(1920, 0, 1920, 1080), QSize(3840, 2160))};
+    DisplayPlanner::HostInfo old;
+    old.known = true;
+    old.platform = 1;
+    const auto plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), old);
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QVERIFY(plan.legacy);
+    QCOMPARE(plan.legacyHostLayout, QStringLiteral("dual-horizontal"));
+    const auto targets = DisplayPlanner::presentationTargets(plan, displays, true);
+    QVERIFY(targets.separateWindows);
+    QCOMPARE(targets.planIndices, QVector<int>({-1, 1, 2}));
+    QCOMPARE(targets.primaryDisplay, 1);
+    QCOMPARE(plan.outputs.at(1).position, QPoint(0, 0));
+    QCOMPARE(plan.outputs.at(2).position, QPoint(3840, 0));
+}
+
+void TestDisplayPlanner::arrangementPresentationBindsTheLiveDisplayOrder()
+{
+    const QVector<NvClientDisplay> displays {
+        mac(QStringLiteral("uuid:L"), QRect(-1920, 0, 1920, 1080), QSize(3840, 2160)),
+        mac(QStringLiteral("uuid:R"), QRect(0, 0, 1920, 1080), QSize(3840, 2160), true)};
+    const auto plan = DisplayPlanner::plan(displays, DisplayPlanner::proposal(displays), {});
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    // SDL enumeration may differ from the setup probe. The main window
+    // belongs to the planned primary; each secondary gets its own crop.
+    const auto targets = DisplayPlanner::presentationTargets(plan, {displays.at(1), displays.at(0)}, true);
+    QVERIFY(targets.separateWindows);
+    QCOMPARE(targets.primaryDisplay, 0);
+    QCOMPARE(targets.planIndices, QVector<int>({1, 0}));
+}
+
+void TestDisplayPlanner::presentationHonoursSingleWindowAndSpacesLimits()
+{
+    const QVector<NvClientDisplay> displays {
+        mac(QStringLiteral("uuid:L"), QRect(0, 0, 1920, 1080), QSize(3840, 2160), true),
+        mac(QStringLiteral("uuid:R"), QRect(1920, 0, 1920, 1080), QSize(3840, 2160))};
+    auto profile = DisplayPlanner::proposal(displays);
+    const auto plan = DisplayPlanner::plan(displays, profile, {});
+    // Preparing windows is independent of whether they start visible:
+    // windowed launches keep the selection for a later fullscreen entry.
+    QVERIFY(DisplayPlanner::presentationTargets(plan, displays, true).separateWindows);
+    QVERIFY(!DisplayPlanner::presentationTargets(plan, displays, false).separateWindows);
+    QVERIFY(!DisplayPlanner::presentationTargets(plan, {displays.first()}, true).separateWindows);
+    QVERIFY(!DisplayPlanner::presentationTargets({}, displays, true).separateWindows);
+
+    DisplayPlanner::Limits limits;
+    limits.separateSpaces = false;
+    const auto noSpaces = DisplayPlanner::plan(displays, profile, {}, limits);
+    QVERIFY(noSpaces.ok);
+    QVERIFY(!DisplayPlanner::presentationTargets(noSpaces, displays, true).separateWindows);
+    profile.presentation = QStringLiteral("single");
+    const auto single = DisplayPlanner::plan(displays, profile, {});
+    QVERIFY(single.ok);
+    QVERIFY(!DisplayPlanner::presentationTargets(single, displays, true).separateWindows);
 }
 
 void TestDisplayPlanner::macHostMatchesTheDesktop()
