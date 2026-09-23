@@ -4255,7 +4255,13 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
                         qInfo() << "PLANK sign-in screen worker changed; authentication will be refreshed";
                         continue;
                     }
-                    if (PlankReconnectPolicy::terminalStatus(retryError.getStatusCode(), authenticating)) {
+                    // The host confirmed sign-out before this loop. Its old
+                    // worker may refuse a fresh admission while logind tears
+                    // down that desktop and the greeter worker takes over.
+                    // Keep the same bounded wait as a GDM desktop handover;
+                    // each attempt obtains a new one-use broker token.
+                    if (PlankReconnectPolicy::terminalStatus(retryError.getStatusCode(),
+                                                            authenticating, true)) {
                         endWait();
                         throw;
                     }
