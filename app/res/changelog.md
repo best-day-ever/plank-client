@@ -1,16 +1,18 @@
-## 1.0.155 — Microphone candidate
+## 1.0.156 — Microphone candidate
 
 ### Client
 
 - Add automatic or manual microphone forwarding to macOS Hosts.
 - Add a toolbar microphone switch and recording status; muting closes local capture.
 - Remember the microphone switch during session reconnection.
+- Deliver already-decoded audio/video promptly when setup packets arrive late.
 
 ### Host
 
 - macOS: add the PLANK Microphone virtual sound input for remote applications.
 - Offer automatic input selection with restoration of the previous device after disconnect.
 - Keep microphone failure isolated from video and speaker audio.
+- Prevent a startup identity reply from racing connection cleanup.
 
 ## 1.0.154
 

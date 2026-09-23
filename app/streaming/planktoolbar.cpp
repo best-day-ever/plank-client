@@ -911,6 +911,24 @@ void PlankToolbar::redraw()
     const QPointF fullscreenCenter(m_Width - 88.0, 19.0);
     if (m_MicrophoneSupported) {
         const qreal x = m_Width - 121.0;
+        const bool hovered = m_LocalPointerInteraction && microphoneContains(m_PointerX, m_PointerY);
+        if (hovered) {
+            // Keep the hint in the existing toolbar surface. A separate popup
+            // would introduce another focus/pointer boundary during capture.
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(35, 43, 53));
+            painter.drawRoundedRect(QRectF(targetLeft - 3, 1, targetWidth + 6, 36), 3, 3);
+            painter.setPen(QColor(235, 239, 244));
+            QFont hintFont = labelFont; hintFont.setPixelSize(11); painter.setFont(hintFont);
+            QString hint;
+            switch (m_MicrophoneState) {
+            case PlankMicrophone::State::Active: hint = QStringLiteral("Microphone on\nClick to mute"); break;
+            case PlankMicrophone::State::Off: hint = QStringLiteral("Microphone off\nClick to enable"); break;
+            case PlankMicrophone::State::Pending: hint = QStringLiteral("Starting microphone\nClick to cancel"); break;
+            case PlankMicrophone::State::Unavailable: hint = QStringLiteral("Microphone unavailable\nCheck permission/input"); break;
+            }
+            painter.drawText(QRectF(targetLeft, 1, targetWidth, 36), Qt::AlignCenter, hint);
+        }
         const QColor color = m_MicrophoneState == PlankMicrophone::State::Active ? QColor(52, 199, 110) :
             m_MicrophoneState == PlankMicrophone::State::Pending ? QColor(240, 186, 70) :
             m_MicrophoneState == PlankMicrophone::State::Unavailable ? QColor(239, 88, 88) : QColor(180, 189, 202);
