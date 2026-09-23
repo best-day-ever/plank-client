@@ -251,15 +251,12 @@ PlankToolbar::Action PlankToolbar::update(
         show(now);
     }
 
-    if (m_Visible && !m_ButtonRouter.hasLocalButtons() &&
-            !m_DraggingSlider && !m_PointerInside && !m_ScreensPromptVisible &&
+    // A stationary pointer over the toolbar is idle too. Only an active
+    // button sequence, drag, or unanswered screen prompt keeps it open.
+    if (m_Visible && !m_Pinned && !m_ButtonRouter.hasLocalButtons() &&
+            !m_DraggingToolbar && !m_DraggingSlider && !m_ScreensPromptVisible &&
             m_HideDeadline != 0 && now >= m_HideDeadline) {
-        if (m_Pinned) {
-            endLocalPointerInteraction();
-            m_HideDeadline = 0;
-        } else {
-            hide();
-        }
+        hide();
     }
 
     if (m_Visible && now >= m_LastRedrawTime + RedrawIntervalMs &&
@@ -343,7 +340,7 @@ void PlankToolbar::hideScreensPrompt()
     m_ScreensPromptVisible = false;
     m_ScreensPromptText.clear();
     if (m_Visible) {
-        m_HideDeadline = m_Pinned ? 0 : SDL_GetTicks() + AutoHideDelayMs;
+        restartAutoHideTimer(SDL_GetTicks());
         redraw();
     }
 }
@@ -446,6 +443,9 @@ void PlankToolbar::notifyFocusLost()
     m_DraggingToolbar = false;
     m_DraggingSlider = false;
     endLocalPointerInteraction();
+    if (m_Visible) {
+        restartAutoHideTimer(SDL_GetTicks());
+    }
 }
 
 bool PlankToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event)
@@ -504,11 +504,7 @@ bool PlankToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event)
     }
 
     m_PointerInside = contains(m_PointerX, m_PointerY);
-    if (m_PointerInside || m_ButtonRouter.hasLocalButtons()) {
-        m_HideDeadline = 0;
-    } else {
-        m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
-    }
+    restartAutoHideTimer(now);
 
     const auto owner = m_ButtonRouter.routeMotion(
                 pointerEnteredVisibleToolbar);
@@ -590,7 +586,11 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
     }
 
     m_PointerInside = pointerInside;
-    m_HideDeadline = 0;
+    if (event.down) {
+        m_HideDeadline = 0;
+    } else {
+        restartAutoHideTimer(now);
+    }
 
     if (event.button != SDL_BUTTON_LEFT) {
         return Action::Consumed;
@@ -630,6 +630,7 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
             m_Pinned = !m_Pinned;
             m_Preferences.plankToolbarPinned = m_Pinned;
             m_Preferences.save();
+            restartAutoHideTimer(now);
             redraw();
             break;
         case Control::Fullscreen:
@@ -656,7 +657,7 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
     }
 
     if (!m_ButtonRouter.hasLocalButtons() && !pointerInside) {
-        m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+        restartAutoHideTimer(now);
         endLocalPointerInteraction();
     }
     return action;
@@ -685,6 +686,7 @@ bool PlankToolbar::handlePointerWheel(const SDL_MouseWheelEvent& event)
         endLocalPointerInteraction();
         return false;
     }
+    restartAutoHideTimer(SDL_GetTicks());
     if (!m_LocalPointerInteraction) {
         beginLocalPointerInteraction();
     }
@@ -712,13 +714,19 @@ void PlankToolbar::show(Uint64 now)
 {
     m_Visible = true;
     m_EdgeHoverStartTime = 0;
-    m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+    restartAutoHideTimer(now);
     redraw();
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setVisible(true);
     } else {
         m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, true);
     }
+}
+
+void PlankToolbar::restartAutoHideTimer(Uint64 now)
+{
+    m_HideDeadline = m_Pinned || m_ScreensPromptVisible ?
+                0 : now + AutoHideDelayMs;
 }
 
 void PlankToolbar::hide()
@@ -747,7 +755,7 @@ void PlankToolbar::beginLocalPointerInteraction()
 
     m_LocalPointerInteraction = true;
     m_PointerInside = true;
-    m_HideDeadline = 0;
+    restartAutoHideTimer(SDL_GetTicks());
     redraw();
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
                  "PLANK toolbar routed pointer to local controls");
@@ -1238,7 +1246,7 @@ void PlankToolbar::nativePointerEnter(int parentX, int parentY)
     m_PointerX = parentX;
     m_PointerY = parentY;
     m_PointerInside = true;
-    m_HideDeadline = 0;
+    restartAutoHideTimer(SDL_GetTicks());
     beginLocalPointerInteraction();
     redraw();
 }
@@ -1248,7 +1256,7 @@ void PlankToolbar::nativePointerLeave()
     m_PointerInside = false;
     if (!m_ButtonRouter.hasLocalButtons()) {
         endLocalPointerInteraction();
-        m_HideDeadline = m_Pinned ? 0 : SDL_GetTicks() + AutoHideDelayMs;
+        restartAutoHideTimer(SDL_GetTicks());
     }
     redraw();
 }
@@ -1259,7 +1267,7 @@ void PlankToolbar::nativePointerMotion(int parentX, int parentY)
     m_PointerX = parentX;
     m_PointerY = parentY;
     m_PointerInside = true;
-    m_HideDeadline = 0;
+    restartAutoHideTimer(now);
 
     if (m_DraggingToolbar) {
         const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,

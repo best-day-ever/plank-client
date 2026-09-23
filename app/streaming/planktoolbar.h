@@ -75,6 +75,7 @@ private:
     };
 
     void show(Uint64 now);
+    void restartAutoHideTimer(Uint64 now);
     int toolbarHeight() const;
     QRect screensButtonRect(int index) const;
     void hide();
