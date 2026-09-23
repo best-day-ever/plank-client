@@ -27,7 +27,7 @@ private slots:
             QVERIFY(PlankReconnectPolicy::terminalStatus(status, false));
         }
         QVERIFY(PlankReconnectPolicy::terminalStatus(401, true));
-        QVERIFY(!PlankReconnectPolicy::terminalStatus(401, true, true)); // GDM is handing over.
+        QVERIFY(!PlankReconnectPolicy::terminalStatus(401, true, true)); // Confirmed desktop handover or sign-out.
         QVERIFY(PlankReconnectPolicy::terminalStatus(403, true, true));
         QVERIFY(PlankReconnectPolicy::terminalStatus(423, true, true));
         QVERIFY(!PlankReconnectPolicy::terminalStatus(401, false)); // Expired worker token.
