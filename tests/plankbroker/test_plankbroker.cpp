@@ -806,9 +806,15 @@ void TestPlankBroker::classifiesBearerStatus()
     QCOMPARE(PlankBroker::classifyBearerStatus(429), BearerStatus::RateLimited);
     QCOMPARE(PlankBroker::classifyBearerStatus(403), BearerStatus::Denied);
     QCOMPARE(PlankBroker::classifyBearerStatus(404), BearerStatus::Denied);
-    QCOMPARE(PlankBroker::classifyBearerStatus(409), BearerStatus::Denied);
+    QCOMPARE(PlankBroker::classifyBearerStatus(409), BearerStatus::Unavailable);
     QCOMPARE(PlankBroker::classifyBearerStatus(302), BearerStatus::Malformed);
     QCOMPARE(PlankBroker::classifyBearerStatus(500), BearerStatus::Malformed);
+    QVERIFY(PlankBroker::isTransientOfflineResponse(409,
+        R"({"state":"unavailable","reason":"offline"})"));
+    QVERIFY(!PlankBroker::isTransientOfflineResponse(409,
+        R"({"state":"unavailable","reason":"certificate changed"})"));
+    QVERIFY(!PlankBroker::isTransientOfflineResponse(401,
+        R"({"state":"unavailable","reason":"offline"})"));
 }
 
 void TestPlankBroker::encodesHostActionPath()

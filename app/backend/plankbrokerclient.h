@@ -28,6 +28,7 @@ public:
         Denied,          // generic auth failure / host not admitted
         RateLimited,     // HTTP 429, see retryAfter()
         SessionExpired,  // bearer rejected; sign in again
+        Unavailable,     // host temporarily offline during desktop handoff
         Protocol,        // malformed reply
     };
 
