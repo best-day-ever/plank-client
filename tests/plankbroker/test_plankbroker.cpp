@@ -319,6 +319,7 @@ private slots:
     // Broker replies
     void parsesChallenge();
     void parsesAuthenticated();
+    void tlsPasskeySetupUsesTheAuthenticatedSession();
     void parsesDenied();
     void parsesRateLimit();
     void rejectsMalformedAuthReplies();
@@ -581,6 +582,29 @@ void TestPlankBroker::parsesAuthenticated()
     QCOMPARE(reply.sessionToken, QStringLiteral("AbC-_123"));
     QCOMPARE(reply.expiresIn, 36000);
     QCOMPARE(reply.username, QStringLiteral("anna"));
+    QVERIFY(!reply.passkeySetupAvailable);
+    const auto offered = PlankBroker::parseAuthReply(200, json(R"({"state":"authenticated",
+        "session_token":"AbC-_123","expires_in":36000,"username":"anna","passkey_setup_available":true})"));
+    QVERIFY(offered.passkeySetupAvailable);
+}
+
+void TestPlankBroker::tlsPasskeySetupUsesTheAuthenticatedSession()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", R"({"state":"passkey_added"})");
+    server.queue("200 OK", R"({"state":"done"})");
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    const QString mapping = QStringLiteral("passkey:%1,%2").arg(PasskeyCredential, DeviceSpki);
+    client.setupPasskey(QStringLiteral("session-token"), mapping);
+    client.skipPasskeySetup(QStringLiteral("session-token"));
+    QCOMPARE(server.requestLog.size(), 2);
+    QVERIFY(server.requestLog.at(0).startsWith("POST /v1/passkeys/setup HTTP/1.1\r\n"));
+    QVERIFY(server.requestLog.at(0).contains("Authorization: Bearer session-token\r\n"));
+    QVERIFY(server.requestLog.at(0).contains(mapping.toUtf8()));
+    QVERIFY(server.requestLog.at(1).startsWith("POST /v1/passkeys/setup/skip HTTP/1.1\r\n"));
+    QVERIFY(server.requestLog.at(1).contains("Authorization: Bearer session-token\r\n"));
+    QVERIFY(!server.requestLog.at(1).contains(mapping.toUtf8()));
 }
 
 void TestPlankBroker::parsesDenied()

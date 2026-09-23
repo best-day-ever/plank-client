@@ -79,6 +79,67 @@ Item {
         function onStreamSetupRequired(hostId, hostName, reason) {
             displaySetupDialog.openFor(hostId, hostName, true, "", reason)
         }
+        function onTouchIdSetupRequested() {
+            if (RemoteBroker.touchIdSetupPending) touchIdSetupDialog.open()
+        }
+        function onTouchIdSetupCompleted() {
+            touchIdSetupDialog.close()
+        }
+        function onStateChanged() {
+            if (!RemoteBroker.signedIn && touchIdSetupDialog.visible) touchIdSetupDialog.close()
+        }
+    }
+
+    NavigableDialog {
+        id: touchIdSetupDialog
+        title: qsTr("Sign in with Touch ID?")
+        width: Math.min(440, remoteView.width - 32)
+        height: Math.min(implicitHeight, remoteView.height - 20)
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        standardButtons: Dialog.NoButton
+
+        ColumnLayout {
+            width: parent.width
+            spacing: theme.spaceMedium
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("You are signed in. Add a sign-in key to this Mac so you can use Touch ID next time. Your authenticator app stays available as a fallback.")
+                color: theme.textSecondary
+                wrapMode: Text.Wrap
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: RemoteBroker.touchIdSetupError !== ""
+                text: RemoteBroker.touchIdSetupError
+                color: theme.danger
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: qsTr("Not now")
+                    enabled: !RemoteBroker.touchIdSetupBusy
+                    onClicked: {
+                        RemoteBroker.skipTouchIdAfterSignIn()
+                        touchIdSetupDialog.close()
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                BusyIndicator {
+                    visible: RemoteBroker.touchIdSetupBusy
+                    running: visible
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                }
+                Button {
+                    text: qsTr("Set up Touch ID")
+                    highlighted: true
+                    enabled: !RemoteBroker.touchIdSetupBusy
+                    onClicked: RemoteBroker.setUpTouchIdAfterSignIn()
+                }
+            }
+        }
     }
 
     // Per-workstation settings (display setup and stream quality), asked on

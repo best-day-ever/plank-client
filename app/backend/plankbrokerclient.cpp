@@ -1,4 +1,5 @@
 #include "plankbrokerclient.h"
+#include "plankenrollment.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -175,7 +176,8 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
                          &loop, &QEventLoop::quit);
     }
     const bool authentication = path.startsWith(QLatin1String("/v1/auth/"));
-    const bool enrollment = path.startsWith(QLatin1String("/v1/enroll/"));
+    const bool enrollment = path.startsWith(QLatin1String("/v1/enroll/")) ||
+                            path == QLatin1String("/v1/passkeys/setup");
     QTimer::singleShot(enrollment ? EnrollmentTimeoutMs :
                        authentication ? AuthenticationTimeoutMs : RequestTimeoutMs,
                        &loop, &QEventLoop::quit);
@@ -387,4 +389,26 @@ void PlankBrokerClient::logout(const QString& sessionToken) const
     const QJsonObject empty;
     const Response response = request("POST", QStringLiteral("/v1/logout"), &empty, sessionToken);
     throwForBearerStatus(response.status, response.body);
+}
+
+void PlankBrokerClient::setupPasskey(const QString& sessionToken, const QString& mapping) const
+{
+    if (sessionToken.isEmpty()) throw PlankBrokerError(PlankBrokerError::SessionExpired);
+    if (!PlankEnrollment::isPasskeyMapping(mapping)) throw PlankBrokerError(PlankBrokerError::Protocol);
+    const QJsonObject body {{QStringLiteral("mapping"), mapping}};
+    Response response = request("POST", QStringLiteral("/v1/passkeys/setup"), &body, sessionToken);
+    throwForBearerStatus(response.status, response.body);
+    QJsonObject result;
+    const bool added = PlankBroker::parseObject(response.body, result) &&
+            result.value(QStringLiteral("state")) == QLatin1String("passkey_added");
+    response.body.fill('\0');
+    if (!added) throw PlankBrokerError(PlankBrokerError::Protocol);
+}
+
+void PlankBrokerClient::skipPasskeySetup(const QString& sessionToken) const
+{
+    if (sessionToken.isEmpty()) return;
+    Response response = request("POST", QStringLiteral("/v1/passkeys/setup/skip"), nullptr, sessionToken);
+    throwForBearerStatus(response.status, response.body);
+    response.body.fill('\0');
 }

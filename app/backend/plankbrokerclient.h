@@ -123,6 +123,11 @@ public:
     PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId) const;
     void keepalive(const QString& sessionToken, const QString& hostId) const;
     void logout(const QString& sessionToken) const;
+    // A fresh password + OTP session may register one key with the user's
+    // own IPA rights. The broker holds the proven password only briefly;
+    // skipping the offer discards it immediately.
+    void setupPasskey(const QString& sessionToken, const QString& mapping) const;
+    void skipPasskeySetup(const QString& sessionToken) const;
 
 private:
     Response request(const QByteArray& method, const QString& path,

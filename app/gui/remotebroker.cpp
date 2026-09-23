@@ -8,6 +8,7 @@
 #include "backend/nvcomputer.h"
 #include "backend/nvhttp.h"
 #include "backend/onboardingstate.h"
+#include "backend/plankenrollment.h"
 #include "backend/outputtopology.h"
 #include "backend/remotedisplaysetup.h"
 #include "backend/remotestreamsetup.h"
@@ -149,6 +150,9 @@ void RemoteBroker::setBusy(const QString& text)
 void RemoteBroker::signOutLocally(const QString& message)
 {
     ++m_Generation;
+    m_TouchIdSetupPending = false;
+    m_TouchIdSetupBusy = false;
+    m_TouchIdSetupError.clear();
     stopKeepalive();
     m_Token->clear();
     BrokerSessionStore::clear(brokerAddress());
@@ -197,11 +201,14 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
 
     setBusy(tr("Signing in..."));
     const PlankBrokerClient::Config config = clientConfig();
+    const QString helperProgram = m_PasskeyHelper.program();
+    const QString rpId = passkeyRpId();
     const quint64 generation = ++m_Generation;
     QPointer<RemoteBroker> self(this);
-    QThreadPool::globalInstance()->start([self, config, generation, user, password, otp]() mutable {
+    QThreadPool::globalInstance()->start([self, config, helperProgram, rpId, generation, user, password, otp]() mutable {
         QString token;
         QString confirmedUser;
+        bool offerTouchId = false;
         std::unique_ptr<PlankBrokerError> failure;
         try {
             PlankBrokerClient client(config);
@@ -219,13 +226,28 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
             }
             token = reply.sessionToken;
             confirmedUser = reply.username.isEmpty() ? user : reply.username;
+            if (reply.passkeySetupAvailable) {
+                const PlankPasskeyHelper helper(helperProgram);
+                QVector<PlankPasskeyHelper::LocalKey> keys;
+                if (helper.available() && helper.list(rpId, keys)) {
+                    const QString normalized = PlankBroker::normalizePasskeyUsername(confirmedUser);
+                    offerTouchId = std::none_of(keys.begin(), keys.end(), [&](const auto& key) {
+                        return key.username == normalized;
+                    });
+                }
+                if (!offerTouchId) {
+                    try { client.skipPasskeySetup(token); } catch (const PlankBrokerError&) {
+                        // The broker expires the short-lived password in five minutes.
+                    }
+                }
+            }
             qInfo() << "Remote access session device-bound:" << reply.deviceBound;
         } catch (const PlankBrokerError& error) {
             failure = std::make_unique<PlankBrokerError>(error);
         }
         password.fill(QChar('\0'));
         otp.fill(QChar('\0'));
-        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser,
+        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, offerTouchId,
                                          failure = std::shared_ptr<PlankBrokerError>(failure.release())]() mutable {
             if (!self || generation != self->m_Generation) {
                 token.fill(QChar('\0'));
@@ -235,7 +257,7 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
                 self->handleBrokerError(*failure, false);
                 return;
             }
-            self->finishSignIn(token, confirmedUser);
+            self->finishSignIn(token, confirmedUser, offerTouchId);
             token.fill(QChar('\0'));
         }, Qt::QueuedConnection);
     });
@@ -247,8 +269,11 @@ QString RemoteBroker::passkeyRpId() const
     return PlankBroker::isPasskeyRpId(rpId) ? rpId : PlankBroker::defaultPasskeyRpId();
 }
 
-void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser)
+void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser, bool offerTouchId)
 {
+    m_TouchIdSetupPending = offerTouchId;
+    m_TouchIdSetupBusy = false;
+    m_TouchIdSetupError.clear();
     m_Token->set(token);
     // Password + code and Touch ID both end here: remember the session.
     BrokerSessionStore::save(brokerAddress(), confirmedUser, token);
@@ -263,6 +288,7 @@ void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser)
     setBusy(QString());
     emit stateChanged();
     refreshHosts();
+    if (offerTouchId) emit touchIdSetupRequested();
 }
 
 void RemoteBroker::adoptSession(QString token, const QString& confirmedUser)
@@ -413,6 +439,70 @@ void RemoteBroker::createPasskey(const QString& username)
             }
             self->refreshPasskeys();
         }, Qt::QueuedConnection);
+    });
+}
+
+void RemoteBroker::setUpTouchIdAfterSignIn()
+{
+    if (!m_TouchIdSetupPending || m_TouchIdSetupBusy || !signedIn() || !m_PasskeyHelper.available()) return;
+    m_TouchIdSetupBusy = true;
+    m_TouchIdSetupError.clear();
+    emit stateChanged();
+    const QString program = m_PasskeyHelper.program();
+    const QString rpId = passkeyRpId();
+    const QString user = PlankBroker::normalizePasskeyUsername(m_Username);
+    QString token = m_Token->get();
+    const PlankBrokerClient::Config config = clientConfig();
+    const quint64 generation = m_Generation;
+    QPointer<RemoteBroker> self(this);
+    QThreadPool::globalInstance()->start([self, program, rpId, user, token, config, generation]() mutable {
+        const PlankPasskeyHelper helper(program);
+        PlankPasskeyHelper::CreatedKey key;
+        const bool created = helper.create(rpId, user, key) && PlankEnrollment::isPasskeyMapping(key.mapping);
+        bool added = false;
+        if (created) {
+            for (int attempt = 0; attempt < 2 && !added; ++attempt) {
+                try {
+                    PlankBrokerClient(config).setupPasskey(token, key.mapping);
+                    added = true;
+                } catch (const PlankBrokerError& error) {
+                    if (error.kind() != PlankBrokerError::Network || attempt == 1) break;
+                }
+            }
+            if (!added) helper.remove(rpId, user);
+        }
+        token.fill(QChar('\0'));
+        QMetaObject::invokeMethod(qApp, [self, generation, created, added]() {
+            if (!self || generation != self->m_Generation) return;
+            self->m_TouchIdSetupBusy = false;
+            if (added) {
+                self->m_TouchIdSetupPending = false;
+                self->m_TouchIdSetupError.clear();
+                self->refreshPasskeys();
+                emit self->touchIdSetupCompleted();
+            } else {
+                self->m_TouchIdSetupError = created ?
+                            tr("Touch ID couldn't be added to your account. Try again or choose Not now.") :
+                            tr("Touch ID wasn't set up on this Mac. Try again or choose Not now.");
+            }
+            emit self->stateChanged();
+        }, Qt::QueuedConnection);
+    });
+}
+
+void RemoteBroker::skipTouchIdAfterSignIn()
+{
+    if (!m_TouchIdSetupPending || m_TouchIdSetupBusy) return;
+    m_TouchIdSetupPending = false;
+    m_TouchIdSetupError.clear();
+    emit stateChanged();
+    QString token = m_Token->get();
+    const PlankBrokerClient::Config config = clientConfig();
+    QThreadPool::globalInstance()->start([token, config]() mutable {
+        try { PlankBrokerClient(config).skipPasskeySetup(token); } catch (const PlankBrokerError&) {
+            // The broker still expires the password after five minutes.
+        }
+        token.fill(QChar('\0'));
     });
 }
 
