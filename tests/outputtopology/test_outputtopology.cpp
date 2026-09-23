@@ -774,6 +774,17 @@ void TestOutputTopology::retriesOnlyAnEmptyModesetSnapshot()
     QVERIFY(NvOutputTopology::temporarilyEmpty(object));
     QVERIFY(!NvOutputTopology::fromJson(object, topology));
 
+    // During an NVIDIA modeset, RandR may expose a connected output while
+    // the server still reports a zero-sized desktop.
+    QJsonObject partiallyReady = object;
+    partiallyReady["outputs"] = QJsonArray {QJsonObject {{"id", "x11:DP-0"}}};
+    layout["output_count"] = 1;
+    partiallyReady["layout"] = layout;
+    QJsonObject desktop = partiallyReady.value("desktop").toObject();
+    desktop["width"] = 0;
+    partiallyReady["desktop"] = desktop;
+    QVERIFY(NvOutputTopology::temporarilyEmpty(partiallyReady));
+
     object["outputs"] = QJsonArray {QJsonObject {{"id", "x11:broken"}}};
     QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
     object["outputs"] = QJsonArray();

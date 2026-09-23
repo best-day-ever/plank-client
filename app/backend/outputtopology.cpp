@@ -176,11 +176,14 @@ bool NvOutputTopology::temporarilyEmpty(const QJsonObject& object)
     const QJsonValue outputs = object.value("outputs");
     const QJsonValue layout = object.value("layout");
     const QJsonValue count = layout.toObject().value("output_count");
+    const QJsonObject desktop = object.value("desktop").toObject();
+    const bool zeroDesktop = desktop.value("width").toInt(-1) == 0 ||
+            desktop.value("height").toInt(-1) == 0;
     return object.value("schema_version").toInt(-1) == ProtocolVersion &&
             (object.value("feature_flags").toInt() & OutputTopologyFeature) != 0 &&
             (object.value("feature_flags").toInt() & FixedCaptureFeature) == 0 &&
-            outputs.isArray() && outputs.toArray().isEmpty() &&
-            layout.isObject() && count.isDouble() && count.toInt(-1) == 0;
+            outputs.isArray() && layout.isObject() && count.isDouble() &&
+            (zeroDesktop || (outputs.toArray().isEmpty() && count.toInt(-1) == 0));
 }
 
 bool NvOutputTopology::fromJson(const QJsonObject& object,
