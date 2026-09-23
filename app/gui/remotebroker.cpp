@@ -22,6 +22,7 @@
 #include <QElapsedTimer>
 #include <QQmlEngine>
 #include <QThreadPool>
+#include <QThread>
 #include <QCoreApplication>
 
 #include <algorithm>
@@ -42,6 +43,7 @@ qint64 nowMs() { return monotonicClock().elapsed(); }
 // network and 429 are retryable).
 [[noreturn]] void throwForSession(const PlankBrokerError& error)
 {
+    qWarning() << "Remote access broker admission failed; kind" << static_cast<int>(error.kind());
     switch (error.kind()) {
     case PlankBrokerError::Network:
         throw QtNetworkReplyException(QNetworkReply::TimeoutError, error.userMessage());
@@ -637,7 +639,8 @@ struct StreamSettingsRequired {
 NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QString& hostId,
                                     const QString& hostName, const StreamInputs& stream,
                                     const RemoteDisplaySetup::Setup& display,
-                                    RemoteStreamSetup::Capabilities& capabilities)
+                                    RemoteStreamSetup::Capabilities& capabilities,
+                                    bool& authenticatedGreeter)
 {
     const NvAddress address(lease.endpoint, lease.port);
     NvHTTP http(address);
@@ -694,7 +697,8 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
         computer->brokerHostId = hostId;
     }
 
-    const QString token = http.authenticateGssapi(lease.username, lease.gssapiToken);
+    const QString token = http.authenticateGssapi(lease.username, lease.gssapiToken,
+                                                  &authenticatedGreeter);
     NvOutputTopology topology;
     bool topologySupported;
     QString desktopMode;
@@ -707,8 +711,21 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
         appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(computer->plankVideoProfile);
     }
     if (topologySupported) {
-        topology = macHost ? http.prepareMacDisplay(desktopMode, appleEncodingMode, 1) :
-                             http.getOutputTopology();
+        if (macHost) {
+            topology = http.prepareMacDisplay(desktopMode, appleEncodingMode, 1);
+        } else {
+            QElapsedTimer readiness;
+            readiness.start();
+            for (;;) {
+                try {
+                    topology = http.getOutputTopology();
+                    break;
+                } catch (const GfeHttpResponseException& error) {
+                    if (error.getStatusCode() != 425 || readiness.elapsed() >= 10000) throw;
+                    QThread::msleep(300);
+                }
+            }
+        }
         if (!macHost && topology.displayArrangementPublished()) {
             // Cached so the display setup can preview this workstation.
             capabilities.displayCapabilities = QString::fromUtf8(
@@ -996,13 +1013,15 @@ void RemoteBroker::connectToHost(const QString& hostId)
         QString hostFailure;
         QString streamProblem;
         RemoteStreamSetup::Capabilities capabilities;
+        bool authenticatedGreeter = false;
         try {
             PlankBroker::Lease lease = PlankBrokerClient(config).connect(token->get(), hostId);
             // Office LAN: the broker hands out the workstation itself; the flow is identical.
             qInfo() << "Remote access route to" << hostId << ":"
                     << (lease.route == PlankBroker::Route::Direct ? "direct" : "relay");
             try {
-                computer = prepareBrokeredComputer(lease, hostId, hostName, stream, display, capabilities);
+                computer = prepareBrokeredComputer(lease, hostId, hostName, stream, display,
+                                                   capabilities, authenticatedGreeter);
             } catch (const StreamSettingsRequired& required) {
                 streamProblem = required.reason;
             }
@@ -1021,6 +1040,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
                         tr("The workstation could not be reached through the remote access server.");
         }
         QMetaObject::invokeMethod(qApp, [self, generation, hostId, hostName, computer,
+                                         authenticatedGreeter,
                                          brokerFailure, hostFailure, streamProblem, capabilities]() {
             if (capabilities.known) {
                 // Kept for the settings dialog and the next connect's check.
@@ -1091,6 +1111,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
                     throwForSession(error);
                 }
             });
+            session->setAuthenticatedGreeter(authenticatedGreeter);
 
             self->m_PendingSession = session;
             self->startKeepalive(hostId, session);

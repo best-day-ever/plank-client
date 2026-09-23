@@ -1686,6 +1686,11 @@ void Session::setPlankBrokerAdmission(PlankBrokerAdmission admission)
     }
 }
 
+void Session::setAuthenticatedGreeter(bool confirmed)
+{
+    m_AuthenticatedGreeter.store(confirmed);
+}
+
 bool Session::isPlankBrokered() const
 {
     QReadLocker lock(&m_Computer->lock);
@@ -4312,7 +4317,11 @@ bool Session::beginPlankReconnect(
 
     m_Reconnecting.store(true);
     m_ReconnectGreeterConfirmed.store(false);
-    const bool openingDesktop = m_DesktopHandoffNoticeDeadline.exchange(0) > SDL_GetTicks();
+    const bool noticeFresh = m_DesktopHandoffNoticeDeadline.exchange(0) > SDL_GetTicks();
+    const bool greeterConfirmed = m_AuthenticatedGreeter.exchange(false);
+    const bool openingDesktop = noticeFresh ||
+            (greeterConfirmed &&
+             (m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature));
     // The greeter's worker closes before the user's worker binds to the new
     // X session. A broker connect or host admission during that short gap can
     // return 401 even though this user's desktop is opening. Keep the normal
@@ -4410,6 +4419,7 @@ bool Session::runPlankReconnect()
                         ((m_Computer->plankFeatureFlags & NvOutputTopology::AuthenticatedDesktopStageFeature) ||
                          m_Computer->plankFeatureFlags == NvOutputTopology::FixedCaptureFlags)) {
                     m_ReconnectGreeterConfirmed.store(true);
+                    m_AuthenticatedGreeter.store(true);
                 }
             }
 

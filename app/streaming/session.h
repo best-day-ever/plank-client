@@ -152,6 +152,9 @@ public:
     // transitions; tokens are one-use, so every re-auth goes back to the broker.
     using PlankBrokerAdmission = std::function<void(QString& username, QString& gssapiToken)>;
     void setPlankBrokerAdmission(PlankBrokerAdmission admission);
+    // A signed host admission that explicitly named the greeter permits a
+    // bounded handoff retry even if the stream ends before its notice arrives.
+    void setAuthenticatedGreeter(bool confirmed);
 
     Q_INVOKABLE void cancelConnectionStart();
 
@@ -485,6 +488,7 @@ private:
     std::atomic_bool m_ReconnectRequested;
     std::atomic<Uint64> m_DesktopHandoffNoticeDeadline {0};
     std::atomic<Uint64> m_DesktopHandoffRetryDeadline {0};
+    std::atomic_bool m_AuthenticatedGreeter {false};
     std::atomic_bool m_ReconnectGreeterConfirmed {false};
     std::atomic<Uint64> m_LastPlankVideoReceived {0};
     QString m_PlankWorkerInstance;

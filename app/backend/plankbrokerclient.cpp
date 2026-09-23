@@ -122,7 +122,9 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
             if (signature.status == DeviceSignature::Signed && PlankBroker::isDeviceSignature(signature.signature)) {
                 request.setRawHeader(PlankBroker::deviceTimeHeader(), QByteArray::number(now));
                 request.setRawHeader(PlankBroker::deviceProofHeader(), signature.signature.toLatin1());
-            } else if (signature.status != DeviceSignature::NoKey) {
+            } else if (signature.status == DeviceSignature::NoKey) {
+                qWarning() << "Remote access: no device key was found for this bearer request";
+            } else {
                 qWarning() << "Remote access: the device key could not sign this request; not sending it";
                 throw PlankBrokerError(PlankBrokerError::Network);
             }
@@ -360,7 +362,10 @@ QVector<PlankBroker::Host> PlankBrokerClient::hosts(const QString& sessionToken)
 
 PlankBroker::Lease PlankBrokerClient::connect(const QString& sessionToken, const QString& hostId) const
 {
-    if (sessionToken.isEmpty()) throw PlankBrokerError(PlankBrokerError::SessionExpired);
+    if (sessionToken.isEmpty()) {
+        qWarning() << "Remote access: broker session token is absent before connect";
+        throw PlankBrokerError(PlankBrokerError::SessionExpired);
+    }
     if (!PlankBroker::isHostId(hostId)) throw PlankBrokerError(PlankBrokerError::Denied);
     const QJsonObject empty;
     Response response = request("POST", PlankBroker::hostActionPath(hostId, QStringLiteral("connect")),
