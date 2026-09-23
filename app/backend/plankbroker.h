@@ -681,15 +681,25 @@ inline bool parseLease(const QByteArray& body, Lease& lease)
 }
 
 // Bearer-authenticated calls (hosts, connect, keepalive, logout).
-enum class BearerStatus { Ok, SessionExpired, RateLimited, Denied, Malformed };
+enum class BearerStatus { Ok, SessionExpired, RateLimited, Unavailable, Denied, Malformed };
 
 inline BearerStatus classifyBearerStatus(int httpStatus)
 {
     if (httpStatus >= 200 && httpStatus < 300) return BearerStatus::Ok;
     if (httpStatus == 401) return BearerStatus::SessionExpired;
     if (httpStatus == 429) return BearerStatus::RateLimited;
-    if (httpStatus == 403 || httpStatus == 404 || httpStatus == 409 || httpStatus == 410) return BearerStatus::Denied;
+    if (httpStatus == 409) return BearerStatus::Unavailable;
+    if (httpStatus == 403 || httpStatus == 404 || httpStatus == 410) return BearerStatus::Denied;
     return BearerStatus::Malformed;
+}
+
+inline bool isTransientOfflineResponse(int httpStatus, const QByteArray& body)
+{
+    if (httpStatus != 409) return false;
+    QJsonObject object;
+    return parseObject(body, object) &&
+            object.value(QStringLiteral("state")) == QLatin1String("unavailable") &&
+            object.value(QStringLiteral("reason")) == QLatin1String("offline");
 }
 
 // Path for /v1/hosts/{id}/<action>, with the id as one encoded path segment.

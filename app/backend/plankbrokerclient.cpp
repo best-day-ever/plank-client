@@ -51,6 +51,9 @@ QString PlankBrokerError::userMessage() const
     case SessionExpired:
         return QCoreApplication::translate("PlankBroker",
             "Your remote session has ended. Please sign in again.");
+    case Unavailable:
+        return QCoreApplication::translate("PlankBroker",
+            "The workstation is temporarily unavailable.");
     case Protocol:
     default:
         return QCoreApplication::translate("PlankBroker",
@@ -340,6 +343,12 @@ void PlankBrokerClient::throwForBearerStatus(int status, const QByteArray& body)
         const int retryAfter = PlankBroker::parseObject(body, object) ?
                     PlankBroker::retryAfterFrom(object) : PlankBroker::DefaultRetryAfterSeconds;
         throw PlankBrokerError(PlankBrokerError::RateLimited, retryAfter);
+    }
+    case PlankBroker::BearerStatus::Unavailable: {
+        if (PlankBroker::isTransientOfflineResponse(status, body)) {
+            throw PlankBrokerError(PlankBrokerError::Unavailable);
+        }
+        throw PlankBrokerError(PlankBrokerError::Denied);
     }
     case PlankBroker::BearerStatus::Denied:
         throw PlankBrokerError(PlankBrokerError::Denied);

@@ -51,6 +51,8 @@ qint64 nowMs() { return monotonicClock().elapsed(); }
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, error.userMessage());
     case PlankBrokerError::RateLimited:
         throw GfeHttpResponseException(429, error.userMessage());
+    case PlankBrokerError::Unavailable:
+        throw GfeHttpResponseException(409, error.userMessage());
     case PlankBrokerError::Protocol:
         throw GfeHttpResponseException(400, error.userMessage());
     case PlankBrokerError::NotConfigured:
