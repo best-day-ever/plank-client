@@ -591,11 +591,11 @@ ApplicationWindow {
             ListModel {
                 id: addAppleEncodingProfileModel
                 ListElement {
-                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox (Preview)")
+                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox")
                     val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_420
                 }
                 ListElement {
-                    text: qsTr("HEVC 10-bit 4:4:4 — Apple VideoToolbox (Preview)")
+                    text: qsTr("HEVC 10-bit 4:4:4 — Apple VideoToolbox")
                     val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_444
                 }
             }
