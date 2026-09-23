@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -144,6 +145,8 @@ void FernwehUpdater::install()
             const bool started = QProcess::startDetached(QStringLiteral("/bin/bash"),
                 {script, file, canonicalApp, QString::number(QCoreApplication::applicationPid()), version});
             if (!started) {
+                QFile::remove(file);
+                QDir().rmdir(QFileInfo(file).absolutePath());
                 self->m_Status = self->tr("Could not start the installer.");
                 self->m_Busy = false;
                 emit self->changed();
