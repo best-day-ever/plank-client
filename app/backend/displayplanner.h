@@ -158,6 +158,20 @@ DisplayProfile::Profile proposal(const QVector<NvClientDisplay>& displays);
 Plan plan(const QVector<NvClientDisplay>& displays, const DisplayProfile::Profile& profile, const HostInfo& host,
           const Limits& limits = Limits());
 
+// Bind a negotiated plan to the live client monitors, regardless of whether
+// the session initially opens windowed. Windows are shown/hidden separately
+// when entering/leaving fullscreen. Legacy and arrangement plans use the
+// same selection; monitors left local must never acquire a stream window.
+struct PresentationTargets
+{
+    QVector<int> planIndices;
+    int primaryDisplay = -1;
+    bool separateWindows = false;
+};
+
+PresentationTargets presentationTargets(const Plan& plan, const QVector<NvClientDisplay>& displays,
+                                         bool supportsSeparateWindows);
+
 // A user-facing sentence for a PlankDisplayArrangementError code (the
 // host's 400/409 answers and the preview's own checks).
 QString errorText(const QString& code, const DisplayArrangement::Capabilities& capabilities);

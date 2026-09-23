@@ -209,6 +209,7 @@ private:
                                          int& x, int& y) const;
     void updateTabletCursorVisibility();
     QSize streamDimensions() const;
+    void routePresentationPointer(SDL_Window*& window, float& x, float& y) const;
     bool sendAbsoluteMousePosition(SDL_Window* window,
                                    float windowX, float windowY,
                                    bool allowClampedPosition);

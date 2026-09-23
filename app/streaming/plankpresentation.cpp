@@ -4,6 +4,23 @@
 
 #include <cmath>
 
+int PlankPresentation::capturedPointerTarget(const QPointF& point, const QPoint& origin,
+                                             const QVector<QRect>& windows, QPointF& localPoint)
+{
+    const QPointF global = point + origin;
+    for (int index = 0; index < windows.size(); ++index) {
+        const QRect& bounds = windows.at(index);
+        // Half-open edges assign the seam to exactly one output, preserving
+        // fractional Retina coordinates right up to the boundary.
+        if (bounds.isValid() && global.x() >= bounds.x() && global.y() >= bounds.y() &&
+                global.x() < bounds.x() + bounds.width() && global.y() < bounds.y() + bounds.height()) {
+            localPoint = global - bounds.topLeft();
+            return index;
+        }
+    }
+    return -1;
+}
+
 QRect PlankPresentation::aspectFitRect(const QSize& sourceSize,
                                         const QRect& destination)
 {

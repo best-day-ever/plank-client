@@ -7,6 +7,8 @@ class TestPlankPresentation : public QObject
     Q_OBJECT
 
 private slots:
+    void capturedDragCrossesBetweenDisplays();
+    void capturedDragHonoursLogicalBoundsAndGaps();
     void exactDualOutputSlices();
     void letterboxedDualOutputSlices();
     void mapsEachWindowIntoOneStreamCanvas();
@@ -692,6 +694,42 @@ void TestPlankPresentation::packedThreeUhdThirdScreenMapsToTheDesktop()
     QCOMPARE(windowPoint, QPointF(960, 540));
     QVERIFY(!PlankPresentation::mapStreamPointToSourceWindow(QPointF(1920, 3240), capture, layout.outputs.at(0),
                                                              QSize(1920, 1080), QSize(3840, 2160), windowPoint));
+}
+
+void TestPlankPresentation::capturedDragCrossesBetweenDisplays()
+{
+    const QVector<QRect> windows {QRect(0, 0, 1920, 1080), QRect(1920, 0, 1920, 1080)};
+    // A Retina client: events remain in logical coordinates on the first
+    // window while the held-button drag crosses into the second monitor.
+    PlankPresentationOutput right;
+    right.canvasRect = QRect(3840, 0, 3840, 2160);
+    right.desktopRect = right.canvasRect;
+    right.sourceRect = QRectF(right.canvasRect);
+    QPointF local, desktop;
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(2100.5, 300.25), QPoint(0, 0), windows, local), 1);
+    QCOMPARE(local, QPointF(180.5, 300.25));
+    QVERIFY(PlankPresentation::mapWindowPointToDesktop(local, QSize(1920, 1080), QSize(3840, 2160),
+                                                       right, QSize(7680, 2160), desktop, false));
+    QCOMPARE(desktop, QPointF(4201, 600.5));
+    // The same native capture can cross back without changing mouse focus.
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(-0.5, 300), QPoint(1920, 0), windows, local), 0);
+    QCOMPARE(local, QPointF(1919.5, 300));
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(1920, 300), QPoint(0, 0), windows, local), 1);
+    QCOMPARE(local, QPointF(0, 300));
+}
+
+void TestPlankPresentation::capturedDragHonoursLogicalBoundsAndGaps()
+{
+    const QVector<QRect> windows {QRect(-2560, -200, 2560, 1440), QRect(0, 0, 1920, 1080),
+                                  QRect(0, 1080, 1920, 1080), QRect()};
+    QPointF local;
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(-50.25, 10), QPoint(0, 0), windows, local), 0);
+    QCOMPARE(local, QPointF(2509.75, 210));
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(150, 1150), QPoint(0, 0), windows, local), 2);
+    QCOMPARE(local, QPointF(150, 70));
+    // A local-only gap or hidden output is not another remote display.
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(150, -20), QPoint(0, 0), windows, local), -1);
+    QCOMPARE(PlankPresentation::capturedPointerTarget(QPointF(2000, 100), QPoint(0, 0), windows, local), -1);
 }
 
 QTEST_APPLESS_MAIN(TestPlankPresentation)
