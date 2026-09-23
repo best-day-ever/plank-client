@@ -42,6 +42,9 @@ class RemoteBroker : public QObject
     Q_PROPERTY(QVariantList passkeys READ passkeys NOTIFY passkeysChanged)
     Q_PROPERTY(QStringList passkeyUsers READ passkeyUsers NOTIFY passkeysChanged)
     Q_PROPERTY(bool passkeyBusy READ passkeyBusy NOTIFY passkeysChanged)
+    Q_PROPERTY(bool touchIdSetupPending READ touchIdSetupPending NOTIFY stateChanged)
+    Q_PROPERTY(bool touchIdSetupBusy READ touchIdSetupBusy NOTIFY stateChanged)
+    Q_PROPERTY(QString touchIdSetupError READ touchIdSetupError NOTIFY stateChanged)
 
 public:
     explicit RemoteBroker(StreamingPreferences* preferences, QObject* parent = nullptr);
@@ -54,6 +57,8 @@ public:
     Q_INVOKABLE void refreshPasskeys();
     Q_INVOKABLE void createPasskey(const QString& username);
     Q_INVOKABLE void removePasskey(const QString& username);
+    Q_INVOKABLE void setUpTouchIdAfterSignIn();
+    Q_INVOKABLE void skipTouchIdAfterSignIn();
     Q_INVOKABLE void refreshHosts();
     // Connects with the display setup for the current screens (DisplayProfile:
     // this workstation's own, else the global one). Screens without one emit
@@ -122,6 +127,9 @@ public:
     QVariantList passkeys() const { return m_Passkeys; }
     QStringList passkeyUsers() const;
     bool passkeyBusy() const { return m_PasskeyBusy; }
+    bool touchIdSetupPending() const { return m_TouchIdSetupPending; }
+    bool touchIdSetupBusy() const { return m_TouchIdSetupBusy; }
+    QString touchIdSetupError() const { return m_TouchIdSetupError; }
 
 signals:
     void configurationChanged();
@@ -140,6 +148,8 @@ signals:
     // Mapping line for the administrator ("passkey:<id>,<SPKI>"; not secret).
     void passkeyCreated(QString username, QString mapping);
     void passkeyError(QString message);
+    void touchIdSetupRequested();
+    void touchIdSetupCompleted();
 
 private:
     // Shared with Session worker threads (re-admission) and keepalive tasks.
@@ -157,7 +167,7 @@ private:
 
     PlankBrokerClient::Config clientConfig() const;
     QString passkeyRpId() const;
-    void finishSignIn(QString token, const QString& confirmedUser);
+    void finishSignIn(QString token, const QString& confirmedUser, bool offerTouchId = false);
     void setBusy(const QString& text);
     void refreshHostsImpl(bool showBusy);
     void handleBrokerError(const PlankBrokerError& error, bool connecting);
@@ -181,6 +191,9 @@ private:
     PlankPasskeyHelper m_PasskeyHelper;
     QVariantList m_Passkeys;
     bool m_PasskeyBusy = false;
+    bool m_TouchIdSetupPending = false;
+    bool m_TouchIdSetupBusy = false;
+    QString m_TouchIdSetupError;
     quint64 m_PasskeyGeneration = 0;
     QPointer<Session> m_PendingSession;
     bool m_HostRefreshInFlight = false;

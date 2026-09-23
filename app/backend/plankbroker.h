@@ -263,6 +263,7 @@ struct AuthReply {
     QString username;
     int retryAfter = 0;
     bool deviceBound = false; // section 14.2; absent means an unbound session
+    bool passkeySetupAvailable = false; // fresh OTP login; absent on older brokers
 };
 
 struct Host {
@@ -529,6 +530,7 @@ inline bool parseAuthenticated(const QJsonObject& object, AuthReply& reply)
     reply.username = username;
     // Informational only: tolerated when absent or not a boolean.
     reply.deviceBound = object.value(QStringLiteral("device_bound")).toBool(false);
+    reply.passkeySetupAvailable = object.value(QStringLiteral("passkey_setup_available")).toBool(false);
     reply.kind = ReplyKind::Authenticated;
     return true;
 }
