@@ -5,7 +5,7 @@
 	<key>CFBundleExecutable</key>
 	<string>plank-client</string>
 	<key>CFBundleGetInfoString</key>
-	<string>Connect to a PLANK workstation</string>
+	<string>Connect to a BDE fernweh workstation</string>
 	<key>CFBundleIconFile</key>
 	<string>moonlight</string>
 	<key>CFBundleIdentifier</key>
@@ -30,7 +30,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>PLANK uses the local network to connect to a workstation.</string>
+	<string>BDE fernweh uses the local network to connect to a workstation.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_nvstream._tcp</string>
@@ -40,7 +40,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>@VERSION@</string>
 	<key>CFBundleDisplayName</key>
-	<string>BDE Fernweh Client</string>
+	<string>BDE fernweh</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 </dict>

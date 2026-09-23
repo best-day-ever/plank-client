@@ -351,10 +351,10 @@ void planLegacy(Plan& plan, const QVector<NvClientDisplay>& displays, int primar
     if (on > selected.size() || plan.legacyFitted) {
         warn(plan, QStringLiteral("old-host"),
              on > selected.size() ?
-                 tr("This workstation's PLANK shows at most two screens side by side, from a fixed list of "
-                    "sizes. Update PLANK on the workstation to use every screen at its exact size.") :
-                 tr("This workstation's PLANK only offers a fixed list of sizes, so the closest one is used. "
-                    "Update PLANK on the workstation for exact sizes."),
+                 tr("This workstation's BDE fernweh shows at most two screens side by side, from a fixed list of "
+                    "sizes. Update BDE fernweh on the workstation to use every screen at its exact size.") :
+                 tr("This workstation's BDE fernweh only offers a fixed list of sizes, so the closest one is used. "
+                    "Update BDE fernweh on the workstation for exact sizes."),
              QStringLiteral("update-host"), tr("How to update"));
     }
     plan.ok = true;
@@ -637,7 +637,7 @@ QString errorText(const QString& code, const DisplayArrangement::Capabilities& c
         return tr("The workstation has not finished detecting its screens yet. Try again in a minute.");
     }
     if (code == QLatin1String("not_negotiated")) {
-        return tr("The workstation did not accept the display layout. Update PLANK on the workstation.");
+        return tr("The workstation did not accept the display layout. Update BDE fernweh on the workstation.");
     }
     Q_UNUSED(code);
     return tr("The workstation could not show this screen layout.");

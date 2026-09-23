@@ -3,6 +3,7 @@
 #include "plankbroker.h"
 
 #include <QJsonObject>
+#include <QByteArray>
 #include <QString>
 #include <QStringList>
 
@@ -117,6 +118,11 @@ public:
         QByteArray body;
     };
     Response post(const QString& path, const QJsonObject& body) const;
+    Response get(const QString& path) const;
+    // Streams a release into a new file. The same broker TLS pin is checked
+    // before any bytes are accepted; size and SHA-256 are checked before use.
+    void download(const QString& path, const QString& destination,
+                  qint64 expectedSize, const QByteArray& expectedSha256) const;
 
     // Bearer calls. With a deviceSigner each carries X-Plank-Device-Time and
     // X-Plank-Device-Proof (section 14.2) when the signer produces a proof.

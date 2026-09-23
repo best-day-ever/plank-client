@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=BDE Fernweh Client
-Comment=Connect to a PLANK workstation
+Name=BDE fernweh
+Comment=Connect to a BDE fernweh workstation
 Exec=plank-client
 Icon=plank-client
 Terminal=false

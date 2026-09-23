@@ -3,12 +3,12 @@
   <id>la.instinctual.Plank.Client</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>BDE Fernweh Client</name>
-  <summary>Connect to a PLANK workstation</summary>
+  <name>BDE fernweh</name>
+  <summary>Connect to a BDE fernweh workstation</summary>
   <description>
     <p>
-      PLANK provides a low-latency remote desktop connection to an
-      authorized PLANK workstation.
+      BDE fernweh provides a low-latency remote desktop connection to an
+      authorized workstation.
     </p>
   </description>
   <categories>

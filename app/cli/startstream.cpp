@@ -95,12 +95,12 @@ public:
                     m_State = StateFailure;
                     QString msg;
                     if (event.computer->plankAuthentication) {
-                        msg = QObject::tr("Computer %1 requires PLANK credentials. "
+                        msg = QObject::tr("Computer %1 requires BDE fernweh credentials. "
                                           "Use --plank-user with "
                                           "--plank-password-stdin.")
                                 .arg(event.computer->name);
                     } else {
-                        msg = QObject::tr("Computer %1 requires PLANK sign-in before streaming.")
+                        msg = QObject::tr("Computer %1 requires BDE fernweh sign-in before streaming.")
                                 .arg(event.computer->name);
                     }
                     emit q->failed(msg);

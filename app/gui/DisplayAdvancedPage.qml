@@ -272,7 +272,7 @@ ColumnLayout {
         }
         Label {
             Layout.fillWidth: true
-            text: qsTr("A fixed layout for %1 from the sizes older PLANK versions know. It replaces the display setup for this workstation until you save a display setup for it again.").arg(page.hostName)
+            text: qsTr("A fixed layout for %1 from the sizes older BDE fernweh versions know. It replaces the display setup for this workstation until you save a display setup for it again.").arg(page.hostName)
             color: theme.textSecondary
             wrapMode: Text.Wrap
             font.pointSize: 10

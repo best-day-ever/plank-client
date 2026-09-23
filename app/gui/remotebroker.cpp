@@ -650,7 +650,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
     const QString serverInfo = http.getServerInfo(NvHTTP::NVLL_ERROR);
     NvComputer probed(http, serverInfo);
     if (!probed.plankAuthentication) {
-        throw GfeHttpResponseException(400, "The remote workstation does not offer PLANK authentication");
+        throw GfeHttpResponseException(400, "The remote workstation does not offer BDE fernweh authentication");
     }
     const bool macHost = probed.plankFeatureFlags == NvOutputTopology::FixedCaptureFlags;
     capabilities.known = true;

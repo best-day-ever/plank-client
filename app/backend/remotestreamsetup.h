@@ -422,7 +422,7 @@ inline QString problemFor(int captureSource, int profile, const Capabilities& ca
     if (caps.platform == LinuxPlatform &&
             StreamingPreferences::isPlankNvenc420Profile(profile) &&
             (caps.featureFlags & NvfbcNvenc420Feature) == 0) {
-        return tr("This workstation's PLANK is too old for %1. Choose another encoding.")
+        return tr("This workstation's BDE fernweh is too old for %1. Choose another encoding.")
                 .arg(profileName(profile));
     }
     return QString();

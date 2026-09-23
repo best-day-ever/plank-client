@@ -157,7 +157,7 @@ Item {
 
     NavigableMessageDialog {
         id: activeSessionTakeoverDialog
-        title: qsTr("Active PLANK session")
+        title: qsTr("Active BDE fernweh session")
         standardButtons: Dialog.Yes | Dialog.No
         acceptButtonText: qsTr("Take Over")
         rejectButtonText: qsTr("Cancel")

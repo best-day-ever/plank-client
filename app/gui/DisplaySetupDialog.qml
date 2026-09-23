@@ -97,7 +97,7 @@ NavigableDialog {
             visible: text !== ""
             text: {
                 if (dialog.reason === "new-screens") {
-                    return qsTr("These screens (%1) are new to BDE Fernweh. Check how the workstation will show them; you can change it later in Settings.").arg(DisplaySetup.label)
+                    return qsTr("These screens (%1) are new to BDE fernweh. Check how the workstation will show them; you can change it later in Settings.").arg(DisplaySetup.label)
                 }
                 if (dialog.reason === "onboarding" || dialog.reason === "") {
                     return ""
@@ -112,7 +112,7 @@ NavigableDialog {
             id: updateHint
             Layout.fillWidth: true
             visible: false
-            text: qsTr("Ask your studio administrator to update PLANK on this workstation. Until then it uses the older layouts.")
+            text: qsTr("Ask your studio administrator to update BDE fernweh on this workstation. Until then it uses the older layouts.")
             color: theme.textSecondary
             wrapMode: Text.Wrap
         }
