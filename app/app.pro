@@ -231,6 +231,7 @@ SOURCES += \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
     streaming/session.cpp \
+    streaming/audio/microphone.cpp \
     streaming/avsynccontroller.cpp \
     streaming/plankdisplaymode.cpp \
     streaming/plankpresentation.cpp \
@@ -485,6 +486,7 @@ macx {
         streaming/clipboardpolltimer.h \
         streaming/plankclipboard.h
     OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    OBJECTIVE_SOURCES += streaming/audio/macmicrophonepermission.mm
 }
 embedded {
     message(Embedded build)

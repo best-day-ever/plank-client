@@ -829,6 +829,9 @@ bool Session::startPlankTransportDataPlane(quint16 port,
     if (result == PLANK_TRANSPORT_OK) {
         result = plank_transport_native_endpoint_wait_ready(endpoint, 12000);
     }
+    if (result == PLANK_TRANSPORT_OK && m_MicrophoneNegotiated) {
+        result = plank_transport_native_microphone_enable(endpoint);
+    }
     if (result != PLANK_TRANSPORT_OK) {
         QByteArray error(512, '\0');
         if (endpoint != nullptr) {
@@ -1080,6 +1083,10 @@ void Session::stopPlankTransportDataPlane()
         }
     }
     stopPlankTransportMediaReceivers();
+    {
+        std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+        m_Microphone.reset();
+    }
     LiSetPlankNativeControlSender(nullptr, nullptr);
     LiSetPlankNativeInputSender(nullptr, nullptr);
     if (m_PlankTransportEndpoint != nullptr) {
@@ -1340,6 +1347,17 @@ void Session::plankTransportDataReceiveLoop()
                 return;
             }
             switch (control.type) {
+            case PLANK_TRANSPORT_CONTROL_MICROPHONE_APPLIED: {
+                if (!m_MicrophoneNegotiated || control.payload_size != 12 ||
+                        plank_transport_control_read_u32(control.payload + 8) > PLANK_TRANSPORT_MICROPHONE_UNAVAILABLE) {
+                    LiNotifyPlankHostTermination(-1); return;
+                }
+                const uint64_t generation = uint64_t(plank_transport_control_read_u32(control.payload)) << 32 |
+                        plank_transport_control_read_u32(control.payload + 4);
+                std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+                if (m_Microphone) m_Microphone->acknowledge(generation, plank_transport_control_read_u32(control.payload + 8));
+                break;
+            }
             case PLANK_TRANSPORT_CONTROL_HOST_DESKTOP_HANDOFF:
                 if (control.payload_size != 0 ||
                         !(m_Computer->plankFeatureFlags & NvOutputTopology::DesktopHandoffNoticeFeature)) {
@@ -2849,6 +2867,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 }
                 macLaunch = http->startMacPreview(topology, pin, m_StreamConfig.bitrate, quicUdpPayloadMtu);
                 m_MacClipboardNegotiated = macLaunch.clipboard;
+                m_MicrophoneNegotiated = macLaunch.microphone;
                 plankTransportPort = http->controlPort();
                 plankTransportCertificateSha256 = pin;
                 plankTransportToken = QString::fromLatin1(macLaunch.transportToken);
@@ -3240,6 +3259,14 @@ bool Session::startConnectionAsync(bool reconnecting,
     }
 
 #ifdef PLANK_TRANSPORT
+    {
+        std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+        if (m_MicrophoneNegotiated) {
+            if (!reconnecting) m_MicrophoneRequested.store(m_Preferences->microphoneAutomatic);
+            m_Microphone.reset(new PlankMicrophone(m_PlankTransportEndpoint,
+                m_MicrophoneRequested, m_Preferences->microphoneAutomaticInput));
+        }
+    }
     startPlankTransportMediaReceivers();
 #endif
 
@@ -4250,8 +4277,15 @@ void Session::execInternal()
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
                         currentVideoFecLoss().before,
                         currentNetworkRttMs());
+            {
+                std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+                m_PlankToolbar->setMicrophoneState(m_Microphone != nullptr,
+                    m_Microphone ? m_Microphone->state() : PlankMicrophone::State::Off);
+            }
             const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
+            if (action == PlankToolbar::Action::ToggleMicrophone)
+                m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
             if (action == PlankToolbar::Action::Disconnect) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK toolbar disconnect requested");
@@ -4365,6 +4399,8 @@ void Session::execInternal()
                         event.button.windowID == SDL_GetWindowID(m_Window)) {
                     const auto action =
                             m_PlankToolbar->handleMouseButton(event.button);
+                    if (action == PlankToolbar::Action::ToggleMicrophone)
+                        m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
                     if (action == PlankToolbar::Action::Disconnect) {
                         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                     "PLANK toolbar disconnect requested during reconnect");
@@ -4793,6 +4829,10 @@ void Session::execInternal()
             if (m_PlankToolbar &&
                     event.button.windowID == SDL_GetWindowID(m_Window)) {
                 const auto action = m_PlankToolbar->handleMouseButton(event.button);
+                if (action == PlankToolbar::Action::ToggleMicrophone) {
+                    m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
+                    break;
+                }
                 if (action == PlankToolbar::Action::Disconnect) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "PLANK toolbar disconnect requested");

@@ -6,6 +6,7 @@
 #include <QString>
 
 #include "planktoolbarlogic.h"
+#include "audio/microphone.h"
 
 class StreamingPreferences;
 class SdlInputHandler;
@@ -25,6 +26,7 @@ public:
         Minimize,
         Disconnect,
         KeepWaiting,
+        ToggleMicrophone,
     };
 
     PlankToolbar(SDL_Window* window,
@@ -37,6 +39,7 @@ public:
     void setRenderedStats(float fps, float videoMbps, float packetLossPercent,
                           std::uint32_t networkRttMs);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
+    void setMicrophoneState(bool supported, PlankMicrophone::State state);
     Action update(Uint64 now, bool transportAvailable = true);
     void showReconnectPrompt(int unreachableSeconds);
     void hideReconnectPrompt();
@@ -57,6 +60,7 @@ private:
         Handle,
         Slider,
         Pin,
+        Microphone,
         Fullscreen,
         Minimize,
         Disconnect,
@@ -89,6 +93,7 @@ private:
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
     bool pinContains(int x, int y) const;
+    bool microphoneContains(int x, int y) const;
     bool fullscreenContains(int x, int y) const;
     bool minimizeContains(int x, int y) const;
     bool disconnectContains(int x, int y) const;
@@ -114,6 +119,8 @@ private:
     bool m_PointerInitialized;
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
+    bool m_MicrophoneSupported = false;
+    PlankMicrophone::State m_MicrophoneState = PlankMicrophone::State::Off;
     bool m_ReconnectPromptVisible;
     bool m_ReconnectPromptPointerInside;
     bool m_ReconnectPromptButtonDown;

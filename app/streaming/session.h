@@ -18,6 +18,7 @@
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
+#include "audio/microphone.h"
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
 #include "plankreconnectpolicy.h"
@@ -386,6 +387,10 @@ private:
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
     bool m_MacClipboardNegotiated = false;
+    bool m_MicrophoneNegotiated = false;
+    std::atomic<bool> m_MicrophoneRequested {false};
+    std::mutex m_MicrophoneMutex;
+    std::unique_ptr<PlankMicrophone> m_Microphone;
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;

@@ -29,6 +29,7 @@
 
 namespace {
 constexpr int ToolbarHeight = 39;
+constexpr int MicrophoneWidth = 34;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
@@ -365,6 +366,7 @@ void PlankToolbar::notifyWindowChanged()
                 m_WindowWidth, m_WindowHeight,
                 m_WindowPixelWidth, m_WindowPixelHeight);
     m_Width = std::min(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+                      (m_MicrophoneSupported ? MicrophoneWidth : 0) +
                       PlankToolbarStats::WindowControlsWidth,
                       std::max(m_WindowWidth, 1));
     if (m_ToolbarLeft < 0) {
@@ -621,6 +623,9 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
             break;
         case Control::Fullscreen:
             action = Action::ToggleFullscreen;
+            break;
+        case Control::Microphone:
+            action = Action::ToggleMicrophone;
             break;
         case Control::Minimize:
             action = Action::Minimize;
@@ -904,6 +909,24 @@ void PlankToolbar::redraw()
     painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
 
     const QPointF fullscreenCenter(m_Width - 88.0, 19.0);
+    if (m_MicrophoneSupported) {
+        const qreal x = m_Width - 121.0;
+        const QColor color = m_MicrophoneState == PlankMicrophone::State::Active ? QColor(52, 199, 110) :
+            m_MicrophoneState == PlankMicrophone::State::Pending ? QColor(240, 186, 70) :
+            m_MicrophoneState == PlankMicrophone::State::Unavailable ? QColor(239, 88, 88) : QColor(180, 189, 202);
+        painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(QRectF(x-3, 5, 6, 11), 3, 3);
+        painter.drawArc(QRectF(x-6, 8, 12, 13), 180*16, 180*16);
+        painter.drawLine(QPointF(x, 21), QPointF(x, 23));
+        if (m_MicrophoneState == PlankMicrophone::State::Off || m_MicrophoneState == PlankMicrophone::State::Unavailable)
+            painter.drawLine(QPointF(x-8, 4), QPointF(x+8, 21));
+        QFont font = painter.font(); font.setPixelSize(9); painter.setFont(font);
+        const QString label = m_MicrophoneState == PlankMicrophone::State::Active ? QStringLiteral("On") :
+            m_MicrophoneState == PlankMicrophone::State::Pending ? QStringLiteral("Wait") :
+            m_MicrophoneState == PlankMicrophone::State::Unavailable ? QStringLiteral("N/A") : QStringLiteral("Off");
+        painter.drawText(QRectF(x-16, 24, 32, 12), Qt::AlignCenter, label);
+    }
     const QRectF fullscreenRect(fullscreenCenter.x() - WindowButtonSize / 2.0,
                                 fullscreenCenter.y() - WindowButtonSize / 2.0,
                                 WindowButtonSize,
@@ -1348,6 +1371,21 @@ bool PlankToolbar::pinContains(int x, int y) const
            y >= 5 && y <= 33;
 }
 
+void PlankToolbar::setMicrophoneState(bool supported, PlankMicrophone::State state)
+{
+    if (supported == m_MicrophoneSupported && state == m_MicrophoneState) return;
+    const bool geometryChanged = supported != m_MicrophoneSupported;
+    m_MicrophoneSupported = supported; m_MicrophoneState = state;
+    if (geometryChanged) notifyWindowChanged();
+    redraw();
+}
+
+bool PlankToolbar::microphoneContains(int x, int y) const
+{
+    return m_MicrophoneSupported && x >= toolbarLeft() + m_Width - 136 &&
+        x <= toolbarLeft() + m_Width - 106 && y >= 2 && y <= 37;
+}
+
 bool PlankToolbar::handleContains(int x, int y) const
 {
     return x >= toolbarLeft() && x <= toolbarLeft() + 22 &&
@@ -1386,6 +1424,7 @@ PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
     if (fullscreenContains(x, y)) {
         return Control::Fullscreen;
     }
+    if (microphoneContains(x, y)) return Control::Microphone;
     if (minimizeContains(x, y)) {
         return Control::Minimize;
     }
@@ -1411,5 +1450,6 @@ int PlankToolbar::sliderLeft() const
 int PlankToolbar::sliderRight() const
 {
     return toolbarLeft() + std::max(PlankToolbarStats::EncoderTargetLeft,
-                                   m_Width - PlankToolbarStats::WindowControlsWidth);
+                                   m_Width - PlankToolbarStats::WindowControlsWidth -
+                                   (m_MicrophoneSupported ? MicrophoneWidth : 0));
 }
