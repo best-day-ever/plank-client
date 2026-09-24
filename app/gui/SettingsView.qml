@@ -492,6 +492,29 @@ Flickable {
                     }
                 }
 
+                PlankSettingLabel { text: qsTr("Enable microphone") }
+                AutoResizingComboBox {
+                    Layout.fillWidth: true
+                    model: [qsTr("Automatic"), qsTr("Manual")]
+                    currentIndex: StreamingPreferences.microphoneAutomatic ? 0 : 1
+                    onActivated: StreamingPreferences.microphoneAutomatic = currentIndex === 0
+                    Accessible.name: qsTr("Enable microphone")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 1000
+                    ToolTip.text: qsTr("Automatic starts the OS-selected microphone on a supported host after permission is granted. Manual starts muted; use the toolbar to enable it.")
+                }
+                PlankSettingLabel { text: qsTr("Select PLANK Microphone as host input") }
+                AutoResizingComboBox {
+                    Layout.fillWidth: true
+                    model: [qsTr("Automatic"), qsTr("Manual")]
+                    currentIndex: StreamingPreferences.microphoneAutomaticInput ? 0 : 1
+                    onActivated: StreamingPreferences.microphoneAutomaticInput = currentIndex === 0
+                    Accessible.name: qsTr("Select PLANK Microphone as host input")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 1000
+                    ToolTip.text: qsTr("Automatic temporarily selects PLANK Microphone on the host. Manual leaves the input selection to you or the application. Muting always sends silence.")
+                }
+
                 PlankSettingLabel {
                     text: qsTr("Mute host PC speakers while streaming")
                 }

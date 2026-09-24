@@ -6,6 +6,13 @@
 #include "outputtopology.h"
 #include "../../app/streaming/macdisplaygeometry.h"
 
+static NvClientDisplay clientWithPrimary(QRect bounds, QSize nativeSize, bool main)
+{
+    NvClientDisplay display {bounds, nativeSize};
+    display.main = main;
+    return display;
+}
+
 class TestOutputTopology : public QObject
 {
     Q_OBJECT
@@ -21,6 +28,9 @@ private slots:
     void enforcesHostDisplayPolicy();
     void validatesRequestedLayoutGeometry();
     void matchesOneClientDisplay();
+    void matchesPrimaryInDesktopOrder();
+    void primaryHintRequiresMatchingOutputCount();
+    void omitsAmbiguousPrimaryHints();
     void matchesTwoClientDisplaysLeftToRight();
     void rejectsUnsupportedClientLayouts();
     void parsesFixedCapture();
@@ -29,6 +39,7 @@ private slots:
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
+    void matchesMultipleNativeFullscreenViewports();
     void buildsMacDisplayRequest();
     void computesClientMatchTarget();
     void bestFitsOddClientDisplays_data();
@@ -79,6 +90,25 @@ void TestOutputTopology::matchesMacFullscreenViewport()
         const auto request = NvOutputTopology::macDisplayRequest(
             QStringLiteral("3420x%1").arg(pixelHeight), "hevc-10-444-videotoolbox", scale);
         QVERIFY(!request.isEmpty());
+    }
+}
+
+void TestOutputTopology::matchesMultipleNativeFullscreenViewports()
+{
+    for (int count : {-1, 0}) {
+        QVERIFY(!MacDisplayGeometry::useNativeFullscreen(count));
+    }
+
+    for (int count : {1, 2, 3}) {
+        QVERIFY(MacDisplayGeometry::useNativeFullscreen(count));
+        int height = 1329, pixels = 2658;
+        QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
+        QCOMPARE(height, 1291);
+        QCOMPARE(pixels, height * 2);
+        height = 1440; pixels = 1440;
+        QVERIFY(MacDisplayGeometry::insetTop(2560, height, 2560, pixels, 0));
+        QCOMPARE(height, 1440);
+        QCOMPARE(pixels, height);
     }
 }
 
@@ -211,7 +241,7 @@ void TestOutputTopology::parsesFixedCapture()
     QCOMPARE(topology.outputs.size(), 1);
     QCOMPARE(topology.toJson(), fixture);
     QVERIFY(!(topology.featureFlags & NvOutputTopology::UnifiedAbsoluteInputFeature));
-    QVERIFY(!(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature));
+    QVERIFY(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature);
     QVERIFY(!(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::FixedCaptureFeature));
     // Linux-only launch features must never alias a Mac fixed-capture bit.
     QVERIFY(!(NvOutputTopology::FixedCaptureFlags & NvOutputTopology::DesktopSignOutFeature));
@@ -253,7 +283,7 @@ void TestOutputTopology::rejectsInvalidFixedCapture()
         QVERIFY(!NvOutputTopology::fromJson(object, topology));
     }
     auto object = fixture;
-    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::SessionTakeoverFeature;
+    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::DynamicHostLayoutFeature;
     QVERIFY(!NvOutputTopology::fromJson(object, topology));
     object = fixture; object["generation"] = "not-a-generation";
     QVERIFY(!NvOutputTopology::fromJson(object, topology));
@@ -544,6 +574,92 @@ void TestOutputTopology::matchesOneClientDisplay()
              qPrintable(error));
     QCOMPARE(layout, QStringLiteral("single"));
     QCOMPARE(modes, QStringList({QStringLiteral("3840x2160")}));
+}
+
+void TestOutputTopology::matchesPrimaryInDesktopOrder()
+{
+    QFile fixture(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) +
+                  "/tests/protocol/output-topology-v13-virtual-primary.json");
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(QJsonDocument::fromJson(fixture.readAll()).object(), topology));
+    QVERIFY(topology.featureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature);
+    QVERIFY(topology.matchesRequestedHostLayout("dual-horizontal", {"1920x1200", "2560x1440"}));
+    QCOMPARE(topology.outputs[0].id, QStringLiteral("x11:DP-2"));
+    QCOMPARE(topology.outputs[1].id, QStringLiteral("x11:DP-0"));
+    QVERIFY(topology.outputs[1].primary);
+
+    const NvClientDisplay eizo = clientWithPrimary(QRect(1920, 0, 2560, 1440), QSize(2560, 1440), true);
+    const NvClientDisplay laptop = clientWithPrimary(QRect(0, 0, 1920, 1200), QSize(3456, 2234), false);
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({eizo, laptop}, 2), 1);
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({laptop, eizo}, 2), 1);
+    auto leftPrimary = laptop;
+    leftPrimary.main = true;
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({leftPrimary, eizo}, 2), -1);
+    auto noPrimary = eizo;
+    noPrimary.main = false;
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({laptop, noPrimary}, 2), -1);
+
+    // A qualified virtual pair retains its existing sizes and gains only the
+    // optional primary connector index for a Host that advertises the bit.
+    QString layout;
+    QStringList modes;
+    QString error;
+    int primary = -1;
+    const NvClientDisplay virtualLaptop = clientWithPrimary(QRect(0, 0, 1920, 1200), QSize(1920, 1200), false);
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 {eizo, virtualLaptop}, layout, modes, &error, nullptr,
+                 NvOutputTopology::qualifiedVirtualModes(), &primary), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("dual-horizontal"));
+    QCOMPARE(modes, QStringList({QStringLiteral("1920x1200"), QStringLiteral("2560x1440")}));
+    QCOMPARE(primary, 1);
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 {eizo}, layout, modes, &error, nullptr,
+                 NvOutputTopology::qualifiedVirtualModes(), &primary), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(primary, 0);
+    QVERIFY(NvOutputTopology::SupportedFeatureFlags &
+            NvOutputTopology::VirtualPrimaryConnectorFeature);
+    QVERIFY(!(NvOutputTopology::VirtualPrimaryConnectorFeature &
+              NvOutputTopology::ClipboardSyncFeature));
+}
+
+void TestOutputTopology::primaryHintRequiresMatchingOutputCount()
+{
+    // A manual two-output bookmark is valid even with one or three client
+    // monitors. In those cases there is no one-to-one connector hint, even
+    // when the local primary happens to have index 0 or 1.
+    for (int count = 0; count <= 4; ++count) {
+        for (int primary = 0; primary < qMax(1, count); ++primary) {
+            QVector<NvClientDisplay> displays;
+            for (int index = 0; index < count; ++index) {
+                // Reverse enumeration and a negative desktop origin must not
+                // change the primary's index in left-to-right output order.
+                displays.prepend(clientWithPrimary(QRect((index - 1) * 1920, 0, 1920, 1080),
+                                                   QSize(1920, 1080), index == primary));
+            }
+            for (int requested = -1; requested <= 4; ++requested) {
+                const int expected = count == requested && count >= 1 && count <= 2
+                    ? primary : -1;
+                QCOMPARE(NvOutputTopology::clientPrimaryIndex(displays, requested), expected);
+            }
+        }
+    }
+}
+
+void TestOutputTopology::omitsAmbiguousPrimaryHints()
+{
+    const NvClientDisplay primary = clientWithPrimary(QRect(0, 0, 1920, 1080), QSize(1920, 1080), true);
+    for (const QRect& bounds : {QRect(0, 1080, 1920, 1080), // stacked
+                               QRect(0, 0, 1920, 1080),    // mirrored
+                               QRect(960, 0, 1920, 1080),  // overlapping
+                               QRect(1920, 1080, 1920, 1080), // diagonal
+                               QRect()}) {
+        const NvClientDisplay other = clientWithPrimary(bounds, QSize(1920, 1080), false);
+        QCOMPARE(NvOutputTopology::clientPrimaryIndex({primary, other}, 2), -1);
+    }
+    const NvClientDisplay right = clientWithPrimary(QRect(1920, 200, 2560, 1440), QSize(5120, 2880), false);
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({right, primary}, 2), 0);
 }
 
 void TestOutputTopology::matchesTwoClientDisplaysLeftToRight()

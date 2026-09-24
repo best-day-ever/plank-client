@@ -321,6 +321,8 @@ public:
     Q_PROPERTY(PlankUnreachableAction plankUnreachableAction MEMBER plankUnreachableAction NOTIFY plankUnreachableActionChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
+    Q_PROPERTY(bool microphoneAutomatic MEMBER microphoneAutomatic NOTIFY microphoneAutomaticChanged)
+    Q_PROPERTY(bool microphoneAutomaticInput MEMBER microphoneAutomaticInput NOTIFY microphoneAutomaticInputChanged)
     Q_PROPERTY(bool plankToolbarPinned MEMBER plankToolbarPinned NOTIFY plankToolbarPinnedChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
@@ -386,6 +388,8 @@ public:
     int plankUnreachableTimeoutSeconds;
     PlankUnreachableAction plankUnreachableAction;
     AudioConfig audioConfig;
+    bool microphoneAutomatic;
+    bool microphoneAutomaticInput;
     bool plankToolbarPinned;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
@@ -403,6 +407,8 @@ signals:
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void audioConfigChanged();
+    void microphoneAutomaticChanged();
+    void microphoneAutomaticInputChanged();
     void plankToolbarPinnedChanged();
     void windowModeChanged();
     void connectionWarningsChanged();

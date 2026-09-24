@@ -8,8 +8,13 @@
 #include "utils.h"
 #ifdef Q_OS_MACOS
 #include "streaming/macquitshortcut.h"
+#include "streaming/mackeyboardcapture.h"
 #include "streaming/macwindow.h"
 #include "streaming/input/macpen.h"
+#endif
+
+#ifdef HAVE_MAC_RAW_WACOM
+#include "streaming/input/macrawwacom.h"
 #endif
 
 #ifdef HAVE_LIBINPUT_TABLET
@@ -106,19 +111,24 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
             WMUtils::isRunningDesktopEnvironment();
 #ifdef Q_OS_MACOS
-    m_MacQuitShortcut = std::make_unique<MacQuitShortcut>([this] {
-        if (!isSystemKeyCaptureActive())
-            return false;
-        for (const auto& output : m_PresentationLayout.outputs) {
-            // SDL focus notifications may still be queued. A local Qt dialog
-            // must never inherit the stream's shortcut ownership.
-            if (MacWindow::hasKeyboardFocus(output.window))
-                return true;
-        }
-        return false;
-    });
+    auto ownsKeyboard = [this] { return isSystemKeyCaptureActive(); };
+    m_MacQuitShortcut = std::make_unique<MacQuitShortcut>(ownsKeyboard);
+    m_MacKeyboardCapture = std::make_unique<MacKeyboardCapture>(
+        ownsKeyboard, [this] { raiseAllKeys(); });
 #endif
 }
+
+#ifdef Q_OS_MACOS
+bool SdlInputHandler::hasMacStreamKeyboardFocus() const
+{
+    // SDL focus notifications may still be queued. A local Qt dialog must
+    // never inherit the stream's shortcut ownership or forward its typing.
+    for (const auto& output : m_PresentationLayout.outputs) {
+        if (MacWindow::hasKeyboardFocus(output.window)) return true;
+    }
+    return false;
+}
+#endif
 
 void SdlInputHandler::setStreamDimensions(int streamWidth, int streamHeight)
 {
@@ -141,7 +151,11 @@ QSize SdlInputHandler::streamDimensions() const
 SdlInputHandler::~SdlInputHandler()
 {
 #ifdef Q_OS_MACOS
+    m_MacKeyboardCapture.reset();
     m_MacQuitShortcut.reset();
+#endif
+#ifdef HAVE_MAC_RAW_WACOM
+    m_MacRawWacomInput.reset();
 #endif
 #ifdef HAVE_LIBINPUT_TABLET
     m_LinuxWacomInput.reset();
@@ -596,6 +610,12 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     if (!mapRemoteCursorPositionToWindow(position, targetWindow, x, y)) {
         return;
     }
+#ifdef HAVE_MAC_RAW_WACOM
+    updateTabletCursorVisibility();
+    if (m_MacRawWacomInput) {
+        followPointerFocus(targetWindow, 0, PointerFocusPosition::HostTablet);
+    }
+#endif
     PlankWaylandCursor* cursor =
             ensureWaylandTabletCursorAttached(targetWindow);
     if (cursor == nullptr) {
@@ -620,7 +640,11 @@ void SdlInputHandler::applyPendingTabletCursorActivation()
     }
     reconcileWaylandTabletCursorOutputs();
     if (!m_LocalCursorSupported || !isCaptureActive() ||
-            m_WaylandTabletCursorOutputs.empty()) {
+            (m_WaylandTabletCursorOutputs.empty()
+#ifdef HAVE_MAC_RAW_WACOM
+             && !m_MacRawWacomInput
+#endif
+             )) {
         m_TabletCursorActivationPending.store(false);
         return;
     }
@@ -676,9 +700,13 @@ void SdlInputHandler::notifyMouseLeave()
 void SdlInputHandler::notifyFocusLost()
 {
 #ifdef Q_OS_MACOS
+    m_MacKeyboardCapture->refresh();
     m_MacQuitShortcut->refresh();
 #endif
     activateCompositorCursor();
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->setActive(false);
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
         m_LinuxWacomInput->setActive(false);
@@ -701,7 +729,11 @@ void SdlInputHandler::notifyFocusLost()
 void SdlInputHandler::notifyFocusGained()
 {
 #ifdef Q_OS_MACOS
+    m_MacKeyboardCapture->refresh();
     m_MacQuitShortcut->refresh();
+#endif
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->setActive(isCaptureActive());
 #endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxWacomInput) {
@@ -721,7 +753,9 @@ void SdlInputHandler::notifyFocusGained()
 void SdlInputHandler::handleRawHidControl(const unsigned char* data,
                                           unsigned int length)
 {
-#ifdef HAVE_LIBINPUT_TABLET
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->handleControl(data, length);
+#elif defined(HAVE_LIBINPUT_TABLET)
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->handleControl(data, length);
     }
@@ -733,6 +767,9 @@ void SdlInputHandler::handleRawHidControl(const unsigned char* data,
 
 void SdlInputHandler::beginRawHidReconnect()
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->beginReconnect();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->beginReconnect();
@@ -742,6 +779,9 @@ void SdlInputHandler::beginRawHidReconnect()
 
 void SdlInputHandler::finishRawHidReconnect()
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) m_MacRawWacomInput->finishReconnect();
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->finishReconnect();
@@ -819,12 +859,15 @@ void SdlInputHandler::updateKeyboardGrabState()
     // Don't close the window on Alt+F4 when keyboard grab is enabled
     SDL_SetHint(SDL_HINT_WINDOWS_CLOSE_ON_ALT_F4, shouldGrab ? "0" : "1");
 
+#ifndef Q_OS_MACOS
     for (const auto& output : m_PresentationLayout.outputs) {
         SDL_SetWindowKeyboardGrab(output.window, shouldGrab ? true : false);
     }
+#endif
 
     m_KeyboardCaptureActive = shouldGrab;
 #ifdef Q_OS_MACOS
+    m_MacKeyboardCapture->refresh();
     m_MacQuitShortcut->refresh();
 #endif
 }
@@ -847,7 +890,13 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
     bool fullscreen = false;
     for (const auto& output : m_PresentationLayout.outputs) {
         const Uint32 windowFlags = SDL_GetWindowFlags(output.window);
+#ifdef Q_OS_MACOS
+        // AppKit can return to a fullscreen Space before SDL's cached focus
+        // flags recover. Do not require both native and cached focus to agree.
+        focused = focused || MacWindow::hasKeyboardFocus(output.window);
+#else
         focused = focused || (windowFlags & SDL_WINDOW_INPUT_FOCUS);
+#endif
         fullscreen = fullscreen || (windowFlags & SDL_WINDOW_FULLSCREEN);
     }
     if (!focused || !m_KeyboardCaptureActive) {
@@ -864,6 +913,13 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 
 void SdlInputHandler::setCaptureActive(bool active)
 {
+#ifdef HAVE_MAC_RAW_WACOM
+    if (m_MacRawWacomInput) {
+        SDL_Window* focus = SDL_GetKeyboardFocus();
+        m_MacRawWacomInput->setActive(active && focus &&
+            presentationWindow(SDL_GetWindowID(focus)) != nullptr);
+    }
+#endif
     if (active) {
         setCursorVisible(m_LocalCursorSupported ?
                              (!m_MouseWasInVideoRegion || m_RemoteCursorVisible) :
@@ -932,6 +988,11 @@ void SdlInputHandler::activateCompositorCursor()
     }
 
     m_TabletCursorActive = false;
+#ifdef HAVE_MAC_RAW_WACOM
+    for (const auto& output : m_PresentationLayout.outputs)
+        MacWindow::hideTabletCursor(output.window);
+    MacWindow::hideTabletCursor(m_Window);
+#endif
     for (auto& output : m_WaylandTabletCursorOutputs) {
         output.cursor->setVisible(false);
         output.cursor->dispatchPending();
@@ -1134,6 +1195,16 @@ void SdlInputHandler::updateTabletCursorVisibility()
             m_RemoteCursorVisible &&
             m_AppliedRemoteCursorPositionSequence >
                 m_TabletCursorActivationSequence;
+#ifdef HAVE_MAC_RAW_WACOM
+    for (const auto& output : m_PresentationLayout.outputs) {
+        if (output.window != positionWindow) MacWindow::hideTabletCursor(output.window);
+    }
+    if (positionWindow && m_AppliedRemoteCursorValid) {
+        const auto& image = m_AppliedRemoteCursor;
+        MacWindow::tabletCursor(positionWindow, image.pixels.data(), image.width, image.height,
+            image.hotspotX, image.hotspotY, image.generation, x, y, visible);
+    }
+#endif
     for (auto& output : m_WaylandTabletCursorOutputs) {
         output.cursor->setVisible(visible && output.window == positionWindow);
         output.cursor->dispatchPending();

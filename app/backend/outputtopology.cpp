@@ -600,6 +600,15 @@ bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
     return allowedLayoutKinds.contains(layout);
 }
 
+int NvOutputTopology::outputCountForLayout(const QString& resolvedLayout) const
+{
+    if (resolvedLayout == SingleHostLayout) return 1;
+    if (resolvedLayout == DualHorizontalHostLayout) return 2;
+    if (resolvedLayout == PhysicalHostLayout || resolvedLayout == QStringLiteral("fixed"))
+        return outputs.size();
+    return 0;
+}
+
 bool NvOutputTopology::matchesRequestedHostLayout(const QString& layout,
                                                   const QStringList& modes) const
 {
@@ -778,7 +787,8 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
                                                   QStringList& virtualModes,
                                                   QString* error,
                                                   bool* fitted,
-                                                  const QStringList& candidateModes)
+                                                  const QStringList& candidateModes,
+                                                  int* primaryOutput)
 {
     hostLayout.clear();
     virtualModes.clear();
@@ -872,5 +882,41 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
     }
     hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
                                        QString::fromLatin1(DualHorizontalHostLayout);
+    if (primaryOutput) {
+        *primaryOutput = clientPrimaryIndex(displays, displays.size());
+        if (*primaryOutput < 0) {
+            if (error) *error = QStringLiteral("Unable to identify one primary client display. Please reconnect.");
+            hostLayout.clear();
+            virtualModes.clear();
+            return false;
+        }
+    }
     return true;
+}
+
+int NvOutputTopology::clientPrimaryIndex(QVector<NvClientDisplay> displays, int outputCount)
+{
+    if (outputCount < 1 || outputCount > 2 || displays.size() != outputCount) {
+        return -1;
+    }
+    std::sort(displays.begin(), displays.end(), [](const auto& left, const auto& right) {
+        return std::make_tuple(left.bounds.x(), left.bounds.y()) <
+                std::make_tuple(right.bounds.x(), right.bounds.y());
+    });
+    if (displays.size() == 2) {
+        const QRect& left = displays.at(0).bounds;
+        const QRect& right = displays.at(1).bounds;
+        if (left.right() >= right.left() ||
+                left.top() > right.bottom() || right.top() > left.bottom()) {
+            return -1;
+        }
+    }
+    int primary = -1;
+    for (int index = 0; index < displays.size(); ++index) {
+        if (!displays[index].bounds.isValid()) return -1;
+        if (!displays[index].main) continue;
+        if (primary != -1) return -1;
+        primary = index;
+    }
+    return primary;
 }

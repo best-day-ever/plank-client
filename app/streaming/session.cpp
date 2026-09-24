@@ -7,6 +7,7 @@
 #include "streaming/avsynccontroller.h"
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
+#include "streaming/input/plankmousemotion.h"
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
 #include "backend/displayprofile.h"
@@ -24,6 +25,7 @@
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
 #include "streaming/macdisplayinfo.h"
+#include "streaming/macdisplaygeometry.h"
 #include "streaming/video/decodercaps.h"
 #endif
 
@@ -857,6 +859,9 @@ bool Session::startPlankTransportDataPlane(quint16 port,
     if (result == PLANK_TRANSPORT_OK) {
         result = plank_transport_native_endpoint_wait_ready(endpoint, 12000);
     }
+    if (result == PLANK_TRANSPORT_OK && m_MicrophoneNegotiated) {
+        result = plank_transport_native_microphone_enable(endpoint);
+    }
     if (result != PLANK_TRANSPORT_OK) {
         QByteArray error(512, '\0');
         if (endpoint != nullptr) {
@@ -1114,6 +1119,10 @@ void Session::stopPlankTransportDataPlane()
         }
     }
     stopPlankTransportMediaReceivers();
+    {
+        std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+        m_Microphone.reset();
+    }
     LiSetPlankNativeControlSender(nullptr, nullptr);
     LiSetPlankNativeInputSender(nullptr, nullptr);
     if (m_PlankTransportEndpoint != nullptr) {
@@ -1374,6 +1383,17 @@ void Session::plankTransportDataReceiveLoop()
                 return;
             }
             switch (control.type) {
+            case PLANK_TRANSPORT_CONTROL_MICROPHONE_APPLIED: {
+                if (!m_MicrophoneNegotiated || control.payload_size != 12 ||
+                        plank_transport_control_read_u32(control.payload + 8) > PLANK_TRANSPORT_MICROPHONE_UNAVAILABLE) {
+                    LiNotifyPlankHostTermination(-1); return;
+                }
+                const uint64_t generation = uint64_t(plank_transport_control_read_u32(control.payload)) << 32 |
+                        plank_transport_control_read_u32(control.payload + 4);
+                std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+                if (m_Microphone) m_Microphone->acknowledge(generation, plank_transport_control_read_u32(control.payload + 8));
+                break;
+            }
             case PLANK_TRANSPORT_CONTROL_HOST_DESKTOP_HANDOFF:
                 if (control.payload_size != 0 ||
                         !(m_Computer->plankFeatureFlags & NvOutputTopology::DesktopHandoffNoticeFeature)) {
@@ -1734,11 +1754,20 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
 bool Session::initialize()
 {
 #ifdef Q_OS_DARWIN
-    // Keep native fullscreen Spaces, including trackpad app switching. Match
-    // Client uses the notch-safe viewport; never switch the desktop mode.
-    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES, "1");
+    // SDL 3.4.2 caches allow_spaces in Cocoa_VideoInit, so use CoreGraphics
+    // before SDL video initialization. Setting the hint before window creation
+    // alone is too late. Match Client and the presenter share this policy.
+    const int macDisplayCount = MacWindow::activeDisplayCount();
+    if (macDisplayCount <= 0) {
+        emit displayLaunchError(tr("Unable to discover active Mac displays."));
+        return false;
+    }
+    SDL_SetHint(SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES,
+                MacDisplayGeometry::useNativeFullscreen(macDisplayCount) ? "1" : "0");
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK Mac fullscreen policy: native Spaces, active displays=%d",
+                macDisplayCount);
 #endif
-
     if (!StreamingPreferences::isPlankProfileValidForCaptureSource(
                 m_PlankVideoProfile,
                 m_PlankCaptureSource)) {
@@ -1788,6 +1817,14 @@ bool Session::initialize()
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return false;
     }
+
+#ifdef Q_OS_DARWIN
+    if (m_ClientDisplays.size() != macDisplayCount) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        emit displayLaunchError(tr("The Mac display layout changed during setup. Please connect again."));
+        return false;
+    }
+#endif
 
     LiInitializeStreamConfiguration(&m_StreamConfig);
     if (!configurePlankLaunchGeometry()) {
@@ -2135,6 +2172,7 @@ bool Session::snapshotClientDisplays()
     for (int index = 0; index < displayCount; ++index) {
         ClientDisplaySnapshot snapshot;
         snapshot.displayId = StreamUtils::getDisplayId(index);
+        snapshot.primary = snapshot.displayId == SDL_GetPrimaryDisplay();
         SDL_DisplayMode nativeMode;
         SDL_Rect safeArea;
         if (snapshot.displayId == 0 ||
@@ -2158,7 +2196,8 @@ bool Session::snapshotClientDisplays()
             SDL_DisplayMode currentMode;
             SDL_Rect matchedBounds;
             if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
-                    &currentMode, &matchedBounds, m_IsFullScreen)) return false;
+                    &currentMode, &matchedBounds, m_IsFullScreen &&
+                    MacDisplayGeometry::useNativeFullscreen(displayCount))) return false;
             snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
                                              matchedBounds.w, matchedBounds.h);
             snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
@@ -2178,10 +2217,14 @@ bool Session::snapshotClientDisplays()
                 std::make_tuple(right.logicalBounds.x,
                                 right.logicalBounds.y);
     });
-    m_UseMultiDisplayPresentation = m_IsFullScreen &&
-            strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+    // Remember multi-output capability even when the session starts windowed.
+    // Fullscreen may be entered later without reconnecting; only the active
+    // presentation layout, not display discovery, depends on that state.
+    m_MultiDisplayPresentationAvailable =
+            (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
+             strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             m_ClientDisplays.size() == 2;
-    if (m_UseMultiDisplayPresentation) {
+    if (m_MultiDisplayPresentationAvailable) {
         const auto& left = m_ClientDisplays.at(0).logicalBounds;
         const auto& right = m_ClientDisplays.at(1).logicalBounds;
         const bool horizontal = left.x + left.w <= right.x;
@@ -2190,7 +2233,7 @@ bool Session::snapshotClientDisplays()
         if (!horizontal || !overlapsVertically) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Two-output presentation requires client monitors arranged left to right; using the target output only");
-            m_UseMultiDisplayPresentation = false;
+            m_MultiDisplayPresentationAvailable = false;
         }
     }
 
@@ -2229,12 +2272,12 @@ bool Session::snapshotClientDisplays()
         m_TargetDisplayId = m_ClientDisplays.first().displayId;
     }
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK client presentation: outputs=%lld canvas=%dx%d mode=%s",
+                "PLANK client presentation capability: outputs=%lld canvas=%dx%d mode=%s",
                 static_cast<long long>(
-                    m_UseMultiDisplayPresentation ? m_ClientDisplays.size() : 1),
-                m_UseMultiDisplayPresentation ? canvasX : targetNativeSize.width(),
-                m_UseMultiDisplayPresentation ? canvasHeight : targetNativeSize.height(),
-                m_UseMultiDisplayPresentation ? "multi-output" : "single-output");
+                    m_MultiDisplayPresentationAvailable ? m_ClientDisplays.size() : 1),
+                m_MultiDisplayPresentationAvailable ? canvasX : targetNativeSize.width(),
+                m_MultiDisplayPresentationAvailable ? canvasHeight : targetNativeSize.height(),
+                m_MultiDisplayPresentationAvailable ? "multi-output" : "single-output");
     return true;
 }
 
@@ -2649,7 +2692,7 @@ bool Session::placeFullscreenWindowOnDisplay(SDL_Window* window,
     actualDisplay = SDL_GetDisplayForWindow(window);
     if (actualDisplay != displayId) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Wayland compositor kept fullscreen surface on output %u instead of requested output %u",
+                    "Window system kept fullscreen surface on output %u instead of requested output %u",
                      actualDisplay, displayId);
         return false;
     }
@@ -2691,7 +2734,8 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
                     "Failed to set presentation fullscreen state: %s",
                     SDL_GetError());
     }
-    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 &&
+    if ((strcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0 ||
+         strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
             !SDL_SyncWindow(m_Window)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Timed out synchronizing presentation fullscreen state: %s",
@@ -2777,6 +2821,7 @@ bool Session::configurePlankHostLayout()
     QSize authenticatedDesktopSize;
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
+    bool virtualPrimary = false;
     int hostFeatureFlags = 0;
     NvOutputTopology topologySnapshot;
     bool arrangementPublished = false;
@@ -2795,6 +2840,8 @@ bool Session::configurePlankHostLayout()
         authenticatedDesktopSize = QSize(m_Computer->outputTopology.desktopWidth,
                                          m_Computer->outputTopology.desktopHeight);
         authenticatedLogicalSize = m_Computer->outputTopology.captureLogicalBounds.size();
+        virtualPrimary = m_Computer->outputTopology.startupLayoutKind == NvOutputTopology::SingleHostLayout &&
+            (m_Computer->outputTopology.featureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature);
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
         hostRejectsRequestedLayout = hostPolicyKnown &&
                 !m_Computer->outputTopology.allowsBookmarkHostLayout(layoutPolicy);
@@ -2809,6 +2856,7 @@ bool Session::configurePlankHostLayout()
 
     m_ResolvedHostLayout.clear();
     m_ResolvedVirtualModes.clear();
+    m_ResolvedPrimaryOutput = -1;
     m_ResolvedArrangement.clear();
     m_DisplayPlan = {};
     for (auto& display : m_ClientDisplays) {
@@ -2884,6 +2932,23 @@ bool Session::configurePlankHostLayout()
         m_ResolvedVirtualModes.append(virtualMode1);
         if (layoutPolicy == NvOutputTopology::DualHorizontalHostLayout) {
             m_ResolvedVirtualModes.append(virtualMode2);
+            if (virtualPrimary) {
+                QVector<NvClientDisplay> displays;
+                for (const auto& display : std::as_const(m_ClientDisplays)) {
+                    NvClientDisplay probed = display.probeView;
+                    probed.bounds = QRect(display.logicalBounds.x, display.logicalBounds.y,
+                                          display.logicalBounds.w, display.logicalBounds.h);
+                    probed.nativeSize = display.nativeSize;
+                    probed.backingSize = display.macBackingSize;
+                    probed.main = display.primary;
+                    displays.append(probed);
+                }
+                // A manual bookmark remains usable with a different number
+                // or arrangement of local monitors. Omit an ambiguous hint;
+                // never send an index into unrelated local displays.
+                m_ResolvedPrimaryOutput = NvOutputTopology::clientPrimaryIndex(
+                    displays, m_ResolvedVirtualModes.size());
+            }
         }
     }
     else {
@@ -3182,6 +3247,20 @@ bool Session::configurePlankLaunchGeometry()
     if (m_Computer->plankAuthentication &&
             !configurePlankHostLayout()) {
         return false;
+    }
+
+    {
+        QReadLocker lock(&m_Computer->lock);
+        const int hostOutputs = m_Computer->outputTopology.outputCountForLayout(m_ResolvedHostLayout);
+        m_UseMultiDisplayPresentation = m_MultiDisplayPresentationAvailable;
+#ifdef Q_OS_DARWIN
+        // The Mac single-output policy is qualified independently of Wayland.
+        m_UseMultiDisplayPresentation = m_UseMultiDisplayPresentation && hostOutputs > 1;
+#endif
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK presentation selection: host-outputs=%d client-multi=%d selected-outputs=%d",
+                    hostOutputs, m_MultiDisplayPresentationAvailable,
+                    m_UseMultiDisplayPresentation ? 2 : 1);
     }
 
     const QSize resolution = configurePlankDisplayMode();
@@ -3559,7 +3638,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
                           acceptedEncodingMode,
-                          acceptedFileClipboardMode);
+                          acceptedFileClipboardMode,
+                          m_ResolvedPrimaryOutput);
         };
         try {
             startApp();
@@ -3656,6 +3736,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                             {
                                 QWriteLocker lock(&m_Computer->lock);
                                 m_Computer->sessionToken = token;
+                                m_Computer->sessionIdentityKey = http->hostIdentityKey();
                                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             }
                             authenticationRefreshRequired = false;
@@ -4005,6 +4086,14 @@ bool Session::startConnectionAsync(bool reconnecting,
     }
 
 #ifdef PLANK_TRANSPORT
+    {
+        std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+        if (m_MicrophoneNegotiated) {
+            if (!reconnecting) m_MicrophoneRequested.store(m_Preferences->microphoneAutomatic);
+            m_Microphone.reset(new PlankMicrophone(m_PlankTransportEndpoint,
+                m_MicrophoneRequested, m_Preferences->microphoneAutomaticInput));
+        }
+    }
     startPlankTransportMediaReceivers();
 #endif
 
@@ -4392,6 +4481,7 @@ bool Session::runPlankReconnect()
                 {
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->sessionToken = token;
+                    m_Computer->sessionIdentityKey = http.hostIdentityKey();
                     m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 }
                 if (greeterConfirmed &&
@@ -4431,6 +4521,7 @@ bool Session::runPlankReconnect()
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
+                m_Computer->sessionIdentityKey = http.hostIdentityKey();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
@@ -4451,6 +4542,10 @@ bool Session::runPlankReconnect()
                             attempt);
                 return true;
             }
+        } catch (const MacSessionActiveException&) {
+            m_CanReconnect.store(false);
+            m_ReconnectCancelled.store(true);
+            emit displayLaunchError(tr("Another client has an active PLANK session. Connect again to request takeover."));
         } catch (const GfeHttpResponseException& error) {
             qWarning() << "PLANK reconnect attempt" << attempt
                        << "failed:" << error.toQString();
@@ -5238,9 +5333,17 @@ void Session::execInternal()
             m_PlankToolbar->setRenderedStats(
                         m_CurrentRenderedFps.load(std::memory_order_relaxed),
                         m_CurrentVideoMbps.load(std::memory_order_relaxed),
-                        currentVideoFecLoss().before);
+                        currentVideoFecLoss().before,
+                        currentNetworkRttMs());
+            {
+                std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
+                m_PlankToolbar->setMicrophoneState(m_Microphone != nullptr,
+                    m_Microphone ? m_Microphone->state() : PlankMicrophone::State::Off);
+            }
             const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
+            if (action == PlankToolbar::Action::ToggleMicrophone)
+                m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
             if (action == PlankToolbar::Action::Disconnect) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK toolbar disconnect requested");
@@ -5336,6 +5439,11 @@ void Session::execInternal()
         const bool reconnectCompletion =
                 event.type == SDL_EVENT_USER &&
                 event.user.code == SDL_CODE_PLANK_REPLANK_COMPLETE;
+#ifdef Q_OS_MACOS
+        if (m_InputHandler->handleCapturedMacKeyEvent(event)) {
+            continue;
+        }
+#endif
         if (m_Reconnecting.load() &&
                 event.type != SDL_EVENT_QUIT && !reconnectCompletion) {
             // Cursor shapes, host-authoritative Wacom positions, and toolbar
@@ -5364,6 +5472,8 @@ void Session::execInternal()
                         event.button.windowID == SDL_GetWindowID(m_Window)) {
                     const auto action =
                             m_PlankToolbar->handleMouseButton(event.button);
+                    if (action == PlankToolbar::Action::ToggleMicrophone)
+                        m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
                     if (action == PlankToolbar::Action::Disconnect) {
                         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                     "PLANK toolbar disconnect requested during reconnect");
@@ -5839,6 +5949,10 @@ void Session::execInternal()
             if (m_PlankToolbar &&
                     event.button.windowID == SDL_GetWindowID(m_Window)) {
                 const auto action = m_PlankToolbar->handleMouseButton(event.button);
+                if (action == PlankToolbar::Action::ToggleMicrophone) {
+                    m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
+                    break;
+                }
                 if (action == PlankToolbar::Action::Disconnect) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "PLANK toolbar disconnect requested");
@@ -5886,24 +6000,7 @@ void Session::execInternal()
                 // transport. Aggregate it here when the toolbar is present so
                 // the toolbar tracker and host receive the identical delta.
                 if (event.motion.which != SDL_TOUCH_MOUSEID) {
-                    SDL_Event nextMotionEvent;
-                    while (SDL_PeepEvents(&nextMotionEvent, 1, SDL_GETEVENT,
-                                          SDL_EVENT_MOUSE_MOTION,
-                                          SDL_EVENT_MOUSE_MOTION) > 0) {
-                        if (nextMotionEvent.motion.which != SDL_TOUCH_MOUSEID) {
-                            if (nextMotionEvent.motion.windowID !=
-                                    event.motion.windowID) {
-                                SDL_PushEvent(&nextMotionEvent);
-                                break;
-                            }
-                            event.motion.timestamp =
-                                    nextMotionEvent.motion.timestamp;
-                            event.motion.x = nextMotionEvent.motion.x;
-                            event.motion.y = nextMotionEvent.motion.y;
-                            event.motion.xrel += nextMotionEvent.motion.xrel;
-                            event.motion.yrel += nextMotionEvent.motion.yrel;
-                        }
-                    }
+                    PlankMouseMotion::coalescePending(event.motion);
                 }
                 // The single-window toolbar observes the same authoritative
                 // coordinates, but motion always remains remote-desktop input.

@@ -20,7 +20,11 @@ class LinuxRawWacomInput;
 class PlankWaylandCursor;
 #ifdef Q_OS_MACOS
 class MacQuitShortcut;
+class MacKeyboardCapture;
 class PlankMacPenInput;
+#endif
+#ifdef HAVE_MAC_RAW_WACOM
+class MacRawWacomInput;
 #endif
 
 class SdlInputHandler
@@ -55,6 +59,9 @@ public:
     void refreshWaylandTabletCursorParents();
 
     void handleKeyEvent(SDL_KeyboardEvent* event);
+#ifdef Q_OS_MACOS
+    bool handleCapturedMacKeyEvent(const SDL_Event& event);
+#endif
 
     void handleMouseButtonEvent(SDL_MouseButtonEvent* event);
 
@@ -118,6 +125,8 @@ public:
 private:
 #ifdef Q_OS_MACOS
     std::unique_ptr<MacQuitShortcut> m_MacQuitShortcut;
+    std::unique_ptr<MacKeyboardCapture> m_MacKeyboardCapture;
+    bool hasMacStreamKeyboardFocus() const;
 #endif
     enum KeyCombo {
         KeyComboQuit,
@@ -224,6 +233,11 @@ private:
                         PlankOutputGeometry& geometry) const;
 
     SDL_Window* presentationWindow(Uint32 windowId) const;
+    SDL_Window* pointerPresentationWindow(SDL_Window* source,
+                                          float& x, float& y) const;
+    enum class PointerFocusPosition { LocalMouse, HostTablet };
+    void followPointerFocus(SDL_Window* target, SDL_MouseButtonFlags eventButtons,
+                            PointerFocusPosition position = PointerFocusPosition::LocalMouse);
     const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
 
@@ -243,6 +257,10 @@ private:
 
     std::atomic_uint64_t m_StreamDimensions;
     std::atomic_bool m_LiveDrawableGeometry{false};
+
+#ifdef HAVE_MAC_RAW_WACOM
+    std::unique_ptr<MacRawWacomInput> m_MacRawWacomInput;
+#endif
 
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;

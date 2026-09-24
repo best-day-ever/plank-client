@@ -738,6 +738,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
     {
         QWriteLocker lock(&computer->lock);
         computer->sessionToken = token;
+        computer->sessionIdentityKey = http.hostIdentityKey();
         computer->authorizationState = NvComputer::AS_AUTHORIZED;
         if (topologySupported) {
             computer->outputTopology = topology;

@@ -155,7 +155,7 @@ Item {
         streamLoader.active = true
     }
 
-    NavigableMessageDialog {
+    SessionTakeoverDialog {
         id: activeSessionTakeoverDialog
         title: qsTr("Active BDE fernweh session")
         standardButtons: Dialog.Yes | Dialog.No

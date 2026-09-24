@@ -22,6 +22,7 @@
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
+#include "audio/microphone.h"
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
 #include "plankreconnectpolicy.h"
@@ -460,6 +461,10 @@ private:
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
     bool m_MacClipboardNegotiated = false;
+    bool m_MicrophoneNegotiated = false;
+    std::atomic<bool> m_MicrophoneRequested {false};
+    std::mutex m_MicrophoneMutex;
+    std::unique_ptr<PlankMicrophone> m_Microphone;
     QString m_FileClipboardMode {QStringLiteral("off")};
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
@@ -507,6 +512,7 @@ private:
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
+    int m_ResolvedPrimaryOutput = -1;
     // Display arrangement: the canonical request (m_ResolvedHostLayout is
     // then "arrangement") and the plan behind it.
     QString m_ResolvedArrangement;
@@ -528,6 +534,7 @@ private:
         // Display arrangement: this display's entry in m_DisplayPlan.outputs
         // when the workstation shows it, else -1.
         int planIndex = -1;
+        bool primary = false;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
     // The plan's primary display: the stream window opens there.
@@ -542,6 +549,7 @@ private:
     QString m_PresentedDisplaySignature;
     std::atomic_bool m_DisplayReconfigureRequested {false};
     SDL_DisplayID m_TargetDisplayId = 0;
+    bool m_MultiDisplayPresentationAvailable = false;
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;
     bool m_HasWindowedPresentationGeometry = false;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nvcomputer.h"
+#include "authenticationtakeover.h"
 #include "settings/streamingpreferences.h"
 
 #include <qmdnsengine/server.h>
@@ -247,7 +248,8 @@ public:
 
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 
-    void authenticateHost(NvComputer* computer, QString username, QString password);
+    void authenticateHost(NvComputer* computer, QString username, QString password,
+                          bool allowTakeoverPrompt = false);
 
     bool takePlankReconnectCredentials(NvComputer* computer,
                                                 QString& username,
@@ -267,6 +269,10 @@ signals:
     void computerStateChanged(NvComputer* computer);
 
     void authenticationCompleted(NvComputer* computer, QString error);
+    void authenticationTakeoverRequested(NvComputer* computer, AuthenticationTakeover decision);
+    void authenticationTrustRequested(NvComputer* computer, QString endpoint, QString previousKey,
+                                      QString replacementKey, AuthenticationTakeover decision);
+    void authenticationCancelled(NvComputer* computer);
 
     void computerAddCompleted(QVariant success);
 

@@ -1,5 +1,6 @@
 #include "input.h"
 #include "plankpointerlogic.h"
+#include "plankmousemotion.h"
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -53,11 +54,13 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     routePresentationPointer(window, routedEvent.x, routedEvent.y);
     routedEvent.windowID = SDL_GetWindowID(window);
     event = &routedEvent;
+    const float x = routedEvent.x;
+    const float y = routedEvent.y;
     activateCompositorCursor();
     if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
-                isMouseInVideoRegion(event->x, event->y,
-                                     event->windowID)) {
+                isMouseInVideoRegion(qRound(x), qRound(y),
+                                     SDL_GetWindowID(window))) {
             // Capture the mouse again if clicked when unbound.
             // We start capture on left button released instead of
             // pressed to avoid sending an errant mouse button released
@@ -69,8 +72,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Not capturing
         return;
     }
-    else if (!isMouseInVideoRegion(event->x, event->y,
-                                   event->windowID) && event->down) {
+    else if (!isMouseInVideoRegion(qRound(x), qRound(y),
+                                   SDL_GetWindowID(window)) && event->down) {
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
@@ -112,6 +115,11 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
                                BUTTON_ACTION_PRESS :
                                BUTTON_ACTION_RELEASE,
                            button);
+    if (!event->down) {
+        // A captured drag can finish on the other output without another move.
+        // Forward its release before transferring native window focus.
+        followPointerFocus(window, 0);
+    }
 }
 
 void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
@@ -132,26 +140,10 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         return;
     }
 
-    // Batch all pending mouse motion events to save CPU time
-    // Keep SDL's fractional point coordinates: on a 2x display one point is
-    // two drawable pixels, so truncating here would lose half the precision.
-    float x = event->x, y = event->y;
-    SDL_Event nextEvent;
-    while (batchPendingEvents &&
-           SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
-                          SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
-        event = &nextEvent.motion;
-
-        // Ignore synthetic mouse events
-        if (event->which != SDL_TOUCH_MOUSEID &&
-                event->windowID == SDL_GetWindowID(window)) {
-            x = event->x;
-            y = event->y;
-        } else if (event->windowID != SDL_GetWindowID(window)) {
-            SDL_PushEvent(&nextEvent);
-            break;
-        }
-    }
+    SDL_MouseMotionEvent motion = *event;
+    if (batchPendingEvents) PlankMouseMotion::coalescePending(motion);
+    // Keep SDL's fractional point coordinates for Retina input.
+    float x = motion.x, y = motion.y;
 
     // We should not reference the original event anymore
     event = nullptr;
@@ -178,7 +170,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         }
     }
     if (mouseInVideoRegion || m_MouseWasInVideoRegion || m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
-        sendAbsoluteMousePosition(window, x, y, true);
+        sendAbsoluteMousePosition(window, qRound(x), qRound(y), true);
     }
 
     // Adjust the cursor visibility if applicable
@@ -194,6 +186,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
 
     m_MouseWasInVideoRegion = mouseInVideoRegion;
+    followPointerFocus(window, motion.state);
 }
 
 bool SdlInputHandler::mapWindowPointToDesktop(SDL_Window* window, float windowX, float windowY,
@@ -353,6 +346,70 @@ SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
     }
     SDL_Window* window = SDL_GetWindowFromID(windowId);
     return presentationOutput(window) != nullptr ? window : nullptr;
+}
+
+void SdlInputHandler::followPointerFocus(SDL_Window* target,
+                                        SDL_MouseButtonFlags eventButtons,
+                                        PointerFocusPosition position)
+{
+#ifdef Q_OS_DARWIN
+    // The fullscreen surfaces are one remote desktop. Transfer native focus
+    // on hover so a secondary click does not need a preceding activation click.
+    // Never switch away from the Cocoa window that owns an in-progress drag.
+    if (!m_PresentationLayout.isMultiOutput() || !isCaptureActive() ||
+            eventButtons != 0 || SDL_GetMouseState(nullptr, nullptr) != 0) {
+        return;
+    }
+    const bool tablet = position == PointerFocusPosition::HostTablet;
+    if (tablet && !PlankPointerLogic::tabletFocusPositionIsCurrent(
+                m_TabletCursorActive, m_AppliedRemoteCursorPositionValid,
+                m_AppliedRemoteCursorPositionSequence, m_TabletCursorActivationSequence)) {
+        return;
+    }
+    SDL_Window* focused = SDL_GetKeyboardFocus();
+    if (focused == nullptr || focused == target ||
+            presentationOutput(focused) == nullptr ||
+            presentationOutput(target) == nullptr) {
+        return;
+    }
+    const auto targetFlags = SDL_GetWindowFlags(target);
+    if (!(targetFlags & SDL_WINDOW_FULLSCREEN) ||
+            (targetFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))) {
+        return;
+    }
+
+    // Raw tablet reports go directly to the Host and do not move the Mac's
+    // mouse pointer. Their target was mapped from the fresh Host position.
+    // Only local mouse events can be checked against the Mac desktop pointer.
+    // Both paths retain native mouse drags and require owned presentation focus.
+    float gx, gy;
+    if (SDL_GetGlobalMouseState(&gx, &gy) != 0) {
+        return;
+    }
+    if (!tablet) {
+        int wx, wy, width, height;
+        if (!SDL_GetWindowPosition(target, &wx, &wy) ||
+                !SDL_GetWindowSize(target, &width, &height) ||
+                gx < wx || gy < wy || gx >= wx + width || gy >= wy + height) {
+            return;
+        }
+    }
+    if (!SDL_RaiseWindow(target)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Unable to transfer fullscreen pointer focus: %s",
+                    SDL_GetError());
+    }
+    else {
+        SDL_LogInfo(tablet ? SDL_LOG_CATEGORY_APPLICATION : SDL_LOG_CATEGORY_INPUT,
+                    "PLANK fullscreen %s focus: %u -> %u",
+                    tablet ? "tablet" : "pointer",
+                    SDL_GetWindowID(focused), SDL_GetWindowID(target));
+    }
+#else
+    Q_UNUSED(target);
+    Q_UNUSED(eventButtons);
+    Q_UNUSED(position);
+#endif
 }
 
 const PlankPresentationOutput* SdlInputHandler::presentationOutput(

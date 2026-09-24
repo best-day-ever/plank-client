@@ -14,6 +14,8 @@
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
+#define SER_MICROPHONE_AUTOMATIC "microphone-automatic"
+#define SER_MICROPHONE_AUTOMATIC_INPUT "microphone-automatic-host-input"
 #define SER_PLANK_TOOLBAR_PINNED "planktoolbarpinned"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
@@ -87,6 +89,8 @@ void StreamingPreferences::reload()
     plankToolbarPinned = settings.value(SER_PLANK_TOOLBAR_PINNED, false).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
+    microphoneAutomatic = settings.value(SER_MICROPHONE_AUTOMATIC, true).toBool();
+    microphoneAutomaticInput = settings.value(SER_MICROPHONE_AUTOMATIC_INPUT, true).toBool();
     enableMdns = settings.value(SER_MDNS, false).toBool();
     const PlankClientPolicy systemPolicy;
     mdnsDiscoveryManaged = systemPolicy.managedBoolean(
@@ -269,6 +273,8 @@ void StreamingPreferences::save()
     settings.setValue(SER_FPS, fps);
     settings.setValue(SER_VSYNC, enableVsync);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
+    settings.setValue(SER_MICROPHONE_AUTOMATIC, microphoneAutomatic);
+    settings.setValue(SER_MICROPHONE_AUTOMATIC_INPUT, microphoneAutomaticInput);
     if (!mdnsDiscoveryManaged) {
         settings.setValue(SER_MDNS, enableMdns);
     }

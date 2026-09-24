@@ -1,0 +1,144 @@
+## 1.1.001
+
+Update Host and Client together. This version is not compatible with the previous release's transport.
+
+### Client
+
+- Add microphone forwarding to macOS Hosts, with automatic/manual selection and a toolbar mute switch.
+- Remember Host identity before sending login credentials, and ask before trusting a replacement Host.
+- Improve connection cancellation, rendering shutdown and audio/video startup reliability.
+
+### Host
+
+- Upgrade loss recovery to RaptorQ 2.0.1 and remove the application datagram pacer.
+- macOS: add the PLANK Microphone sound input and improve first-login startup after reboot.
+- Bound malformed network data and stalled authentication work.
+
+## 1.0.157
+
+### Host
+
+- macOS: allow certificate preparation to finish during a slow first login after reboot, while keeping stalled operations bounded.
+
+## 1.0.156 — Microphone candidate
+
+### Client
+
+- Add automatic or manual microphone forwarding to macOS Hosts.
+- Add a toolbar microphone switch and recording status; muting closes local capture.
+- Remember the microphone switch during session reconnection.
+- Deliver already-decoded audio/video promptly when setup packets arrive late.
+
+### Host
+
+- macOS: add the PLANK Microphone virtual sound input for remote applications.
+- Offer automatic input selection with restoration of the previous device after disconnect.
+- Keep microphone failure isolated from video and speaker audio.
+- Prevent a startup identity reply from racing connection cleanup.
+
+## 1.0.154
+
+### Client
+
+- Upgrade loss recovery to RaptorQ 2.0.1; requires a matching updated Host.
+- Reject malformed or oversized incoming transport messages safely.
+- Cancel connection startup promptly and prevent a render-thread shutdown hang.
+- Preserve the correct audio/video packet when receive queues overflow.
+- Remove the Experimental label from macOS capture.
+
+### Host
+
+- Upgrade loss recovery to RaptorQ 2.0.1; update Host and Client together.
+- Remove the unused application datagram pacer; retain Quinn scheduling and transport headroom.
+- Bound malformed incoming data and cancel stalled connection setup.
+- Linux: keep stalled operating-system authentication from blocking other requests.
+
+## 1.0.153
+
+### Client
+
+- Remember each Host's identity before sending login credentials.
+- Ask before trusting a replacement Host; cancelling keeps the previous identity.
+- Keep Host trust when bookmarks are deleted or recreated.
+
+### Host
+
+- macOS: keep one machine identity across the login screen and different desktop users.
+- Preserve machine identity when renewing Host certificates.
+
+## 1.0.152
+
+### Client
+
+- Match the primary client monitor when ordering a Linux Host's virtual displays.
+- Keep the existing image proportions when host and client monitor sizes differ.
+- Allow manual two-display bookmarks when the client has a different monitor layout.
+
+### Host
+
+- Linux: place the first virtual connector on the client's primary side for applications that choose the first monitor.
+
+## 1.0.151
+
+### Client
+
+- Offer Take Over or Cancel when another client is connected to the same Mac account.
+- Use the new client's display size after an approved takeover.
+- Preserve valid packets when the connection adjusts its network packet size.
+- Ubuntu: include the image plugin needed to display dialog icons.
+
+### Host
+
+- macOS: transfer an active session to another client after explicit confirmation, including while locked.
+- macOS: avoid a temporary loss of connectivity when switching between the login screen and desktop.
+- Preserve valid packets during network packet-size recovery on Linux and macOS.
+- Reduce diagnostic logging overhead during streaming.
+
+## 1.0.146
+
+### Client
+
+- Click the version number to see what's new, even when offline.
+
+### Host
+
+- macOS: retry failed desktop-service startup after login or user switching.
+
+## 1.0.143
+
+### Client
+
+- Fix mouse positioning at the right and bottom edges of the remote screen.
+
+### Host
+
+- Linux: deliver mouse clicks immediately and improve high-bitrate sending.
+- macOS: keep the connection open when the screen locks.
+- macOS: let administrators read the Host's system logs.
+
+## 1.0.137
+
+### Client
+
+- Copy and paste plain text between Mac Clients and Mac Hosts.
+- Improve clipboard transfers when the connection is busy.
+
+### Host
+
+- macOS: add plain-text clipboard sharing with Mac Clients.
+- macOS and Linux: limit shared text to 512 KiB and reject invalid text safely.
+
+## 1.0.135
+
+### Client
+
+- macOS: send Command-Tab and Command-Space to the Host, including after switching Spaces.
+- macOS: request keyboard-capture permission before starting a session.
+- macOS: improve multi-monitor and Wacom support; support macOS 15 and newer.
+- Add network round-trip time to the toolbar and reduce toolbar flicker on macOS.
+- Copy and paste plain text between Mac Clients and Linux Hosts.
+
+### Host
+
+- Linux: add plain-text clipboard sharing with Mac Clients.
+- Improve mouse-button ordering and keyboard release handling.

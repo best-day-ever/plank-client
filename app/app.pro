@@ -26,7 +26,14 @@ unix:contains(CONFIG, plank-transport) {
 
     PLANK_CARGO = $$(CARGO)
     isEmpty(PLANK_CARGO): PLANK_CARGO = cargo
-    PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+    macx {
+        # Share Cargo objects across Mac worktrees and never let qmake clean
+        # the machine-wide target used by other builds.
+        PLANK_TRANSPORT_CARGO_TARGET_DIR = $$(HOME)/.cargo/shared-target
+    } else {
+        PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+        QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
+    }
     PLANK_TRANSPORT_LIBRARY = $$PLANK_TRANSPORT_CARGO_TARGET_DIR/release/libplank_transport.a
 
     plank_transport.target = $$PLANK_TRANSPORT_LIBRARY
@@ -37,7 +44,6 @@ unix:contains(CONFIG, plank-transport) {
         --manifest-path $$shell_quote($$PLANK_TRANSPORT_DIR/Cargo.toml)
     QMAKE_EXTRA_TARGETS += plank_transport
     PRE_TARGETDEPS += $$PLANK_TRANSPORT_LIBRARY
-    QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
 
     INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
     LIBS += $$PLANK_TRANSPORT_LIBRARY -ldl -lpthread -lm
@@ -223,6 +229,8 @@ SOURCES += \
     backend/computerseeker.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
+    backend/hosttruststore.cpp \
+    backend/hosttlsguard.cpp \
     backend/brokersessionstore.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
@@ -239,6 +247,7 @@ SOURCES += \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
     streaming/session.cpp \
+    streaming/audio/microphone.cpp \
     streaming/avsynccontroller.cpp \
     streaming/plankdisplaymode.cpp \
     streaming/plankpresentation.cpp \
@@ -261,6 +270,7 @@ SOURCES += \
 macx: HEADERS += macapplication.h
 
 HEADERS += \
+    backend/authenticationtakeover.h \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
@@ -275,6 +285,8 @@ HEADERS += \
     backend/nvcomputer.h \
     backend/planknetwork.h \
     backend/nvhttp.h \
+    backend/hosttruststore.h \
+    backend/hosttlsguard.h \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
     backend/remotedisplaysetup.h \
@@ -297,11 +309,13 @@ HEADERS += \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/plankpointerlogic.h \
+    streaming/input/plankmousemotion.h \
     streaming/session.h \
     streaming/plankdisplaymode.h \
     streaming/plankpresentation.h \
     streaming/planktoolbar.h \
     streaming/planktoolbarlogic.h \
+    streaming/planktoolbarstats.h \
     streaming/plankreconnectpolicy.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
@@ -496,8 +510,14 @@ win32:!winrt {
 macx {
     message(VideoToolbox renderer selected)
 
+    DEFINES += HAVE_MAC_RAW_WACOM
+    SOURCES += streaming/input/macrawwacom.cpp
+    HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h
+    LIBS += -framework IOKit -framework CoreFoundation -framework ApplicationServices -framework Carbon
+
     SOURCES += \
         streaming/macquitshortcut.mm \
+        streaming/mackeyboardcapture.mm \
         streaming/macdisplayinfo.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
@@ -506,6 +526,7 @@ macx {
 
     HEADERS += \
         streaming/macquitshortcut.h \
+        streaming/mackeyboardcapture.h \
         streaming/macdisplayinfo.h \
         streaming/macwindow.h \
         streaming/video/decodercaps.h \
@@ -516,6 +537,7 @@ macx {
         streaming/clipboardpolltimer.h \
         streaming/plankclipboard.h
     OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    OBJECTIVE_SOURCES += streaming/audio/macmicrophonepermission.mm
     contains(CONFIG, plank-transport) {
         HEADERS += streaming/macfileclipboard.h
         OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
@@ -668,6 +690,8 @@ macx {
     isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 13.0
     QMAKE_MACOSX_DEPLOYMENT_TARGET = $$PLANK_MACOS_DEPLOYMENT_TARGET
     QMAKE_APPLE_DEVICE_ARCHS = arm64
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
     QMAKE_INFO_PLIST = $$PWD/Info.plist
 
     APP_BUNDLE_RESOURCES.files = moonlight.icns
