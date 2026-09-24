@@ -284,8 +284,8 @@ const QString DeviceSpki = QString::fromLatin1(
 
 QJsonObject fixedCaptureTopology()
 {
-    return QJsonDocument::fromJson(R"({
-      "schema_version": 13, "feature_flags": 3670129,
+    auto topology = QJsonDocument::fromJson(R"({
+      "schema_version": 13,
       "generation": "98454815-80ab-4a88-b187-92f59353afca",
       "capture": {"id": "cgdisplay:42", "width": 3840, "height": 2160,
         "logical_bounds": {"x": -1920, "y": 0, "width": 1920, "height": 1080},
@@ -293,6 +293,8 @@ QJsonObject fixedCaptureTopology()
           "encoding_mode": "hevc-10-420-videotoolbox", "codec": "hevc", "profile": "main10",
           "bit_depth": 10, "chroma": "4:2:0", "range": "full", "matrix": "bt709",
           "primaries": "bt709", "transfer": "srgb", "rgb_identity": false}}})").object();
+    topology["feature_flags"] = NvOutputTopology::FixedCaptureFlags;
+    return topology;
 }
 
 }
