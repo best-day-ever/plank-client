@@ -158,9 +158,12 @@ private:
 
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;
+    bool m_HasActivatedCapture;
+    unsigned m_MousePressFailureLogs;
     bool m_KeyboardCaptureActive;
     bool m_FilePasteKeyUpConsumed = false;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
+    bool m_ImmersiveKeyboardMode;
     bool m_MouseCursorCapturedVisibilityState;
 
     struct RemoteCursorState {

@@ -863,6 +863,24 @@ Flickable {
                     }
                 }
 
+                PlankSettingLabel {
+                    text: qsTr("Immersive keyboard mode")
+                    visible: Qt.platform.os === "osx"
+                }
+
+                PlankCheckBox {
+                    visible: Qt.platform.os === "osx"
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    Accessible.name: qsTr("Immersive keyboard mode")
+                    checked: StreamingPreferences.immersiveKeyboardMode
+                    onToggled: StreamingPreferences.immersiveKeyboardMode = checked
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 10000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("On your next connection, forward keyboard shortcuts to the remote desktop while its window has focus. Fernweh shortcuts are disabled except Ctrl+Alt+Shift+Z, which leaves immersive mode for this session. macOS Accessibility permission is required. Some protected system keys remain local.")
+                }
+
             }
         }
 

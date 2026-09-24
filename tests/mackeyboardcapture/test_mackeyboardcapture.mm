@@ -101,6 +101,21 @@ private slots:
         QVERIFY(drain().empty());
         QVERIFY(m_Capture->suppressSdlKeyEvent());
     }
+    void optionTabIsForwardedAsRemoteAltTab()
+    {
+        const auto flags = kCGEventFlagMaskAlternate | NX_DEVICELALTKEYMASK;
+        QVERIFY(capture(kVK_Option, kCGEventFlagsChanged, flags));
+        QVERIFY(capture(kVK_Tab, kCGEventKeyDown, flags));
+        QVERIFY(capture(kVK_Tab, kCGEventKeyUp, flags));
+        QVERIFY(capture(kVK_Option, kCGEventFlagsChanged));
+        const auto keys = drain();
+        QCOMPARE(keys.size(), size_t(4));
+        QCOMPARE(keys[0].scancode, SDL_SCANCODE_LALT);
+        QVERIFY(keys[0].down);
+        QCOMPARE(keys[1].scancode, SDL_SCANCODE_TAB);
+        QVERIFY(keys[1].mod & SDL_KMOD_LALT);
+        QVERIFY(keys[1].down && !keys[2].down && !keys[3].down);
+    }
     void heldAndRightModifiersAreReconciled()
     {
         const auto flags = kCGEventFlagMaskCommand | NX_DEVICERCMDKEYMASK |

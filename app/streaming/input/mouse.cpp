@@ -58,6 +58,16 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     const float y = routedEvent.y;
     activateCompositorCursor();
     if (!isCaptureActive()) {
+        if (!m_HasActivatedCapture && event->down &&
+                isMouseInVideoRegion(qRound(x), qRound(y),
+                                     SDL_GetWindowID(window))) {
+            // A first click can arrive before the deferred renderer event
+            // activates capture. Preserve the deliberate click; an explicit
+            // later ungrab still uses the normal release-to-recapture path.
+            setCaptureActive(true);
+        }
+    }
+    if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
                 isMouseInVideoRegion(qRound(x), qRound(y),
                                      SDL_GetWindowID(window))) {
@@ -108,13 +118,20 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     const bool positioned = sendAbsoluteMousePosition(
                 window, event->x, event->y, !event->down);
     if (event->down && !positioned) {
+        if (m_MousePressFailureLogs++ < 3) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                        "Remote mouse press dropped: pointer position unavailable");
+        }
         return;
     }
 
-    LiSendMouseButtonEvent(event->down ?
-                               BUTTON_ACTION_PRESS :
-                               BUTTON_ACTION_RELEASE,
-                           button);
+    if (LiSendMouseButtonEvent(event->down ?
+                                   BUTTON_ACTION_PRESS :
+                                   BUTTON_ACTION_RELEASE,
+                               button) != 0 && m_MousePressFailureLogs++ < 3) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Remote mouse button could not be queued");
+    }
     if (!event->down) {
         // A captured drag can finish on the other output without another move.
         // Forward its release before transferring native window focus.
