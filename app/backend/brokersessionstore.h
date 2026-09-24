@@ -4,9 +4,10 @@
 // people are not asked for password + code (or Touch ID) every time they
 // open the app. Only the broker's opaque session token and the confirmed
 // user name are kept -- never a password, OTP or passkey material -- and only
-// in the macOS login Keychain (this device only, never synced). Other
-// platforms keep the session in memory as before. The broker still bounds the
-// session (absolute and idle lifetime); an expired token is simply dropped.
+// in the macOS login Keychain (this device only, never synced) or Windows
+// current-user DPAPI storage. Other platforms keep the session in memory.
+// The broker still bounds the session (absolute and idle lifetime); an
+// expired token is simply dropped.
 
 #include <QByteArray>
 #include <QJsonDocument>
@@ -51,8 +52,8 @@ inline bool decode(const QByteArray& data, Saved& saved)
     return true;
 }
 
-// One saved session per broker address ("host:port"). All return false where
-// persistence is unavailable (non-Apple platforms, Keychain locked/denied).
+// One saved session per broker address ("host:port"). Returns false where
+// persistence is unavailable or protected storage refuses the operation.
 bool isAvailable();
 bool save(const QString& brokerAddress, const QString& username, const QString& token);
 bool load(const QString& brokerAddress, Saved& saved);

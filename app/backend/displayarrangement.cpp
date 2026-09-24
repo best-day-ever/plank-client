@@ -82,10 +82,30 @@ Downscale downscale(const QSize& size, const QSize& carrier)
 
 int compareDownscale(const Downscale& a, const Downscale& b)
 {
-    // Numerators are at most 8192*8192*... well inside 64 bits after one product.
-    const __int128 left = __int128(a.numerator) * b.denominator;
-    const __int128 right = __int128(b.numerator) * a.denominator;
-    return left < right ? -1 : (left > right ? 1 : 0);
+    // Compare positive ratios exactly without a 128-bit compiler extension.
+    // Each reciprocal reverses the ordering; Euclidean remainders shrink the
+    // values until the integer parts differ or both fractions terminate.
+    qint64 aNumerator = a.numerator;
+    qint64 aDenominator = a.denominator;
+    qint64 bNumerator = b.numerator;
+    qint64 bDenominator = b.denominator;
+    int direction = 1;
+    for (;;) {
+        const qint64 aWhole = aNumerator / aDenominator;
+        const qint64 bWhole = bNumerator / bDenominator;
+        if (aWhole != bWhole) return direction * (aWhole < bWhole ? -1 : 1);
+        const qint64 aRemainder = aNumerator % aDenominator;
+        const qint64 bRemainder = bNumerator % bDenominator;
+        if (aRemainder == 0 || bRemainder == 0) {
+            if (aRemainder == bRemainder) return 0;
+            return direction * (aRemainder == 0 ? -1 : 1);
+        }
+        aNumerator = aDenominator;
+        aDenominator = aRemainder;
+        bNumerator = bDenominator;
+        bDenominator = bRemainder;
+        direction = -direction;
+    }
 }
 
 }

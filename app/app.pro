@@ -52,9 +52,40 @@ unix:contains(CONFIG, plank-transport) {
     DEFINES += PLANK_TRANSPORT=1
 }
 
+# The Windows build script creates the MSVC static library before qmake runs.
+# Keep Cargo outside nmake: the POSIX environment assignment above does not
+# work in cmd.exe, and a missing native transport must fail the build.
+win32:contains(CONFIG, plank-transport) {
+    isEmpty(PLANK_TRANSPORT_DIR): PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
+    isEmpty(PLANK_TRANSPORT_DIR) {
+        PLANK_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/plank-transport)
+    }
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport.h) {
+        error("PLANK native transport header is missing: $$PLANK_TRANSPORT_DIR")
+    }
+    isEmpty(PLANK_TRANSPORT_LIBRARY): PLANK_TRANSPORT_LIBRARY = $$(PLANK_TRANSPORT_LIBRARY)
+    isEmpty(PLANK_TRANSPORT_LIBRARY) {
+        error("PLANK_TRANSPORT_LIBRARY must name the built MSVC plank_transport.lib")
+    }
+    !exists($$PLANK_TRANSPORT_LIBRARY) {
+        error("PLANK native transport library is missing: $$PLANK_TRANSPORT_LIBRARY")
+    }
+
+    INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
+    PRE_TARGETDEPS += $$PLANK_TRANSPORT_LIBRARY
+    LIBS += $$quote($$PLANK_TRANSPORT_LIBRARY) advapi32.lib bcrypt.lib crypt32.lib ntdll.lib secur32.lib userenv.lib
+    DEFINES += PLANK_TRANSPORT=1
+}
+
 TARGET = plank-client
 
 include(../globaldefs.pri)
+
+win32:contains(CONFIG, plank-transport) {
+    # Rust's MSVC static library contains unwind metadata without EHCONT
+    # targets, so LINK cannot generate an EH continuation table for the EXE.
+    QMAKE_LFLAGS -= -guard:ehcont
+}
 
 # Precompile QML files to avoid writing qmlcache on portable versions.
 # Since this binds the app against the Qt runtime version, we will only
@@ -83,6 +114,7 @@ contains(CONFIG, plank-frame-flow-trace): DEFINES += PLANK_FRAME_FLOW_TRACE
 DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 win32 {
+    DEFINES += NOMINMAX WIN32_LEAN_AND_MEAN
     !exists($$PWD/../libs/windows) {
         error("Missing dependencies. Please run 'powershell .\setup-deps.ps1' to fetch prebuilt libraries.")
     }
