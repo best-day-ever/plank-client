@@ -29,10 +29,6 @@ extern "C" {
 #include <memory>
 #include <vector>
 
-#include <array>
-#include <memory>
-#include <vector>
-
 struct Vertex
 {
     vector_float4 position;
@@ -41,68 +37,35 @@ struct Vertex
 
 #define MAX_VIDEO_PLANES 3
 
-// A drawable may report presentation after the renderer has been destroyed.
-// Callbacks retain only this state, never the renderer or its SDL windows.
-struct MetalPresentationPacer
-{
-    SDL_Mutex* mutex = SDL_CreateMutex();
-    SDL_Condition* condition = SDL_CreateCondition();
-    int pending = 0;
-    ~MetalPresentationPacer()
-    {
-        SDL_DestroyCondition(condition);
-        SDL_DestroyMutex(mutex);
-    }
-};
-
-struct MetalPresentationTarget
-{
-    PlankPresentationOutput output;
-    SDL_MetalView view = nullptr;
-    CAMetalLayer* layer = nil;
-    id<CAMetalDrawable> drawable = nil;
-    id<MTLBuffer> vertices = nil;
-    bool visible = false;
-    QSize frameSize;
-    QSize drawableSize;
-
-    ~MetalPresentationTarget()
-    {
-        [drawable release];
-        [vertices release];
-        if (view) SDL_Metal_DestroyView(view);
-    }
-};
-
-struct MetalFrameTextures
-{
-    std::array<CVMetalTextureRef, MAX_VIDEO_PLANES> cv {};
-    ~MetalFrameTextures()
-    {
-        for (auto texture : cv) if (texture) CFRelease(texture);
-    }
-};
-
 class VTMetalRenderer : public VTBaseRenderer
 {
-    friend class VTMetalRendererProbe;
 public:
     VTMetalRenderer(bool hwAccel)
         : m_HwAccel(hwAccel),
+          m_Window(nullptr),
           m_HwContext(nullptr),
           m_MetalLayer(nullptr),
           m_TextureCache(nullptr),
           m_CscParamsBuffer(nullptr),
+          m_VideoVertexBuffer(nullptr),
           m_OverlayTextures{},
           m_OverlayLock(0),
           m_VideoPipelineState(nullptr),
           m_OverlayPipelineState(nullptr),
           m_ShaderLibrary(nullptr),
           m_CommandQueue(nullptr),
+          m_NextDrawable(nullptr),
           m_SwMappingTextures{},
+          m_MetalView(nullptr),
           m_LastColorSpace(-1),
           m_LastFullRange(false),
-          m_Pacer(std::make_shared<MetalPresentationPacer>())
+          m_LastFrameWidth(-1),
+          m_LastFrameHeight(-1),
+          m_LastDrawableWidth(-1),
+          m_LastDrawableHeight(-1),
+          m_PresentationMutex(SDL_CreateMutex()),
+          m_PresentationCond(SDL_CreateCondition()),
+          m_PendingPresentationCount(0)
     {
     }
 
@@ -177,32 +140,40 @@ public:
 
     void discardNextDrawable()
     { @autoreleasepool {
-        for (auto& target : m_Targets) {
-            [target->drawable release];
-            target->drawable = nil;
+        if (!m_NextDrawable) {
+            return;
         }
+
+        [m_NextDrawable release];
+        m_NextDrawable = nullptr;
     }}
 
     virtual void waitToRender() override
     { @autoreleasepool {
-        SDL_LockMutex(m_Pacer->mutex);
-        if (m_Pacer->pending > 2) {
-            SDL_WaitConditionTimeout(m_Pacer->condition, m_Pacer->mutex, 100);
-        }
-        SDL_UnlockMutex(m_Pacer->mutex);
-        for (auto& target : m_Targets) {
-            if (!target->drawable) target->drawable = [[target->layer nextDrawable] retain];
-            if (!target->drawable) {
-                // Keep both outputs on the same decoded frame if an output is
-                // temporarily hidden/unavailable. Do not retain the other one.
-                discardNextDrawable();
+        if (!m_NextDrawable) {
+            // Wait for the next available drawable before latching the frame to render
+            m_NextDrawable = [[m_MetalLayer nextDrawable] retain];
+            if (m_NextDrawable == nullptr) {
                 return;
+            }
+
+            if (m_MetalLayer.displaySyncEnabled) {
+                // Pace ourselves by waiting if too many frames are pending presentation
+                SDL_LockMutex(m_PresentationMutex);
+                if (m_PendingPresentationCount > 2) {
+                    if (!SDL_WaitConditionTimeout(m_PresentationCond, m_PresentationMutex, 100)) {
+                        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                                    "Presentation wait timed out after 100 ms");
+                    }
+                }
+                SDL_UnlockMutex(m_PresentationMutex);
             }
         }
     }}
 
     virtual void cleanupRenderContext() override
     {
+        // Free any unused drawable
         discardNextDrawable();
     }
 
@@ -222,6 +193,7 @@ public:
                 drawableWidth == lastDrawableWidth && drawableHeight == lastDrawableHeight) {
             // Nothing to do
             return true;
+        }
 
         QRectF source(0, 0, frame->width, frame->height);
         if (sourceRect.isValid()) {
@@ -456,17 +428,21 @@ public:
             return;
         }
 
-        for (auto& target : m_Targets) {
-            if (!updateVideoRegionSizeForFrame(*target, frame)) {
-                SDL_Event event = {};
-                event.type = SDL_EVENT_RENDER_DEVICE_RESET;
-                SDL_PushEvent(&event);
-                return;
-            }
-            if (!target->drawable) return;
+        // Handle changes to the video size or drawable size
+        if (!updateVideoRegionSizeForFrame(frame)) {
+            // Trigger the main thread to recreate the decoder
+            SDL_Event event;
+            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
+            SDL_PushEvent(&event);
+            return;
         }
 
-        MetalFrameTextures textures;
+        // Don't proceed with rendering if we don't have a drawable
+        if (m_NextDrawable == nullptr) {
+            return;
+        }
+
+        std::array<CVMetalTextureRef, MAX_VIDEO_PLANES> cvMetalTextures;
         size_t planes = getFramePlaneCount(frame);
         SDL_assert(planes <= MAX_VIDEO_PLANES);
 
@@ -507,7 +483,7 @@ public:
                                                                          CVPixelBufferGetWidthOfPlane(pixBuf, i),
                                                                          CVPixelBufferGetHeightOfPlane(pixBuf, i),
                                                                          i,
-                                                                         &textures.cv[i]);
+                                                                         &cvMetalTextures[i]);
                 if (err != kCVReturnSuccess) {
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "CVMetalTextureCacheCreateTextureFromImage() failed: %d",
@@ -579,33 +555,80 @@ public:
 
         auto renderEncoder = encodeVideo(m_NextDrawable.texture, m_VideoVertexBuffer);
 
-            // Only one output paces a frame; the secondary output must not double
-            // the in-flight count. A late callback cannot touch a deleted renderer.
-            if (target->output.primary && target->layer.displaySyncEnabled) {
-                auto pacer = m_Pacer;
-                SDL_LockMutex(pacer->mutex);
-                pacer->pending++;
-                SDL_UnlockMutex(pacer->mutex);
-                [target->drawable addPresentedHandler:^(id<MTLDrawable>) {
-                    SDL_LockMutex(pacer->mutex);
-                    pacer->pending--;
-                    SDL_SignalCondition(pacer->condition);
-                    SDL_UnlockMutex(pacer->mutex);
-                }];
+        // Now draw any overlays that are enabled
+        for (int i = 0; i < Overlay::OverlayMax; i++) {
+            id<MTLTexture> overlayTexture = nullptr;
+
+            // Try to acquire a reference on the overlay texture
+            SDL_LockSpinlock(&m_OverlayLock);
+            overlayTexture = [m_OverlayTextures[i] retain];
+            SDL_UnlockSpinlock(&m_OverlayLock);
+
+            if (overlayTexture) {
+                SDL_FRect renderRect = {};
+                if (i == Overlay::OverlayStatusUpdate) {
+                    // Bottom Left
+                    renderRect.x = 0;
+                    renderRect.y = 0;
+                }
+                else if (i == Overlay::OverlayDebug) {
+                    // Top left
+                    renderRect.x = 0;
+                    renderRect.y = m_LastDrawableHeight - overlayTexture.height;
+                }
+                else if (i == Overlay::OverlayToolbar) {
+                    const float position = Session::get()->getOverlayManager().getOverlayHorizontalPosition(Overlay::OverlayToolbar);
+                    renderRect.x = std::max(0, m_LastDrawableWidth - (int)overlayTexture.width) * position;
+                    renderRect.y = m_LastDrawableHeight - overlayTexture.height;
+                }
+
+                renderRect.w = overlayTexture.width;
+                renderRect.h = overlayTexture.height;
+
+                // Convert screen space to normalized device coordinates
+                StreamUtils::screenSpaceToNormalizedDeviceCoords(&renderRect, m_LastDrawableWidth, m_LastDrawableHeight);
+
+                Vertex verts[] =
+                {
+                    { { renderRect.x, renderRect.y, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+                    { { renderRect.x, renderRect.y+renderRect.h, 0.0f, 1.0f }, { 0.0f, 0} },
+                    { { renderRect.x+renderRect.w, renderRect.y, 0.0f, 1.0f }, { 1.0f, 1.0f} },
+                    { { renderRect.x+renderRect.w, renderRect.y+renderRect.h, 0.0f, 1.0f }, { 1.0f, 0} },
+                };
+
+                [renderEncoder setRenderPipelineState:m_OverlayPipelineState];
+                [renderEncoder setFragmentTexture:overlayTexture atIndex:0];
+                [renderEncoder setVertexBytes:verts length:sizeof(verts) atIndex:0];
+                [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:SDL_arraysize(verts)];
+
+                [overlayTexture release];
             }
-            [commandBuffer presentDrawable:target->drawable];
         }
+
+        [renderEncoder endEncoding];
+
+        if (m_MetalLayer.displaySyncEnabled) {
+            // Queue a completion callback on the drawable to pace our rendering
+            SDL_LockMutex(m_PresentationMutex);
+            m_PendingPresentationCount++;
+            SDL_UnlockMutex(m_PresentationMutex);
+            [m_NextDrawable addPresentedHandler:^(id<MTLDrawable>) {
+                SDL_LockMutex(m_PresentationMutex);
+                m_PendingPresentationCount--;
+                SDL_SignalCondition(m_PresentationCond);
+                SDL_UnlockMutex(m_PresentationMutex);
+            }];
+        }
+
+        // Flip to the newly rendered buffer
+        [commandBuffer presentDrawable:m_NextDrawable];
         [commandBuffer commit];
-        // One submission, with frame textures retained until both passes finish.
+
+        // Wait for the command buffer to complete and free our CVMetalTextureCache references
         [commandBuffer waitUntilCompleted];
-        if (commandBuffer.status == MTLCommandBufferStatusError) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Metal presentation command failed: %s",
-                commandBuffer.error.localizedDescription.UTF8String);
-            SDL_Event event = {};
-            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
-            SDL_PushEvent(&event);
-        }
-        discardNextDrawable();
+
+        [m_NextDrawable release];
+        m_NextDrawable = nullptr;
     }}
 
     id<MTLDevice> getMetalDevice() {
@@ -648,7 +671,8 @@ public:
     virtual bool initialize(PDECODER_PARAMETERS params) override
     { @autoreleasepool {
         int err;
-        if (!m_Pacer->mutex || !m_Pacer->condition) return false;
+
+        m_Window = params->window;
 
         id<MTLDevice> device = getMetalDevice();
         if (!device) {
@@ -675,38 +699,34 @@ public:
             return false;
         }
 
-        QVector<PlankPresentationOutput> outputs;
-        if (params->presentationLayout && params->presentationLayout->isMultiOutput()) {
-            m_PresentationCanvas = params->presentationLayout->canvasSize;
-            outputs = params->presentationLayout->outputs;
-            if (!m_PresentationCanvas.isValid() || outputs.size() != 2) return false;
-        } else {
-            int width = 0, height = 0;
-            if (!SDL_GetWindowSizeInPixels(params->window, &width, &height)) return false;
-            m_PresentationCanvas = QSize(width, height);
-            outputs.append({params->window, QRect(QPoint(0, 0), m_PresentationCanvas), true});
+        m_MetalView = SDL_Metal_CreateView(m_Window);
+        if (!m_MetalView) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "SDL_Metal_CreateView() failed: %s",
+                         SDL_GetError());
+            return false;
         }
-        for (const auto& output : outputs) {
-            auto target = std::make_unique<MetalPresentationTarget>();
-            target->output = output;
-            target->view = SDL_Metal_CreateView(output.window);
-            if (!target->view) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "Unable to create Metal view for presentation output: %s", SDL_GetError());
-                return false;
-            }
-            target->layer = (CAMetalLayer*)SDL_Metal_GetLayer(target->view);
-            if (!target->layer) return false;
-            target->layer.device = device;
-            target->layer.wantsExtendedDynamicRangeContent = !!(params->videoFormat & VIDEO_FORMAT_MASK_10BIT);
-            target->layer.maximumDrawableCount = 3;
-            target->layer.displaySyncEnabled = params->enableVsync;
-            if (output.primary) m_MetalLayer = target->layer;
-            m_Targets.push_back(std::move(target));
-        }
-        if (!m_MetalLayer) return false;
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Metal presentation initialized: outputs=%zu canvas=%dx%d",
-            m_Targets.size(), m_PresentationCanvas.width(), m_PresentationCanvas.height());
+
+        m_MetalLayer = (CAMetalLayer*)SDL_Metal_GetLayer(m_MetalView);
+
+        // Choose a device
+        m_MetalLayer.device = device;
+
+        // Allow EDR content if we're streaming in a 10-bit format
+        m_MetalLayer.wantsExtendedDynamicRangeContent = !!(params->videoFormat & VIDEO_FORMAT_MASK_10BIT);
+
+        // Ideally, we don't actually want triple buffering due to increased
+        // display latency, since our render time is very short. However, we
+        // *need* 3 drawables in order to hit the offloaded "direct" display
+        // path for our Metal layer.
+        //
+        // If we only use 2 drawables, we'll be stuck in the composited path
+        // (particularly for windowed mode) and our latency will actually be
+        // higher than opting for triple buffering.
+        m_MetalLayer.maximumDrawableCount = 3;
+
+        // Allow tearing if V-Sync is off (also requires direct display path)
+        m_MetalLayer.displaySyncEnabled = params->enableVsync;
 
         // One window per workstation display: every other window gets its own
         // Metal view and layer on the same device, queue, texture cache and
@@ -772,26 +792,20 @@ public:
     { @autoreleasepool {
         SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
         bool overlayEnabled = Session::get()->getOverlayManager().isOverlayEnabled(type);
-        updateOverlayTexture(type, newSurface, overlayEnabled);
-    }}
-
-    // Consumes newSurface. The UI thread prepares each replacement while the
-    // render thread continues using the last complete texture.
-    void updateOverlayTexture(Overlay::OverlayType type, SDL_Surface* newSurface,
-                              bool overlayEnabled)
-    { @autoreleasepool {
         if (newSurface == nullptr && overlayEnabled) {
             // The overlay is enabled and there is no new surface. Leave the old texture alone.
             return;
         }
 
-        // Only an explicit hide may publish an empty texture slot.
+        SDL_LockSpinlock(&m_OverlayLock);
+        auto oldTexture = m_OverlayTextures[type];
+        m_OverlayTextures[type] = nullptr;
+        SDL_UnlockSpinlock(&m_OverlayLock);
+
+        [oldTexture release];
+
+        // If the overlay is disabled, we're done
         if (!overlayEnabled) {
-            SDL_LockSpinlock(&m_OverlayLock);
-            auto oldTexture = m_OverlayTextures[type];
-            m_OverlayTextures[type] = nullptr;
-            SDL_UnlockSpinlock(&m_OverlayLock);
-            [oldTexture release];
             SDL_DestroySurface(newSurface);
             return;
         }
@@ -807,12 +821,6 @@ public:
         texDesc.storageMode = MTLStorageModeManaged;
         texDesc.usage = MTLTextureUsageShaderRead;
         auto newTexture = [m_MetalLayer.device newTextureWithDescriptor:texDesc];
-        if (newTexture == nil) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Unable to allocate Metal overlay texture; retaining the previous image");
-            SDL_DestroySurface(newSurface);
-            return;
-        }
 
         // Load the pixel data into the new texture
         [newTexture replaceRegion:MTLRegionMake2D(0, 0, newSurface->w, newSurface->h)
@@ -825,12 +833,8 @@ public:
         newSurface = nullptr;
 
         SDL_LockSpinlock(&m_OverlayLock);
-        auto oldTexture = m_OverlayTextures[type];
         m_OverlayTextures[type] = newTexture;
         SDL_UnlockSpinlock(&m_OverlayLock);
-        // Readers retain under the same lock; submitted Metal commands retain
-        // their resources. Never block the render thread during allocation/upload.
-        [oldTexture release];
     }}
 
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override
@@ -958,18 +962,25 @@ private:
     CAMetalLayer* m_MetalLayer;
     CVMetalTextureCacheRef m_TextureCache;
     id<MTLBuffer> m_CscParamsBuffer;
+    id<MTLBuffer> m_VideoVertexBuffer;
     id<MTLTexture> m_OverlayTextures[Overlay::OverlayMax];
     SDL_SpinLock m_OverlayLock;
     id<MTLRenderPipelineState> m_VideoPipelineState;
     id<MTLRenderPipelineState> m_OverlayPipelineState;
     id<MTLLibrary> m_ShaderLibrary;
     id<MTLCommandQueue> m_CommandQueue;
+    id<CAMetalDrawable> m_NextDrawable;
     id<MTLTexture> m_SwMappingTextures[MAX_VIDEO_PLANES];
+    SDL_MetalView m_MetalView;
     int m_LastColorSpace;
     bool m_LastFullRange;
-    QSize m_PresentationCanvas;
-    std::vector<std::unique_ptr<MetalPresentationTarget>> m_Targets;
-    std::shared_ptr<MetalPresentationPacer> m_Pacer;
+    int m_LastFrameWidth;
+    int m_LastFrameHeight;
+    int m_LastDrawableWidth;
+    int m_LastDrawableHeight;
+    SDL_Mutex* m_PresentationMutex;
+    SDL_Condition* m_PresentationCond;
+    int m_PendingPresentationCount;
 };
 
 IFFmpegRenderer* VTMetalRendererFactory::createRenderer(bool hwAccel) {
