@@ -508,6 +508,7 @@ private:
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
+    int m_ResolvedPrimaryOutput = -1;
     // Display arrangement: the canonical request (m_ResolvedHostLayout is
     // then "arrangement") and the plan behind it.
     QString m_ResolvedArrangement;

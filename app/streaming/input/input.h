@@ -22,6 +22,9 @@ class PlankWaylandCursor;
 class MacQuitShortcut;
 class PlankMacPenInput;
 #endif
+#ifdef HAVE_MAC_RAW_WACOM
+class MacRawWacomInput;
+#endif
 
 class SdlInputHandler
 {

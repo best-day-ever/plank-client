@@ -188,7 +188,9 @@ public:
     // no gate. False cancels, while the callback may wait for a local decision.
     void setRequestGate(std::function<bool(bool)> gate) { m_RequestGate = std::move(gate); }
 
-    QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr);
+    enum class AuthenticationIntent { ExplicitConnection, Recovery };
+    QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr,
+                         AuthenticationIntent intent = AuthenticationIntent::ExplicitConnection);
     // Brokered admission: /plank/auth/start with a one-use GSSAPI token minted
     // by the broker. Never answers a password challenge.
     QString authenticateGssapi(QString username, QString gssapiToken, bool* greeterConfirmed = nullptr);
@@ -241,7 +243,8 @@ public:
              QString& acceptedCaptureSource,
              QString& acceptedEncoderBackend,
              QString& acceptedEncodingMode,
-             QString& acceptedFileClipboardMode);
+             QString& acceptedFileClipboardMode,
+             int primaryOutput = -1);
 
     QVector<NvApp>
     getAppList();
@@ -280,5 +283,9 @@ private:
     QString m_WorkerInstance;
     PlankDesktopSignOut m_DesktopSignOut;
     QString m_DisplayArrangementError;
+    HostTrustStore m_TrustStore;
+    QString m_TrustEndpoint;
+    QByteArray m_IdentityKey;
+    std::function<bool(const HostIdentityChangedException&)> m_TrustPrompt;
     std::function<bool(bool)> m_RequestGate;
 };

@@ -2853,6 +2853,7 @@ bool Session::configurePlankHostLayout()
 
     m_ResolvedHostLayout.clear();
     m_ResolvedVirtualModes.clear();
+    m_ResolvedPrimaryOutput = -1;
     m_ResolvedArrangement.clear();
     m_DisplayPlan = {};
     for (auto& display : m_ClientDisplays) {
@@ -3634,7 +3635,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                           acceptedCaptureSource,
                           acceptedEncoderBackend,
                           acceptedEncodingMode,
-                          acceptedFileClipboardMode);
+                          acceptedFileClipboardMode,
+                          m_ResolvedPrimaryOutput);
         };
         try {
             startApp();
