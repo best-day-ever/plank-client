@@ -1,3 +1,9 @@
+## 1.0.157
+
+### Host
+
+- macOS: allow certificate preparation to finish during a slow first login after reboot, while keeping stalled operations bounded.
+
 ## 1.0.156 — Microphone candidate
 
 ### Client
