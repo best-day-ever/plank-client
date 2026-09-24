@@ -209,6 +209,20 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         }
     };
 #endif
+#ifdef HAVE_MAC_RAW_WACOM
+    // The SDL pen path is an explicit fallback. Never claim the physical
+    // tablet through both transports in the same session.
+    if (qEnvironmentVariableIntValue("PLANK_MACOS_PEN_INPUT") == 0 &&
+            (LiGetHostFeatureFlags() &
+             (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
+            (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
+                    "Using Mac Wacom raw HID forwarding");
+        m_MacRawWacomInput.reset(new MacRawWacomInput(requestTabletCursor));
+        m_MacRawWacomInput->setActive(isCaptureActive() &&
+            (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
+#endif
 #ifdef HAVE_LIBINPUT_TABLET
     if (qEnvironmentVariableIntValue("PLANK_EXTERNAL_WACOM_BRIDGE") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
