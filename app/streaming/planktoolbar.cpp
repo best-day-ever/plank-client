@@ -29,6 +29,7 @@
 
 namespace {
 constexpr int ToolbarHeight = 39;
+constexpr int MicrophoneWidth = 34;
 // The "screens changed" strip below the toolbar row.
 constexpr int ScreensPromptHeight = 36;
 constexpr int EdgeRevealHeight = 3;

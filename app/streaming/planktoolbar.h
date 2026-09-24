@@ -31,6 +31,7 @@ public:
         ApplyScreens,
         KeepScreens,
         SetUpScreens,
+        ToggleMicrophone,
     };
 
     PlankToolbar(SDL_Window* window,

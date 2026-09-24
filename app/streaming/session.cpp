@@ -7,6 +7,7 @@
 #include "streaming/avsynccontroller.h"
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
+#include "streaming/input/plankmousemotion.h"
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
 #include "backend/displayprofile.h"
