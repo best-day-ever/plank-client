@@ -20,6 +20,7 @@ class LinuxRawWacomInput;
 class PlankWaylandCursor;
 #ifdef Q_OS_MACOS
 class MacQuitShortcut;
+class MacKeyboardCapture;
 class PlankMacPenInput;
 #endif
 #ifdef HAVE_MAC_RAW_WACOM

@@ -388,6 +388,8 @@ public:
     int plankUnreachableTimeoutSeconds;
     PlankUnreachableAction plankUnreachableAction;
     AudioConfig audioConfig;
+    bool microphoneAutomatic;
+    bool microphoneAutomaticInput;
     bool plankToolbarPinned;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
