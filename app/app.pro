@@ -709,8 +709,8 @@ unix:!macx: {
     INSTALLS += target desktop icons appstream
 }
 win32 {
-    RC_ICONS = moonlight.ico
-    QMAKE_TARGET_COMPANY = Instinctual
+    RC_ICONS = bde-fernweh.ico
+    QMAKE_TARGET_COMPANY = "Best Day Ever"
     QMAKE_TARGET_DESCRIPTION = BDE fernweh
     QMAKE_TARGET_PRODUCT = BDE fernweh
 
