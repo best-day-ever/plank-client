@@ -3,6 +3,7 @@
 #include "hostrecovery.h"
 #include "plankbroker.h"
 #include "plankhttp.h"
+#include "authenticationtakeover.h"
 #include <QCryptographicHash>
 #include <QScopedPointer>
 #include <Limelight.h>
@@ -44,6 +45,26 @@ public:
 private:
     QString& m_Value;
 };
+
+bool isPlankCertificate(const QSslCertificate& certificate)
+{
+    const auto alternativeNames = certificate.subjectAlternativeNames();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    return !certificate.isNull() && certificate.isSelfSigned() &&
+            certificate.publicKey().algorithm() == QSsl::Rsa &&
+            certificate.publicKey().length() >= 3072 &&
+            !alternativeNames.values(QSsl::DnsEntry).isEmpty() &&
+            alternativeNames.values(QSsl::IpAddressEntry).isEmpty() &&
+            certificate.effectiveDate() <= now && certificate.expiryDate() > now;
+}
+
+QMetaObject::Connection rememberPlankTls(QNetworkAccessManager* manager, QObject* context)
+{
+    return QObject::connect(manager, &QNetworkAccessManager::encrypted, context,
+                            [](QNetworkReply* reply) {
+        reply->setProperty("plankNegotiatedTls", QVariant::fromValue(reply->sslConfiguration()));
+    });
+}
 
 QSslConfiguration plankSslConfiguration()
 {
@@ -583,6 +604,24 @@ void NvHTTP::checkTlsGuard(const HostTlsGuard& guard)
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
             result.error.isEmpty() ? QStringLiteral("Host identity is not established. Sign in again.") : result.error);
     }
+}
+
+void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
+{
+    const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
+    if (!acceptsPlankCertificate(certificate)) return;
+    for (const QSslError& error : errors) {
+        switch (error.error()) {
+        case QSslError::SelfSignedCertificate:
+        case QSslError::CertificateUntrusted:
+        case QSslError::UnableToGetLocalIssuerCertificate:
+        case QSslError::UnableToVerifyFirstCertificate:
+        case QSslError::HostNameMismatch:
+            break;
+        default: return;
+        }
+    }
+    reply->ignoreSslErrors(errors);
 }
 
 void NvHTTP::establishHostTrust(AuthenticationIntent intent)
@@ -1140,5 +1179,5 @@ NvHTTP::openConnection(QUrl baseUrl,
         throw exception;
     }
 
-    return reply.release();
+    return reply.take();
 }

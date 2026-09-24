@@ -276,6 +276,7 @@ private:
     NvAddress m_Address;
     bool acceptsPlankCertificate(const QSslCertificate& certificate) const;
     QMetaObject::Connection enforcePinnedCertificate(QNetworkAccessManager* manager);
+    void handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
 
     QNetworkAccessManager* m_Nam;
     QString m_PinnedCertificateSha256;
