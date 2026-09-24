@@ -6,6 +6,13 @@
 #include "outputtopology.h"
 #include "../../app/streaming/macdisplaygeometry.h"
 
+static NvClientDisplay clientWithPrimary(QRect bounds, QSize nativeSize, bool main)
+{
+    NvClientDisplay display {bounds, nativeSize};
+    display.main = main;
+    return display;
+}
+
 class TestOutputTopology : public QObject
 {
     Q_OBJECT
@@ -563,15 +570,15 @@ void TestOutputTopology::matchesPrimaryInDesktopOrder()
     QCOMPARE(topology.outputs[1].id, QStringLiteral("x11:DP-0"));
     QVERIFY(topology.outputs[1].primary);
 
-    const NvClientDisplay eizo {QRect(1920, 0, 2560, 1440), QSize(2560, 1440), {}, true};
-    const NvClientDisplay laptop {QRect(0, 0, 1920, 1200), QSize(3456, 2234), {}, false};
+    const NvClientDisplay eizo = clientWithPrimary(QRect(1920, 0, 2560, 1440), QSize(2560, 1440), true);
+    const NvClientDisplay laptop = clientWithPrimary(QRect(0, 0, 1920, 1200), QSize(3456, 2234), false);
     QCOMPARE(NvOutputTopology::clientPrimaryIndex({eizo, laptop}, 2), 1);
     QCOMPARE(NvOutputTopology::clientPrimaryIndex({laptop, eizo}, 2), 1);
     auto leftPrimary = laptop;
-    leftPrimary.primary = true;
+    leftPrimary.main = true;
     QCOMPARE(NvOutputTopology::clientPrimaryIndex({leftPrimary, eizo}, 2), -1);
     auto noPrimary = eizo;
-    noPrimary.primary = false;
+    noPrimary.main = false;
     QCOMPARE(NvOutputTopology::clientPrimaryIndex({laptop, noPrimary}, 2), -1);
 
     // A qualified virtual pair retains its existing sizes and gains only the
@@ -580,14 +587,16 @@ void TestOutputTopology::matchesPrimaryInDesktopOrder()
     QStringList modes;
     QString error;
     int primary = -1;
-    const NvClientDisplay virtualLaptop {QRect(0, 0, 1920, 1200), QSize(1920, 1200), {}, false};
+    const NvClientDisplay virtualLaptop = clientWithPrimary(QRect(0, 0, 1920, 1200), QSize(1920, 1200), false);
     QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
-                 {eizo, virtualLaptop}, layout, modes, &error, &primary), qPrintable(error));
+                 {eizo, virtualLaptop}, layout, modes, &error, nullptr,
+                 NvOutputTopology::qualifiedVirtualModes(), &primary), qPrintable(error));
     QCOMPARE(layout, QStringLiteral("dual-horizontal"));
     QCOMPARE(modes, QStringList({QStringLiteral("1920x1200"), QStringLiteral("2560x1440")}));
     QCOMPARE(primary, 1);
     QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
-                 {eizo}, layout, modes, &error, &primary), qPrintable(error));
+                 {eizo}, layout, modes, &error, nullptr,
+                 NvOutputTopology::qualifiedVirtualModes(), &primary), qPrintable(error));
     QCOMPARE(layout, QStringLiteral("single"));
     QCOMPARE(primary, 0);
     QVERIFY(NvOutputTopology::SupportedFeatureFlags &
@@ -607,8 +616,8 @@ void TestOutputTopology::primaryHintRequiresMatchingOutputCount()
             for (int index = 0; index < count; ++index) {
                 // Reverse enumeration and a negative desktop origin must not
                 // change the primary's index in left-to-right output order.
-                displays.prepend({QRect((index - 1) * 1920, 0, 1920, 1080),
-                                  QSize(1920, 1080), {}, index == primary});
+                displays.prepend(clientWithPrimary(QRect((index - 1) * 1920, 0, 1920, 1080),
+                                                   QSize(1920, 1080), index == primary));
             }
             for (int requested = -1; requested <= 4; ++requested) {
                 const int expected = count == requested && count >= 1 && count <= 2
@@ -621,16 +630,16 @@ void TestOutputTopology::primaryHintRequiresMatchingOutputCount()
 
 void TestOutputTopology::omitsAmbiguousPrimaryHints()
 {
-    const NvClientDisplay primary {QRect(0, 0, 1920, 1080), QSize(1920, 1080), {}, true};
+    const NvClientDisplay primary = clientWithPrimary(QRect(0, 0, 1920, 1080), QSize(1920, 1080), true);
     for (const QRect& bounds : {QRect(0, 1080, 1920, 1080), // stacked
                                QRect(0, 0, 1920, 1080),    // mirrored
                                QRect(960, 0, 1920, 1080),  // overlapping
                                QRect(1920, 1080, 1920, 1080), // diagonal
                                QRect()}) {
-        const NvClientDisplay other {bounds, QSize(1920, 1080), {}, false};
+        const NvClientDisplay other = clientWithPrimary(bounds, QSize(1920, 1080), false);
         QCOMPARE(NvOutputTopology::clientPrimaryIndex({primary, other}, 2), -1);
     }
-    const NvClientDisplay right {QRect(1920, 200, 2560, 1440), QSize(5120, 2880), {}, false};
+    const NvClientDisplay right = clientWithPrimary(QRect(1920, 200, 2560, 1440), QSize(5120, 2880), false);
     QCOMPARE(NvOutputTopology::clientPrimaryIndex({right, primary}, 2), 0);
 }
 

@@ -787,7 +787,8 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
                                                   QStringList& virtualModes,
                                                   QString* error,
                                                   bool* fitted,
-                                                  const QStringList& candidateModes)
+                                                  const QStringList& candidateModes,
+                                                  int* primaryOutput)
 {
     hostLayout.clear();
     virtualModes.clear();
@@ -913,7 +914,7 @@ int NvOutputTopology::clientPrimaryIndex(QVector<NvClientDisplay> displays, int 
     int primary = -1;
     for (int index = 0; index < displays.size(); ++index) {
         if (!displays[index].bounds.isValid()) return -1;
-        if (!displays[index].primary) continue;
+        if (!displays[index].main) continue;
         if (primary != -1) return -1;
         primary = index;
     }

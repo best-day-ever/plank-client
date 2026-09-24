@@ -2931,9 +2931,13 @@ bool Session::configurePlankHostLayout()
             if (virtualPrimary) {
                 QVector<NvClientDisplay> displays;
                 for (const auto& display : std::as_const(m_ClientDisplays)) {
-                    displays.append({QRect(display.logicalBounds.x, display.logicalBounds.y,
-                                           display.logicalBounds.w, display.logicalBounds.h),
-                                     display.nativeSize, display.macBackingSize, display.primary});
+                    NvClientDisplay probed = display.probeView;
+                    probed.bounds = QRect(display.logicalBounds.x, display.logicalBounds.y,
+                                          display.logicalBounds.w, display.logicalBounds.h);
+                    probed.nativeSize = display.nativeSize;
+                    probed.backingSize = display.macBackingSize;
+                    probed.main = display.primary;
+                    displays.append(probed);
                 }
                 // A manual bookmark remains usable with a different number
                 // or arrangement of local monitors. Omit an ambiguous hint;

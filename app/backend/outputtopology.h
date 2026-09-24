@@ -86,7 +86,7 @@ struct NvOutputTopology
     static const int DesktopHandoffNoticeFeature = 0x10000;
     static const int AuthenticatedDesktopStageFeature = 0x20000;
     static const int WorkerInstanceFeature = 0x40000;
-    static const int VirtualPrimaryConnectorFeature = 0x2000000;
+    static const int VirtualPrimaryConnectorFeature = 0x10000000;
     // Fixed capture description only. Not part of the Linux launch feature
     // mask: parsing this does not grant input, layout changes or media launch.
     static const int FixedCaptureFeature = 0x80000;
@@ -144,7 +144,8 @@ struct NvOutputTopology
                                              PlatformClipboardFilesFeature |
                                              NvfbcNvenc420Feature |
                                              NotchSafeLaptopModesFeature |
-                                             DisplayArrangementFeature;
+                                             DisplayArrangementFeature |
+                                             VirtualPrimaryConnectorFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;
@@ -178,7 +179,9 @@ struct NvOutputTopology
                                            QStringList& virtualModes,
                                            QString* error = nullptr,
                                            bool* fitted = nullptr,
-                                           const QStringList& candidateModes = qualifiedVirtualModes());
+                                           const QStringList& candidateModes = qualifiedVirtualModes(),
+                                           int* primaryOutput = nullptr);
+    static int clientPrimaryIndex(QVector<NvClientDisplay> displays, int outputCount);
     // The pixel size "Match client displays" aims for: the current desktop
     // backing pixels (what the client presents into), capped at the physical
     // panel with the aspect ratio kept. A macOS "More Space" backing larger
