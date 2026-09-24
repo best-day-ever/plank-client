@@ -1,3 +1,19 @@
+## 1.1.001
+
+Update Host and Client together. This version is not compatible with the previous release's transport.
+
+### Client
+
+- Add microphone forwarding to macOS Hosts, with automatic/manual selection and a toolbar mute switch.
+- Remember Host identity before sending login credentials, and ask before trusting a replacement Host.
+- Improve connection cancellation, rendering shutdown and audio/video startup reliability.
+
+### Host
+
+- Upgrade loss recovery to RaptorQ 2.0.1 and remove the application datagram pacer.
+- macOS: add the PLANK Microphone sound input and improve first-login startup after reboot.
+- Bound malformed network data and stalled authentication work.
+
 ## 1.0.157
 
 ### Host
