@@ -26,7 +26,14 @@ unix:contains(CONFIG, plank-transport) {
 
     PLANK_CARGO = $$(CARGO)
     isEmpty(PLANK_CARGO): PLANK_CARGO = cargo
-    PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+    macx {
+        # Share Cargo objects across Mac worktrees and never let qmake clean
+        # the machine-wide target used by other builds.
+        PLANK_TRANSPORT_CARGO_TARGET_DIR = $$(HOME)/.cargo/shared-target
+    } else {
+        PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+        QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
+    }
     PLANK_TRANSPORT_LIBRARY = $$PLANK_TRANSPORT_CARGO_TARGET_DIR/release/libplank_transport.a
 
     plank_transport.target = $$PLANK_TRANSPORT_LIBRARY
@@ -37,7 +44,6 @@ unix:contains(CONFIG, plank-transport) {
         --manifest-path $$shell_quote($$PLANK_TRANSPORT_DIR/Cargo.toml)
     QMAKE_EXTRA_TARGETS += plank_transport
     PRE_TARGETDEPS += $$PLANK_TRANSPORT_LIBRARY
-    QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
 
     INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
     LIBS += $$PLANK_TRANSPORT_LIBRARY -ldl -lpthread -lm
