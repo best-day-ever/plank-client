@@ -223,6 +223,8 @@ SOURCES += \
     backend/computerseeker.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
+    backend/hosttruststore.cpp \
+    backend/hosttlsguard.cpp \
     backend/brokersessionstore.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
@@ -277,6 +279,8 @@ HEADERS += \
     backend/nvcomputer.h \
     backend/planknetwork.h \
     backend/nvhttp.h \
+    backend/hosttruststore.h \
+    backend/hosttlsguard.h \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
     backend/remotedisplaysetup.h \
@@ -507,6 +511,7 @@ macx {
 
     SOURCES += \
         streaming/macquitshortcut.mm \
+        streaming/mackeyboardcapture.mm \
         streaming/macdisplayinfo.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
@@ -515,6 +520,7 @@ macx {
 
     HEADERS += \
         streaming/macquitshortcut.h \
+        streaming/mackeyboardcapture.h \
         streaming/macdisplayinfo.h \
         streaming/macwindow.h \
         streaming/video/decodercaps.h \
@@ -525,6 +531,7 @@ macx {
         streaming/clipboardpolltimer.h \
         streaming/plankclipboard.h
     OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    OBJECTIVE_SOURCES += streaming/audio/macmicrophonepermission.mm
     contains(CONFIG, plank-transport) {
         HEADERS += streaming/macfileclipboard.h
         OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
