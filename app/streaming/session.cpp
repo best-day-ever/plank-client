@@ -1573,6 +1573,7 @@ int Session::plankTransportNativeInputSender(void* context, uint8_t type,
 bool Session::clipboardSyncEnabled() const
 {
     return m_Computer != nullptr &&
+            m_SessionClipboardEntitled &&
             (!(m_Computer->plankFeatureFlags & NvOutputTopology::FixedCaptureFeature) || m_MacClipboardNegotiated) &&
             (m_Computer->plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0;
 }
@@ -3527,6 +3528,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     QString acceptedEncoderBackend;
     QString acceptedEncodingMode;
     QString acceptedFileClipboardMode {QStringLiteral("off")};
+    bool acceptedClipboardSync = true;
     const bool macCapture = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT;
     MacPreviewLaunch::Reply macLaunch;
     quint32 routeInterfaceMtu = 0;
@@ -3610,6 +3612,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 acceptedEncoderBackend = encoderBackend;
                 acceptedEncodingMode = encodingMode;
                 acceptedFileClipboardMode = QStringLiteral("off");
+                acceptedClipboardSync = macLaunch.clipboard;
                 return;
             }
             http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
@@ -3639,6 +3642,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                           acceptedEncoderBackend,
                           acceptedEncodingMode,
                           acceptedFileClipboardMode,
+                          acceptedClipboardSync,
                           m_ResolvedPrimaryOutput);
         };
         try {
@@ -4029,6 +4033,7 @@ bool Session::startConnectionAsync(bool reconnecting,
     LiSetPlankNativeInputSender(nullptr, nullptr);
 #endif
     m_FileClipboardMode = acceptedFileClipboardMode;
+    m_SessionClipboardEntitled = acceptedClipboardSync;
     if (!startPlankTransportDataPlane(plankTransportPort,
                                  plankTransportCertificateSha256,
                                  plankTransportToken,

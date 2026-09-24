@@ -244,6 +244,7 @@ public:
              QString& acceptedEncoderBackend,
              QString& acceptedEncodingMode,
              QString& acceptedFileClipboardMode,
+             bool& acceptedClipboardSync,
              int primaryOutput = -1);
 
     QVector<NvApp>

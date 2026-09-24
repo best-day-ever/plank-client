@@ -251,6 +251,7 @@ NvHTTP::startApp(QString verb,
                  QString& acceptedEncoderBackend,
                  QString& acceptedEncodingMode,
                  QString& acceptedFileClipboardMode,
+                 bool& acceptedClipboardSync,
                  int primaryOutput)
 {
     QString plankOutputArguments;
@@ -384,6 +385,20 @@ NvHTTP::startApp(QString verb,
     acceptedEncoderBackend = getXmlString(response, "PlankEncoderBackend");
     acceptedEncodingMode = getXmlString(response, "PlankEncodingMode");
     acceptedFileClipboardMode = getXmlString(response, "PlankFileClipboardMode");
+    const QString clipboardSync = getXmlString(response, "PlankClipboardSync");
+    if (!clipboardSync.isEmpty() && clipboardSync != QStringLiteral("0") &&
+            clipboardSync != QStringLiteral("1")) {
+        throw GfeHttpResponseException(400, "Host returned an invalid text clipboard policy");
+    }
+    // Older Hosts omit this field and use the advertised capability. A Host
+    // with per-user entitlements returns its effective session permission.
+    acceptedClipboardSync = clipboardSync.isEmpty() ?
+            (plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0 :
+            clipboardSync == QStringLiteral("1");
+    if (acceptedClipboardSync &&
+            (plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) == 0) {
+        throw GfeHttpResponseException(400, "Host enabled unrequested text clipboard sync");
+    }
     const auto isCanonicalSha256Hex = [](const QString& value) {
         const QByteArray encoded = value.toLatin1();
         const QByteArray decoded = QByteArray::fromHex(encoded);
@@ -424,7 +439,8 @@ NvHTTP::startApp(QString verb,
                                   NvOutputTopology::ClipboardFilesFeature)) ==
                 (NvOutputTopology::ClipboardSyncFeature |
                  NvOutputTopology::ClipboardFilesFeature);
-    if (filesNegotiated != (acceptedFileClipboardMode != QStringLiteral("off"))) {
+    if ((acceptedFileClipboardMode != QStringLiteral("off") &&
+         (!filesNegotiated || !acceptedClipboardSync))) {
         throw GfeHttpResponseException(
                     400, "Host returned inconsistent file clipboard negotiation");
     }
