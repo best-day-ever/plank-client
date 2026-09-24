@@ -33,6 +33,15 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         break;
 
     case KeyComboUngrabInput:
+        if (m_ImmersiveKeyboardMode) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Leaving immersive keyboard mode for this session");
+            m_ImmersiveKeyboardMode = false;
+            m_CaptureSystemKeysMode = StreamingPreferences::CSK_OFF;
+            raiseAllKeys();
+            updateKeyboardGrabState();
+            break;
+        }
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected mouse capture toggle combo");
 
@@ -173,6 +182,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         return;
     }
     if (event->scancode == SDL_SCANCODE_V && event->down &&
+            !m_ImmersiveKeyboardMode &&
             (event->mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0 &&
             (event->mod & SDL_KMOD_ALT) == 0 && Session::get() != nullptr &&
             Session::get()->beginFileClipboardPasteOnMainThread()) {
@@ -201,6 +211,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         // the scancode of another.
 
         for (int i = 0; i < KeyComboMax; i++) {
+            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput) continue;
             if (m_SpecialKeyCombos[i].enabled && event->key == m_SpecialKeyCombos[i].keyCode) {
                 performSpecialKeyCombo(m_SpecialKeyCombos[i].keyCombo);
                 return;
@@ -208,6 +219,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         }
 
         for (int i = 0; i < KeyComboMax; i++) {
+            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput) continue;
             if (m_SpecialKeyCombos[i].enabled && event->scancode == m_SpecialKeyCombos[i].scanCode) {
                 performSpecialKeyCombo(m_SpecialKeyCombos[i].keyCombo);
                 return;

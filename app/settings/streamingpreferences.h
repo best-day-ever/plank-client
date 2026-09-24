@@ -329,6 +329,7 @@ public:
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
+    Q_PROPERTY(bool immersiveKeyboardMode MEMBER immersiveKeyboardMode NOTIFY immersiveKeyboardModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
     // Remote (broker) mode, bde-linux docs/plank-broker.md section 10.1
     Q_PROPERTY(QString brokerHost MEMBER brokerHost NOTIFY brokerChanged)
@@ -399,6 +400,7 @@ public:
     QStringList brokerPins;
     QString passkeyRpId;
     CaptureSysKeysMode captureSysKeysMode;
+    bool immersiveKeyboardMode;
 
 signals:
     void displayModeChanged();
@@ -418,6 +420,7 @@ signals:
     void showPerformanceOverlayChanged();
     void muteOnFocusLossChanged();
     void captureSysKeysModeChanged();
+    void immersiveKeyboardModeChanged();
     void keepAwakeChanged();
     void languageChanged();
     void brokerChanged();

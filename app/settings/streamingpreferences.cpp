@@ -26,6 +26,7 @@
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_CAPTURESYSKEYS "capturesyskeys"
+#define SER_IMMERSIVE_KEYBOARD "plank-immersive-keyboard"
 #define SER_KEEPAWAKE "keepawake"
 #define SER_LANGUAGE "language"
 #define SER_BROKER_HOST "plank-broker-host"
@@ -122,6 +123,7 @@ void StreamingPreferences::reload()
     keepAwake = settings.value(SER_KEEPAWAKE, true).toBool();
     captureSysKeysMode = static_cast<CaptureSysKeysMode>(settings.value(SER_CAPTURESYSKEYS,
                                                          static_cast<int>(CaptureSysKeysMode::CSK_ALWAYS)).toInt());
+    immersiveKeyboardMode = settings.value(SER_IMMERSIVE_KEYBOARD, false).toBool();
     audioConfig = static_cast<AudioConfig>(settings.value(SER_AUDIOCFG,
                                                   static_cast<int>(AudioConfig::AC_STEREO)).toInt());
     windowMode = static_cast<WindowMode>(settings.value(SER_WINDOWMODE,
@@ -291,6 +293,7 @@ void StreamingPreferences::save()
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
+    settings.setValue(SER_IMMERSIVE_KEYBOARD, immersiveKeyboardMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
     settings.setValue(SER_BROKER_HOST, brokerHost.trimmed());
     settings.setValue(SER_BROKER_PORT, brokerPort);

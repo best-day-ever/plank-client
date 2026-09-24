@@ -45,13 +45,22 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
       m_CompositorCursorRequestedVisible(true),
       m_TabletCursorActive(false),
       m_FakeMouseCaptureActive(false),
+      m_HasActivatedCapture(false),
+      m_MousePressFailureLogs(0),
       m_KeyboardCaptureActive(false),
       m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
+      m_ImmersiveKeyboardMode(false),
       m_MouseCursorCapturedVisibilityState(false),
       m_StreamDimensions(
           (static_cast<std::uint64_t>(streamWidth) << 32) |
           static_cast<std::uint32_t>(streamHeight))
 {
+#ifdef Q_OS_MACOS
+    m_ImmersiveKeyboardMode = prefs.immersiveKeyboardMode;
+    if (m_ImmersiveKeyboardMode) {
+        m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
+    }
+#endif
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
@@ -939,6 +948,7 @@ void SdlInputHandler::setCaptureActive(bool active)
                              (!m_MouseWasInVideoRegion || m_RemoteCursorVisible) :
                              m_MouseCursorCapturedVisibilityState);
         m_FakeMouseCaptureActive = true;
+        m_HasActivatedCapture = true;
 
         // Synchronize the client and host cursor when activating absolute capture
         float mouseX, mouseY;

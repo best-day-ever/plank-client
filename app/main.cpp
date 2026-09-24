@@ -1023,10 +1023,13 @@ int main(int argc, char *argv[])
     auto requestKeyboardPermission = [] {
         if (Session::get() == nullptr) {
             MacKeyboardCapture::requestPermissionIfNeeded(
-                        StreamingPreferences::get()->captureSysKeysMode != StreamingPreferences::CSK_OFF);
+                        StreamingPreferences::get()->captureSysKeysMode != StreamingPreferences::CSK_OFF ||
+                        StreamingPreferences::get()->immersiveKeyboardMode);
         }
     };
     QObject::connect(StreamingPreferences::get(), &StreamingPreferences::captureSysKeysModeChanged,
+                     &app, requestKeyboardPermission);
+    QObject::connect(StreamingPreferences::get(), &StreamingPreferences::immersiveKeyboardModeChanged,
                      &app, requestKeyboardPermission);
     // CLI autoconnect must not put a permission dialog behind its stream.
     // Provision permission once by opening the ordinary launcher first.
