@@ -24,6 +24,7 @@
 #ifdef Q_OS_DARWIN
 #include "streaming/macwindow.h"
 #include "streaming/macdisplayinfo.h"
+#include "streaming/macdisplaygeometry.h"
 #include "streaming/video/decodercaps.h"
 #endif
 
@@ -2819,6 +2820,7 @@ bool Session::configurePlankHostLayout()
     QSize authenticatedDesktopSize;
     QSizeF authenticatedLogicalSize;
     bool hostRejectsRequestedLayout = false;
+    bool virtualPrimary = false;
     int hostFeatureFlags = 0;
     NvOutputTopology topologySnapshot;
     bool arrangementPublished = false;

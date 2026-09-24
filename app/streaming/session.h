@@ -461,6 +461,10 @@ private:
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
     bool m_MacClipboardNegotiated = false;
+    bool m_MicrophoneNegotiated = false;
+    std::atomic<bool> m_MicrophoneRequested {false};
+    std::mutex m_MicrophoneMutex;
+    std::unique_ptr<PlankMicrophone> m_Microphone;
     QString m_FileClipboardMode {QStringLiteral("off")};
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
@@ -530,6 +534,7 @@ private:
         // Display arrangement: this display's entry in m_DisplayPlan.outputs
         // when the workstation shows it, else -1.
         int planIndex = -1;
+        bool primary = false;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
     // The plan's primary display: the stream window opens there.

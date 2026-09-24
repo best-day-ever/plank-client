@@ -54,6 +54,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     routePresentationPointer(window, routedEvent.x, routedEvent.y);
     routedEvent.windowID = SDL_GetWindowID(window);
     event = &routedEvent;
+    const float x = routedEvent.x;
+    const float y = routedEvent.y;
     activateCompositorCursor();
     if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
@@ -138,26 +140,9 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         return;
     }
 
-    // Batch all pending mouse motion events to save CPU time
-    // Keep SDL's fractional point coordinates: on a 2x display one point is
-    // two drawable pixels, so truncating here would lose half the precision.
-    float x = event->x, y = event->y;
-    SDL_Event nextEvent;
-    while (batchPendingEvents &&
-           SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
-                          SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
-        event = &nextEvent.motion;
-
-        // Ignore synthetic mouse events
-        if (event->which != SDL_TOUCH_MOUSEID &&
-                event->windowID == SDL_GetWindowID(window)) {
-            x = event->x;
-            y = event->y;
-        } else if (event->windowID != SDL_GetWindowID(window)) {
-            SDL_PushEvent(&nextEvent);
-            break;
-        }
-    }
+    SDL_MouseMotionEvent motion = *event;
+    if (batchPendingEvents) PlankMouseMotion::coalescePending(motion);
+    // Keep SDL's fractional point coordinates for Retina input.
     float x = motion.x, y = motion.y;
 
     // We should not reference the original event anymore

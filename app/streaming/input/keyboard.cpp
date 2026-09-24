@@ -5,6 +5,7 @@
 
 #ifdef Q_OS_MACOS
 #include "streaming/macclipboardsync.h"
+#include "streaming/mackeyboardcapture.h"
 #endif
 
 #define VK_0 0x30
