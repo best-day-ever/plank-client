@@ -5,6 +5,18 @@
 #include <Security/Security.h>
 #endif
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <dpapi.h>
+
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QStandardPaths>
+#endif
+
 namespace BrokerSessionStore {
 
 #ifdef Q_OS_DARWIN
@@ -95,6 +107,100 @@ void clear(const QString& brokerAddress)
     CfRelease service, account, query;
     query.ref = baseQuery(brokerAddress, service, account);
     SecItemDelete(static_cast<CFDictionaryRef>(query.ref));
+}
+
+#elif defined(Q_OS_WIN)
+
+namespace {
+
+QString sessionPath(const QString& brokerAddress)
+{
+    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (root.isEmpty() || brokerAddress.isEmpty()) return QString();
+    const QByteArray digest = QCryptographicHash::hash(brokerAddress.toUtf8(),
+                                                       QCryptographicHash::Sha256).toHex();
+    return QDir(root).filePath(QStringLiteral("broker-sessions/") + QString::fromLatin1(digest) +
+                               QStringLiteral(".dat"));
+}
+
+DATA_BLOB dataBlob(QByteArray& data)
+{
+    return {static_cast<DWORD>(data.size()), reinterpret_cast<BYTE*>(data.data())};
+}
+
+}
+
+bool isAvailable()
+{
+    return !QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation).isEmpty();
+}
+
+bool save(const QString& brokerAddress, const QString& username, const QString& token)
+{
+    const QString path = sessionPath(brokerAddress);
+    if (path.isEmpty() || username.isEmpty() || token.isEmpty()) return false;
+    QByteArray plaintext = encode(username, token);
+    if (plaintext.size() > 4096) {
+        plaintext.fill('\0');
+        return false;
+    }
+    QByteArray entropy = brokerAddress.toUtf8();
+    DATA_BLOB input = dataBlob(plaintext);
+    DATA_BLOB optionalEntropy = dataBlob(entropy);
+    DATA_BLOB protectedData {};
+    const BOOL protectedOk = CryptProtectData(&input, L"BDE fernweh session", &optionalEntropy,
+                                               nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN,
+                                               &protectedData);
+    plaintext.fill('\0');
+    if (!protectedOk || protectedData.pbData == nullptr) {
+        if (protectedData.pbData != nullptr) LocalFree(protectedData.pbData);
+        return false;
+    }
+
+    const bool directoryOk = QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile file(path);
+    const bool opened = directoryOk && file.open(QIODevice::WriteOnly);
+    const bool written = opened && file.write(reinterpret_cast<const char*>(protectedData.pbData),
+                                               protectedData.cbData) == protectedData.cbData;
+    const bool committed = written && file.commit();
+    SecureZeroMemory(protectedData.pbData, protectedData.cbData);
+    LocalFree(protectedData.pbData);
+    return committed;
+}
+
+bool load(const QString& brokerAddress, Saved& saved)
+{
+    saved = Saved();
+    const QString path = sessionPath(brokerAddress);
+    if (path.isEmpty()) return false;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 16384) return false;
+    QByteArray protectedBytes = file.readAll();
+    QByteArray entropy = brokerAddress.toUtf8();
+    DATA_BLOB input = dataBlob(protectedBytes);
+    DATA_BLOB optionalEntropy = dataBlob(entropy);
+    DATA_BLOB plaintext {};
+    const BOOL unprotected = CryptUnprotectData(&input, nullptr, &optionalEntropy,
+                                                 nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN,
+                                                 &plaintext);
+    if (!unprotected || plaintext.pbData == nullptr) {
+        if (plaintext.pbData != nullptr) LocalFree(plaintext.pbData);
+        clear(brokerAddress);
+        return false;
+    }
+    QByteArray decoded(reinterpret_cast<const char*>(plaintext.pbData), plaintext.cbData);
+    const bool valid = decode(decoded, saved);
+    decoded.fill('\0');
+    SecureZeroMemory(plaintext.pbData, plaintext.cbData);
+    LocalFree(plaintext.pbData);
+    if (!valid) clear(brokerAddress);
+    return valid;
+}
+
+void clear(const QString& brokerAddress)
+{
+    const QString path = sessionPath(brokerAddress);
+    if (!path.isEmpty()) QFile::remove(path);
 }
 
 #else

@@ -15,7 +15,7 @@ CONFIG += staticlib
 # Include global qmake defs
 include(../globaldefs.pri)
 
-unix:contains(CONFIG, plank-transport) {
+contains(CONFIG, plank-transport) {
     isEmpty(PLANK_TRANSPORT_DIR) {
         PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
     }

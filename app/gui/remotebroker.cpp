@@ -97,7 +97,7 @@ RemoteBroker::~RemoteBroker()
 void RemoteBroker::initialize(ComputerManager* computerManager)
 {
     m_ComputerManager = computerManager;
-    // Resume a remembered session (macOS Keychain). If the broker has since
+    // Resume a remembered session (macOS Keychain or Windows DPAPI). If the broker has since
     // expired it, the first host list returns 401 and signOutLocally drops it.
     if (!signedIn() && configured()) {
         BrokerSessionStore::Saved saved;
