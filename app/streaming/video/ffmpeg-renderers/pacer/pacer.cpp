@@ -87,12 +87,18 @@ Pacer::Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats) :
 
 Pacer::~Pacer()
 {
-    m_Stopping = true;
-
-    // Stop the V-sync thread
-    if (m_VsyncThread != nullptr) {
+    {
+        // Serialize shutdown with each wait's predicate check and atomic
+        // unlock-and-wait. An atomic flag alone cannot prevent a lost wake.
+        QMutexLocker lock(&m_FrameQueueLock);
+        m_Stopping = true;
+        m_RenderQueueNotEmpty.wakeAll();
         m_PacingQueueNotEmpty.wakeAll();
         m_VsyncSignalled.wakeAll();
+    }
+
+    // Join without holding the queue lock so the workers can finish.
+    if (m_VsyncThread != nullptr) {
         SDL_WaitThread(m_VsyncThread, nullptr);
     }
 
@@ -102,7 +108,6 @@ Pacer::~Pacer()
 
     // Stop the render thread
     if (m_RenderThread != nullptr) {
-        m_RenderQueueNotEmpty.wakeAll();
         SDL_WaitThread(m_RenderThread, nullptr);
     }
     else {
@@ -183,7 +188,9 @@ int Pacer::vsyncThread(void *context)
         if (async) {
             // Wait for the VSync source to invoke signalVsync() or 100ms to elapse
             me->m_FrameQueueLock.lock();
-            me->m_VsyncSignalled.wait(&me->m_FrameQueueLock, 100);
+            if (!me->m_Stopping) {
+                me->m_VsyncSignalled.wait(&me->m_FrameQueueLock, 100);
+            }
             me->m_FrameQueueLock.unlock();
         }
         else {
@@ -277,6 +284,11 @@ void Pacer::handleVsync(int timeUntilNextVsyncMillis)
 
     m_FrameQueueLock.lock();
 
+    if (m_Stopping) {
+        m_FrameQueueLock.unlock();
+        return;
+    }
+
     // If the queue length history entries are large, be strict
     // about dropping excess frames.
     int frameDropTarget = 1;
@@ -322,7 +334,9 @@ void Pacer::handleVsync(int timeUntilNextVsyncMillis)
             return;
         }
 
-        if (m_Stopping) {
+        // A wake need not mean there is a frame (shutdown, queue discard or
+        // a spurious wake). Never dequeue an empty queue.
+        if (m_Stopping || m_PacingQueue.isEmpty()) {
             m_FrameQueueLock.unlock();
             return;
         }
@@ -510,7 +524,7 @@ void Pacer::recordFrameDrop(DropReason reason, AVFrame* frame, int queueDepth, i
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Client pacer dropped frame: reason=%s age=%u ms queue=%d target=%d total=%u",
                 reasonName,
-                SDL_GetTicks() - (Uint32)frame->pkt_dts,
+                static_cast<Uint32>(SDL_GetTicks() - (Uint32)frame->pkt_dts),
                 queueDepth,
                 targetDepth,
                 m_VideoStats->pacerDroppedFrames);
