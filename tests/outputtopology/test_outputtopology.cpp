@@ -93,6 +93,25 @@ void TestOutputTopology::matchesMacFullscreenViewport()
     }
 }
 
+void TestOutputTopology::matchesMultipleNativeFullscreenViewports()
+{
+    for (int count : {-1, 0}) {
+        QVERIFY(!MacDisplayGeometry::useNativeFullscreen(count));
+    }
+
+    for (int count : {1, 2, 3}) {
+        QVERIFY(MacDisplayGeometry::useNativeFullscreen(count));
+        int height = 1329, pixels = 2658;
+        QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
+        QCOMPARE(height, 1291);
+        QCOMPARE(pixels, height * 2);
+        height = 1440; pixels = 1440;
+        QVERIFY(MacDisplayGeometry::insetTop(2560, height, 2560, pixels, 0));
+        QCOMPARE(height, 1440);
+        QCOMPARE(pixels, height);
+    }
+}
+
 void TestOutputTopology::buildsMacDisplayRequest()
 {
     QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/macos-display-v3.json");
