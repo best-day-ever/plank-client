@@ -461,6 +461,7 @@ private:
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
     bool m_MacClipboardNegotiated = false;
+    bool m_SessionClipboardEntitled = true;
     bool m_MicrophoneNegotiated = false;
     std::atomic<bool> m_MicrophoneRequested {false};
     std::mutex m_MicrophoneMutex;
