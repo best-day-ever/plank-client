@@ -39,6 +39,7 @@ struct Vertex
 
 class VTMetalRenderer : public VTBaseRenderer
 {
+    friend class VTMetalRendererProbe;
 public:
     VTMetalRenderer(bool hwAccel)
         : m_HwAccel(hwAccel),
