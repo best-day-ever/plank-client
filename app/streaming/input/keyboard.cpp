@@ -141,8 +141,20 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
     }
 }
 
+#ifdef Q_OS_MACOS
+bool SdlInputHandler::handleCapturedMacKeyEvent(const SDL_Event& event)
+{
+    return m_MacKeyboardCapture->dispatch(event, [this](SDL_KeyboardEvent* key) {
+        handleKeyEvent(key);
+    });
+}
+#endif
+
 void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
 {
+#ifdef Q_OS_MACOS
+    if (m_MacKeyboardCapture->suppressSdlKeyEvent() || !hasMacStreamKeyboardFocus()) return;
+#endif
     short keyCode;
     char modifiers;
     bool shouldNotConvertToScanCodeOnServer = false;

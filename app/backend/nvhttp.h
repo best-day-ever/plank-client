@@ -5,6 +5,7 @@
 #include "outputtopology.h"
 #include "desktopstage.h"
 #include "macpreviewlaunch.h"
+#include "hosttlsguard.h"
 
 #include <Limelight.h>
 
@@ -102,6 +103,28 @@ private:
     QByteArray m_ErrorText;
 };
 
+class MacSessionActiveException : public GfeHttpResponseException
+{
+public:
+    explicit MacSessionActiveException(const QString& sessionId) :
+        GfeHttpResponseException(409, "PLANK workstation session is active"),
+        m_SessionId(sessionId) {}
+    const QString& sessionId() const { return m_SessionId; }
+private:
+    QString m_SessionId;
+};
+
+class HostIdentityChangedException : public QtNetworkReplyException
+{
+public:
+    HostIdentityChangedException(QString endpoint, QByteArray previous, QByteArray replacement) :
+        QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
+            "Host identity changed. Connect again to review the replacement before signing in."),
+        endpoint(std::move(endpoint)), previousKey(std::move(previous)), replacementKey(std::move(replacement)) {}
+    const QString endpoint;
+    const QByteArray previousKey, replacementKey;
+};
+
 class NvHTTP : public QObject
 {
     Q_OBJECT
@@ -147,7 +170,12 @@ public:
 
     void setAddress(NvAddress address);
 
-    void setPlankSessionToken(QString sessionToken);
+    void setPlankSessionToken(QString sessionToken, QByteArray identityKey);
+    void setTrustAddress(NvAddress address);
+    QByteArray hostIdentityKey() const { return m_IdentityKey; }
+    void setTrustPrompt(std::function<bool(const HostIdentityChangedException&)> prompt) {
+        m_TrustPrompt = std::move(prompt);
+    }
 
     // Brokered (remote) mode: every HTTPS connection to this host must present
     // exactly this leaf (SHA-256 over DER, lower-case hex), replacing the
@@ -172,7 +200,8 @@ public:
     // (400 or 409 with the display arrangement extension), else empty.
     QString displayArrangementError() const { return m_DisplayArrangementError; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
-    NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1);
+    NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1,
+                                      const QString& takeoverSessionId = QString());
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
                                            const QString& certificateSha256,
                                            int bitrateKbps, int udpPayloadSize);
@@ -227,15 +256,15 @@ public:
     QUrl m_BaseUrlHttps;
 private:
     void waitForRequestPermission(bool authenticating = false);
-    void
-    handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
+    void establishHostTrust(AuthenticationIntent intent);
+    void checkTlsGuard(const HostTlsGuard& guard);
 
     QNetworkReply*
     openConnection(QUrl baseUrl,
                    QString command,
                    QString arguments,
                    int timeoutMs,
-                   NvLogLevel logLevel);
+                   NvLogLevel logLevel, HostTlsGuard::Mode trustMode = HostTlsGuard::Mode::Observe);
 
     QJsonObject postPlankJson(QString command, const QJsonObject& body);
     QJsonObject postPinnedMacJson(const QString& path, const QJsonObject& body,

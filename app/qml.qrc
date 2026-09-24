@@ -12,6 +12,8 @@
         <file>gui/PlankVideoSettings.qml</file>
         <file>gui/SettingsView.qml</file>
         <file>gui/StreamSegue.qml</file>
+        <file>gui/SessionTakeoverDialog.qml</file>
+        <file>gui/HostTrustDialog.qml</file>
         <file>gui/NavigableToolButton.qml</file>
         <file>gui/NavigableItemDelegate.qml</file>
         <file>gui/NavigableMenuItem.qml</file>
@@ -23,6 +25,7 @@
         <file>gui/NavigableDialog.qml</file>
         <file>gui/CenteredGridView.qml</file>
         <file>gui/PlankTheme.qml</file>
+        <file>gui/PlankVersionButton.qml</file>
         <file>gui/PlankSection.qml</file>
         <file>gui/PlankSettingsGrid.qml</file>
         <file>gui/PlankSettingLabel.qml</file>

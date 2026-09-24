@@ -22,6 +22,7 @@
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
+#include "audio/microphone.h"
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
 #include "plankreconnectpolicy.h"
@@ -542,6 +543,7 @@ private:
     QString m_PresentedDisplaySignature;
     std::atomic_bool m_DisplayReconfigureRequested {false};
     SDL_DisplayID m_TargetDisplayId = 0;
+    bool m_MultiDisplayPresentationAvailable = false;
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;
     bool m_HasWindowedPresentationGeometry = false;

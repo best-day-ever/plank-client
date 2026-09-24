@@ -1,6 +1,8 @@
 #include <QtTest>
 
 #include "streaming/plankpresentation.h"
+#include "streaming/input/plankmousemotion.h"
+#include "streaming/input/plankpointerlogic.h"
 
 class TestPlankPresentation : public QObject
 {
@@ -10,6 +12,7 @@ private slots:
     void capturedDragCrossesBetweenDisplays();
     void capturedDragHonoursLogicalBoundsAndGaps();
     void exactDualOutputSlices();
+    void preservesAspectWithDifferentHostAndClientModes();
     void letterboxedDualOutputSlices();
     void mapsEachWindowIntoOneStreamCanvas();
     void preservesMappingWithScaledLogicalWindows();
@@ -74,6 +77,37 @@ void TestPlankPresentation::exactDualOutputSlices()
     QVERIFY(right.visible);
     QCOMPARE(right.sourceRect, QRectF(2560, 0, 2560, 2160));
     QCOMPARE(right.destinationRect, QRect(0, 0, 2560, 2160));
+}
+
+void TestPlankPresentation::preservesAspectWithDifferentHostAndClientModes()
+{
+    // Two 1920x1080 Host outputs on taller client monitors. Retain the client
+    // pixel canvas: substituting Host output sizes would stretch each image
+    // vertically to 2160 instead of preserving its aspect and letterboxing.
+    const QSize stream(3840, 1080);
+    const QSize canvas(5120, 2160);
+    const QSize drawable(2560, 2160);
+    for (int index = 0; index < 2; ++index) {
+        const QRect output(index * drawable.width(), 0, drawable.width(), drawable.height());
+        const auto slice = PlankPresentation::sliceForDrawable(stream, canvas, output, drawable);
+        QCOMPARE(slice.sourceRect, QRectF(index * 1920, 0, 1920, 1080));
+        QCOMPARE(slice.destinationRect, QRect(0, 360, 2560, 1440));
+        // Mouse/pen and cursor mappings share the same geometry, including a
+        // Retina window's logical coordinates and noninteractive black bars.
+        for (int scale : {1, 2}) {
+            const QSize window = drawable / scale;
+            const QPointF center(window.width() / 2.0, window.height() / 2.0);
+            QPointF streamPoint, windowPoint;
+            QVERIFY(PlankPresentation::mapWindowPointToStream(
+                center, window, stream, canvas, output, streamPoint, false));
+            QCOMPARE(streamPoint, QPointF(index * 1920 + 960, 540));
+            QVERIFY(PlankPresentation::mapStreamPointToWindow(
+                streamPoint, stream, canvas, output, window, windowPoint));
+            QCOMPARE(windowPoint, center);
+            QVERIFY(!PlankPresentation::mapWindowPointToStream(
+                QPointF(center.x(), 0), window, stream, canvas, output, streamPoint, false));
+        }
+    }
 }
 
 void TestPlankPresentation::letterboxedDualOutputSlices()

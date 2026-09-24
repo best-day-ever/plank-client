@@ -86,6 +86,7 @@ struct NvOutputTopology
     static const int DesktopHandoffNoticeFeature = 0x10000;
     static const int AuthenticatedDesktopStageFeature = 0x20000;
     static const int WorkerInstanceFeature = 0x40000;
+    static const int VirtualPrimaryConnectorFeature = 0x2000000;
     // Fixed capture description only. Not part of the Linux launch feature
     // mask: parsing this does not grant input, layout changes or media launch.
     static const int FixedCaptureFeature = 0x80000;
@@ -117,7 +118,7 @@ struct NvOutputTopology
     static const int DisplayArrangementFeature = DisplayArrangement::Feature;
     static const int FixedCaptureFlags = FixedCaptureFeature | OutputTopologyFeature |
             TopologyGenerationFeature | HostLayoutMetadataFeature | CompositeSourceRegionsFeature |
-            MacDesktopPreparationFeature | MacEncodingProfileFeature;
+            MacDesktopPreparationFeature | MacEncodingProfileFeature | ClipboardSyncFeature | SessionTakeoverFeature;
     static const int MaximumVirtualCanvasWidth = 8192;
     static const int SupportedFeatureFlags = OutputTopologyFeature |
                                              SelectedOutputFeature |
@@ -207,6 +208,8 @@ struct NvOutputTopology
                                    const QStringList& virtualModes);
     bool displayPolicyKnown() const;
     bool allowsBookmarkHostLayout(const QString& layout) const;
+    // Requested layouts may still be transitioning from the authenticated one.
+    int outputCountForLayout(const QString& resolvedLayout) const;
     bool matchesRequestedHostLayout(const QString& layout,
                                     const QStringList& modes) const;
     // The host applied exactly this canonical arrangement: the live request,

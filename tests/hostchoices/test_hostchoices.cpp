@@ -41,6 +41,7 @@ private slots:
         emit manager.hostPlatformDetected(1, "mac.test", 2);
         QCOMPARE(box->property("count").toInt(), 1);
         QCOMPARE(box->property("captureSource").toInt(), 2);
+        QCOMPARE(box->property("currentText").toString(), QStringLiteral("ScreenCaptureKit — macOS"));
         box->setProperty("hostAddress", "linux.test");
         QCOMPARE(box->property("count").toInt(), 3);
         emit manager.hostPlatformDetected(1, "mac.test", 2);
@@ -51,6 +52,7 @@ private slots:
         QCOMPARE(box->property("captureSource").toInt(), 0);
         box->setProperty("currentIndex", 1);
         QCOMPARE(box->property("captureSource").toInt(), 1);
+        QCOMPARE(box->property("currentText").toString(), QStringLiteral("Native X11/XShm — 10-bit (Experimental)"));
         box->setProperty("hostAddress", "offline.test");
         QTRY_COMPARE(manager.sequence, 3);
         emit manager.hostPlatformDetected(3, "offline.test", 0);

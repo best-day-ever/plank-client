@@ -239,6 +239,7 @@ SOURCES += \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
     streaming/session.cpp \
+    streaming/audio/microphone.cpp \
     streaming/avsynccontroller.cpp \
     streaming/plankdisplaymode.cpp \
     streaming/plankpresentation.cpp \
@@ -261,6 +262,7 @@ SOURCES += \
 macx: HEADERS += macapplication.h
 
 HEADERS += \
+    backend/authenticationtakeover.h \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
@@ -297,11 +299,13 @@ HEADERS += \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/plankpointerlogic.h \
+    streaming/input/plankmousemotion.h \
     streaming/session.h \
     streaming/plankdisplaymode.h \
     streaming/plankpresentation.h \
     streaming/planktoolbar.h \
     streaming/planktoolbarlogic.h \
+    streaming/planktoolbarstats.h \
     streaming/plankreconnectpolicy.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
@@ -496,6 +500,11 @@ win32:!winrt {
 macx {
     message(VideoToolbox renderer selected)
 
+    DEFINES += HAVE_MAC_RAW_WACOM
+    SOURCES += streaming/input/macrawwacom.cpp
+    HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h
+    LIBS += -framework IOKit -framework CoreFoundation -framework ApplicationServices -framework Carbon
+
     SOURCES += \
         streaming/macquitshortcut.mm \
         streaming/macdisplayinfo.mm \
@@ -668,6 +677,8 @@ macx {
     isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 13.0
     QMAKE_MACOSX_DEPLOYMENT_TARGET = $$PLANK_MACOS_DEPLOYMENT_TARGET
     QMAKE_APPLE_DEVICE_ARCHS = arm64
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
     QMAKE_INFO_PLIST = $$PWD/Info.plist
 
     APP_BUNDLE_RESOURCES.files = moonlight.icns

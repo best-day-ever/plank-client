@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+        <file>res/changelog.md</file>
         <file>res/ic_add_to_queue_white_48px.svg</file>
         <file>res/baseline-lock-24px.svg</file>
         <file>res/warning_FILL1_wght300_GRAD200_opsz24.svg</file>

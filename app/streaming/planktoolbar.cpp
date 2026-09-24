@@ -1,4 +1,5 @@
 #include "planktoolbar.h"
+#include "planktoolbarstats.h"
 #include "plankwaylandtoolbar.h"
 #include "videopacketlosswindow.h"
 
@@ -27,7 +28,6 @@
 #endif
 
 namespace {
-constexpr int ToolbarPreferredWidth = 539;
 constexpr int ToolbarHeight = 39;
 // The "screens changed" strip below the toolbar row.
 constexpr int ScreensPromptHeight = 36;
@@ -109,7 +109,10 @@ PlankToolbar::PlankToolbar(
       m_WindowPixelWidth(0),
       m_WindowPixelHeight(0),
       m_PixelDensity(1.0f),
-      m_Width(ToolbarPreferredWidth),
+      m_EncoderTargetWidth(PlankToolbarStats::encoderTargetWidth(
+              BitrateMinimumKbps, BitrateMaximumKbps, BitrateStepKbps)),
+      m_Width(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+              PlankToolbarStats::WindowControlsWidth),
       m_ToolbarLeft(-1),
       m_ToolbarDragOffsetX(0),
       m_PointerX(0),
@@ -124,9 +127,11 @@ PlankToolbar::PlankToolbar(
       m_RenderedFps(0.0f),
       m_VideoMbps(0.0f),
       m_PacketLossPercent(-1.0f),
+      m_NetworkRttMs(0),
       m_LastDrawnFps(-1.0f),
       m_LastDrawnVideoMbps(-1.0f),
       m_LastDrawnPacketLossPercent(-2.0f),
+      m_LastDrawnNetworkRttMs(0),
       m_HideDeadline(0),
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
@@ -205,12 +210,14 @@ PlankToolbar::~PlankToolbar()
 }
 
 void PlankToolbar::setRenderedStats(
-        float fps, float videoMbps, float packetLossPercent)
+        float fps, float videoMbps, float packetLossPercent,
+        std::uint32_t networkRttMs)
 {
     m_RenderedFps = std::max(0.0f, fps);
     m_VideoMbps = std::max(0.0f, videoMbps);
     m_PacketLossPercent = packetLossPercent < 0.0f ?
                 -1.0f : qBound(0.0f, packetLossPercent, 100.0f);
+    m_NetworkRttMs = networkRttMs;
 }
 
 void PlankToolbar::setAppliedBitrate(
@@ -263,7 +270,8 @@ PlankToolbar::Action PlankToolbar::update(
             (std::fabs(m_RenderedFps - m_LastDrawnFps) >= 0.05f ||
              std::fabs(m_VideoMbps - m_LastDrawnVideoMbps) >= 0.05f ||
              std::fabs(m_PacketLossPercent -
-                       m_LastDrawnPacketLossPercent) >= 0.05f)) {
+                       m_LastDrawnPacketLossPercent) >= 0.05f ||
+             m_NetworkRttMs != m_LastDrawnNetworkRttMs)) {
         redraw();
     }
 
@@ -376,7 +384,10 @@ void PlankToolbar::notifyWindowChanged()
                 SDL_GetWindowPixelDensity(m_Window),
                 m_WindowWidth, m_WindowHeight,
                 m_WindowPixelWidth, m_WindowPixelHeight);
-    m_Width = std::min(ToolbarPreferredWidth, std::max(m_WindowWidth, 1));
+    m_Width = std::min(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+                      (m_MicrophoneSupported ? MicrophoneWidth : 0) +
+                      PlankToolbarStats::WindowControlsWidth,
+                      std::max(m_WindowWidth, 1));
     if (m_ToolbarLeft < 0) {
         m_ToolbarLeft = std::max(0, (m_WindowWidth - m_Width) / 2);
     } else {
@@ -635,6 +646,9 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
             break;
         case Control::Fullscreen:
             action = Action::ToggleFullscreen;
+            break;
+        case Control::Microphone:
+            action = Action::ToggleMicrophone;
             break;
         case Control::Minimize:
             action = Action::Minimize;
@@ -896,12 +910,25 @@ void PlankToolbar::redraw()
                          QString("%1%").arg(m_PacketLossPercent, 0, 'f',
                                              VideoPacketLossDisplayDecimalPlaces));
 
-    QFont targetFont = labelFont;
-    targetFont.setPixelSize(12);
-    painter.setFont(targetFont);
+    painter.setFont(labelFont);
+    painter.setPen(QColor(151, 161, 174));
+    painter.drawText(QRect(PlankToolbarStats::RttLeft, 5,
+                          PlankToolbarStats::RttWidth, 12),
+                     Qt::AlignLeft | Qt::AlignVCenter, "RTT");
+    painter.setFont(lossFont);
+    painter.setPen(QColor(246, 248, 250));
+    painter.drawText(QRect(PlankToolbarStats::RttLeft, 16,
+                          PlankToolbarStats::RttWidth, 17),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     PlankToolbarStats::networkRttText(m_NetworkRttMs));
+
+    const int targetLeft = sliderLeft() - toolbarLeft();
+    const int targetWidth = sliderRight() - sliderLeft();
+    painter.setFont(PlankToolbarStats::encoderTargetFont());
     painter.setPen(m_BitrateSupported ? QColor(235, 239, 244) : QColor(135, 143, 153));
-    painter.drawText(QRect(229, 3, 190, 17), Qt::AlignLeft | Qt::AlignVCenter,
-                     QString("Encoder target  %1 Mbps").arg(m_BitrateKbps / 1000.0, 0, 'f', 1));
+    painter.drawText(QRect(targetLeft, 3, targetWidth, 17),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     PlankToolbarStats::encoderTargetText(m_BitrateKbps));
 
     const int trackLeft = sliderLeft() - toolbarLeft();
     const int trackRight = sliderRight() - toolbarLeft();
@@ -921,6 +948,42 @@ void PlankToolbar::redraw()
     painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
 
     const QPointF fullscreenCenter(m_Width - 88.0, 19.0);
+    if (m_MicrophoneSupported) {
+        const qreal x = m_Width - 121.0;
+        const bool hovered = m_LocalPointerInteraction && microphoneContains(m_PointerX, m_PointerY);
+        if (hovered) {
+            // Keep the hint in the existing toolbar surface. A separate popup
+            // would introduce another focus/pointer boundary during capture.
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(35, 43, 53));
+            painter.drawRoundedRect(QRectF(targetLeft - 3, 1, targetWidth + 6, 36), 3, 3);
+            painter.setPen(QColor(235, 239, 244));
+            QFont hintFont = labelFont; hintFont.setPixelSize(11); painter.setFont(hintFont);
+            QString hint;
+            switch (m_MicrophoneState) {
+            case PlankMicrophone::State::Active: hint = QStringLiteral("Microphone on\nClick to mute"); break;
+            case PlankMicrophone::State::Off: hint = QStringLiteral("Microphone off\nClick to enable"); break;
+            case PlankMicrophone::State::Pending: hint = QStringLiteral("Starting microphone\nClick to cancel"); break;
+            case PlankMicrophone::State::Unavailable: hint = QStringLiteral("Microphone unavailable\nCheck permission/input"); break;
+            }
+            painter.drawText(QRectF(targetLeft, 1, targetWidth, 36), Qt::AlignCenter, hint);
+        }
+        const QColor color = m_MicrophoneState == PlankMicrophone::State::Active ? QColor(52, 199, 110) :
+            m_MicrophoneState == PlankMicrophone::State::Pending ? QColor(240, 186, 70) :
+            m_MicrophoneState == PlankMicrophone::State::Unavailable ? QColor(239, 88, 88) : QColor(180, 189, 202);
+        painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(QRectF(x-3, 5, 6, 11), 3, 3);
+        painter.drawArc(QRectF(x-6, 8, 12, 13), 180*16, 180*16);
+        painter.drawLine(QPointF(x, 21), QPointF(x, 23));
+        if (m_MicrophoneState == PlankMicrophone::State::Off || m_MicrophoneState == PlankMicrophone::State::Unavailable)
+            painter.drawLine(QPointF(x-8, 4), QPointF(x+8, 21));
+        QFont font = painter.font(); font.setPixelSize(9); painter.setFont(font);
+        const QString label = m_MicrophoneState == PlankMicrophone::State::Active ? QStringLiteral("On") :
+            m_MicrophoneState == PlankMicrophone::State::Pending ? QStringLiteral("Wait") :
+            m_MicrophoneState == PlankMicrophone::State::Unavailable ? QStringLiteral("N/A") : QStringLiteral("Off");
+        painter.drawText(QRectF(x-16, 24, 32, 12), Qt::AlignCenter, label);
+    }
     const QRectF fullscreenRect(fullscreenCenter.x() - WindowButtonSize / 2.0,
                                 fullscreenCenter.y() - WindowButtonSize / 2.0,
                                 WindowButtonSize,
@@ -1006,9 +1069,9 @@ void PlankToolbar::redraw()
         hintFont.setPixelSize(10);
         painter.setFont(hintFont);
         painter.setPen(QColor(183, 151, 92));
-        painter.fillRect(QRect(225, 21, 198, 17), QColor(22, 27, 34));
-        painter.drawText(QRect(229, 22, 190, 15), Qt::AlignLeft | Qt::AlignVCenter,
-                         "Live bitrate control unavailable");
+        painter.fillRect(QRect(targetLeft - 4, 21, targetWidth + 8, 17), QColor(22, 27, 34));
+        painter.drawText(QRect(targetLeft, 22, targetWidth, 15), Qt::AlignLeft | Qt::AlignVCenter,
+                         "Bitrate control unavailable");
     }
 
     if (m_ScreensPromptVisible) {
@@ -1043,6 +1106,7 @@ void PlankToolbar::redraw()
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
     m_LastDrawnPacketLossPercent = m_PacketLossPercent;
+    m_LastDrawnNetworkRttMs = m_NetworkRttMs;
     m_LastRedrawTime = SDL_GetTicks();
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
@@ -1407,6 +1471,21 @@ bool PlankToolbar::pinContains(int x, int y) const
            y >= 5 && y <= 33;
 }
 
+void PlankToolbar::setMicrophoneState(bool supported, PlankMicrophone::State state)
+{
+    if (supported == m_MicrophoneSupported && state == m_MicrophoneState) return;
+    const bool geometryChanged = supported != m_MicrophoneSupported;
+    m_MicrophoneSupported = supported; m_MicrophoneState = state;
+    if (geometryChanged) notifyWindowChanged();
+    redraw();
+}
+
+bool PlankToolbar::microphoneContains(int x, int y) const
+{
+    return m_MicrophoneSupported && x >= toolbarLeft() + m_Width - 136 &&
+        x <= toolbarLeft() + m_Width - 106 && y >= 2 && y <= 37;
+}
+
 bool PlankToolbar::handleContains(int x, int y) const
 {
     return x >= toolbarLeft() && x <= toolbarLeft() + 22 &&
@@ -1452,6 +1531,7 @@ PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
     if (fullscreenContains(x, y)) {
         return Control::Fullscreen;
     }
+    if (microphoneContains(x, y)) return Control::Microphone;
     if (minimizeContains(x, y)) {
         return Control::Minimize;
     }
@@ -1471,10 +1551,12 @@ int PlankToolbar::toolbarLeft() const
 
 int PlankToolbar::sliderLeft() const
 {
-    return toolbarLeft() + 229;
+    return toolbarLeft() + PlankToolbarStats::EncoderTargetLeft;
 }
 
 int PlankToolbar::sliderRight() const
 {
-    return toolbarLeft() + std::max(191, m_Width - 113);
+    return toolbarLeft() + std::max(PlankToolbarStats::EncoderTargetLeft,
+                                   m_Width - PlankToolbarStats::WindowControlsWidth -
+                                   (m_MicrophoneSupported ? MicrophoneWidth : 0));
 }

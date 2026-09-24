@@ -34,6 +34,9 @@ public:
     Q_INVOKABLE void deleteComputer(int computerIndex);
 
     Q_INVOKABLE void authenticateComputer(int computerIndex, QString username, QString password);
+    Q_INVOKABLE void respondToAuthenticationTakeover(bool accepted);
+    Q_INVOKABLE void respondToHostTrust(bool accepted);
+    ~ComputerModel() override;
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
 
@@ -70,7 +73,10 @@ public:
                                           const QVariantList& profileBitratesKbps);
 
 signals:
-    void authenticationCompleted(QVariant error);
+    void authenticationCompleted(QVariant error, int computerIndex);
+    void authenticationTakeoverRequested();
+    void authenticationTrustRequested(QString endpoint, QString previousKey, QString replacementKey);
+    void authenticationCancelled();
 
     void relayWakeCompleted(QVariant error);
 
@@ -82,4 +88,7 @@ private slots:
 private:
     QVector<NvComputer*> m_Computers;
     ComputerManager* m_ComputerManager;
+    NvComputer* m_AuthenticatingComputer = nullptr;
+    AuthenticationTakeover m_AuthenticationTakeover;
+    AuthenticationTakeover m_HostTrustDecision;
 };
