@@ -694,13 +694,14 @@ void TestPlankBroker::parsesHosts()
 {
     QVector<PlankBroker::Host> hosts;
     QVERIFY(PlankBroker::parseHosts(json(R"({"hosts":[
-        {"id":"ws01.example.test","name":"ws01","online":true,"in_use_by":null,"connectable":true,"reason":null},
+        {"id":"ws01.example.test","name":"ws01","online":true,"busy":true,"in_use_by":null,"connectable":true,"reason":null},
         {"id":"ws02.example.test","name":"ws02","online":true,"in_use_by":"bob","connectable":false,"reason":"in use"},
         {"id":"ws03.example.test","online":false,"connectable":false,"reason":"offline"}]})"), hosts));
     QCOMPARE(hosts.size(), 3);
     QCOMPARE(hosts.at(0).id, QStringLiteral("ws01.example.test"));
     QCOMPARE(hosts.at(0).name, QStringLiteral("ws01"));
     QVERIFY(hosts.at(0).online);
+    QVERIFY(hosts.at(0).busy);
     QVERIFY(hosts.at(0).inUseBy.isEmpty());
     QVERIFY(hosts.at(0).connectable);
     QCOMPARE(hosts.at(1).inUseBy, QStringLiteral("bob"));
@@ -708,6 +709,7 @@ void TestPlankBroker::parsesHosts()
     QVERIFY(!hosts.at(1).connectable);
     QCOMPARE(hosts.at(2).name, QStringLiteral("ws03.example.test")); // falls back to id
     QVERIFY(!hosts.at(2).online);
+    QVERIFY(!hosts.at(2).busy); // older brokers omit the advisory field
     QVERIFY(PlankBroker::parseHosts(json(R"({"hosts":[]})"), hosts));
     QVERIFY(hosts.isEmpty());
 }
@@ -723,6 +725,7 @@ void TestPlankBroker::rejectsMalformedHosts()
         R"({"hosts":[{"id":"ws01","online":true}]})",
         R"({"hosts":[{"id":"../etc","online":true,"connectable":true}]})",
         R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"in_use_by":42}]})",
+        R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"busy":"yes"}]})",
         R"({"hosts":[{"id":"ws01","online":true,"connectable":true}, 7]})",
     };
     for (const char* body : malformed) {

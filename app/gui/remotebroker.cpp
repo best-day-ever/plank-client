@@ -572,6 +572,7 @@ void RemoteBroker::refreshHostsImpl(bool showBusy)
                 entry.insert(QStringLiteral("id"), host.id);
                 entry.insert(QStringLiteral("name"), host.name);
                 entry.insert(QStringLiteral("online"), host.online);
+                entry.insert(QStringLiteral("busy"), host.busy);
                 entry.insert(QStringLiteral("inUseBy"), host.inUseBy);
                 entry.insert(QStringLiteral("connectable"), host.connectable);
                 entry.insert(QStringLiteral("reason"), host.reason);

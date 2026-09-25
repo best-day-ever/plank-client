@@ -606,7 +606,7 @@ Item {
                         height: 10
                         radius: 5
                         color: !modelData.online ? theme.textDisabled :
-                               (modelData.inUseBy !== "" ? theme.warning : theme.success)
+                               (modelData.busy || modelData.inUseBy !== "" ? theme.warning : theme.success)
                         Layout.alignment: Qt.AlignVCenter
                     }
 
@@ -624,7 +624,9 @@ Item {
                         Label {
                             text: {
                                 var parts = []
-                                parts.push(modelData.online ? qsTr("Online") : qsTr("Offline"))
+                                parts.push(!modelData.online ? qsTr("Offline") :
+                                           (modelData.busy || modelData.inUseBy !== "") ?
+                                               qsTr("Busy") : qsTr("Online"))
                                 if (modelData.inUseBy !== "") {
                                     parts.push(qsTr("in use by %1").arg(modelData.inUseBy))
                                 }
