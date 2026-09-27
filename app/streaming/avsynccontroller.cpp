@@ -378,8 +378,18 @@ AudioPhaseController::Result AudioPhaseController::update(
     int targetCorrection = std::clamp(
         static_cast<int>(std::llround(-phaseErrorUs / 1000.0 * PhaseGainPpmPerMs)),
         -MaximumCorrectionPpm, MaximumCorrectionPpm);
-    if ((targetCorrection > 0 && m_AccelerationBlocked) ||
-            (targetCorrection < 0 && queuedAudioMs > 50))
+    if (m_AccelerationBlocked) {
+        // Zero correction alone still drains the reserve when the device clock
+        // is faster than the source. Recover headroom with the SAME bounded,
+        // slew-limited resampler, not inserted silence or a second clock loop.
+        // This is a safety ceiling on phase catch-up, not an A/V target offset.
+        const int reserveErrorUs = outputValid ?
+            std::min(0, playback.headroomUs - 2 * sourceBlockUs) : 0;
+        const int safeCorrection = std::clamp(static_cast<int>(std::llround(
+            reserveErrorUs / 1000.0 * PhaseGainPpmPerMs)), -MaximumCorrectionPpm, 0);
+        targetCorrection = std::min(targetCorrection, safeCorrection);
+    }
+    if (targetCorrection < 0 && queuedAudioMs > 50)
         targetCorrection = 0;
     const int maximumStep = MaximumPhaseStepPpmPerSecond * std::min(elapsedMs, 1000U) / 1000;
     const int delta = std::clamp(targetCorrection - m_CorrectionPpm,

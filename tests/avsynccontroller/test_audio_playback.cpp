@@ -161,6 +161,8 @@ static void finiteQueue(int deviceFrames, double skewPpm, int videoDelayMs)
     std::int64_t lastLead = 0;
     std::uint32_t lastCompensation = 0;
     int maximumQueue = 0;
+    double settledLeadSum = 0, finalLeadSum = 0;
+    int settledSamples = 0, finalSamples = 0;
     constexpr std::int64_t EpochUs = 90000000000LL;
     for (int block = 0; block < 120000; ++block) { // ten minutes of source audio
         // Arrival jitter without packet loss; wall clock never follows resampler
@@ -183,6 +185,14 @@ static void finiteQueue(int deviceFrames, double skewPpm, int videoDelayMs)
         const auto correction = controller.update(timing, queueMs, now,
                                                    output.observer.read(), 5000);
         lastLead = timing.estimatedLeadUs;
+        if (block >= 24000 && block < 36000) {
+            settledLeadSum += lastLead;
+            ++settledSamples;
+        }
+        if (block >= 108000) {
+            finalLeadSum += lastLead;
+            ++finalSamples;
+        }
         if (correction.updated || now - lastCompensation >= 100) {
             lastCompensation = now;
             assert(swr_set_compensation(swr, static_cast<int>(std::llround(
@@ -194,11 +204,17 @@ static void finiteQueue(int deviceFrames, double skewPpm, int videoDelayMs)
         assert(frames > 0);
         assert(SDL_PutAudioStreamData(stream, converted.data(), frames * 8));
     }
+    const double settledLead = settledLeadSum / settledSamples;
+    const double finalLead = finalLeadSum / finalSamples;
     std::cout << "finite_queue: device_frames=" << deviceFrames << " skew_ppm=" << skewPpm
               << " video_delay_ms=" << videoDelayMs << " short_reads=" << shortReads
-              << " max_queue_ms=" << maximumQueue << " last_lead_us=" << lastLead << std::endl;
+              << " max_queue_ms=" << maximumQueue << " last_lead_us=" << lastLead
+              << " settled_mean_us=" << settledLead << " final_mean_us=" << finalLead << std::endl;
     assert(shortReads == 0);
     assert(maximumQueue < 75);
+    // A bounded endpoint alone is not a drift gate. Compare full settled
+    // minute windows and expose the residual offset, including infeasible cases.
+    assert(std::abs(finalLead - settledLead) < 10000);
     // For the reachable timing case, correction must still preserve phase.
     // The deliberately infeasible case must not empty audio to fake zero phase.
     if (videoDelayMs == 55)
@@ -214,6 +230,8 @@ int main()
     finiteQueue(1024, -400, 55);
     finiteQueue(1024, 400, 55);
     finiteQueue(1024, 0, 25);
+    finiteQueue(1024, -400, 25);
+    finiteQueue(1024, 400, 25);
     finiteQueue(256, 0, 25);
     std::cout << "audio_playback=pass simulated_device=1\n";
 }

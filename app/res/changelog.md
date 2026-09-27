@@ -1,8 +1,9 @@
-## 1.1.028 — Protect audio playback during synchronization
+## 1.1.029 — Protect audio playback during synchronization
 
 ### Client
 - Use actual audio-output requests to avoid draining playback while correcting sync.
 - Resume catch-up gradually after the output has recovered, without adding a new playback buffer.
+- Recover low audio headroom through smooth resampling, including when the device clock runs faster.
 - Record output shortfalls separately from network loss for real-world qualification.
 
 ### Host

@@ -91,7 +91,7 @@ static void safetyTests()
 
     // Output guards also prevent starting a rate, not just continuing it.
     for (std::uint32_t ms = 0; ms <= 2000; ms += 5)
-        assert(controller.update(phase(-350000), 0, ms).correctionPpm == 0);
+        assert(controller.update(phase(-350000), 0, ms).correctionPpm <= 0);
     controller.reset();
     for (std::uint32_t ms = 0; ms <= 2000; ms += 5)
         assert(controller.update(phase(350000), 55, ms).correctionPpm == 0);
