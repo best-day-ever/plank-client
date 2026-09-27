@@ -1,3 +1,10 @@
+## 1.1.027 — Correct sustained audio drift
+
+### Client
+- Use Host audio/video timestamps to correct drifting sound when connected to a macOS Host.
+- Stop stale timing corrections during video interruptions and protect against audio-buffer starvation.
+- Keep the existing Linux Host synchronization policy; no Host update is required.
+
 ## 1.1.026 — Restore hardware-rendered video timing
 
 ### Client

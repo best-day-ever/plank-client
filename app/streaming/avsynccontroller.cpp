@@ -13,10 +13,11 @@ constexpr double FitWindowDurationMs = 300000.0;
 constexpr std::int32_t MaximumVideoClockAgeMs = 2000;
 constexpr int MaximumCorrectionStepPpm = 2;
 constexpr double PhaseCorrectionHorizonMs = 1800000.0;
-constexpr std::int32_t BacklogUpdateIntervalMs = 100;
-constexpr int BacklogTargetMs = 15;
-constexpr int BacklogGainPpmPerMs = 500;
-constexpr int MaximumBacklogCorrectionStepPpm = 1000;
+constexpr std::uint32_t PhaseUpdateIntervalMs = 100;
+constexpr double PhaseFilterTimeMs = 1000.0;
+constexpr double PhaseDeadbandUs = 5000.0;
+constexpr double PhaseGainPpmPerMs = 100.0;
+constexpr int MaximumPhaseStepPpmPerSecond = 10000;
 
 std::mutex videoClockLock;
 VideoClockSample latestVideoClock;
@@ -248,45 +249,83 @@ void AudioRateController::trimWindow(std::deque<ClockPoint>& points)
     }
 }
 
-void AudioBacklogController::reset()
+void AudioPhaseController::reset()
 {
     m_LastUpdateTicks = 0;
+    m_LastObservationTicks = 0;
+    m_FilteredLeadUs = 0.0;
     m_CorrectionPpm = 0;
     m_Anchored = false;
 }
 
-AudioBacklogController::Result AudioBacklogController::update(
-        int pendingAudioMs,
+AudioPhaseController::Result AudioPhaseController::update(
+        const AudioTimestampObserver::Observation& timing,
+        int queuedAudioMs,
         std::uint32_t observationTicks)
 {
-    Result result {m_CorrectionPpm, false};
+    // Unknown/stale video, capture discontinuities and invalid latency must
+    // release compensation immediately, not leave an old resampling rate active.
+    // Very large offsets require stream recovery, not minutes of rate chasing.
+    if (!timing.sourceValid || !timing.phaseValid ||
+            timing.estimatedLeadUs < -2000000 || timing.estimatedLeadUs > 2000000 ||
+            timing.sourceGapUs < -100000 || timing.sourceGapUs > 100000 ||
+            queuedAudioMs < 0 || queuedAudioMs > 2000) {
+        const bool changed = m_CorrectionPpm != 0;
+        reset();
+        return {0, changed};
+    }
     if (!m_Anchored) {
         m_LastUpdateTicks = observationTicks;
+        m_LastObservationTicks = observationTicks;
+        m_FilteredLeadUs = static_cast<double>(timing.estimatedLeadUs);
         m_Anchored = true;
-        return result;
+        return {0, false};
     }
 
-    if (static_cast<std::int32_t>(observationTicks - m_LastUpdateTicks) <
-            BacklogUpdateIntervalMs) {
-        return result;
+    const auto elapsedMs = static_cast<std::uint32_t>(observationTicks - m_LastUpdateTicks);
+    const auto observationElapsedMs = static_cast<std::uint32_t>(
+        observationTicks - m_LastObservationTicks);
+    if (observationElapsedMs > 2000) {
+        const bool changed = m_CorrectionPpm != 0;
+        reset();
+        return {0, changed};
     }
+    // Filter every block, not just the 100ms actuator updates; subsampling here
+    // can alias periodic video/USB callback jitter into a persistent phase bias.
+    m_LastObservationTicks = observationTicks;
+    const double alpha = 1.0 - std::exp(-static_cast<double>(observationElapsedMs) / PhaseFilterTimeMs);
+    m_FilteredLeadUs += alpha * (timing.estimatedLeadUs - m_FilteredLeadUs);
+    // Do not starve the output to chase unavoidable capture/device latency, or
+    // add more buffering to an already full output queue. These guards also
+    // apply between controller updates and bypass the ordinary slew limit.
+    if ((m_CorrectionPpm > 0 && queuedAudioMs < 10) ||
+            (m_CorrectionPpm < 0 && queuedAudioMs > 50)) {
+        m_CorrectionPpm = 0;
+        return {0, true};
+    }
+    if (elapsedMs < PhaseUpdateIntervalMs)
+        return {m_CorrectionPpm, false};
     m_LastUpdateTicks = observationTicks;
 
-    const int targetCorrection = std::clamp(
-        (std::max(pendingAudioMs, BacklogTargetMs) - BacklogTargetMs) *
-            BacklogGainPpmPerMs,
-        0,
-        MaximumCorrectionPpm);
+    const double phaseErrorUs = std::copysign(
+        std::max(0.0, std::abs(m_FilteredLeadUs) - PhaseDeadbandUs), m_FilteredLeadUs);
+    // Audio behind (negative lead) needs positive/faster correction. Use the
+    // actual source phase, not callback/sample-count throughput (which itself
+    // changes as a consequence of output backpressure).
+    int targetCorrection = std::clamp(
+        static_cast<int>(std::llround(-phaseErrorUs / 1000.0 * PhaseGainPpmPerMs)),
+        -MaximumCorrectionPpm, MaximumCorrectionPpm);
+    if ((targetCorrection > 0 && queuedAudioMs < 10) ||
+            (targetCorrection < 0 && queuedAudioMs > 50))
+        targetCorrection = 0;
+    const int maximumStep = MaximumPhaseStepPpmPerSecond * std::min(elapsedMs, 1000U) / 1000;
     const int delta = std::clamp(targetCorrection - m_CorrectionPpm,
-                                 -MaximumBacklogCorrectionStepPpm,
-                                 MaximumBacklogCorrectionStepPpm);
+                                 -maximumStep, maximumStep);
     m_CorrectionPpm += delta;
-    result.correctionPpm = m_CorrectionPpm;
-    result.updated = true;
-    return result;
+    return {m_CorrectionPpm, true};
 }
 
-int AudioBacklogController::correctionPpm() const
+int AudioPhaseController::correctionPpm() const
 {
     return m_CorrectionPpm;
 }

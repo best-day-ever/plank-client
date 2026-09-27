@@ -19,8 +19,7 @@ void publishVideoClock(std::int64_t mediaTimeMs,
 
 VideoClockSample readVideoClock();
 
-// Observation only: source time must survive decoding before a playback
-// controller can use it. Positive estimatedLeadUs means audio is ahead of
+// Positive estimatedLeadUs means audio is ahead of
 // video. Device/renderer timing is estimated, not an acoustic measurement.
 class AudioTimestampObserver
 {
@@ -88,7 +87,10 @@ private:
     bool m_Anchored = false;
 };
 
-class AudioBacklogController
+// Common-epoch hosts only. Positive correction consumes source audio faster;
+// negative correction slows it. Never combine this with the sample-rate fit
+// used for hosts whose audio/video epochs are independent.
+class AudioPhaseController
 {
 public:
     static constexpr int MaximumCorrectionPpm = 10000;
@@ -101,12 +103,15 @@ public:
 
     void reset();
 
-    Result update(int pendingAudioMs, std::uint32_t observationTicks);
+    Result update(const AudioTimestampObserver::Observation& timing,
+                  int queuedAudioMs, std::uint32_t observationTicks);
 
     int correctionPpm() const;
 
 private:
     std::uint32_t m_LastUpdateTicks = 0;
+    std::uint32_t m_LastObservationTicks = 0;
+    double m_FilteredLeadUs = 0.0;
     int m_CorrectionPpm = 0;
     bool m_Anchored = false;
 };

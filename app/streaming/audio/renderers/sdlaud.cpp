@@ -26,7 +26,6 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection, bool commonAudio
       m_RawAudioFrames(0),
       m_SubmittedAudioFrames(0),
       m_LastSubmittedAudioMediaTimeMs(-1),
-      m_SkippedAudioBlocks(0),
       m_CommonAudioVideoEpoch(commonAudioVideoEpoch)
 #if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
       , m_SwrContext(nullptr)
@@ -115,8 +114,11 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
         }
         else {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "PLANK video-master audio correction enabled (limit %d ppm)",
-                        PlankAvSync::AudioRateController::MaximumCorrectionPpm);
+                        "PLANK audio correction enabled: mode=%s limit=%d ppm",
+                        m_CommonAudioVideoEpoch ? "source-phase" : "relative-rate",
+                        m_CommonAudioVideoEpoch ?
+                            PlankAvSync::AudioPhaseController::MaximumCorrectionPpm :
+                            PlankAvSync::AudioRateController::MaximumCorrectionPpm);
         }
     }
 #else
@@ -144,8 +146,9 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
                 "SDL audio driver: %s",
                 SDL_GetCurrentAudioDriver());
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "PLANK A/V source timing begin: common=%d observation_only=1",
-                m_CommonAudioVideoEpoch);
+                "PLANK A/V source timing begin: common=%d observation_only=%d",
+                m_CommonAudioVideoEpoch,
+                !(m_EnableAvSyncCorrection && m_CommonAudioVideoEpoch));
 
     // Start playback
     if (!SDL_ResumeAudioStreamDevice(m_AudioStream)) {
@@ -192,20 +195,6 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
     const int inputFrames = m_BytesPerSampleFrame == 0 ?
                                 0 : bytesWritten / m_BytesPerSampleFrame;
 
-    const int pendingAudioMs = LiGetPendingAudioDuration();
-
-    // Generic Moonlight drops decoded audio to recover latency when its input
-    // queue grows. PLANK instead uses bounded resampling catch-up for
-    // ordinary scheduling bursts and retains a hard emergency ceiling.
-    constexpr int MaximumPlankPendingAudioMs = 100;
-    if ((!m_EnableAvSyncCorrection && pendingAudioMs > 30) ||
-            (m_EnableAvSyncCorrection &&
-             pendingAudioMs > MaximumPlankPendingAudioMs)) {
-        m_RawAudioFrames += inputFrames;
-        m_SkippedAudioBlocks++;
-        return true;
-    }
-
     // Provide backpressure on the queue to ensure too many frames don't build up
     // in SDL's audio queue, but don't wait forever to avoid a deadlock if the
     // audio device fails.
@@ -229,24 +218,45 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
     qint64 resamplerDelayUs = 0;
 
 #if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
-    if (m_EnableAvSyncCorrection && m_SwrContext != nullptr && inputFrames > 0) {
+    if (m_SwrContext != nullptr)
         resamplerDelayUs = swr_get_delay(m_SwrContext, 1000000);
-        const Uint32 now = SDL_GetTicks();
-        const int backlogAudioMs = LiGetPendingAudioDuration();
-        const auto correction = m_AudioRateController.update(
-            m_RawAudioFrames,
-            m_SubmittedAudioFrames,
-            m_SampleRate,
-            now,
-            PlankAvSync::readVideoClock());
-        const auto backlogCorrection = m_AudioBacklogController.update(
-            backlogAudioMs,
-            now);
-        if (correction.updated || backlogCorrection.updated) {
+#endif
+    // One observation supplies both control and diagnostics at the same
+    // pre-conversion/pre-enqueue boundary; do not count source gaps twice.
+    const Uint64 observedAt = SDL_GetTicks();
+    const int queuedMs = getQueuedAudioDurationMs();
+    const auto videoClock = PlankAvSync::readVideoClock();
+    const auto timing = m_AudioTimestampObserver.observe(
+        sourceTimeUs, inputFrames, m_SampleRate, static_cast<Uint32>(observedAt),
+        queuedMs, m_DeviceBufferDurationMs, resamplerDelayUs,
+        videoClock, m_CommonAudioVideoEpoch);
+
+#if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
+    if (m_EnableAvSyncCorrection && m_SwrContext != nullptr && inputFrames > 0) {
+        int appliedCorrectionPpm;
+        bool correctionUpdated;
+        if (m_CommonAudioVideoEpoch) {
+            const auto correction = m_AudioPhaseController.update(
+                timing, queuedMs, static_cast<Uint32>(observedAt));
+            appliedCorrectionPpm = correction.correctionPpm;
+            correctionUpdated = correction.updated;
+        }
+        else {
+            // Linux Host clocks have independent epochs. Preserve its existing
+            // relative-rate policy; never invent an absolute phase or combine
+            // both controllers on the same stream.
+            const auto correction = m_AudioRateController.update(
+                m_RawAudioFrames, m_SubmittedAudioFrames, m_SampleRate,
+                static_cast<Uint32>(observedAt), videoClock);
+            appliedCorrectionPpm = correction.correctionPpm;
+            correctionUpdated = correction.updated;
+        }
+        // Refresh the one-second compensation before it expires, including
+        // the unchanged Linux relative-rate policy between its 1Hz updates.
+        if (correctionUpdated || observedAt - m_LastCompensationUpdate >= 100) {
+            m_LastCompensationUpdate = observedAt;
             constexpr int CompensationSeconds = 1;
             const int compensationDistance = m_SampleRate * CompensationSeconds;
-            const int appliedCorrectionPpm =
-                correction.correctionPpm + backlogCorrection.correctionPpm;
             const int sampleDelta = static_cast<int>(std::llround(
                 -static_cast<double>(appliedCorrectionPpm) *
                 compensationDistance / 1000000.0));
@@ -256,12 +266,11 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Unable to update PLANK audio correction");
             }
-            else if (correction.updated &&
-                     (m_RawAudioFrames / m_SampleRate) % 10 == 0) {
+            else if (observedAt - m_LastCorrectionTelemetry >= 10000) {
+                m_LastCorrectionTelemetry = observedAt;
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                            "PLANK A/V audio correction: ppm=%d catchup=%d applied=%d delta=%d distance=%d",
-                            correction.correctionPpm,
-                            backlogCorrection.correctionPpm,
+                            "PLANK A/V audio correction: mode=%s applied=%d delta=%d distance=%d",
+                            m_CommonAudioVideoEpoch ? "source-phase" : "relative-rate",
                             appliedCorrectionPpm,
                             sampleDelta,
                             compensationDistance);
@@ -293,12 +302,6 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
 #endif
 
     m_RawAudioFrames += inputFrames;
-    const Uint64 observedAt = SDL_GetTicks();
-    const int queuedMs = getQueuedAudioDurationMs();
-    const auto timing = m_AudioTimestampObserver.observe(
-        sourceTimeUs, inputFrames, m_SampleRate, static_cast<Uint32>(observedAt),
-        queuedMs, m_DeviceBufferDurationMs, resamplerDelayUs,
-        PlankAvSync::readVideoClock(), m_CommonAudioVideoEpoch);
     if (m_LastTimestampTelemetry == 0 || observedAt - m_LastTimestampTelemetry >= 1000) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "PLANK A/V source timing: observe_ms=%llu common=%d valid=%d audio_us=%lld video_us=%lld estimated_lead_us=%lld queue_ms=%d device_ms=%d resampler_us=%lld gaps=%llu gap_us=%lld correction_ppm=%d",
@@ -326,7 +329,7 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
 
 int SdlAudioRenderer::getCapabilities()
 {
-    // Direct submit can't be used because we use LiGetPendingAudioDuration()
+    // Keep audio submission on its worker: SDL output backpressure can wait.
     return CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
 }
 
@@ -352,17 +355,8 @@ qint64 SdlAudioRenderer::getSubmittedAudioMediaTimeMs()
 
 int SdlAudioRenderer::getAudioClockCorrectionPpm()
 {
-    return m_AudioRateController.correctionPpm();
-}
-
-int SdlAudioRenderer::getAudioBacklogCorrectionPpm()
-{
-    return m_AudioBacklogController.correctionPpm();
-}
-
-quint64 SdlAudioRenderer::getSkippedAudioBlockCount()
-{
-    return m_SkippedAudioBlocks;
+    return m_CommonAudioVideoEpoch ? m_AudioPhaseController.correctionPpm() :
+                                    m_AudioRateController.correctionPpm();
 }
 IAudioRenderer::AudioFormat SdlAudioRenderer::getAudioBufferFormat()
 {
