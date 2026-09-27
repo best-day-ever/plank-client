@@ -1,3 +1,12 @@
+## 1.1.025 — Audio synchronization diagnostics
+
+### Client
+- Preserve Host audio timestamps through decoding and record estimated audio/video alignment for investigation.
+- Playback timing is unchanged; this candidate measures the reported drift before a synchronization correction is applied.
+
+### Host
+- No changes.
+
 ## 1.1.024 — Wacom focus and contact recovery
 
 ### Client

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+#include <limits>
 
 namespace PlankAvSync {
 namespace {
@@ -40,6 +41,54 @@ VideoClockSample readVideoClock()
 {
     std::lock_guard<std::mutex> lock(videoClockLock);
     return latestVideoClock;
+}
+
+void AudioTimestampObserver::reset()
+{
+    m_ExpectedSourceUs = -1;
+    m_Discontinuities = 0;
+}
+
+AudioTimestampObserver::Observation AudioTimestampObserver::observe(
+        std::int64_t sourceUs, int frames, int sampleRate,
+        std::uint32_t nowMs, int queuedMs, int deviceMs,
+        std::int64_t resamplerDelayUs, const VideoClockSample& video,
+        bool commonEpoch)
+{
+    Observation result;
+    result.discontinuities = m_Discontinuities;
+    if (sourceUs < 0 || frames <= 0 || sampleRate <= 0) {
+        m_ExpectedSourceUs = -1;
+        return result;
+    }
+    const auto durationUs = std::int64_t(frames) * 1000000 / sampleRate;
+    if (sourceUs > std::numeric_limits<std::int64_t>::max() - durationUs) {
+        m_ExpectedSourceUs = -1;
+        return result;
+    }
+    result.sourceValid = true;
+    result.sourceUs = sourceUs;
+    if (m_ExpectedSourceUs >= 0) {
+        result.sourceGapUs = sourceUs - m_ExpectedSourceUs;
+        // Audio wire PTS is rounded down to milliseconds. Do not call its
+        // sub-millisecond quantization a capture discontinuity.
+        if (result.sourceGapUs > 1000 || result.sourceGapUs < -1000)
+            result.discontinuities = ++m_Discontinuities;
+    }
+    m_ExpectedSourceUs = sourceUs + durationUs;
+    const auto ageMs = static_cast<std::int32_t>(nowMs - video.presentationTicks);
+    if (!commonEpoch || !video.valid || video.mediaTimeMs < 0 ||
+            video.mediaTimeMs > std::numeric_limits<std::int64_t>::max() / 1000 - 10000 ||
+            ageMs < 0 || ageMs > MaximumVideoClockAgeMs ||
+            queuedMs < 0 || queuedMs > 2000 || deviceMs < 0 || deviceMs > 2000 ||
+            resamplerDelayUs < 0 || resamplerDelayUs > 2000000) return result;
+    result.videoUs = (video.mediaTimeMs + ageMs) * 1000;
+    // At this enqueue boundary the new output starts after the queued audio
+    // and device buffer. swresample may still hold earlier source samples.
+    result.estimatedLeadUs = sourceUs - result.videoUs - resamplerDelayUs -
+        std::int64_t(queuedMs + deviceMs) * 1000;
+    result.phaseValid = true;
+    return result;
 }
 
 void AudioRateController::reset()

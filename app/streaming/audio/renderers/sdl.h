@@ -12,7 +12,7 @@ struct SwrContext;
 class SdlAudioRenderer : public IAudioRenderer
 {
 public:
-    explicit SdlAudioRenderer(bool enableAvSyncCorrection = false);
+    explicit SdlAudioRenderer(bool enableAvSyncCorrection = false, bool commonAudioVideoEpoch = false);
 
     virtual ~SdlAudioRenderer();
 
@@ -20,7 +20,7 @@ public:
 
     virtual void* getAudioBuffer(int* size);
 
-    virtual bool submitAudio(int bytesWritten);
+    virtual bool submitAudio(int bytesWritten, qint64 sourceTimeUs);
 
     virtual int getCapabilities();
 
@@ -54,6 +54,9 @@ private:
     quint64 m_SkippedAudioBlocks;
     PlankAvSync::AudioRateController m_AudioRateController;
     PlankAvSync::AudioBacklogController m_AudioBacklogController;
+    bool m_CommonAudioVideoEpoch;
+    Uint64 m_LastTimestampTelemetry = 0;
+    PlankAvSync::AudioTimestampObserver m_AudioTimestampObserver;
 
 #if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
     SwrContext* m_SwrContext;

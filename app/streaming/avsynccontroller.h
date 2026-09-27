@@ -19,6 +19,31 @@ void publishVideoClock(std::int64_t mediaTimeMs,
 
 VideoClockSample readVideoClock();
 
+// Observation only: source time must survive decoding before a playback
+// controller can use it. Positive estimatedLeadUs means audio is ahead of
+// video. Device/renderer timing is estimated, not an acoustic measurement.
+class AudioTimestampObserver
+{
+public:
+    struct Observation {
+        bool sourceValid = false;
+        bool phaseValid = false;
+        std::int64_t sourceUs = -1;
+        std::int64_t sourceGapUs = 0;
+        std::int64_t videoUs = -1;
+        std::int64_t estimatedLeadUs = 0;
+        std::uint64_t discontinuities = 0;
+    };
+    Observation observe(std::int64_t sourceUs, int frames, int sampleRate,
+                        std::uint32_t nowMs, int queuedMs, int deviceMs,
+                        std::int64_t resamplerDelayUs,
+                        const VideoClockSample& video, bool commonEpoch);
+    void reset();
+private:
+    std::int64_t m_ExpectedSourceUs = -1;
+    std::uint64_t m_Discontinuities = 0;
+};
+
 class AudioRateController
 {
 public:

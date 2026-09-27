@@ -23,7 +23,8 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     QString mlAudio = qgetenv("ML_AUDIO").toLower();
     if (mlAudio == "sdl") {
         TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
-                          m_Computer->plankAuthentication)
+                          m_Computer->plankAuthentication,
+                          m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT)
         return nullptr;
     }
 #if defined(HAVE_SLAUDIO)
@@ -48,7 +49,8 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
 
     // PLANK uses SDL as its sole audio renderer.
     TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
-                      m_Computer->plankAuthentication)
+                      m_Computer->plankAuthentication,
+                      m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT)
 
     return nullptr;
 }
@@ -149,7 +151,7 @@ void Session::arCleanup()
     s_ActiveSession->m_OpusDecoder = nullptr;
 }
 
-void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
+void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength, int64_t presentationTimeUs)
 {
     int samplesDecoded;
     const quint64 mediaFrameIndex = s_ActiveSession->m_AudioMediaFramesReceived++;
@@ -225,7 +227,7 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
             desiredBufferSize = 0;
         }
 
-        if (!s_ActiveSession->m_AudioRenderer->submitAudio(desiredBufferSize)) {
+        if (!s_ActiveSession->m_AudioRenderer->submitAudio(desiredBufferSize, presentationTimeUs)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Reinitializing audio renderer after failure");
 

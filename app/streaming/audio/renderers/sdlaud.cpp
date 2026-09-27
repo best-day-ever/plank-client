@@ -12,7 +12,7 @@ extern "C" {
 }
 #endif
 
-SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
+SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection, bool commonAudioVideoEpoch)
     : m_AudioStream(nullptr),
       m_AudioBuffer(nullptr),
       m_FrameSize(0),
@@ -26,7 +26,8 @@ SdlAudioRenderer::SdlAudioRenderer(bool enableAvSyncCorrection)
       m_RawAudioFrames(0),
       m_SubmittedAudioFrames(0),
       m_LastSubmittedAudioMediaTimeMs(-1),
-      m_SkippedAudioBlocks(0)
+      m_SkippedAudioBlocks(0),
+      m_CommonAudioVideoEpoch(commonAudioVideoEpoch)
 #if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
       , m_SwrContext(nullptr)
 #endif
@@ -142,6 +143,9 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "SDL audio driver: %s",
                 SDL_GetCurrentAudioDriver());
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "PLANK A/V source timing begin: common=%d observation_only=1",
+                m_CommonAudioVideoEpoch);
 
     // Start playback
     if (!SDL_ResumeAudioStreamDevice(m_AudioStream)) {
@@ -178,7 +182,7 @@ void* SdlAudioRenderer::getAudioBuffer(int*)
     return m_AudioBuffer;
 }
 
-bool SdlAudioRenderer::submitAudio(int bytesWritten)
+bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
 {
     if (bytesWritten == 0) {
         // Nothing to do
@@ -222,9 +226,11 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
 
     const void* queuedBuffer = m_AudioBuffer;
     int queuedBytes = bytesWritten;
+    qint64 resamplerDelayUs = 0;
 
 #if defined(HAVE_FFMPEG) && (defined(Q_OS_LINUX) || defined(Q_OS_MACOS))
     if (m_EnableAvSyncCorrection && m_SwrContext != nullptr && inputFrames > 0) {
+        resamplerDelayUs = swr_get_delay(m_SwrContext, 1000000);
         const Uint32 now = SDL_GetTicks();
         const int backlogAudioMs = LiGetPendingAudioDuration();
         const auto correction = m_AudioRateController.update(
@@ -287,6 +293,23 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten)
 #endif
 
     m_RawAudioFrames += inputFrames;
+    const Uint64 observedAt = SDL_GetTicks();
+    const int queuedMs = getQueuedAudioDurationMs();
+    const auto timing = m_AudioTimestampObserver.observe(
+        sourceTimeUs, inputFrames, m_SampleRate, static_cast<Uint32>(observedAt),
+        queuedMs, m_DeviceBufferDurationMs, resamplerDelayUs,
+        PlankAvSync::readVideoClock(), m_CommonAudioVideoEpoch);
+    if (m_LastTimestampTelemetry == 0 || observedAt - m_LastTimestampTelemetry >= 1000) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK A/V source timing: observe_ms=%llu common=%d valid=%d audio_us=%lld video_us=%lld estimated_lead_us=%lld queue_ms=%d device_ms=%d resampler_us=%lld gaps=%llu gap_us=%lld correction_ppm=%d",
+                    static_cast<unsigned long long>(observedAt), m_CommonAudioVideoEpoch, timing.phaseValid,
+                    static_cast<long long>(timing.sourceUs), static_cast<long long>(timing.videoUs),
+                    static_cast<long long>(timing.estimatedLeadUs), queuedMs, m_DeviceBufferDurationMs,
+                    static_cast<long long>(resamplerDelayUs),
+                    static_cast<unsigned long long>(timing.discontinuities),
+                    static_cast<long long>(timing.sourceGapUs), getAudioClockCorrectionPpm());
+        m_LastTimestampTelemetry = observedAt;
+    }
     if (!SDL_PutAudioStreamData(m_AudioStream, queuedBuffer, queuedBytes)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to queue audio sample: %s",
@@ -313,8 +336,8 @@ int SdlAudioRenderer::getQueuedAudioDurationMs()
         return -1;
     }
 
-    return static_cast<int>(SDL_GetAudioStreamQueued(m_AudioStream) * 1000ULL /
-                            m_BytesPerSecond);
+    const int queued = SDL_GetAudioStreamQueued(m_AudioStream);
+    return queued < 0 ? -1 : static_cast<int>(queued * 1000ULL / m_BytesPerSecond);
 }
 
 int SdlAudioRenderer::getDeviceBufferDurationMs()
