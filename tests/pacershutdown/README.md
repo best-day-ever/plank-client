@@ -1,5 +1,11 @@
 # Render shutdown regression
 
+The suite also verifies that the real render path publishes its original video
+timestamp when a renderer consumes the AVFrame with `av_frame_move_ref()` (the
+EGL hardware path). It covers an unknown PTS, zero, and a long-running Host clock,
+with and without reference transfer, plus exactly-once buffer release. Reading
+PTS after the renderer returns must fail the moved-frame cases.
+
 This headless test links the actual Pacer queue/destructor and render/V-sync
 workers against Qt, SDL3 and FFmpeg. A controlled renderer replaces GPU calls;
 only the display-refresh query is stubbed. No networking, display server,

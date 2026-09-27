@@ -1,3 +1,12 @@
+## 1.1.026 — Restore hardware-rendered video timing
+
+### Client
+- Keep the video clock available to audio correction when hardware rendering consumes a frame.
+- Record source audio/video timing to help verify sustained synchronization.
+
+### Host
+- No changes.
+
 ## 1.1.025 — Audio synchronization diagnostics
 
 ### Client
