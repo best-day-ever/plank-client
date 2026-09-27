@@ -40,7 +40,12 @@ static void run(double initialLeadUs, double deviceErrorPpm)
         const auto timing = observer.observe(sourceUs / 1000 * 1000, 240, 48000,
             now, 35, 21, delayUs, {EpochMs + now - 1000, now, true}, true);
         assert(timing.phaseValid);
-        const auto correction = controller.update(timing, 35, now);
+        PlankAvSync::AudioPlaybackObserver::Observation playback;
+        playback.pulls = block + 1;
+        playback.ticks = now;
+        playback.requestUs = 21000;
+        playback.headroomUs = 14000;
+        const auto correction = controller.update(timing, 35, now, playback, 5000);
         if (correction.updated) {
             const int delta = static_cast<int>(std::llround(
                 -correction.correctionPpm * 48000.0 / 1000000.0));

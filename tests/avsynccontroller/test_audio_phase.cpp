@@ -8,6 +8,25 @@
 
 using namespace PlankAvSync;
 
+// Idealized demand for the clock-only tests below. The SDL fixture separately
+// exercises independent producer/device clocks and a finite, changing queue.
+class TestController : public AudioPhaseController
+{
+public:
+    Result update(const AudioTimestampObserver::Observation& timing, int queueMs,
+                  std::uint32_t now)
+    {
+        AudioPlaybackObserver::Observation output;
+        output.pulls = ++pulls;
+        output.ticks = now;
+        output.requestUs = 21000;
+        output.headroomUs = std::max(0, queueMs - 21) * 1000;
+        return AudioPhaseController::update(timing, queueMs, now, output, 5000);
+    }
+private:
+    std::uint64_t pulls = 0;
+};
+
 static AudioTimestampObserver::Observation phase(std::int64_t leadUs)
 {
     AudioTimestampObserver::Observation timing;
@@ -16,7 +35,7 @@ static AudioTimestampObserver::Observation phase(std::int64_t leadUs)
     return timing;
 }
 
-static void fill(AudioPhaseController& controller, std::int64_t leadUs,
+static void fill(TestController& controller, std::int64_t leadUs,
                  std::uint32_t start = 0)
 {
     for (std::uint32_t ms = 0; ms <= 2000; ms += 5)
@@ -25,7 +44,7 @@ static void fill(AudioPhaseController& controller, std::int64_t leadUs,
 
 static void safetyTests()
 {
-    AudioPhaseController controller;
+    TestController controller;
     fill(controller, 0);
     assert(controller.correctionPpm() == 0);
     controller.reset();
@@ -85,7 +104,7 @@ static void safetyTests()
 static void soak(double initialLeadUs, double deviceErrorPpm, bool jitter)
 {
     AudioTimestampObserver observer;
-    AudioPhaseController controller;
+    TestController controller;
     double leadUs = initialLeadUs;
     double maximumAfterSettling = 0;
     constexpr std::int64_t EpochMs = 88890000;

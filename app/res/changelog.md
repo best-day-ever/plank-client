@@ -1,3 +1,13 @@
+## 1.1.028 — Protect audio playback during synchronization
+
+### Client
+- Use actual audio-output requests to avoid draining playback while correcting sync.
+- Resume catch-up gradually after the output has recovered, without adding a new playback buffer.
+- Record output shortfalls separately from network loss for real-world qualification.
+
+### Host
+- No changes.
+
 ## 1.1.027 — Correct sustained audio drift
 
 ### Client

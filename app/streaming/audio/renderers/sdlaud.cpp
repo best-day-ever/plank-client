@@ -151,6 +151,13 @@ bool SdlAudioRenderer::prepareForPlayback(const OPUS_MULTISTREAM_CONFIGURATION* 
                 !(m_EnableAvSyncCorrection && m_CommonAudioVideoEpoch));
 
     // Start playback
+    // Observe demand without supplying, dropping or delaying any samples.
+    // SDL holds the stream lock; snapshot reads use that same lock.
+    if (!SDL_SetAudioStreamGetCallback(m_AudioStream, observeOutputPull, this)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to observe audio output: %s", SDL_GetError());
+        return false;
+    }
     if (!SDL_ResumeAudioStreamDevice(m_AudioStream)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to start audio stream: %s", SDL_GetError());
@@ -178,6 +185,14 @@ SdlAudioRenderer::~SdlAudioRenderer()
 
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
     SDL_assert(!SDL_WasInit(SDL_INIT_AUDIO));
+}
+
+void SDLCALL SdlAudioRenderer::observeOutputPull(void* userdata, SDL_AudioStream* stream,
+                                              int additionalBytes, int requestedBytes)
+{
+    auto* self = static_cast<SdlAudioRenderer*>(userdata);
+    self->m_PlaybackObserver.observePull(SDL_GetAudioStreamQueued(stream),
+        additionalBytes, requestedBytes, self->m_BytesPerSecond, SDL_GetTicks());
 }
 
 void* SdlAudioRenderer::getAudioBuffer(int*)
@@ -223,8 +238,11 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
 #endif
     // One observation supplies both control and diagnostics at the same
     // pre-conversion/pre-enqueue boundary; do not count source gaps twice.
+    SDL_LockAudioStream(m_AudioStream);
     const Uint64 observedAt = SDL_GetTicks();
     const int queuedMs = getQueuedAudioDurationMs();
+    const auto playback = m_PlaybackObserver.read();
+    SDL_UnlockAudioStream(m_AudioStream);
     const auto videoClock = PlankAvSync::readVideoClock();
     const auto timing = m_AudioTimestampObserver.observe(
         sourceTimeUs, inputFrames, m_SampleRate, static_cast<Uint32>(observedAt),
@@ -237,7 +255,8 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
         bool correctionUpdated;
         if (m_CommonAudioVideoEpoch) {
             const auto correction = m_AudioPhaseController.update(
-                timing, queuedMs, static_cast<Uint32>(observedAt));
+                timing, queuedMs, static_cast<Uint32>(observedAt), playback,
+                inputFrames * 1000000LL / m_SampleRate);
             appliedCorrectionPpm = correction.correctionPpm;
             correctionUpdated = correction.updated;
         }
@@ -312,6 +331,14 @@ bool SdlAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
                     static_cast<unsigned long long>(timing.discontinuities),
                     static_cast<long long>(timing.sourceGapUs), getAudioClockCorrectionPpm());
         m_LastTimestampTelemetry = observedAt;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK audio output demand: pulls=%llu shortage_requests=%llu missing_input_bytes=%llu request_us=%d headroom_us=%d pull_age_ms=%u acceleration_blocked=%d",
+                    static_cast<unsigned long long>(playback.pulls),
+                    static_cast<unsigned long long>(playback.shortageRequests),
+                    static_cast<unsigned long long>(playback.missingInputBytes),
+                    playback.requestUs, playback.headroomUs,
+                    static_cast<Uint32>(observedAt) - playback.ticks,
+                    m_CommonAudioVideoEpoch && m_AudioPhaseController.accelerationBlocked());
     }
     if (!SDL_PutAudioStreamData(m_AudioStream, queuedBuffer, queuedBytes)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,

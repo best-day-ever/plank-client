@@ -249,6 +249,32 @@ void AudioRateController::trimWindow(std::deque<ClockPoint>& points)
     }
 }
 
+void AudioPlaybackObserver::observePull(int queuedBytes, int additionalBytes,
+                                       int requestedBytes, int bytesPerSecond,
+                                       std::uint32_t ticks)
+{
+    if (queuedBytes < 0 || additionalBytes < 0 || requestedBytes <= 0 ||
+            bytesPerSecond <= 0) {
+        m_Observation.headroomUs = -1;
+        return;
+    }
+    ++m_Observation.pulls;
+    m_Observation.ticks = ticks;
+    const auto requestUs = std::int64_t(requestedBytes) * 1000000 / bytesPerSecond;
+    m_Observation.requestUs = static_cast<int>(std::min<std::int64_t>(requestUs, INT32_MAX));
+    // SDL's request is in the stream's input format, including conversion
+    // requirements. additionalBytes may slightly overestimate a shortfall;
+    // call this a shortage request, not a measured audible/device underrun.
+    if (additionalBytes != 0) {
+        ++m_Observation.shortageRequests;
+        m_Observation.missingInputBytes += additionalBytes;
+    }
+    const auto headroomBytes = additionalBytes != 0 ? 0 :
+        std::max(0, queuedBytes - requestedBytes);
+    m_Observation.headroomUs = static_cast<int>(std::min<std::int64_t>(
+        std::int64_t(headroomBytes) * 1000000 / bytesPerSecond, INT32_MAX));
+}
+
 void AudioPhaseController::reset()
 {
     m_LastUpdateTicks = 0;
@@ -256,12 +282,18 @@ void AudioPhaseController::reset()
     m_FilteredLeadUs = 0.0;
     m_CorrectionPpm = 0;
     m_Anchored = false;
+    m_LastOutputPull = 0;
+    m_LastShortageRequests = 0;
+    m_HealthyOutputPulls = 0;
+    m_AccelerationBlocked = true;
 }
 
 AudioPhaseController::Result AudioPhaseController::update(
         const AudioTimestampObserver::Observation& timing,
         int queuedAudioMs,
-        std::uint32_t observationTicks)
+        std::uint32_t observationTicks,
+        const AudioPlaybackObserver::Observation& playback,
+        int sourceBlockUs)
 {
     // Unknown/stale video, capture discontinuities and invalid latency must
     // release compensation immediately, not leave an old resampling rate active.
@@ -269,10 +301,41 @@ AudioPhaseController::Result AudioPhaseController::update(
     if (!timing.sourceValid || !timing.phaseValid ||
             timing.estimatedLeadUs < -2000000 || timing.estimatedLeadUs > 2000000 ||
             timing.sourceGapUs < -100000 || timing.sourceGapUs > 100000 ||
-            queuedAudioMs < 0 || queuedAudioMs > 2000) {
+            queuedAudioMs < 0 || queuedAudioMs > 2000 ||
+            sourceBlockUs <= 0 || sourceBlockUs > 120000) {
         const bool changed = m_CorrectionPpm != 0;
         reset();
         return {0, changed};
+    }
+    // Protect the reserve at the actual output-pull boundary. An input queue
+    // observed just before a large device pull can look healthy and still be
+    // exhausted by that pull. Do not add a buffer or change the phase target.
+    const auto outputAge = static_cast<std::uint32_t>(observationTicks - playback.ticks);
+    const bool outputValid = playback.pulls != 0 && playback.headroomUs >= 0 &&
+        playback.requestUs > 0 && playback.requestUs <= 2000000 &&
+        outputAge <= static_cast<std::uint32_t>(std::max(100, playback.requestUs / 250));
+    if (!outputValid) {
+        m_AccelerationBlocked = true;
+        m_HealthyOutputPulls = 0;
+    }
+    else if (playback.pulls != m_LastOutputPull) {
+        const bool shortage = playback.shortageRequests != m_LastShortageRequests;
+        if (shortage || playback.headroomUs < sourceBlockUs) {
+            m_AccelerationBlocked = true;
+            m_HealthyOutputPulls = 0;
+        }
+        else if (m_AccelerationBlocked) {
+            // Resume only after three consecutive pulls retain two source
+            // blocks. Avoid on/off correction at every producer callback.
+            if (playback.pulls != m_LastOutputPull + 1)
+                m_HealthyOutputPulls = 0;
+            m_HealthyOutputPulls = playback.headroomUs >= 2 * sourceBlockUs ?
+                m_HealthyOutputPulls + 1 : 0;
+            if (m_HealthyOutputPulls >= 3)
+                m_AccelerationBlocked = false;
+        }
+        m_LastOutputPull = playback.pulls;
+        m_LastShortageRequests = playback.shortageRequests;
     }
     if (!m_Anchored) {
         m_LastUpdateTicks = observationTicks;
@@ -298,7 +361,7 @@ AudioPhaseController::Result AudioPhaseController::update(
     // Do not starve the output to chase unavoidable capture/device latency, or
     // add more buffering to an already full output queue. These guards also
     // apply between controller updates and bypass the ordinary slew limit.
-    if ((m_CorrectionPpm > 0 && queuedAudioMs < 10) ||
+    if ((m_CorrectionPpm > 0 && m_AccelerationBlocked) ||
             (m_CorrectionPpm < 0 && queuedAudioMs > 50)) {
         m_CorrectionPpm = 0;
         return {0, true};
@@ -315,7 +378,7 @@ AudioPhaseController::Result AudioPhaseController::update(
     int targetCorrection = std::clamp(
         static_cast<int>(std::llround(-phaseErrorUs / 1000.0 * PhaseGainPpmPerMs)),
         -MaximumCorrectionPpm, MaximumCorrectionPpm);
-    if ((targetCorrection > 0 && queuedAudioMs < 10) ||
+    if ((targetCorrection > 0 && m_AccelerationBlocked) ||
             (targetCorrection < 0 && queuedAudioMs > 50))
         targetCorrection = 0;
     const int maximumStep = MaximumPhaseStepPpmPerSecond * std::min(elapsedMs, 1000U) / 1000;
