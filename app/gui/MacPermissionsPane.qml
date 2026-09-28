@@ -11,7 +11,7 @@ ColumnLayout {
 
     Label {
         visible: pane.showHeading
-        text: qsTr("PLANK Client")
+        text: qsTr("BDE fernweh")
         font.pixelSize: 22
         font.weight: Font.DemiBold
     }
@@ -98,7 +98,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         font.pixelSize: 12
-        text: qsTr("Allow permissions for PLANK Client, not the Host.") + "\n" +
+        text: qsTr("Allow permissions for BDE fernweh, not the Host.") + "\n" +
               qsTr("Permissions do not turn forwarding on.") + "\n" +
               qsTr("Missing optional permissions do not block desktop video.") + "\n" +
               qsTr("Status refreshes when you return from System Settings.")

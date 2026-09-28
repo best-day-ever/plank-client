@@ -12,9 +12,26 @@ TextField {
     rightPadding: 12
     implicitHeight: 38
     color: theme.textPrimary
-    placeholderTextColor: theme.textDisabled
+    // Material floats the placeholder onto the top border once the field has
+    // focus or text, which collides with this flat outline. Draw a plain hint
+    // inside the field instead, shown only while the field is empty.
+    placeholderTextColor: "transparent"
     selectionColor: theme.accent
     selectedTextColor: "white"
+
+    Text {
+        x: control.leftPadding
+        y: control.topPadding
+        width: control.width - control.leftPadding - control.rightPadding
+        height: control.height - control.topPadding - control.bottomPadding
+        visible: control.length === 0 && control.preeditText === ""
+        text: control.placeholderText
+        font: control.font
+        color: theme.textDisabled
+        verticalAlignment: control.verticalAlignment
+        elide: Text.ElideRight
+        renderType: control.renderType
+    }
 
     background: Rectangle {
         color: theme.surfaceRaised

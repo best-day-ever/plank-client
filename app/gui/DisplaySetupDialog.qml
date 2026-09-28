@@ -26,7 +26,9 @@ NavigableDialog {
 
     title: hostName !== "" ? qsTr("Screens for %1").arg(hostName) : qsTr("Display setup")
     width: Math.min(860, parent.width - 40)
-    height: Math.min(parent.height - 40, 860)
+    // As tall as the page shown needs (one screen leaves little to show),
+    // never taller than the window; the pages scroll beyond that.
+    height: Math.min(parent.height - 40, 860, Math.max(420, implicitHeight))
     modal: true
     dim: true
     closePolicy: Popup.CloseOnEscape
@@ -120,6 +122,7 @@ NavigableDialog {
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.preferredHeight: dialog.page === 0 ? overviewPanel.implicitHeight : advancedPage.implicitHeight
             currentIndex: dialog.page
 
             ScrollView {
@@ -128,6 +131,7 @@ NavigableDialog {
                 contentWidth: availableWidth
 
                 DisplaySetupPanel {
+                    id: overviewPanel
                     width: overviewScroll.availableWidth
                 }
             }
@@ -138,6 +142,7 @@ NavigableDialog {
                 contentWidth: availableWidth
 
                 DisplayAdvancedPage {
+                    id: advancedPage
                     width: advancedScroll.availableWidth
                     hostId: dialog.hostId
                     hostName: dialog.hostName
@@ -154,9 +159,8 @@ NavigableDialog {
 
     footer: Pane {
         padding: 12
-        background: Rectangle {
-            color: theme.surfaceRaised
-        }
+        // Transparent, so the dialog's rounded corners and border show.
+        background: Item {}
 
         PlankTheme {
             id: footerTheme

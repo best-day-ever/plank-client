@@ -235,10 +235,14 @@ ColumnLayout {
         }
     }
 
+    // These labels wrap: an unwrapped one would fix this column's minimum
+    // width and push the controls past a narrow settings column.
     Label {
+        Layout.fillWidth: true
         text: (root.showRoutes ? qsTr("Startup encoder target on the office network: %1 Mbps") :
                                  qsTr("Startup encoder target: %1 Mbps")).arg((officeSlider.value / 1000.0).toFixed(1))
         font.bold: true
+        wrapMode: Text.Wrap
     }
     Slider {
         id: officeSlider
@@ -254,9 +258,11 @@ ColumnLayout {
     }
 
     Label {
+        Layout.fillWidth: true
         visible: root.showRoutes
         text: qsTr("Startup encoder target over the internet: %1 Mbps").arg((internetSlider.value / 1000.0).toFixed(1))
         font.bold: true
+        wrapMode: Text.Wrap
     }
     Slider {
         id: internetSlider

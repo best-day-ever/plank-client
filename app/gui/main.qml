@@ -310,6 +310,11 @@ ApplicationWindow {
 
                 iconSource: "qrc:/res/arrow_left.svg"
 
+                ToolTip.delay: 1000
+                ToolTip.timeout: 3000
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Back")
+
                 onClicked: goBack()
 
                 Keys.onDownPressed: {
@@ -395,7 +400,7 @@ ApplicationWindow {
                 ToolTip.delay: 1000
                 ToolTip.timeout: 3000
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("Add PC manually") + (newPcShortcut.nativeText ? (" ("+newPcShortcut.nativeText+")") : "")
+                ToolTip.text: qsTr("Add workstation") + (newPcShortcut.nativeText ? (" ("+newPcShortcut.nativeText+")") : "")
 
                 Shortcut {
                     id: newPcShortcut
@@ -493,11 +498,12 @@ ApplicationWindow {
         property var virtualModeChoices: ComputerManager.plankVirtualModeChoices()
 
         // Give both connection fields enough room for real hostnames while
-        // keeping the dialog inside smaller launcher windows. The dialog still
-        // blocks the launcher, but it must not wash out the UI behind it.
+        // keeping the dialog inside smaller launcher windows. Modal, so a
+        // stray click beside it cannot throw away what was typed.
         width: Math.min(640, parent.width - 40)
         height: Math.min(implicitHeight, parent.height - 20)
-        dim: false
+        modal: true
+        closePolicy: Popup.CloseOnEscape
 
         function suggestedNickname(address) {
             var value = address.trim()
@@ -544,6 +550,7 @@ ApplicationWindow {
             addVideoSettings.load(StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT,
                                   StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444,
                                   StreamingPreferences.plankDefaultProfileBitratesKbps(), [])
+            standardButton(Dialog.Ok).text = qsTr("Add")
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return addressText.text.trim() !== "" && nicknameText.text.trim() !== ""
             })
@@ -633,6 +640,7 @@ ApplicationWindow {
             }
 
             Label {
+                Layout.topMargin: 10
                 text: qsTr("Host display layout")
                 font.bold: true
             }
@@ -699,6 +707,7 @@ ApplicationWindow {
             }
 
             Label {
+                Layout.topMargin: 10
                 text: qsTr("Scaling")
                 font.bold: true
             }

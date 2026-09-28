@@ -158,7 +158,6 @@ Item {
         title: qsTr("Settings for %1").arg(hostName)
         width: Math.min(560, remoteView.width - 40)
         height: Math.min(implicitHeight, remoteView.height - 20)
-        dim: false
         modal: true
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -207,7 +206,9 @@ Item {
             // saved. Otherwise they come from an earlier connect and may be
             // stale (host upgraded, encoder fixed): the choice is only
             // flagged, and the connect checks it against the live host.
-            standardButton(Dialog.Ok).enabled = Qt.binding(function() {
+            var saveButton = standardButton(Dialog.Ok)
+            saveButton.text = connectAfter ? qsTr("Save and connect") : qsTr("Save")
+            saveButton.enabled = Qt.binding(function() {
                 return streamReason === "" || streamVideoSettings.problemText === ""
             })
         }
@@ -324,6 +325,33 @@ Item {
         }
     }
 
+    // One status line per workstation. The broker's reason codes are
+    // short English tokens ("offline", "no address", "certificate changed");
+    // say what they mean, and never repeat the state ("Offline · offline").
+    function hostStatusText(host) {
+        var parts = []
+        parts.push(!host.online ? qsTr("Offline") :
+                   (host.busy || host.inUseBy !== "") ? qsTr("Busy") : qsTr("Online"))
+        if (host.inUseBy !== "") {
+            parts.push(qsTr("in use by %1").arg(host.inUseBy))
+        }
+        if (!host.connectable && host.reason !== "") {
+            switch (host.reason) {
+            case "offline":
+                break
+            case "no address":
+                parts.push(qsTr("no network address; ask the studio to check it"))
+                break
+            case "certificate changed":
+                parts.push(qsTr("its identity changed; ask the studio to check it"))
+                break
+            default:
+                parts.push(host.reason)
+            }
+        }
+        return parts.join(" · ")
+    }
+
     function submitSignIn() {
         if (!signInButton.enabled) {
             return
@@ -387,6 +415,7 @@ Item {
             PlankTextField {
                 id: usernameField
                 Layout.fillWidth: true
+                Accessible.name: qsTr("Username")
                 enabled: !RemoteBroker.busy
                 inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
                 onTextChanged: remoteView.usePassword = false
@@ -405,6 +434,7 @@ Item {
                 id: passwordField
                 visible: !remoteView.passkeyReady
                 Layout.fillWidth: true
+                Accessible.name: qsTr("Password")
                 enabled: !RemoteBroker.busy
                 echoMode: TextInput.Password
                 inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
@@ -423,6 +453,7 @@ Item {
                 id: otpField
                 visible: !remoteView.passkeyReady
                 Layout.fillWidth: true
+                Accessible.name: qsTr("Authenticator code")
                 enabled: !RemoteBroker.busy
                 placeholderText: qsTr("6 digits")
                 maximumLength: 6
@@ -451,21 +482,33 @@ Item {
                 Layout.topMargin: 4
             }
 
+            // Progress gets its own line: beside two buttons it had no room
+            // left and elided to a couple of letters.
+            RowLayout {
+                visible: RemoteBroker.busy
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                spacing: theme.spaceSmall
+
+                BusyIndicator {
+                    running: parent.visible
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                }
+                Label {
+                    text: RemoteBroker.busyText
+                    color: theme.textSecondary
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: 8
                 spacing: theme.spaceMedium
 
-                BusyIndicator {
-                    visible: RemoteBroker.busy
-                    running: visible
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 28
-                }
-                Label {
-                    text: RemoteBroker.busyText
-                    color: theme.textSecondary
-                    elide: Label.ElideRight
+                Item {
                     Layout.fillWidth: true
                 }
                 Button {
@@ -571,12 +614,35 @@ Item {
             Layout.fillWidth: true
         }
 
-        Label {
+        Rectangle {
             visible: hostList.count === 0 && !RemoteBroker.busy
-            text: qsTr("No workstations are assigned to you for remote access.")
-            color: theme.textSecondary
-            wrapMode: Text.Wrap
             Layout.fillWidth: true
+            implicitHeight: emptyColumn.implicitHeight + 40
+            radius: theme.radiusMedium
+            color: theme.surface
+            border.width: 1
+            border.color: theme.borderSubtle
+
+            ColumnLayout {
+                id: emptyColumn
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 4
+
+                Label {
+                    text: qsTr("No workstations yet")
+                    color: theme.textPrimary
+                    font.pointSize: 12
+                    font.weight: Font.Medium
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: qsTr("No workstation is assigned to you for remote access. Ask the studio to assign yours, then choose Refresh.")
+                    color: theme.textSecondary
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+            }
         }
 
         ListView {
@@ -622,19 +688,7 @@ Item {
                             Layout.fillWidth: true
                         }
                         Label {
-                            text: {
-                                var parts = []
-                                parts.push(!modelData.online ? qsTr("Offline") :
-                                           (modelData.busy || modelData.inUseBy !== "") ?
-                                               qsTr("Busy") : qsTr("Online"))
-                                if (modelData.inUseBy !== "") {
-                                    parts.push(qsTr("in use by %1").arg(modelData.inUseBy))
-                                }
-                                if (!modelData.connectable && modelData.reason !== "") {
-                                    parts.push(modelData.reason)
-                                }
-                                return parts.join(" · ")
-                            }
+                            text: remoteView.hostStatusText(modelData)
                             color: theme.textSecondary
                             font.pointSize: 10
                             elide: Label.ElideRight

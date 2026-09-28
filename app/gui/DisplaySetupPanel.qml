@@ -245,8 +245,9 @@ ColumnLayout {
         }
     }
 
-    // Legend: what backs each workstation display.
-    RowLayout {
+    // Legend: what backs each workstation display. It wraps, so a narrow
+    // panel (the first sign-in wizard) never grows wider than its card.
+    Flow {
         Layout.fillWidth: true
         spacing: theme.spaceLarge
         visible: DisplaySetup.hostKind !== "legacy" && DisplaySetup.hostKind !== "mac"
@@ -257,9 +258,10 @@ ColumnLayout {
                 {"backing": "virtual", "text": qsTr("Virtual display, exact size")},
                 {"backing": "physical-viewport", "text": qsTr("Workstation screen, scaled")}
             ]
-            delegate: RowLayout {
+            delegate: Row {
                 spacing: 6
                 Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
                     width: 10
                     height: 10
                     radius: 2
@@ -271,9 +273,6 @@ ColumnLayout {
                     font.pointSize: 9
                 }
             }
-        }
-        Item {
-            Layout.fillWidth: true
         }
         Label {
             visible: DisplaySetup.backingExpected

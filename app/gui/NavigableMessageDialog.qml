@@ -15,7 +15,7 @@ NavigableDialog {
     property alias imageSrc: dialogImage.source
     property string acceptButtonText
     property string rejectButtonText
-    // Colours the accept button for actions that discard someone's work.
+    // A red accept button, for actions that discard someone's work.
     property bool acceptButtonDestructive: false
 
     onOpened: {
@@ -23,9 +23,6 @@ NavigableDialog {
         var rejectButton = standardButton(Dialog.No)
         if (acceptButton && acceptButtonText !== "") {
             acceptButton.text = acceptButtonText
-        }
-        if (acceptButton && acceptButtonDestructive) {
-            acceptButton.Material.foreground = messageTheme.danger
         }
         if (rejectButton && rejectButtonText !== "") {
             rejectButton.text = rejectButtonText
@@ -78,9 +75,21 @@ NavigableDialog {
     footer: DialogButtonBox {
         id: dialogButtonBox
         standardButtons: dialog.standardButtons
+        leftPadding: dialog.padding - 6
+        rightPadding: dialog.padding - 6
+        topPadding: 4
+        bottomPadding: 10
+        Material.foreground: messageTheme.textPrimary
+        background: Item {}
 
+        // The accepting answer is the one filled button; red when it
+        // discards someone's work.
         delegate: Button {
-            flat: true
+            highlighted: DialogButtonBox.buttonRole === DialogButtonBox.AcceptRole ||
+                         DialogButtonBox.buttonRole === DialogButtonBox.YesRole
+            flat: !highlighted
+            Material.accent: highlighted && dialog.acceptButtonDestructive ?
+                                 messageTheme.danger : messageTheme.accent
 
             Keys.onReturnPressed: clicked()
             Keys.onEnterPressed: clicked()

@@ -155,7 +155,7 @@ Item {
                         Label {
                             Layout.fillWidth: true
                             text: qsTr("Choose this if the studio gave you a one-time password.")
-                            color: theme.textDisabled
+                            color: theme.textSecondary
                             font.pointSize: 10
                             wrapMode: Text.Wrap
                         }
@@ -237,7 +237,7 @@ Item {
                                 }
                                 return qsTr("Use %1.").arg(hints.join(qsTr(" and ")))
                             }
-                            color: theme.textDisabled
+                            color: theme.textSecondary
                             font.pointSize: 10
                             wrapMode: Text.Wrap
                             Layout.bottomMargin: 4

@@ -4589,7 +4589,7 @@ bool Session::runPlankReconnect()
         } catch (const MacSessionActiveException&) {
             m_CanReconnect.store(false);
             m_ReconnectCancelled.store(true);
-            emit displayLaunchError(tr("Another client has an active PLANK session. Connect again to request takeover."));
+            emit displayLaunchError(tr("Another client has an active BDE fernweh session. Connect again to take it over."));
         } catch (const GfeHttpResponseException& error) {
             qWarning() << "PLANK reconnect attempt" << attempt
                        << "failed:" << error.toQString();
