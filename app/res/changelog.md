@@ -1,3 +1,219 @@
+## 1.1.024 — Wacom focus and contact recovery
+
+### Client
+
+- macOS: follow the active stream window when switching Spaces, windows or applications, so tablet input can resume on focus return.
+
+### Host
+
+- Linux: release held tablet contact when forwarding pauses, without recreating the tablet or changing its identity.
+- Handle interrupted contact reads and partial release writes, and verify cleanup before reporting success.
+
+## 1.1.023 — Host setup opens in front
+
+### Host
+
+- Bring macOS setup in front of Installer when it opens, without keeping it always-on-top.
+- Preserve the accepted centering behavior as the desktop resolution changes.
+
+## 1.1.022 — Host setup follows display changes
+
+### Host
+
+- Keep macOS setup centered when the desktop resolution changes after installation.
+- Stop automatic centering once you drag the setup window yourself.
+
+## 1.1.021 — Consistent Mac setup windows
+
+### Client
+
+- Give installer permission setup native macOS styling and the same clear columns as Host setup.
+- Keep Refresh and Close together at the lower right.
+
+### Host
+
+- Open setup centered on the usable desktop.
+- Move Refresh and Close to the lower right.
+
+## 1.1.020 — Permission setup after installation
+
+### Client
+
+- macOS: open permission setup automatically after installation, without connecting or opening bookmarks.
+- Keep launch-time permission checks for new users and changed approvals.
+
+### Host
+
+- macOS: retain automatic installer setup and clearly defer approval when nobody is logged in.
+- Remove the unverifiable System Audio status indicator while retaining consent setup and a Settings shortcut.
+
+## 1.1.019 — Clearer Mac setup and uninstall
+
+### Client
+
+- macOS: review permission status and open the relevant system settings from Configuration.
+- macOS: include an uninstaller, with optional cleanup of your saved Client data.
+
+### Host
+
+- macOS: show permissions and optional devices in an aligned status panel with clear actions.
+- macOS: remove PLANK Camera safely during uninstall; leave the Host intact if approval or a restart is needed.
+
+## 1.1.018 — Distinct Mac app icons
+
+### Client
+
+- macOS: use the approved monitor-framed artwork to distinguish Client from Host.
+
+### Host
+
+- macOS: use the approved open-landscape artwork, keeping the shared warm PLANK style.
+
+## 1.1.017 — Mac workstation names
+
+### Host
+
+- macOS: use the operating-system hostname by default, matching Linux; custom names remain configurable.
+- Upgrade the old installer-generated name to the automatic default without changing machine identity or other settings.
+
+## 1.1.016 — Permission setup and Mac Host settings
+
+### Client
+
+- macOS: request microphone and attached USB Wacom permissions at app launch instead of during a session.
+- Keep sessions usable without microphone permission; enabling it no longer opens a permission prompt over the stream.
+
+### Host
+
+- macOS: include system-audio consent in the Host app's permission setup before remote use.
+- macOS: optionally show the desktop username beside In Session; publication is off by default.
+- macOS: make the connection inactivity timeout configurable, with fully documented settings.
+
+## 1.1.015 — Workstation session indicator
+
+### Client
+
+- Show In Session when a workstation has a logged-in desktop or a remote session.
+- Show the desktop username only when the Linux Host administrator enables it.
+- Optionally remember the last successful sign-in username for each bookmark; passwords are never saved.
+- Rename the physical-display layout option to Match Host; display behavior is unchanged.
+- macOS: center the toolbar below the camera-notch area instead of shifting it sideways.
+- macOS: install the Client and its administrator configuration together with a PKG installer.
+
+### Host
+
+- Report session status without account lookups or session cleanup during discovery.
+- Include connections to the Mac login screen. Same-user access and takeover rules are unchanged.
+- macOS: use /etc/plank/host.conf for administrator settings, preserving existing settings and machine identity on upgrade.
+
+## 1.1.014 — Mac virtual audio clock correction
+
+### Host
+
+- Correct the clock timestamp period advertised by PLANK Output and PLANK Microphone to meet Core Audio requirements.
+- Keep microphone packets at 10 ms and support larger bounded Core Audio reads.
+
+## 1.1.013 — Mac capture clock
+
+### Host
+
+- Use PLANK Output as the explicit clock for remote audio capture.
+- Add bounded capture-timing diagnostics for intermittent audio gaps during camera use.
+
+## 1.1.012 — Lower overhead for Mac session checks
+
+### Host
+
+- Check desktop ownership in the background every 500 ms while keeping user-switch and sleep notifications responsive.
+- Expire stale session information after one second without blocking audio or typing.
+
+## 1.1.011 — Mac audio and input scheduling
+
+### Host
+
+- Move repeated macOS session checks off the media queue to reduce audio dropouts and typing delays during application startup and camera use.
+- Retain session revocation and enforce a freshness limit when system checks stall.
+
+## 1.1.010 — Camera and microphone timing
+
+### Client
+
+- Default microphone activation to Manual for new configurations; preserve saved preferences.
+- Ubuntu: retain capture timing with stereo Opus audio when supported by the Host.
+- Preserve microphone compatibility with Hosts using the previous stereo format.
+
+### Host
+
+- Request a recovery frame when another application joins PLANK Camera.
+- Use timestamped microphone playback to align camera presentation when both are active.
+- Preserve camera-only operation and compatibility with previous Clients.
+
+## 1.1.009 — Remote output routing
+
+### Host
+
+- Forward audio sent to PLANK Output while physical speakers retain normal local playback.
+- Fix automatic PLANK Output selection when a session connects.
+- Keep remote volume and mute tied to PLANK Output when another device is selected locally.
+
+## 1.1.008 — Camera setup status
+
+### Host
+
+- Recognize an enabled PLANK Camera during macOS setup and stop offering Enable Camera again.
+- Update an already-enabled camera extension while retaining the existing approval when macOS permits.
+
+## 1.1.007 — Mac remote audio output
+
+### Host
+
+- Add PLANK Output as the macOS playback destination during remote sessions.
+- Restore previous playback and alert devices after disconnect, with routing recovery after Host failures.
+- Keep remote volume and mute independent of the physical output after selection.
+- Recommend restarting after installation to load updated PLANK audio devices; allow restarting later.
+
+## 1.1.006 — Microphone queue recovery
+
+### Host
+
+- Discard stale microphone audio after scheduling stalls and re-prime with fresh samples.
+- Improve stereo microphone clock correction when capture delivers packets in batches.
+
+## 1.1.005 — Mac Client display discovery
+
+### Client
+
+- Start sessions when macOS omits the native display-mode flag, using the current backing-pixel dimensions.
+- Show a connection error if the display layout cannot be read.
+- Retain independent media negotiation; the 1.1.004 Host can remain installed.
+
+## 1.1.004 — Media compatibility candidate
+
+### Client
+
+- Negotiate each Mac media feature independently, preserving desktop connections when optional features are unavailable.
+- Connect to supported older Mac Hosts; disable incompatible microphone or camera forwarding.
+- Ubuntu: select a native H.264/MJPEG webcam and enable it from the session toolbar. Camera starts off on each connection.
+
+### Host
+
+- Accept Mac launch schemas 4, 5 and 6 alongside independently versioned media features.
+- Keep desktop audio and input available to schema-4 Clients, with their incompatible mono microphone disabled.
+- macOS: offer native compressed camera output and decoded NV12 through the PLANK Camera extension.
+
+## 1.1.002 — Stereo microphone candidate
+
+Update Host and Client together for this candidate's microphone protocol.
+
+### Client
+
+- Forward microphone audio in stereo using 192 kbps variable-bitrate Opus.
+
+### Host
+
+- macOS: expose a 48 kHz stereo PLANK Microphone input and preserve both channels through decoding.
+- Require the matching stereo driver before offering microphone forwarding.
+
 ## 1.1.001
 
 Update Host and Client together. This version is not compatible with the previous release's transport.

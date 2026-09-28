@@ -228,6 +228,12 @@ unix:if(!macx|disable-prebuilts) {
     }
 }
 
+linux {
+    PKGCONFIG += libpipewire-0.3
+    SOURCES += streaming/audio/linuxmicrophone.cpp
+    HEADERS += streaming/audio/linuxmicrophone.h streaming/audio/microphonecapturequeue.h streaming/audio/microphonecaptureclock.h
+}
+
 linux:packagesExist(libinput):packagesExist(libudev) {
     DEFINES += HAVE_LIBINPUT_TABLET
     PKGCONFIG += libinput libudev
@@ -280,6 +286,7 @@ SOURCES += \
     streaming/input/mouse.cpp \
     streaming/session.cpp \
     streaming/audio/microphone.cpp \
+    streaming/camera/camera.cpp \
     streaming/avsynccontroller.cpp \
     streaming/plankdisplaymode.cpp \
     streaming/plankpresentation.cpp \
@@ -379,6 +386,12 @@ macx {
 }
 
 # Platform-specific renderers and decoders
+linux:contains(CONFIG, plank-transport) {
+    SOURCES += streaming/camera/linuxnativecamera.cpp
+    HEADERS += streaming/camera/linuxnativecamera.h \
+        streaming/camera/nativecameraframe.h streaming/camera/uvch264control.h
+}
+
 ffmpeg {
     message(FFmpeg decoder selected)
 
@@ -545,6 +558,7 @@ macx {
     DEFINES += HAVE_MAC_RAW_WACOM
     SOURCES += streaming/input/macrawwacom.cpp
     HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h
+    HEADERS += streaming/input/macrawwacomfocus.h
     LIBS += -framework IOKit -framework CoreFoundation -framework ApplicationServices -framework Carbon
 
     SOURCES += \
@@ -564,6 +578,7 @@ macx {
         streaming/video/decodercaps.h \
         streaming/video/decodercaps-test-frames.h \
         streaming/macdisplaygeometry.h \
+        streaming/macdisplaymode.h \
         streaming/video/ffmpeg-renderers/vt.h \
         streaming/macclipboardsync.h \
         streaming/clipboardpolltimer.h \
@@ -574,6 +589,8 @@ macx {
         HEADERS += streaming/macfileclipboard.h
         OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
     }
+    OBJECTIVE_SOURCES += backend/macpermissions.mm
+    HEADERS += backend/macpermissions.h
 }
 embedded {
     message(Embedded build)

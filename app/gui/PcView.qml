@@ -140,7 +140,22 @@ CenteredGridView {
         width: pcGrid.cellWidth
         height: 76
         grid: pcGrid
-        Accessible.name: model.name
+        function sessionStatusText() {
+            if (model.statusUnknown)
+                return qsTr("Checking")
+            if (!model.online)
+                return qsTr("Offline")
+            if (!model.inSession)
+                return qsTr("Online")
+            if (model.sessionUser)
+                return qsTr("In Session - %1").arg(model.sessionUser)
+            return qsTr("In Session")
+        }
+
+        Accessible.name: model.inSession ?
+                          (model.sessionUser ? qsTr("%1, in session - %2").arg(model.name).arg(model.sessionUser)
+                                             : qsTr("%1, in session").arg(model.name))
+                          : model.name
         hoverEnabled: true
 
         background: Rectangle {
@@ -211,21 +226,37 @@ CenteredGridView {
 
         Column {
             id: workstationStatus
-            width: 190
+            width: model.inSession && model.sessionUser ? 280 : 190
             anchors.right: parent.right
             anchors.rightMargin: 18
             anchors.verticalCenter: parent.verticalCenter
             spacing: 3
 
-            Label {
+            RowLayout {
                 width: parent.width
-                text: model.statusUnknown ? qsTr("Checking") :
-                      (model.online ? qsTr("Online") : qsTr("Offline"))
-                color: model.statusUnknown ? theme.textSecondary :
-                       (model.online ? theme.success : theme.textDisabled)
-                font.pointSize: 11
-                font.weight: Font.DemiBold
-                horizontalAlignment: Text.AlignRight
+                spacing: 0
+                Item { Layout.fillWidth: true }
+                Label {
+                    id: occupancyLabel
+                    text: model.statusUnknown ? qsTr("Checking") :
+                          !model.online ? qsTr("Offline") :
+                          model.inSession ? qsTr("In Session") : qsTr("Online")
+                    color: model.statusUnknown ? theme.textSecondary :
+                           !model.online ? theme.textDisabled :
+                           model.inSession ? theme.danger : theme.success
+                    font.pointSize: 11
+                    font.weight: Font.DemiBold
+                    Layout.minimumWidth: implicitWidth
+                }
+                Label {
+                    visible: model.online && !model.statusUnknown && model.inSession && !!model.sessionUser
+                    text: " - " + (model.sessionUser || "")
+                    elide: Text.ElideRight
+                    color: occupancyLabel.color
+                    font: occupancyLabel.font
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: Math.max(0, workstationStatus.width - occupancyLabel.implicitWidth)
+                }
             }
 
             Label {
@@ -245,7 +276,7 @@ CenteredGridView {
             sourceComponent: NavigableMenu {
                 id: pcContextMenu
                 MenuItem {
-                    text: qsTr("PC Status: %1").arg(model.online ? qsTr("Online") : qsTr("Offline"))
+                    text: qsTr("PC Status: %1").arg(pcEntry.sessionStatusText())
                     font.bold: true
                     enabled: false
                 }
@@ -374,7 +405,14 @@ CenteredGridView {
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
 
-        onOpened: usernameField.forceActiveFocus()
+        onOpened: {
+            usernameField.text = computerModel.rememberedUsername(pcIndex)
+            passwordField.clear()
+            if (usernameField.text)
+                passwordField.forceActiveFocus()
+            else
+                usernameField.forceActiveFocus()
+        }
         onClosed: {
             usernameField.clear()
             passwordField.clear()
@@ -551,7 +589,7 @@ CenteredGridView {
                 Layout.fillWidth: true
                 model: editVideoSettings.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
-                    qsTr("Physical displays"),
+                    qsTr("Match Host"),
                     qsTr("One virtual display"),
                     qsTr("Two virtual displays (horizontal)")
                 ]
@@ -568,7 +606,7 @@ CenteredGridView {
             Label {
                 Layout.fillWidth: true
                 visible: editVideoSettings.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
-                text: qsTr("This headless workstation does not provide physical displays.")
+                text: qsTr("Match Host requires physical displays attached to the workstation.")
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }

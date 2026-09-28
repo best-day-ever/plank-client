@@ -1,37 +1,36 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <thread>
+#include <QString>
+#include <QVariantList>
 
 struct PlankTransportNativeEndpoint;
-
-// Owns capture only while the authenticated Host has acknowledged activation.
-// Stop/join before endpoint destruction. The separate output renderer is not
-// touched, and no captured samples are written to disk or diagnostic logs.
-class PlankMicrophone
+class PlankCamera
 {
 public:
     enum class State { Off, Pending, Active, Unavailable };
-    PlankMicrophone(PlankTransportNativeEndpoint* endpoint,
-                    std::atomic<bool>& requested, bool automaticInput, bool timed = false);
-    ~PlankMicrophone();
+    PlankCamera(PlankTransportNativeEndpoint* endpoint, std::atomic<bool>& requested,
+                const QString& device);
+    ~PlankCamera();
     State state() const { return m_State.load(); }
     void acknowledge(std::uint64_t generation, std::uint32_t state);
-
+    void requestKeyframe(std::uint64_t generation);
+    // Read-only native format enumeration. No capture or format changes.
+    static QVariantList devices();
 private:
     void run();
     PlankTransportNativeEndpoint* const m_Endpoint;
     std::atomic<bool>& m_Requested;
-    const bool m_AutomaticInput;
-    const bool m_Timed;
+    const QString m_Device;
     std::atomic<State> m_State {State::Off};
     std::mutex m_Mutex;
     std::condition_variable m_Wake;
     bool m_Stop = false;
-    std::uint64_t m_AckGeneration = 0;
+    std::uint64_t m_AckGeneration = 0, m_KeyGeneration = 0;
     std::uint32_t m_AckState = 0;
     std::thread m_Thread;
 };

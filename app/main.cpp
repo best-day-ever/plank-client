@@ -15,6 +15,8 @@
 #include <QTemporaryFile>
 #include <QThreadPool>
 #include <QRegularExpression>
+#include <QPointer>
+#include <QTimer>
 
 #ifdef Q_OS_UNIX
 #include <sys/socket.h>
@@ -31,6 +33,9 @@
 #ifdef Q_OS_MACOS
 #include "macapplication.h"
 #include "streaming/mackeyboardcapture.h"
+#include "streaming/input/macrawwacom.h"
+#include "streaming/audio/macmicrophonepermission.h"
+#include "backend/macpermissions.h"
 #endif
 
 #ifdef HAVE_FFMPEG
@@ -963,8 +968,14 @@ int main(int argc, char *argv[])
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
 
-    // We require the Material theme
-    QQuickStyle::setStyle("Material");
+    // Installer setup is a standalone process: use native macOS controls there
+    // without changing the established Material launcher/streaming UI.
+#ifdef Q_OS_MACOS
+    if (commandLineParserResult == GlobalCommandLineParser::PermissionsSetupRequested)
+        QQuickStyle::setStyle("macOS");
+    else
+#endif
+        QQuickStyle::setStyle("Material");
 
     // Our icons are styled for a dark theme, so we do not allow the user to override this
     qputenv("QT_QUICK_CONTROLS_MATERIAL_THEME", "Dark");
@@ -992,6 +1003,11 @@ int main(int argc, char *argv[])
         // top of it; anyone who used this Mac before never sees it unasked.
         showOnboarding = OnboardingController::shouldShowOnLaunch(StreamingPreferences::get());
         break;
+#ifdef Q_OS_MACOS
+    case GlobalCommandLineParser::PermissionsSetupRequested:
+        // The installer opens only the permission view, never the bookmark UI.
+        break;
+#endif
     case GlobalCommandLineParser::StreamRequested:
         {
             initialView = "qrc:/gui/CliStartStreamSegue.qml";
@@ -1020,6 +1036,8 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_MACOS
     // Ask before any stream can capture the pointer. Also handle enabling the
     // preference later in Settings, without ever prompting from a live stream.
+    auto permissions = new MacPermissions([] { return Session::get() == nullptr; }, &engine);
+    engine.rootContext()->setContextProperty("macPermissions", permissions);
     auto requestKeyboardPermission = [] {
         if (Session::get() == nullptr) {
             MacKeyboardCapture::requestPermissionIfNeeded(
@@ -1031,17 +1049,32 @@ int main(int argc, char *argv[])
                      &app, requestKeyboardPermission);
     QObject::connect(StreamingPreferences::get(), &StreamingPreferences::immersiveKeyboardModeChanged,
                      &app, requestKeyboardPermission);
-    // CLI autoconnect must not put a permission dialog behind its stream.
-    // Provision permission once by opening the ordinary launcher first.
-    if (commandLineParserResult == GlobalCommandLineParser::NormalStartRequested) {
-        requestKeyboardPermission();
+    // Resolve launch-time consent before constructing the launcher: no
+    // sign-in or autoconnect can race a pending native permission dialog.
+    // CLI autoconnect remains non-prompting; provision via the launcher first.
+    // BDE: Fernweh streams from Linux Hosts, which never negotiate the Client
+    // microphone, so launch asks only for keyboard capture and an attached
+    // raw-HID Wacom. Microphone access stays available in Permissions.
+    if (commandLineParserResult == GlobalCommandLineParser::NormalStartRequested ||
+            commandLineParserResult == GlobalCommandLineParser::PermissionsSetupRequested) {
+        const QString startupView = commandLineParserResult == GlobalCommandLineParser::PermissionsSetupRequested ?
+                    QStringLiteral("qrc:/gui/MacPermissionSetup.qml") : QStringLiteral("qrc:/gui/main.qml");
+        QTimer::singleShot(0, &engine, [context = QPointer<QQmlApplicationEngine>(&engine), requestKeyboardPermission, startupView] {
+            requestKeyboardPermission();
+            MacRawWacomInput::requestPermissionIfNeeded();
+            if (!context) return;
+            context->load(QUrl(startupView));
+            if (context->rootObjects().isEmpty()) QCoreApplication::exit(-1);
+        });
     }
+    else
 #endif
-
-    // Load the main.qml file
-    engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
-    if (engine.rootObjects().isEmpty()) {
-        return -1;
+    {
+        // Load immediately on Linux and for non-prompting CLI autoconnect.
+        engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
+        if (engine.rootObjects().isEmpty()) {
+            return -1;
+        }
     }
 
     int err = app.exec();

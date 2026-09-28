@@ -1,8 +1,12 @@
 #include "microphone.h"
 #include <SDL3/SDL.h>
-#include <opus.h>
+#include "microphoneopus.h"
 #include <QDebug>
 #include <chrono>
+#include <memory>
+#ifdef Q_OS_LINUX
+#include "linuxmicrophone.h"
+#endif
 #ifdef Q_OS_MACOS
 #include "macmicrophonepermission.h"
 #endif
@@ -12,8 +16,8 @@
 #endif
 
 PlankMicrophone::PlankMicrophone(PlankTransportNativeEndpoint* endpoint,
-                               std::atomic<bool>& requested, bool automaticInput)
-    : m_Endpoint(endpoint), m_Requested(requested), m_AutomaticInput(automaticInput),
+                               std::atomic<bool>& requested, bool automaticInput, bool timed)
+    : m_Endpoint(endpoint), m_Requested(requested), m_AutomaticInput(automaticInput), m_Timed(timed),
       m_Thread(&PlankMicrophone::run, this)
 {
 }
@@ -44,10 +48,17 @@ void PlankMicrophone::run()
     m_State.store(State::Unavailable);
 #else
     using Clock = std::chrono::steady_clock;
+#ifdef Q_OS_LINUX
+    std::unique_ptr<PlankLinuxMicrophone> timedCapture;
+    std::uint64_t timedNextSample = 0;
+#endif
     SDL_AudioStream* stream = nullptr;
     OpusEncoder* encoder = nullptr;
     bool audioInitialized = false;
     const auto closeCapture = [&] {
+#ifdef Q_OS_LINUX
+        timedCapture.reset();
+#endif
         if (stream) SDL_DestroyAudioStream(stream);
         if (encoder) opus_encoder_destroy(encoder);
         if (audioInitialized) SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -71,7 +82,13 @@ void PlankMicrophone::run()
         if (requested != lastRequested) { failed = false; lastRequested = requested; }
         int permission = 1;
 #ifdef Q_OS_MACOS
-        if (requested && !failed) permission = plankMacMicrophonePermission(true);
+        // Consent is requested by the launcher, never by a stream/toolbar toggle.
+        // An unprovisioned CLI launch remains usable without microphone capture.
+        if (requested && !failed) {
+            permission = plankMacMicrophonePermission() == 1 ? 1 : -1;
+            if (permission < 0) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "Microphone permission is unavailable; authorize PLANK Client in System Settings or reopen the launcher before connecting");
+        }
 #endif
         if (permission < 0) failed = true;
         const bool enabled = requested && !failed && permission == 1;
@@ -106,16 +123,57 @@ void PlankMicrophone::run()
         }
         if (!enabled) { m_State.store(State::Off); continue; }
         if (ackState != PLANK_TRANSPORT_MICROPHONE_ACTIVE) { failed = true; continue; }
+#ifdef Q_OS_LINUX
+        if (m_Timed) {
+            if (!timedCapture) {
+                timedCapture.reset(new PlankLinuxMicrophone);
+                timedNextSample = 0;
+                encoder = plankMicrophoneCreateEncoder();
+                if (!timedCapture->valid() || !encoder ||
+                        plank_transport_native_microphone_activate(m_Endpoint, command) != PLANK_TRANSPORT_OK) {
+                    failed = true; closeCapture(); continue;
+                }
+                lastSamples = Clock::now();
+            }
+            if (!timedCapture->valid()) { failed = true; closeCapture(); continue; }
+            int lookahead = 0;
+            if (opus_encoder_ctl(encoder, OPUS_GET_LOOKAHEAD(&lookahead)) != OPUS_OK || lookahead < 0 || lookahead > 480) {
+                failed = true; closeCapture(); continue;
+            }
+            PlankLinuxMicrophone::Packet input;
+            for (unsigned i = 0; i < 6 && timedCapture->take(input); i++) {
+                const auto codecDelay = std::uint64_t(lookahead) * 1000000000 / PlankMicrophoneRate;
+                if (input.captureTimeNs <= codecDelay) { failed = true; break; }
+                if (input.sampleTime != timedNextSample && opus_encoder_ctl(encoder, OPUS_RESET_STATE) != OPUS_OK) {
+                    failed = true; break;
+                }
+                timedNextSample = input.sampleTime + 480;
+                std::uint8_t packet[1275];
+                const int bytes = opus_encode_float(encoder, input.samples, 480, packet, sizeof(packet));
+                if (bytes < 1) { failed = true; break; }
+                const int result = plank_transport_native_microphone_send_timed(m_Endpoint, command,
+                    input.sampleTime, input.captureTimeNs - codecDelay, packet, std::size_t(bytes));
+                captured = true; lastSamples = Clock::now();
+                if (result != PLANK_TRANSPORT_OK && result != PLANK_TRANSPORT_DROPPED && result != PLANK_TRANSPORT_TIMEOUT) {
+                    failed = true; break;
+                }
+            }
+            if (Clock::now() - lastSamples > std::chrono::seconds(2)) failed = true;
+            if (failed) closeCapture();
+            m_State.store(failed ? State::Unavailable : captured ? State::Active : State::Pending);
+            continue;
+        }
+#else
+        if (m_Timed) { failed = true; closeCapture(); continue; }
+#endif
         if (!stream) {
-            int error = 0;
             audioInitialized = SDL_InitSubSystem(SDL_INIT_AUDIO);
             if (audioInitialized) {
-                SDL_AudioSpec format {SDL_AUDIO_F32, 1, 48000};
+                SDL_AudioSpec format {SDL_AUDIO_F32, PlankMicrophoneChannels, PlankMicrophoneRate};
                 stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_RECORDING, &format, nullptr, nullptr);
-                encoder = opus_encoder_create(48000, 1, OPUS_APPLICATION_VOIP, &error);
+                encoder = plankMicrophoneCreateEncoder();
             }
-            if (!stream || !encoder || error || opus_encoder_ctl(encoder, OPUS_SET_BITRATE(64000)) != OPUS_OK ||
-                opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(5)) != OPUS_OK ||
+            if (!stream || !encoder ||
                 plank_transport_native_microphone_activate(m_Endpoint, command) != PLANK_TRANSPORT_OK ||
                 !SDL_ResumeAudioStreamDevice(stream)) {
                 qWarning() << "PLANK microphone capture is unavailable";
@@ -125,14 +183,16 @@ void PlankMicrophone::run()
         }
         int available = SDL_GetAudioStreamAvailable(stream);
         if (available < 0) { failed = true; closeCapture(); continue; }
-        if (available > 2880 * int(sizeof(float))) {
+        const int frameBytes = PlankMicrophoneChannels * int(sizeof(float));
+        const int packetBytes = PlankMicrophoneFrames * frameBytes;
+        if (available > 2880 * frameBytes) {
             // Discard a stalled capture backlog, preserving a timestamp gap for
             // the Host. Never play seconds-old speech after a scheduling stall.
-            sampleTime += std::uint64_t(available / int(480*sizeof(float))) * 480;
+            sampleTime += std::uint64_t(available / packetBytes) * PlankMicrophoneFrames;
             SDL_ClearAudioStream(stream); continue;
         }
-        for (int i = 0; i < 6 && available >= int(480*sizeof(float)); ++i) {
-            float samples[480]; std::uint8_t packet[1275];
+        for (int i = 0; i < 6 && available >= packetBytes; ++i) {
+            float samples[PlankMicrophoneFrames * PlankMicrophoneChannels]; std::uint8_t packet[1275];
             if (SDL_GetAudioStreamData(stream, samples, sizeof(samples)) != int(sizeof(samples))) { failed = true; break; }
             const int bytes = opus_encode_float(encoder, samples, 480, packet, sizeof(packet));
             if (bytes < 1) { failed = true; break; }
