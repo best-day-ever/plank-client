@@ -26,6 +26,7 @@ HEADERS += \
     ../../app/backend/brokersessionstore.h \
     ../../app/backend/plankpasskey.h \
     ../../app/backend/macpreviewlaunch.h \
+    ../../app/backend/macmediafeatures.h \
     ../../app/backend/outputtopology.h \
     ../../app/backend/displayarrangement.h
 

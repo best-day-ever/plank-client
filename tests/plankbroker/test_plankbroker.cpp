@@ -932,40 +932,41 @@ void TestPlankBroker::brokeredMacLaunchIgnoresUdpPort()
 {
     NvOutputTopology topology;
     QVERIFY(NvOutputTopology::fromJson(fixedCaptureTopology(), topology));
-    // Launch schema 3: services carry the negotiated clipboard flag.
+    // Launch schema 5: services carry the negotiated clipboard and microphone flags.
+    const auto agreement = MacMediaFeatures::legacy(5, topology.appleEncodingMode);
+    QCOMPARE(agreement.launchSchema, 5);
+    constexpr int bitrate = 10000;
     QJsonObject reply {
-        {"schema_version", 3}, {"state", "connecting"},
+        {"schema_version", 5}, {"state", "connecting"},
         {"transport_token", QString::fromLatin1(QByteArray(32, 'k').toBase64())},
         {"udp_port", 28989}, {"max_udp_payload_size", 1200},
         {"capture", topology.toJson().value("capture")},
         {"services", QJsonObject {{"audio", true}, {"input", true}, {"pen", "normalized"},
-                                  {"cursor", "embedded"}, {"clipboard", false}}},
+                                  {"cursor", "embedded"}, {"clipboard", false}, {"microphone", false}}},
     };
     MacPreviewLaunch::Reply parsed;
-    // A schema-2 reply (no clipboard flag) is refused, never read as "clipboard off".
-    QJsonObject schema2 = reply;
-    schema2["schema_version"] = 2;
-    schema2["services"] = QJsonObject {{"audio", true}, {"input", true}, {"pen", "normalized"},
-                                       {"cursor", "embedded"}};
-    QVERIFY(!MacPreviewLaunch::parseReply(schema2, topology, 28989, 1200, parsed));
+    // A reply for another schema is refused, never reinterpreted.
+    QJsonObject schema3 = reply;
+    schema3["schema_version"] = 3;
+    QVERIFY(!MacPreviewLaunch::parseReply(schema3, topology, 28989, 1200, parsed, agreement, bitrate));
     // The clipboard flag is only accepted where this platform implements clipboard sync.
     QJsonObject withClipboard = reply;
     withClipboard["services"] = QJsonObject {{"audio", true}, {"input", true}, {"pen", "normalized"},
-                                             {"cursor", "embedded"}, {"clipboard", true}};
-    QCOMPARE(MacPreviewLaunch::parseReply(withClipboard, topology, 28989, 1200, parsed),
+                                             {"cursor", "embedded"}, {"clipboard", true}, {"microphone", false}};
+    QCOMPARE(MacPreviewLaunch::parseReply(withClipboard, topology, 28989, 1200, parsed, agreement, bitrate),
              NvOutputTopology::PlatformClipboardSyncFeature != 0);
     if (NvOutputTopology::PlatformClipboardSyncFeature != 0) QVERIFY(parsed.clipboard);
     // Direct: udp_port must equal the approved control port.
-    QVERIFY(!MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed));
-    QVERIFY(MacPreviewLaunch::parseReply(reply, topology, 28989, 1200, parsed));
+    QVERIFY(!MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, agreement, bitrate));
+    QVERIFY(MacPreviewLaunch::parseReply(reply, topology, 28989, 1200, parsed, agreement, bitrate));
     QCOMPARE(parsed.configuration.sessionPort, 28989u);
     // Brokered: the advertised 28989 is ignored; QUIC uses the leased port.
-    QVERIFY(MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, true));
+    QVERIFY(MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, agreement, bitrate, true));
     QCOMPARE(parsed.configuration.sessionPort, 29042u);
     reply["udp_port"] = 0;
-    QVERIFY(!MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, true));
+    QVERIFY(!MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, agreement, bitrate, true));
     reply["udp_port"] = "28989";
-    QVERIFY(!MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, true));
+    QVERIFY(!MacPreviewLaunch::parseReply(reply, topology, 29042, 1200, parsed, agreement, bitrate, true));
 }
 
 void TestPlankBroker::keepaliveCadence()
