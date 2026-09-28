@@ -5,7 +5,7 @@ import QtQuick.Layouts
 // Installer-only process uses native macOS controls, with no bookmark or stream.
 ApplicationWindow {
     id: window
-    title: qsTr("PLANK Client setup")
+    title: qsTr("BDE fernweh setup")
     width: Math.min(650, screen.desktopAvailableWidth)
     height: Math.min(permissions.implicitHeight + 44 + actions.implicitHeight, screen.desktopAvailableHeight)
     visible: true

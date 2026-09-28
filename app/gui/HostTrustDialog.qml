@@ -52,6 +52,7 @@ NavigableDialog {
         }
     }
     footer: DialogButtonBox {
+        background: Item {}
         Button {
             id: cancelButton
             text: qsTr("Cancel")

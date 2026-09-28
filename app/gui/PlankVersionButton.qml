@@ -33,7 +33,7 @@ NavigableToolButton {
     NavigableDialog {
         id: changelogDialog
         objectName: "changelogDialog"
-        title: qsTr("What's new in PLANK")
+        title: qsTr("What's new in BDE fernweh")
         modal: true
         dim: false
         focus: true

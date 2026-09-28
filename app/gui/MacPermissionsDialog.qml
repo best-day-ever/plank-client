@@ -7,7 +7,7 @@ Dialog {
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(680, parent.width - 40)
-    title: qsTr("PLANK Client permissions")
+    title: qsTr("BDE fernweh permissions")
     modal: true
     focus: true
     padding: 24
@@ -19,6 +19,19 @@ Dialog {
         radius: theme.radiusLarge
         border.width: 1
         border.color: theme.border
+    }
+    // Flush with the dialog, like NavigableDialog: the Material header
+    // draws a band in another shade across the title.
+    header: Label {
+        text: dialog.title
+        textFormat: Text.PlainText
+        color: theme.textPrimary
+        font.pointSize: 15
+        font.weight: Font.DemiBold
+        elide: Label.ElideRight
+        topPadding: dialog.padding
+        leftPadding: dialog.padding
+        rightPadding: dialog.padding
     }
     contentItem: MacPermissionsPane { objectName: "permissions"; showHeading: false }
     footer: DialogButtonBox {

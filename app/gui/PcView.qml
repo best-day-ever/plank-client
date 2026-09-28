@@ -12,6 +12,7 @@ CenteredGridView {
     property ComputerModel computerModel : createModel()
 
     id: pcGrid
+    objectName: qsTr("Local workstations")
 
     PlankTheme {
         id: theme
@@ -79,7 +80,7 @@ CenteredGridView {
     function addComplete(success)
     {
         if (!success) {
-            errorDialog.text = qsTr("Unable to connect to the specified PC.")
+            errorDialog.text = qsTr("Could not reach that workstation. Check the address and try again.")
 
             errorDialog.open()
         }
@@ -124,8 +125,8 @@ CenteredGridView {
         Label {
             height: searchSpinner.height
             elide: Label.ElideRight
-            text: StreamingPreferences.enableMdns ? qsTr("Searching for compatible hosts on your local network...")
-                                                  : qsTr("Automatic PC discovery is disabled. Add your PC manually.")
+            text: StreamingPreferences.enableMdns ? qsTr("Searching for workstations on your local network…")
+                                                  : qsTr("No workstations yet. Add one with the button at the top right.")
             color: theme.textSecondary
             font.pointSize: 15
             verticalAlignment: Text.AlignVCenter
@@ -243,7 +244,7 @@ CenteredGridView {
                           model.inSession ? qsTr("In Session") : qsTr("Online")
                     color: model.statusUnknown ? theme.textSecondary :
                            !model.online ? theme.textDisabled :
-                           model.inSession ? theme.danger : theme.success
+                           model.inSession ? theme.warning : theme.success
                     font.pointSize: 11
                     font.weight: Font.DemiBold
                     Layout.minimumWidth: implicitWidth
@@ -276,13 +277,13 @@ CenteredGridView {
             sourceComponent: NavigableMenu {
                 id: pcContextMenu
                 MenuItem {
-                    text: qsTr("PC Status: %1").arg(pcEntry.sessionStatusText())
+                    text: qsTr("Status: %1").arg(pcEntry.sessionStatusText())
                     font.bold: true
                     enabled: false
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Wake PC")
+                    text: qsTr("Wake workstation")
                     visible: computerModel.relayWakeEnabled && model.manualBookmark &&
                              !model.statusUnknown && !model.online
                     onTriggered: computerModel.requestRelayWake(index)
@@ -313,7 +314,7 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Rename PC")
+                    text: qsTr("Rename…")
                     onTriggered: {
                         renamePcDialog.pcIndex = index
                         renamePcDialog.originalName = model.name
@@ -323,7 +324,7 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Delete PC")
+                    text: qsTr("Remove…")
                     onTriggered: {
                         deletePcDialog.pcIndex = index
                         deletePcDialog.pcName = model.name
@@ -406,6 +407,7 @@ CenteredGridView {
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         onOpened: {
+            standardButton(Dialog.Ok).text = qsTr("Sign in")
             usernameField.text = computerModel.rememberedUsername(pcIndex)
             passwordField.clear()
             if (usernameField.text)
@@ -475,7 +477,6 @@ CenteredGridView {
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         height: Math.min(implicitHeight, parent.height - 20)
-        dim: false
         modal: true
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
@@ -521,6 +522,7 @@ CenteredGridView {
             editVirtualMode2.currentIndex = virtualMode2Index
             ensureVirtualModesCompatible()
             editAddressText.forceActiveFocus()
+            standardButton(Dialog.Ok).text = qsTr("Save")
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
                        editNicknameText.text.trim() !== "" &&
@@ -581,6 +583,7 @@ CenteredGridView {
             }
 
             Label {
+                Layout.topMargin: 10
                 text: qsTr("Host display layout")
                 font.bold: true
             }
@@ -650,6 +653,7 @@ CenteredGridView {
             }
 
             Label {
+                Layout.topMargin: 10
                 text: qsTr("Scaling")
                 font.bold: true
             }
@@ -675,6 +679,8 @@ CenteredGridView {
         property string pcName : ""
         text: qsTr("Are you sure you want to remove '%1'?").arg(pcName)
         standardButtons: Dialog.Yes | Dialog.No
+        acceptButtonText: qsTr("Remove")
+        rejectButtonText: qsTr("Cancel")
 
         onAccepted: {
             computerModel.deleteComputer(pcIndex)
@@ -683,7 +689,7 @@ CenteredGridView {
 
     NavigableDialog {
         id: renamePcDialog
-        property string label: qsTr("Enter the new name for this PC:")
+        property string label: qsTr("New name for this workstation:")
         property string originalName
         property int pcIndex : -1;
 

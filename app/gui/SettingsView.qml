@@ -554,14 +554,14 @@ Flickable {
                 }
 
                 PlankSettingLabel {
-                    text: qsTr("Mute host PC speakers while streaming")
+                    text: qsTr("Mute workstation speakers while streaming")
                 }
 
                 PlankCheckBox {
                     id: audioPcCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
-                    Accessible.name: qsTr("Mute host PC speakers while streaming")
+                    Accessible.name: qsTr("Mute workstation speakers while streaming")
                     checked: !StreamingPreferences.playAudioOnHost
                     onCheckedChanged: {
                         StreamingPreferences.playAudioOnHost = !checked
@@ -570,7 +570,7 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 5000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("You must restart any game currently in progress for this setting to take effect")
+                    ToolTip.text: qsTr("Keeps the workstation's own speakers silent while you stream.")
                 }
 
                 PlankSettingLabel {
@@ -971,6 +971,9 @@ Flickable {
                     enabled: !automaticQuicMtuCheckBox.checked
                     value: StreamingPreferences.quicUdpPayloadMtu === 0 ? 1344 :
                                StreamingPreferences.quicUdpPayloadMtu
+                    // A byte count: no locale group separator ("1.344").
+                    textFromValue: function(value) { return value.toString() }
+                    valueFromText: function(text) { return parseInt(text) }
                     onValueModified: {
                         if (enabled) {
                             StreamingPreferences.quicUdpPayloadMtu = value
@@ -1208,7 +1211,7 @@ Flickable {
                     RowLayout {
                         Layout.fillWidth: true
                         Button {
-                            text: qsTr("Restore defaults")
+                            text: qsTr("Restore default quality")
                             onClicked: {
                                 RemoteBroker.resetRemoteStreamDefaults()
                                 remoteDefaults.reload()
@@ -1224,106 +1227,6 @@ Flickable {
 
                 PlankSettingHelp {
                     text: qsTr("Used for every remote workstation that has no stream settings of its own. The built-in default is H.265 10-bit 4:4:4 (NVENC) at 50 Mbps on both routes.")
-                }
-
-                PlankSettingLabel {
-                    text: qsTr("Broker server")
-                }
-
-                PlankTextField {
-                    id: brokerHostField
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    text: StreamingPreferences.brokerHost
-                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
-                    onEditingFinished: {
-                        if (text.trim() !== "" && text.trim() !== StreamingPreferences.brokerHost) {
-                            StreamingPreferences.brokerHost = text.trim()
-                        }
-                    }
-                }
-
-                PlankSettingLabel {
-                    text: qsTr("Broker port")
-                }
-
-                SpinBox {
-                    id: brokerPortSpinBox
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    from: 1
-                    to: 65535
-                    editable: true
-                    value: StreamingPreferences.brokerPort
-                    textFromValue: function(value) { return value.toString() }
-                    valueFromText: function(text) { return parseInt(text) }
-                    onValueModified: {
-                        StreamingPreferences.brokerPort = value
-                    }
-                }
-
-                PlankSettingLabel {
-                    text: qsTr("Broker key pins (SPKI SHA-256)")
-                    Layout.alignment: Qt.AlignTop
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    spacing: 4
-
-                    TextArea {
-                        id: brokerPinsArea
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        wrapMode: TextEdit.WrapAnywhere
-                        font.family: "Menlo"
-                        font.pointSize: 9
-                        color: theme.textPrimary
-                        text: StreamingPreferences.brokerPins.join("\n")
-                        background: Rectangle {
-                            color: theme.surfaceRaised
-                            radius: theme.radiusSmall
-                            border.width: 1
-                            border.color: brokerPinsArea.activeFocus ? theme.accent : theme.border
-                        }
-                        onActiveFocusChanged: {
-                            if (!activeFocus) {
-                                var rejected = StreamingPreferences.setBrokerPinsFromText(text)
-                                brokerPinsHelp.rejectedCount = rejected.length
-                                text = StreamingPreferences.brokerPins.join("\n")
-                            }
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Button {
-                            text: qsTr("Restore defaults")
-                            onClicked: {
-                                StreamingPreferences.resetBrokerDefaults()
-                                brokerHostField.text = StreamingPreferences.brokerHost
-                                brokerPortSpinBox.value = StreamingPreferences.brokerPort
-                                brokerPinsArea.text = StreamingPreferences.brokerPins.join("\n")
-                                brokerPinsHelp.rejectedCount = 0
-                                passkeyRpIdField.text = StreamingPreferences.passkeyRpId
-                            }
-                        }
-                    }
-                }
-
-                Item {
-                    Layout.preferredWidth: 280
-                    Layout.preferredHeight: 1
-                }
-
-                PlankSettingHelp {
-                    id: brokerPinsHelp
-                    property int rejectedCount: 0
-                    text: (rejectedCount > 0 ? qsTr("%1 invalid entries were ignored. ").arg(rejectedCount) : "") +
-                          (StreamingPreferences.brokerPins.length === 0 ?
-                               qsTr("No pins: remote access will refuse to connect. ") : "") +
-                          qsTr("One SHA-256 of the broker's public key per line (current and spare). The broker is trusted only if its key matches a pin; public certificate authorities are not used.")
                 }
 
                 // Touch ID sign-in (bde-linux docs/plank-broker.md 13.4): a
@@ -1481,6 +1384,128 @@ Flickable {
                     }
                 }
 
+                Item {
+                    visible: RemoteBroker.passkeySupported
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Sign in to remote access with Touch ID instead of the authenticator code. The key never leaves this Mac; your admin enables it for your account.")
+                }
+            }
+        }
+
+        // Where remote access connects to and how it recognises the server:
+        // set up once by the studio, rarely touched by the person signing in.
+        PlankSection {
+            id: remoteServerGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            title: qsTr("Remote Access Server")
+
+            PlankSettingsGrid {
+
+                PlankSettingLabel {
+                    text: qsTr("Broker server")
+                }
+
+                PlankTextField {
+                    id: brokerHostField
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: StreamingPreferences.brokerHost
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
+                    onEditingFinished: {
+                        if (text.trim() !== "" && text.trim() !== StreamingPreferences.brokerHost) {
+                            StreamingPreferences.brokerHost = text.trim()
+                        }
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Broker port")
+                }
+
+                SpinBox {
+                    id: brokerPortSpinBox
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    from: 1
+                    to: 65535
+                    editable: true
+                    value: StreamingPreferences.brokerPort
+                    textFromValue: function(value) { return value.toString() }
+                    valueFromText: function(text) { return parseInt(text) }
+                    onValueModified: {
+                        StreamingPreferences.brokerPort = value
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Broker key pins (SPKI SHA-256)")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 4
+
+                    TextArea {
+                        id: brokerPinsArea
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        wrapMode: TextEdit.WrapAnywhere
+                        font.family: "Menlo"
+                        font.pointSize: 9
+                        color: theme.textPrimary
+                        text: StreamingPreferences.brokerPins.join("\n")
+                        background: Rectangle {
+                            color: theme.surfaceRaised
+                            radius: theme.radiusSmall
+                            border.width: 1
+                            border.color: brokerPinsArea.activeFocus ? theme.accent : theme.border
+                        }
+                        onActiveFocusChanged: {
+                            if (!activeFocus) {
+                                var rejected = StreamingPreferences.setBrokerPinsFromText(text)
+                                brokerPinsHelp.rejectedCount = rejected.length
+                                text = StreamingPreferences.brokerPins.join("\n")
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("Restore studio defaults")
+                            onClicked: {
+                                StreamingPreferences.resetBrokerDefaults()
+                                brokerHostField.text = StreamingPreferences.brokerHost
+                                brokerPortSpinBox.value = StreamingPreferences.brokerPort
+                                brokerPinsArea.text = StreamingPreferences.brokerPins.join("\n")
+                                brokerPinsHelp.rejectedCount = 0
+                                passkeyRpIdField.text = StreamingPreferences.passkeyRpId
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    id: brokerPinsHelp
+                    property int rejectedCount: 0
+                    text: (rejectedCount > 0 ? qsTr("%1 invalid entries were ignored. ").arg(rejectedCount) : "") +
+                          (StreamingPreferences.brokerPins.length === 0 ?
+                               qsTr("No pins: remote access will refuse to connect. ") : "") +
+                          qsTr("One SHA-256 of the broker's public key per line (current and spare). The broker is trusted only if its key matches a pin; public certificate authorities are not used.")
+                }
+
                 PlankSettingLabel {
                     visible: RemoteBroker.passkeySupported
                     text: qsTr("Touch ID sign-in domain")
@@ -1511,7 +1536,7 @@ Flickable {
 
                 PlankSettingHelp {
                     visible: RemoteBroker.passkeySupported
-                    text: qsTr("Sign in to remote access with Touch ID instead of the authenticator code. The key never leaves this Mac; your admin enables it for your account. The domain is your studio's identity domain (default ipa.bde.run).")
+                    text: qsTr("Your studio's identity domain, which Touch ID sign-in keys belong to (default ipa.bde.run).")
                 }
             }
         }
@@ -1531,6 +1556,11 @@ Flickable {
                 ColumnLayout {
                     visible: FernwehUpdater.supported
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    // Without the (often hidden) status line nothing in here
+                    // fills, which capped this column and shifted the whole
+                    // section's controls out of line with the others.
+                    Layout.maximumWidth: Number.POSITIVE_INFINITY
                     Button {
                         text: FernwehUpdater.available ? qsTr("Update to %1").arg(FernwehUpdater.version) : qsTr("Check for updates")
                         enabled: !FernwehUpdater.busy
@@ -1543,14 +1573,14 @@ Flickable {
                 }
 
                 PlankSettingLabel {
-                    text: qsTr("Automatically find PCs on the local network")
+                    text: qsTr("Automatically find workstations on the local network")
                 }
 
                 PlankCheckBox {
                     id: enableMdns
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
-                    Accessible.name: qsTr("Automatically find PCs on the local network")
+                    Accessible.name: qsTr("Automatically find workstations on the local network")
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged
                     ToolTip.visible: hovered && StreamingPreferences.mdnsDiscoveryManaged
