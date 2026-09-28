@@ -377,6 +377,9 @@ private:
 
     void toggleFullscreen();
 
+    // Ctrl+Alt+Shift+T: show or hide the PLANK stream toolbar.
+    void togglePlankToolbar();
+
     void updateOptimalWindowDisplayMode();
 
     enum class DecoderAvailability {

@@ -60,6 +60,9 @@ public:
     bool setReconnectStatus(const QString& text, bool warning);
     void notifyWindowChanged();
     void notifyFocusLost();
+    // Keyboard shortcut: show a hidden toolbar (auto-hide and pin apply as for
+    // the edge reveal) or hide a visible one.
+    void toggleFromShortcut(Uint64 now);
 
     bool observeMouseMotion(const SDL_MouseMotionEvent& event);
     Action handleMouseButton(const SDL_MouseButtonEvent& event);

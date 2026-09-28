@@ -736,6 +736,17 @@ void PlankToolbar::show(Uint64 now)
     }
 }
 
+void PlankToolbar::toggleFromShortcut(Uint64 now)
+{
+    if (m_Visible) {
+        hide();
+    } else {
+        show(now);
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK toolbar %s by shortcut",
+                m_Visible ? "shown" : "hidden");
+}
+
 void PlankToolbar::restartAutoHideTimer(Uint64 now)
 {
     m_HideDeadline = m_Pinned || m_ScreensPromptVisible ?

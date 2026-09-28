@@ -72,6 +72,14 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
                                                             !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
         break;
 
+    case KeyComboToggleToolbar:
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Detected toolbar toggle combo");
+        if (Session::get() != nullptr) {
+            Session::get()->togglePlankToolbar();
+        }
+        break;
+
     case KeyComboToggleMinimize:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected minimize combo");
@@ -211,7 +219,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         // the scancode of another.
 
         for (int i = 0; i < KeyComboMax; i++) {
-            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput) continue;
+            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput && i != KeyComboToggleToolbar) continue;
             if (m_SpecialKeyCombos[i].enabled && event->key == m_SpecialKeyCombos[i].keyCode) {
                 performSpecialKeyCombo(m_SpecialKeyCombos[i].keyCombo);
                 return;
@@ -219,7 +227,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         }
 
         for (int i = 0; i < KeyComboMax; i++) {
-            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput) continue;
+            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput && i != KeyComboToggleToolbar) continue;
             if (m_SpecialKeyCombos[i].enabled && event->scancode == m_SpecialKeyCombos[i].scanCode) {
                 performSpecialKeyCombo(m_SpecialKeyCombos[i].keyCombo);
                 return;

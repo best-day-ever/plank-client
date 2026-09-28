@@ -928,7 +928,7 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 10000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("On your next connection, forward keyboard shortcuts to the remote desktop while its window has focus. Fernweh shortcuts are disabled except Ctrl+Alt+Shift+Z, which leaves immersive mode for this session. macOS Accessibility permission is required. Some protected system keys remain local.")
+                    ToolTip.text: qsTr("On your next connection, forward keyboard shortcuts to the remote desktop while its window has focus. Fernweh shortcuts are disabled except Ctrl+Alt+Shift+T, which shows the toolbar, and Ctrl+Alt+Shift+Z, which leaves immersive mode for this session. macOS Accessibility permission is required. Some protected system keys remain local.")
                 }
 
             }

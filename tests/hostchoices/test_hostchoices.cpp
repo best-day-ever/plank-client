@@ -32,8 +32,8 @@ private slots:
         QTest::addColumn<QString>("filename");
         QTest::addColumn<QString>("choiceId");
         QTest::addColumn<QString>("captureId");
-        QTest::newRow("create") << "main.qml" << "addHostLayout" << "addCaptureSource";
-        QTest::newRow("edit") << "PcView.qml" << "editHostLayout" << "editCaptureSource";
+        QTest::newRow("create") << "main.qml" << "addHostLayout" << "addVideoSettings";
+        QTest::newRow("edit") << "PcView.qml" << "editHostLayout" << "editVideoSettings";
     }
 
     void bookmarkLayoutLabels() {

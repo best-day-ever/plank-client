@@ -3469,6 +3469,13 @@ void Session::updateOptimalWindowDisplayMode()
     SDL_SetWindowFullscreenMode(m_Window, &bestMode);
 }
 
+void Session::togglePlankToolbar()
+{
+    if (m_PlankToolbar) {
+        m_PlankToolbar->toggleFromShortcut(SDL_GetTicks());
+    }
+}
+
 void Session::toggleFullscreen()
 {
     bool fullScreen = !(SDL_GetWindowFlags(m_Window) & m_FullScreenFlag);
