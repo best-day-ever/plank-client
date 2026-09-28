@@ -94,6 +94,7 @@
 #ifdef PLANK_TRANSPORT
 #include "plank_transport.h"
 #include "plank_transport_control.h"
+#include "plank_transport_camera.h"
 #include "plank_transport_event.h"
 #include "plank_transport_input.h"
 #include "plank_transport_setup.h"
@@ -860,7 +861,11 @@ bool Session::startPlankTransportDataPlane(quint16 port,
         result = plank_transport_native_endpoint_wait_ready(endpoint, 12000);
     }
     if (result == PLANK_TRANSPORT_OK && m_MicrophoneNegotiated) {
-        result = plank_transport_native_microphone_enable(endpoint);
+        result = plank_transport_native_microphone_enable_version(endpoint, m_MicrophoneSchema);
+    }
+    if (result == PLANK_TRANSPORT_OK && m_CameraNegotiated &&
+            plank_transport_native_camera_enable(endpoint, m_MicrophoneNegotiated ? 1 : 0) != PLANK_TRANSPORT_OK) {
+        qWarning() << "PLANK camera lane is unavailable; other session media remain available";
     }
     if (result != PLANK_TRANSPORT_OK) {
         QByteArray error(512, '\0');
@@ -1123,6 +1128,10 @@ void Session::stopPlankTransportDataPlane()
         std::lock_guard<std::mutex> guard(m_MicrophoneMutex);
         m_Microphone.reset();
     }
+    {
+        std::lock_guard<std::mutex> guard(m_CameraMutex);
+        m_Camera.reset(); m_CameraRequested.store(false);
+    }
     LiSetPlankNativeControlSender(nullptr, nullptr);
     LiSetPlankNativeInputSender(nullptr, nullptr);
     if (m_PlankTransportEndpoint != nullptr) {
@@ -1383,6 +1392,19 @@ void Session::plankTransportDataReceiveLoop()
                 return;
             }
             switch (control.type) {
+            case PLANK_TRANSPORT_CONTROL_CAMERA_APPLIED:
+            case PLANK_TRANSPORT_CONTROL_CAMERA_KEYFRAME: {
+                std::uint64_t generation = 0; std::uint32_t value = 0;
+                if (!m_CameraNegotiated || plank_camera_control_decode(&control, &generation, &value)) {
+                    LiNotifyPlankHostTermination(-1); return;
+                }
+                std::lock_guard<std::mutex> guard(m_CameraMutex);
+                if (m_Camera) {
+                    if (control.type == PLANK_TRANSPORT_CONTROL_CAMERA_APPLIED) m_Camera->acknowledge(generation, value);
+                    else m_Camera->requestKeyframe(generation);
+                }
+                break;
+            }
             case PLANK_TRANSPORT_CONTROL_MICROPHONE_APPLIED: {
                 if (!m_MicrophoneNegotiated || control.payload_size != 12 ||
                         plank_transport_control_read_u32(control.payload + 8) > PLANK_TRANSPORT_MICROPHONE_UNAVAILABLE) {
@@ -1816,6 +1838,7 @@ bool Session::initialize()
 
     if (!snapshotClientDisplays()) {
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        emit displayLaunchError(tr("Unable to read the Client display layout. Check the connected displays and try again."));
         return false;
     }
 
@@ -3603,6 +3626,9 @@ bool Session::startConnectionAsync(bool reconnecting,
                 }
                 macLaunch = http->startMacPreview(topology, pin, m_StreamConfig.bitrate, quicUdpPayloadMtu);
                 m_MacClipboardNegotiated = macLaunch.clipboard;
+                m_MicrophoneNegotiated = macLaunch.microphone;
+                m_MicrophoneSchema = macLaunch.microphoneSchema;
+                m_CameraNegotiated = macLaunch.camera;
                 plankTransportPort = http->controlPort();
                 plankTransportCertificateSha256 = pin;
                 plankTransportToken = QString::fromLatin1(macLaunch.transportToken);
@@ -4096,8 +4122,14 @@ bool Session::startConnectionAsync(bool reconnecting,
         if (m_MicrophoneNegotiated) {
             if (!reconnecting) m_MicrophoneRequested.store(m_Preferences->microphoneAutomatic);
             m_Microphone.reset(new PlankMicrophone(m_PlankTransportEndpoint,
-                m_MicrophoneRequested, m_Preferences->microphoneAutomaticInput));
+                m_MicrophoneRequested, m_Preferences->microphoneAutomaticInput, m_MicrophoneSchema == 3));
         }
+    }
+    {
+        std::lock_guard<std::mutex> guard(m_CameraMutex);
+        m_CameraRequested.store(false);
+        if (m_CameraNegotiated) m_Camera.reset(new PlankCamera(m_PlankTransportEndpoint,
+            m_CameraRequested, m_Preferences->cameraDevice));
     }
     startPlankTransportMediaReceivers();
 #endif
@@ -5345,8 +5377,15 @@ void Session::execInternal()
                 m_PlankToolbar->setMicrophoneState(m_Microphone != nullptr,
                     m_Microphone ? m_Microphone->state() : PlankMicrophone::State::Off);
             }
+            {
+                std::lock_guard<std::mutex> guard(m_CameraMutex);
+                m_PlankToolbar->setCameraState(m_Camera != nullptr,
+                    m_Camera ? m_Camera->state() : PlankCamera::State::Off);
+            }
             const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
+            if (action == PlankToolbar::Action::ToggleCamera)
+                m_CameraRequested.store(!m_CameraRequested.load());
             if (action == PlankToolbar::Action::ToggleMicrophone)
                 m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
             if (action == PlankToolbar::Action::Disconnect) {
@@ -5423,6 +5462,8 @@ void Session::execInternal()
         // Native Quit changes explicit session state, not the SDL event queue.
         // Bound the wait even when a stalled Host produces no events.
         eventWaitTimeout = std::min(eventWaitTimeout, 50);
+        // Reconcile AppKit focus even when SDL omits a Spaces focus event.
+        m_InputHandler->refreshTabletFocus();
 #endif
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
             if (reconnectThread != nullptr &&
@@ -5477,6 +5518,8 @@ void Session::execInternal()
                         event.button.windowID == SDL_GetWindowID(m_Window)) {
                     const auto action =
                             m_PlankToolbar->handleMouseButton(event.button);
+                    if (action == PlankToolbar::Action::ToggleCamera)
+                        m_CameraRequested.store(!m_CameraRequested.load());
                     if (action == PlankToolbar::Action::ToggleMicrophone)
                         m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
                     if (action == PlankToolbar::Action::Disconnect) {
@@ -5954,6 +5997,10 @@ void Session::execInternal()
             if (m_PlankToolbar &&
                     event.button.windowID == SDL_GetWindowID(m_Window)) {
                 const auto action = m_PlankToolbar->handleMouseButton(event.button);
+                if (action == PlankToolbar::Action::ToggleCamera) {
+                    m_CameraRequested.store(!m_CameraRequested.load());
+                    break;
+                }
                 if (action == PlankToolbar::Action::ToggleMicrophone) {
                     m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
                     break;

@@ -144,6 +144,14 @@ public:
     int
     getCurrentGame(QString serverInfo);
 
+    static
+    bool
+    getPlankOccupied(QString serverInfo);
+
+    static
+    QString
+    getPlankSessionUser(QString serverInfo);
+
     QString
     getServerInfo(NvLogLevel logLevel, bool fastFail = false);
 
@@ -271,7 +279,8 @@ private:
                    NvLogLevel logLevel, HostTlsGuard::Mode trustMode = HostTlsGuard::Mode::Observe);
 
     QJsonObject postPlankJson(QString command, const QJsonObject& body);
-    QJsonObject postPinnedMacJson(const QString& path, const QJsonObject& body,
+    MacMediaFeatures::Agreement negotiateMacMedia(const QString& encodingMode, const QString& certificateSha256);
+    QJsonObject requestPinnedMacJson(const QString& path, const QJsonObject& body,
                                  const QString& certificateSha256);
 
     NvAddress m_Address;
@@ -285,6 +294,8 @@ private:
     QString m_WorkerInstance;
     PlankDesktopSignOut m_DesktopSignOut;
     QString m_DisplayArrangementError;
+    MacMediaFeatures::Agreement m_MacMediaAgreement;
+    QString m_MacMediaCertificate;
     HostTrustStore m_TrustStore;
     QString m_TrustEndpoint;
     QByteArray m_IdentityKey;

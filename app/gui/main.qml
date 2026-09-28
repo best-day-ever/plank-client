@@ -642,7 +642,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 model: addVideoSettings.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
-                    qsTr("Physical displays"),
+                    qsTr("Match Host"),
                     qsTr("One virtual display"),
                     qsTr("Two virtual displays (horizontal)")
                 ]

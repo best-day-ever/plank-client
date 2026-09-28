@@ -86,6 +86,11 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->authorizationState == NvComputer::AS_AUTHORIZED;
     case StatusUnknownRole:
         return computer->state == NvComputer::CS_UNKNOWN;
+    case InSessionRole:
+        return computer->state == NvComputer::CS_ONLINE && computer->plankOccupied;
+    case SessionUserRole:
+        return computer->state == NvComputer::CS_ONLINE && computer->plankOccupied ?
+                    computer->plankSessionUser : QString();
     case PlankHostVersionRole:
         return computer->plankHostMetadataVersion >= 1 ?
                     computer->plankHostVersion : QString();
@@ -135,6 +140,8 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[OnlineRole] = "online";
     names[AuthorizedRole] = "authorized";
     names[StatusUnknownRole] = "statusUnknown";
+    names[InSessionRole] = "inSession";
+    names[SessionUserRole] = "sessionUser";
     names[PlankHostVersionRole] = "plankHostVersion";
     names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
@@ -337,6 +344,12 @@ void ComputerModel::requestRelayWake(int computerIndex)
     connect(request, &RelayWakeClient::completed,
             this, &ComputerModel::relayWakeCompleted);
     request->start();
+}
+
+QString ComputerModel::rememberedUsername(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return QString();
+    return m_Computers[computerIndex]->rememberedUsername();
 }
 
 void ComputerModel::authenticateComputer(int computerIndex, QString username,

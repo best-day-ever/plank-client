@@ -20,6 +20,12 @@ Flickable {
 
     signal languageChanged()
 
+    Loader {
+        id: macPermissionsDialog
+        active: Qt.platform.os === "osx"
+        source: active ? "MacPermissionsDialog.qml" : ""
+    }
+
     boundsBehavior: Flickable.OvershootBounds
 
     contentWidth: width
@@ -492,6 +498,38 @@ Flickable {
                     }
                 }
 
+                PlankSettingLabel {
+                    text: qsTr("Forward camera")
+                    visible: StreamingPreferences.nativeCameraSupported
+                }
+                AutoResizingComboBox {
+                    id: cameraComboBox
+                    visible: StreamingPreferences.nativeCameraSupported
+                    Layout.fillWidth: true
+                    textRole: "name"
+                    valueRole: "id"
+                    model: []
+                    function refreshCameras() {
+                        let entries = [{id: "", name: qsTr("Automatic (first supported camera)")}]
+                        let devices = StreamingPreferences.cameraDevices()
+                        for (let i = 0; i < devices.length; ++i) entries.push(devices[i])
+                        let selected = entries.findIndex(item => item.id === StreamingPreferences.cameraDevice)
+                        if (selected < 0) {
+                            entries.push({id: StreamingPreferences.cameraDevice, name: qsTr("Selected camera (disconnected)")})
+                            selected = entries.length - 1
+                        }
+                        model = entries
+                        currentIndex = selected
+                    }
+                    Component.onCompleted: refreshCameras()
+                    onPressedChanged: if (pressed) refreshCameras()
+                    onActivated: StreamingPreferences.cameraDevice = currentValue
+                    Accessible.name: qsTr("Forward camera")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 1000
+                    ToolTip.text: qsTr("Camera starts off. Enable it from the session toolbar, then select PLANK Camera in the host application. Native H.264 or MJPEG cameras are supported.")
+                }
+
                 PlankSettingLabel { text: qsTr("Enable microphone") }
                 AutoResizingComboBox {
                     Layout.fillWidth: true
@@ -779,6 +817,18 @@ Flickable {
             title: qsTr("Input Settings")
 
             PlankSettingsGrid {
+
+                PlankSettingLabel {
+                    visible: Qt.platform.os === "osx"
+                    text: qsTr("macOS permissions")
+                }
+                Button {
+                    visible: Qt.platform.os === "osx"
+                    Layout.fillWidth: true
+                    text: qsTr("Review permissions…")
+                    enabled: macPermissionsDialog.status === Loader.Ready
+                    onClicked: macPermissionsDialog.item.open()
+                }
 
                 PlankSettingLabel {
                     text: qsTr("Capture system keyboard shortcuts")
