@@ -196,7 +196,7 @@ Item {
         asynchronous: true
 
         onLoaded: {
-            hintText.text = qsTr("Tip:") + " " + qsTr("Press %1 to disconnect your session").arg(qsTr("Ctrl+Alt+Shift+Q"))
+            hintText.text = qsTr("Tip:") + " " + qsTr("Press %1 to show the toolbar and %2 to disconnect your session").arg(qsTr("Ctrl+Alt+Shift+T")).arg(qsTr("Ctrl+Alt+Shift+Q"))
 
             // Garbage collect QML stuff before we start streaming,
             // since we'll probably be streaming for a while and we

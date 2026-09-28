@@ -142,6 +142,7 @@ private:
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
         KeyComboToggleKeyboardGrab,
+        KeyComboToggleToolbar,
         KeyComboMax
     };
 

@@ -119,6 +119,12 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
             WMUtils::isRunningDesktopEnvironment();
+
+    // Show or hide the PLANK stream toolbar without finding the reveal edge.
+    m_SpecialKeyCombos[KeyComboToggleToolbar].keyCombo = KeyComboToggleToolbar;
+    m_SpecialKeyCombos[KeyComboToggleToolbar].keyCode = SDLK_T;
+    m_SpecialKeyCombos[KeyComboToggleToolbar].scanCode = SDL_SCANCODE_T;
+    m_SpecialKeyCombos[KeyComboToggleToolbar].enabled = true;
 #ifdef Q_OS_MACOS
     auto ownsKeyboard = [this] { return isSystemKeyCaptureActive(); };
     m_MacQuitShortcut = std::make_unique<MacQuitShortcut>(ownsKeyboard);
