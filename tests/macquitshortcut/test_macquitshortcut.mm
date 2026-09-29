@@ -2,6 +2,7 @@
 #include <QtTest>
 #include <SDL3/SDL.h>
 #include "../../app/streaming/macquitshortcut.h"
+#include "../../app/streaming/planksessionevents.h"
 
 // Harmless target: exercise the real native Quit selector without terminating
 // the test process. No remote session or system input injection is involved.
@@ -32,6 +33,42 @@ class TestMacQuitShortcut : public QObject
     }
 
 private slots:
+    void streamWindowCloseDoesNotNeedGlobalQuit()
+    {
+        QVERIFY(SDL_Init(SDL_INIT_EVENTS));
+        SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        // Either presentation window can close while the other is still
+        // visible: the session must consume Close itself, without Quit.
+        for (Uint32 windowId : {1u, 2u}) {
+            SDL_Event close = {};
+            close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+            close.window.windowID = windowId;
+            QVERIFY(SDL_PushEvent(&close));
+            SDL_Event received = {};
+            QCOMPARE(SDL_PeepEvents(&received, 1, SDL_GETEVENT,
+                                   SDL_EVENT_WINDOW_CLOSE_REQUESTED,
+                                   SDL_EVENT_WINDOW_CLOSE_REQUESTED), 1);
+            QVERIFY(!SDL_HasEvent(SDL_EVENT_QUIT));
+            QVERIFY(PlankSessionEvents::closeRequestsDisconnect(received, true));
+        }
+        SDL_QuitSubSystem(SDL_INIT_EVENTS);
+    }
+    void unrelatedWindowCloseKeepsSession()
+    {
+        SDL_Event close = {};
+        close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+        close.window.windowID = 99;
+        QVERIFY(!PlankSessionEvents::closeRequestsDisconnect(close, false));
+    }
+    void presentationChangesKeepSession()
+    {
+        for (auto type : {SDL_EVENT_WINDOW_HIDDEN, SDL_EVENT_WINDOW_MINIMIZED,
+                          SDL_EVENT_WINDOW_FOCUS_LOST}) {
+            SDL_Event event = {};
+            event.type = type;
+            QVERIFY(!PlankSessionEvents::closeRequestsDisconnect(event, true));
+        }
+    }
     void initTestCase() { [NSApplication sharedApplication]; }
     void init()
     {
