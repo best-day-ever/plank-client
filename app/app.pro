@@ -350,6 +350,7 @@ HEADERS += \
     streaming/input/plankpointerlogic.h \
     streaming/input/plankmousemotion.h \
     streaming/session.h \
+    streaming/planksessionevents.h \
     streaming/plankdisplaymode.h \
     streaming/plankpresentation.h \
     streaming/planktoolbar.h \

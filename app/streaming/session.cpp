@@ -7,6 +7,7 @@
 #include "streaming/avsynccontroller.h"
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
+#include "streaming/planksessionevents.h"
 #include "streaming/input/plankmousemotion.h"
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
@@ -5489,6 +5490,15 @@ void Session::execInternal()
             goto DispatchDeferredCleanup;
         }
 #endif
+        // Handle Close before reconnect's presentation-only event drain. SDL
+        // does not synthesize Quit while another stream window is visible.
+        if (PlankSessionEvents::closeRequestsDisconnect(event,
+                event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+                windowForEvent(event.window.windowID) != nullptr)) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Stream window close requested; disconnecting session");
+            goto DispatchDeferredCleanup;
+        }
         const bool reconnectCompletion =
                 event.type == SDL_EVENT_USER &&
                 event.user.code == SDL_CODE_PLANK_REPLANK_COMPLETE;
