@@ -1,3 +1,15 @@
+## 1.1.030 — Audio synchronization and mainline release
+
+### Client
+- Keep audio aligned to Mac Host timestamps using smooth, bounded resampling.
+- Protect playback from excessive catch-up when the audio device needs more data.
+- Restore video-clock tracking on the Linux hardware-rendering path.
+- Include microphone and camera forwarding, Mac permission setup, and the recent connection and tablet fixes.
+
+### Host
+- Include PLANK Output, microphone and camera support on macOS, plus the recent login and display recovery fixes.
+- Upgrade Host and Client together: network recovery is incompatible with the previous published 1.0.143 release.
+
 ## 1.1.029 — Protect audio playback during synchronization
 
 ### Client
