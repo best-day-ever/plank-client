@@ -14,7 +14,7 @@ public:
 
     virtual void* getAudioBuffer(int* size);
 
-    virtual bool submitAudio(int bytesWritten);
+    virtual bool submitAudio(int bytesWritten, qint64 sourceTimeUs);
 
     virtual AudioFormat getAudioBufferFormat();
 

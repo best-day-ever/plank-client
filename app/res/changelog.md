@@ -1,3 +1,51 @@
+## 1.1.030 — Audio synchronization and mainline release
+
+### Client
+- Keep audio aligned to Mac Host timestamps using smooth, bounded resampling.
+- Protect playback from excessive catch-up when the audio device needs more data.
+- Restore video-clock tracking on the Linux hardware-rendering path.
+- Include microphone and camera forwarding, Mac permission setup, and the recent connection and tablet fixes.
+
+### Host
+- Include PLANK Output, microphone and camera support on macOS, plus the recent login and display recovery fixes.
+- Upgrade Host and Client together: network recovery is incompatible with the previous published 1.0.143 release.
+
+## 1.1.029 — Protect audio playback during synchronization
+
+### Client
+- Use actual audio-output requests to avoid draining playback while correcting sync.
+- Resume catch-up gradually after the output has recovered, without adding a new playback buffer.
+- Recover low audio headroom through smooth resampling, including when the device clock runs faster.
+- Record output shortfalls separately from network loss for real-world qualification.
+
+### Host
+- No changes.
+
+## 1.1.027 — Correct sustained audio drift
+
+### Client
+- Use Host audio/video timestamps to correct drifting sound when connected to a macOS Host.
+- Stop stale timing corrections during video interruptions and protect against audio-buffer starvation.
+- Keep the existing Linux Host synchronization policy; no Host update is required.
+
+## 1.1.026 — Restore hardware-rendered video timing
+
+### Client
+- Keep the video clock available to audio correction when hardware rendering consumes a frame.
+- Record source audio/video timing to help verify sustained synchronization.
+
+### Host
+- No changes.
+
+## 1.1.025 — Audio synchronization diagnostics
+
+### Client
+- Preserve Host audio timestamps through decoding and record estimated audio/video alignment for investigation.
+- Playback timing is unchanged; this candidate measures the reported drift before a synchronization correction is applied.
+
+### Host
+- No changes.
+
 ## 1.1.024 — Wacom focus and contact recovery
 
 ### Client

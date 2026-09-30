@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "streaming/streamutils.h"
+#include "streaming/avsynccontroller.h"
 #include "streaming/video/ffmpeg-renderers/pacer/pacer.h"
 
 // The only platform query in Pacer::initialize(). No display server is needed.
@@ -52,7 +53,15 @@ public:
         waitEntered.release();
         if (blockWait) acquire(waitRelease);
     }
-    void renderFrame(AVFrame*) override {
+    void renderFrame(AVFrame* frame) override {
+        if (consumeFrame) {
+            // EGL retains the buffer this way. The source PTS becomes unknown.
+            AVFrame* retained = av_frame_alloc();
+            if (!retained) qFatal("Unable to allocate retained test frame");
+            av_frame_move_ref(retained, frame);
+            movedPts = retained->pts;
+            av_frame_free(&retained);
+        }
         renderThread = SDL_GetCurrentThreadID();
         ++renders;
         renderEntered.release();
@@ -64,6 +73,8 @@ public:
     }
 
     bool threaded = true, blockWait = false, blockRender = false;
+    bool consumeFrame = false;
+    int64_t movedPts = AV_NOPTS_VALUE;
     int renders = 0, cleanups = 0; // Read only after the worker is joined.
     SDL_ThreadID renderThread = 0, cleanupThread = 0;
     QSemaphore waitEntered, waitRelease, renderEntered, renderRelease;
@@ -105,6 +116,8 @@ private slots:
     void cleanupTestCase() { SDL_Quit(); }
     void uninitializedCleanup();
     void mainThreadCleanup();
+    void videoClockSurvivesRenderer_data();
+    void videoClockSurvivesRenderer();
     void idleRenderThread();
     void stopWhileWaitingForRenderer();
     void stopDuringRender();
@@ -148,6 +161,54 @@ void TestPacerShutdown::mainThreadCleanup()
     QCOMPARE(renderer.cleanups, 1);
     QCOMPARE(renderer.cleanupThread, SDL_GetCurrentThreadID());
     QCOMPARE(releases.load(), 2);
+    SDL_FlushEvent(SDL_EVENT_USER);
+}
+
+void TestPacerShutdown::videoClockSurvivesRenderer_data()
+{
+    QTest::addColumn<bool>("consume");
+    QTest::addColumn<qint64>("pts");
+    QTest::newRow("retained-unknown") << false << qint64(AV_NOPTS_VALUE);
+    QTest::newRow("moved-unknown") << true << qint64(AV_NOPTS_VALUE);
+    QTest::newRow("retained-zero") << false << qint64(0);
+    QTest::newRow("moved-zero") << true << qint64(0);
+    QTest::newRow("retained-host-clock") << false << qint64(9876543210LL);
+    QTest::newRow("moved-host-clock") << true << qint64(9876543210LL);
+}
+
+void TestPacerShutdown::videoClockSurvivesRenderer()
+{
+    QFETCH(bool, consume);
+    QFETCH(qint64, pts);
+    Watchdog watchdog;
+    VIDEO_STATS stats {};
+    Renderer renderer;
+    renderer.threaded = false;
+    renderer.consumeFrame = consume;
+    std::atomic<int> releases {0};
+    PlankAvSync::resetVideoClock();
+    {
+        Pacer pacer(&renderer, &stats);
+        QVERIFY(pacer.initialize(nullptr, 60, false));
+        AVFrame* frame = frameWithReleaseCounter(releases);
+        frame->pts = pts;
+        const auto before = static_cast<uint32_t>(SDL_GetTicks());
+        pacer.submitFrame(frame);
+        pacer.renderOnMainThread();
+        const auto after = static_cast<uint32_t>(SDL_GetTicks());
+        const auto clock = PlankAvSync::readVideoClock();
+        QCOMPARE(clock.valid, pts >= 0);
+        if (clock.valid) {
+            QCOMPARE(clock.mediaTimeMs, pts);
+            // Unsigned differences also cover SDL's 32-bit clock wrap.
+            QVERIFY(uint32_t(clock.presentationTicks - before) <= uint32_t(after - before));
+        }
+        if (consume) QCOMPARE(renderer.movedPts, pts);
+    }
+    QCOMPARE(renderer.renders, 1);
+    QCOMPARE(stats.renderedFrames, uint32_t(1));
+    QCOMPARE(releases.load(), 1);
+    PlankAvSync::resetVideoClock();
     SDL_FlushEvent(SDL_EVENT_USER);
 }
 
