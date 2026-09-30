@@ -94,8 +94,9 @@ SLAudioRenderer::~SLAudioRenderer()
     }
 }
 
-bool SLAudioRenderer::submitAudio(int bytesWritten)
+bool SLAudioRenderer::submitAudio(int bytesWritten, qint64 sourceTimeUs)
 {
+    Q_UNUSED(sourceTimeUs);
     if (bytesWritten == 0) {
         // This buffer will be reused next time
         return true;

@@ -1347,7 +1347,7 @@ void Session::plankTransportAudioReceiveLoop()
         const int submitResult = LiSubmitPlankAudioPacket(
                     packetSize == 0 ? nullptr : packet.data(),
                     static_cast<int>(packetSize), info.frame_samples,
-                    info.missing_samples);
+                    info.missing_samples, info.pts);
         if (submitResult < 0) {
             qWarning() << "Native KyProto audio packet submission failed:"
                        << submitResult;

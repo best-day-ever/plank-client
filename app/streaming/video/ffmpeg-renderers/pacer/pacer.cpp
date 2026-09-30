@@ -422,11 +422,16 @@ void Pacer::renderFrame(AVFrame* frame)
         m_QueueLatencyHistogram.size() - 1)]++;
     m_MaxQueueLatencyMs = std::max(m_MaxQueueLatencyMs, queueLatencyMs);
 
+    // A renderer may retain the buffer with av_frame_move_ref(), which resets
+    // the source frame (including PTS). Save timing before transferring it.
+    const int64_t presentationTimeMs = frame->pts;
+    const int64_t tracePresentationTimeUs = frameFlowPtsUs(frame);
+
     // Render it
     const uint64_t renderStarted = ClientFrameFlowTrace::nowNs();
-    m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderBegin, frameFlowPtsUs(frame));
+    m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderBegin, tracePresentationTimeUs);
     m_VsyncRenderer->renderFrame(frame);
-    m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderEnd, frameFlowPtsUs(frame),
+    m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderEnd, tracePresentationTimeUs,
                            -1, -1, 0, -1, ClientFrameFlowTrace::nowNs() - renderStarted);
     Uint32 afterRender = SDL_GetTicks();
 
@@ -438,15 +443,15 @@ void Pacer::renderFrame(AVFrame* frame)
     m_MaxRendererCallLatencyMs = std::max(m_MaxRendererCallLatencyMs, rendererCallLatencyMs);
     m_VideoStats->renderedFrames++;
 
-    if (frame->pts >= 0) {
-        PlankAvSync::publishVideoClock(frame->pts, afterRender);
+    if (presentationTimeMs >= 0) {
+        PlankAvSync::publishVideoClock(presentationTimeMs, afterRender);
     }
 
-    if (m_AvSyncTelemetryEnabled && frame->pts >= 0 &&
+    if (m_AvSyncTelemetryEnabled && presentationTimeMs >= 0 &&
             (m_LastVideoTelemetryTime == 0 || afterRender - m_LastVideoTelemetryTime >= 1000)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "PLANK A/V video clock: media=%lld render=%u queue=%u renderer=%u",
-                    static_cast<long long>(frame->pts),
+                    static_cast<long long>(presentationTimeMs),
                     afterRender,
                     queueLatencyMs,
                     rendererCallLatencyMs);
