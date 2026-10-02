@@ -2187,11 +2187,13 @@ bool Session::snapshotClientDisplays()
     const int targetIndex = getTargetDisplayIndex();
     m_TargetDisplayId = StreamUtils::getDisplayId(targetIndex);
     const int displayCount = StreamUtils::getDisplayCount();
-    // The same probe the display dialogs use, so they agree with the stream.
-    // Elsewhere the probe needs the GUI thread; SDL's native size stands in.
-#ifdef Q_OS_DARWIN
+    // Windows and macOS run the SDL session on the GUI thread. Use the same
+    // monitor identities as display setup so saved on/off choices survive
+    // the handoff from Qt's monitor list to SDL's.
+#if defined(Q_OS_DARWIN) || defined(Q_OS_WIN32)
     const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
 #else
+    // Linux may run this session on a worker thread, where QScreen is unsafe.
     const QVector<NvClientDisplay> probed;
 #endif
     for (int index = 0; index < displayCount; ++index) {
@@ -2215,6 +2217,15 @@ bool Session::snapshotClientDisplays()
                     QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
                           snapshot.logicalBounds.w, snapshot.logicalBounds.h),
                     snapshot.nativeSize, probed);
+#ifdef Q_OS_WIN32
+        if (snapshot.probeView.key.isEmpty()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Could not match SDL output %u to a Windows display setup monitor",
+                         snapshot.displayId);
+            emit displayLaunchError(tr("Your displays changed during setup. Check the connected displays and try again."));
+            return false;
+        }
+#endif
         snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.probeView);
 #ifdef Q_OS_DARWIN
         if (matchMacDesktop) {

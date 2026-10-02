@@ -88,6 +88,8 @@ class TestDisplayPlanner : public QObject
 private slots:
     void monitorKeysPreferTheUuid();
     void fingerprintIgnoresSizeAndPosition();
+    void sessionUsesSavedWindowsMonitorChoice();
+    void ambiguousSessionMonitorStaysUnidentified();
     void duplicateMonitorsGetDistinctKeys();
     void labelsTheSetLeftToRight();
     void macMatchUsesTheFullscreenViewport();
@@ -159,6 +161,47 @@ void TestDisplayPlanner::fingerprintIgnoresSizeAndPosition()
     // A different set is a different fingerprint; no monitors, none at all.
     QVERIFY(ClientDisplayProbe::fingerprint({laptop}) != docked);
     QVERIFY(ClientDisplayProbe::fingerprint({}).isEmpty());
+}
+
+void TestDisplayPlanner::sessionUsesSavedWindowsMonitorChoice()
+{
+    // Windows setup identifies monitors by device path, while SDL originally
+    // rebuilt them with size-only keys and enabled the disabled portrait panel.
+    NvClientDisplay portrait = monitor(QStringLiteral("win:portrait"),
+                                       QRect(0, 0, 1280, 2160), QSize(1280, 2160));
+    NvClientDisplay uhd = monitor(QStringLiteral("win:uhd"),
+                                  QRect(1280, 0, 3840, 2160), QSize(3840, 2160));
+    uhd.main = true;
+    const QVector<NvClientDisplay> setup {portrait, uhd};
+    DisplayProfile::Profile saved = DisplayPlanner::proposal(setup);
+    saved.choice(portrait.key).on = false;
+
+    // Different Qt/SDL logical coordinates still resolve by unique native
+    // size, preserving the monitor keys and therefore the saved fingerprint.
+    const QVector<NvClientDisplay> session {
+        ClientDisplayProbe::forSessionDisplay(QRect(0, 0, 1024, 1728), QSize(1280, 2160), setup),
+        ClientDisplayProbe::forSessionDisplay(QRect(1024, 0, 3072, 1728), QSize(3840, 2160), setup),
+    };
+    QCOMPARE(ClientDisplayProbe::fingerprint(session), ClientDisplayProbe::fingerprint(setup));
+    DisplayProfile::Profile loaded;
+    QVERIFY(DisplayProfile::decode(DisplayProfile::encode(saved), loaded));
+    const DisplayPlanner::Plan plan = DisplayPlanner::plan(session, loaded, arrangementHost(
+        DisplayArrangement::Capabilities::fleetDefault()));
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QCOMPARE(plan.includedCount(), 1);
+    QCOMPARE(plan.capture, QSize(3840, 2160));
+    QCOMPARE(plan.arrangement, QStringLiteral("1:3840x2160+0+0:auto"));
+}
+
+void TestDisplayPlanner::ambiguousSessionMonitorStaysUnidentified()
+{
+    const QVector<NvClientDisplay> setup {
+        monitor(QStringLiteral("win:first"), QRect(0, 0, 1920, 1080), QSize(1920, 1080)),
+        monitor(QStringLiteral("win:second"), QRect(1920, 0, 1920, 1080), QSize(1920, 1080)),
+    };
+    const NvClientDisplay unmatched = ClientDisplayProbe::forSessionDisplay(
+        QRect(0, 0, 1536, 864), QSize(1920, 1080), setup);
+    QVERIFY(unmatched.key.isEmpty());
 }
 
 void TestDisplayPlanner::duplicateMonitorsGetDistinctKeys()

@@ -38,11 +38,10 @@ QVector<NvClientDisplay> probe();
 
 // The Session's view of one SDL display, from the same probe the dialogs use:
 // the probed entry with the same logical bounds gives the panel (nativeSize)
-// and the desktop backing (backingSize). With no matching entry (no probe on
-// this platform, or the display changed in between) the SDL native size is the
-// panel and the desktop size is unknown. The Session resolves Match client and
-// sizes the stream with exactly this, so the dialog and the stream cannot
-// disagree about which size is the panel and which is the desktop.
+// and the desktop backing (backingSize). Qt and SDL can report different
+// logical bounds on a scaled Windows desktop; a unique native pixel size can
+// still identify that monitor. Ambiguous matches stay unidentified rather
+// than borrowing another monitor's saved choice.
 inline NvClientDisplay forSessionDisplay(const QRect& sdlLogicalBounds, const QSize& sdlNativeSize,
                                          const QVector<NvClientDisplay>& probed)
 {
@@ -51,6 +50,16 @@ inline NvClientDisplay forSessionDisplay(const QRect& sdlLogicalBounds, const QS
             return display;
         }
     }
+    const NvClientDisplay* nativeMatch = nullptr;
+    for (const NvClientDisplay& display : probed) {
+        if (display.nativeSize != sdlNativeSize) continue;
+        if (nativeMatch != nullptr) {
+            nativeMatch = nullptr;
+            break;
+        }
+        nativeMatch = &display;
+    }
+    if (nativeMatch != nullptr) return *nativeMatch;
     return {sdlLogicalBounds, sdlNativeSize, QSize()};
 }
 
