@@ -2844,7 +2844,7 @@ void TestPlankBroker::enrollmentTextsAreGeneric()
     const PasswordPolicy policy {12, 3};
     QCOMPARE(noticeText(Notice::Denied, policy),
              QStringLiteral("We couldn't start setup. Check your username and one-time password. "
-                            "If it's more than 7 days old, ask the studio for a new one."));
+                            "If they are correct, ask the studio to check your account access."));
     QCOMPARE(noticeText(Notice::AlreadyEnrolled, policy),
              QStringLiteral("Your account is already set up. Sign in with your password and authenticator code."));
     QVERIFY(noticeText(Notice::None, policy).isEmpty());
