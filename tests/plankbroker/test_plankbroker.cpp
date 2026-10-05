@@ -1348,10 +1348,17 @@ void TestPlankBroker::remoteDisplaySetupDialogAndSessionAgree()
     QCOMPARE(modes, pairDialog.modes);
     QCOMPARE(fitted, pairDialog.fitted);
 
-    // No probe entry for these bounds (no probe on this platform, or the
-    // display moved): the SDL native size is the panel, the desktop unknown.
-    const NvClientDisplay unprobed = ClientDisplayProbe::forSessionDisplay(
+    // Scaled Qt/SDL bounds can differ while a unique native size still
+    // identifies the same display and retains its desktop backing size.
+    const NvClientDisplay scaled = ClientDisplayProbe::forSessionDisplay(
                 QRect(0, 0, 1512, 982), QSize(3024, 1964), probed);
+    QCOMPARE(scaled.bounds, oneX.bounds);
+    QCOMPARE(scaled.backingSize, oneX.backingSize);
+    QCOMPARE(NvOutputTopology::clientMatchTarget(scaled), QSize(1920, 1200));
+
+    // Without a probe the SDL native size is the panel; desktop is unknown.
+    const NvClientDisplay unprobed = ClientDisplayProbe::forSessionDisplay(
+                QRect(0, 0, 1512, 982), QSize(3024, 1964), {});
     QCOMPARE(unprobed.bounds, QRect(0, 0, 1512, 982));
     QCOMPARE(unprobed.nativeSize, QSize(3024, 1964));
     QVERIFY(!unprobed.backingSize.isValid());
