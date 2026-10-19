@@ -12,6 +12,10 @@ TEMPLATE = lib
 # Build a static library
 # Upstream callback lifetime guards use C11 atomics, including on MSVC.
 CONFIG += staticlib c11
+win32-msvc* {
+    # MSVC gates its C11 atomics implementation separately from /std:c11.
+    QMAKE_CFLAGS += /experimental:c11atomics
+}
 
 # Include global qmake defs
 include(../globaldefs.pri)
