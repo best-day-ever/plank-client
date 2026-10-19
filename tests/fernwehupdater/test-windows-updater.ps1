@@ -9,16 +9,16 @@ function Create-Package([string]$name, [string]$product, [string]$upgrade, [stri
     $path = Join-Path $directory $name
     $database = $engine.OpenDatabase($path, 3)
     $view = $database.OpenView('CREATE TABLE `Property` (`Property` CHAR(72) NOT NULL, `Value` CHAR(0) LOCALIZABLE PRIMARY KEY `Property`)')
-    $view.Execute()
-    $view.Close()
+    [void]$view.Execute()
+    [void]$view.Close()
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view)
     foreach ($entry in @(@('ProductName', $product), @('UpgradeCode', $upgrade), @('ProductVersion', $version))) {
         $view = $database.OpenView("INSERT INTO ``Property`` (``Property``, ``Value``) VALUES ('$($entry[0])', '$($entry[1])')")
-        $view.Execute()
-        $view.Close()
+        [void]$view.Execute()
+        [void]$view.Close()
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view)
     }
-    $database.Commit()
+    [void]$database.Commit()
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database)
     return $path
 }

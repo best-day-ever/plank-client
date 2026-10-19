@@ -23,12 +23,12 @@ try {
     $database = $engine.OpenDatabase($Installer, 0)
     function Read-MsiProperty([string]$name) {
         $view = $database.OpenView('SELECT `Value` FROM `Property` WHERE `Property` = ''' + $name + '''')
-        $view.Execute()
+        [void]$view.Execute()
         $record = $view.Fetch()
         if (-not $record) { throw 'The downloaded update has incomplete package information.' }
         $value = $record.StringData(1)
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($record)
-        $view.Close()
+        [void]$view.Close()
         [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view)
         return $value
     }
