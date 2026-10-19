@@ -345,6 +345,7 @@ private slots:
 
     // Real TLS through the active Qt TLS backend
     void tlsPinnedRoundTrip();
+    void tlsUpdateDownloadChecksPinAndHash_data();
     void tlsUpdateDownloadChecksPinAndHash();
     void tlsWrongPinSendsNothing();
     void tlsRateLimitOnBearerCall();
@@ -1031,6 +1032,13 @@ void TestPlankBroker::tlsPinnedRoundTrip()
     QVERIFY(!server.request.contains("Authorization:"));
 }
 
+void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash_data()
+{
+    QTest::addColumn<QString>("path");
+    QTest::newRow("Mac DMG") << QStringLiteral("/v1/client-updates/macos-arm64/1.0.139.dmg");
+    QTest::newRow("Windows unsigned MSI") << QStringLiteral("/v1/client-updates/windows-x64/1.1.040.msi");
+}
+
 void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash()
 {
     TestBrokerServer server(QSsl::TlsV1_3OrLater);
@@ -1038,7 +1046,7 @@ void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash()
     server.body = QByteArrayLiteral("not-a-real-dmg");
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    const QString path = QStringLiteral("/v1/client-updates/macos-arm64/1.0.139.dmg");
+    QFETCH(QString, path);
     const QByteArray digest = QCryptographicHash::hash(server.body, QCryptographicHash::Sha256).toHex();
     const QString output = dir.filePath(QStringLiteral("release.dmg"));
     const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
@@ -1046,7 +1054,7 @@ void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash()
     QFile file(output);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), server.body);
-    QVERIFY(server.requestLog.last().startsWith("GET /v1/client-updates/macos-arm64/1.0.139.dmg HTTP/1.1\r\n"));
+    QVERIFY(server.requestLog.last().startsWith("GET " + path.toUtf8() + " HTTP/1.1\r\n"));
 
     QVERIFY(QFile::remove(output));
     try {
@@ -1056,6 +1064,16 @@ void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash()
         QCOMPARE(error.kind(), PlankBrokerError::Protocol);
     }
     QVERIFY(!QFile::exists(output));
+
+    // Truncation, excess bytes and HTTP redirects never leave an installable file.
+    for (const qint64 size : {qint64(server.body.size() - 1), qint64(server.body.size() + 1)}) {
+        QVERIFY_THROWS_EXCEPTION(PlankBrokerError, client.download(path, output, size, digest));
+        QVERIFY(!QFile::exists(output));
+    }
+    server.status = "302 Found";
+    QVERIFY_THROWS_EXCEPTION(PlankBrokerError, client.download(path, output, server.body.size(), digest));
+    QVERIFY(!QFile::exists(output));
+    server.status = "200 OK";
 
     server.request.clear();
     try {
@@ -2844,7 +2862,7 @@ void TestPlankBroker::enrollmentTextsAreGeneric()
     const PasswordPolicy policy {12, 3};
     QCOMPARE(noticeText(Notice::Denied, policy),
              QStringLiteral("We couldn't start setup. Check your username and one-time password. "
-                            "If it's more than 7 days old, ask the studio for a new one."));
+                            "If they are correct, ask the studio to check your account access."));
     QCOMPARE(noticeText(Notice::AlreadyEnrolled, policy),
              QStringLiteral("Your account is already set up. Sign in with your password and authenticator code."));
     QVERIFY(noticeText(Notice::None, policy).isEmpty());

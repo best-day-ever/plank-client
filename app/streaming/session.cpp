@@ -2258,7 +2258,11 @@ bool Session::snapshotClientDisplays()
             return false;
         }
 #endif
+#ifdef Q_OS_DARWIN
+        snapshot.matchTarget = snapshot.macBackingSize;
+#else
         snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.probeView);
+#endif
         m_ClientDisplays.append(snapshot);
     }
 

@@ -7,7 +7,7 @@
 
 class StreamingPreferences;
 
-// Checks the trusted broker for a newer Mac release and installs it on click.
+// Checks the trusted broker for a newer Mac or Windows release and installs it on click.
 class FernwehUpdater : public QObject
 {
     Q_OBJECT
@@ -34,6 +34,7 @@ signals:
 
 private:
     PlankBrokerClient::Config brokerConfig() const;
+    bool waitForStreams();
     StreamingPreferences* m_Preferences;
     bool m_Busy = false;
     QString m_Version;

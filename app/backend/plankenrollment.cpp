@@ -44,7 +44,7 @@ QString noticeText(Notice notice, const PasswordPolicy& policy)
     case Notice::Denied:
         return QCoreApplication::translate("PlankEnrollment",
             "We couldn't start setup. Check your username and one-time password. "
-            "If it's more than 7 days old, ask the studio for a new one.");
+            "If they are correct, ask the studio to check your account access.");
     case Notice::DeniedAfterPasswordChange:
         return QCoreApplication::translate("PlankEnrollment",
             "Setup was interrupted, but your new password is saved. "

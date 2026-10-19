@@ -337,6 +337,7 @@ HEADERS += \
     backend/plankbroker.h \
     backend/plankbrokerclient.h \
     backend/fernwehupdater.h \
+    backend/fernwehupdatepolicy.h \
     backend/plankenrollment.h \
     backend/plankpasskey.h \
     backend/qrencoder.h \
