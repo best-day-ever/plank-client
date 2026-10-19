@@ -1054,6 +1054,7 @@ void TestPlankBroker::tlsUpdateDownloadChecksPinAndHash()
     QFile file(output);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), server.body);
+    file.close(); // Windows does not unlink a file while this reader holds it open.
     QVERIFY(server.requestLog.last().startsWith("GET " + path.toUtf8() + " HTTP/1.1\r\n"));
 
     QVERIFY(QFile::remove(output));
