@@ -875,6 +875,18 @@ public:
         return unhandledStateFlags == 0;
     }
 
+    bool letterboxesAgainstLiveDrawable() override
+    {
+        // Keep input aligned with each target's current backing-pixel drawable.
+        return true;
+    }
+
+    bool letterboxesDecodedFrameSize() override
+    {
+        // Both source-rectangle and canvas slices are fitted from actual frames.
+        return true;
+    }
+
 private:
     bool m_HwAccel;
     AVBufferRef* m_HwContext;
