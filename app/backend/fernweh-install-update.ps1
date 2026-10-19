@@ -11,8 +11,10 @@ $ErrorActionPreference = 'Stop'
 try {
     # The client only starts this helper once all streams have ended. Wait for
     # its normal process shutdown before asking Windows Installer to replace it.
-    $parent = Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue
-    if ($parent) { $parent.WaitForExit() }
+    if (-not $ValidateOnly) {
+        $parent = Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue
+        if ($parent) { $parent.WaitForExit() }
+    }
     if ((Get-Item -LiteralPath $Installer).Length -ne $ExpectedSize -or
         (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ExpectedHash) {
         throw 'The downloaded update failed its integrity check. Please check for updates again.'
