@@ -60,13 +60,13 @@ try {
     if ($database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
     if ($engine) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }
     if (-not $ValidateOnly) {
-    # Only task-owned files are removed; settings and credentials are untouched.
-    Remove-Item -LiteralPath $Installer -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue
-    $directory = Split-Path -Parent $Installer
-    if (-not (Get-ChildItem -LiteralPath $directory -Force)) {
-        Remove-Item -LiteralPath $directory -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $Executable) { Start-Process -FilePath $Executable }
+        # Only task-owned files are removed; settings and credentials are untouched.
+        Remove-Item -LiteralPath $Installer -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue
+        $directory = Split-Path -Parent $Installer
+        if (-not (Get-ChildItem -LiteralPath $directory -Force)) {
+            Remove-Item -LiteralPath $directory -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $Executable) { Start-Process -FilePath $Executable }
     }
 }

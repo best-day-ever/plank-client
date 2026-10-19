@@ -339,6 +339,15 @@ ApplicationWindow {
                 onClicked: FernwehUpdater.install()
             }
 
+            Label {
+                visible: FernwehUpdater.status !== ""
+                text: FernwehUpdater.status
+                color: theme.textSecondary
+                font.pointSize: 9
+                Layout.maximumWidth: 280
+                wrapMode: Text.WordWrap
+            }
+
             // This label will appear when the window gets too small and
             // we need to ensure the toolbar controls don't collide
             Label {

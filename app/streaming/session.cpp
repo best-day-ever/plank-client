@@ -5115,7 +5115,6 @@ void Session::execInternal()
         QThreadPool::globalInstance()->start(
                     new DeferredSessionCleanupTask(this));
         return;
-
     }
 
     if (!m_IsFullScreen) {
