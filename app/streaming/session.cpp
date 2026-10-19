@@ -303,8 +303,10 @@ void Session::clSetHdrMode(bool enabled)
 
 void Session::clRawHidControl(const unsigned char* data, unsigned int length)
 {
-    if (s_ActiveSession != nullptr && s_ActiveSession->m_InputHandler != nullptr) {
-        s_ActiveSession->m_InputHandler->handleRawHidControl(data, length);
+    if (s_ActiveSession != nullptr) {
+        s_ActiveSession->m_InputCallbacks.invoke([&](SdlInputHandler& input) {
+            input.handleRawHidControl(data, length);
+        });
     }
 }
 
@@ -330,28 +332,41 @@ void Session::clVideoBitrateApplied(
 
 void Session::clCursorChunk(const unsigned char* data, unsigned int length)
 {
-    if (s_ActiveSession == nullptr || s_ActiveSession->m_InputHandler == nullptr) {
+    if (s_ActiveSession == nullptr) {
         return;
     }
-    if (s_ActiveSession->m_InputHandler->handleRemoteCursorChunk(data, length)) {
-        SDL_Event event = {};
-        event.type = SDL_EVENT_USER;
-        event.user.code = SDL_CODE_PLANK_CURSOR;
-        SDL_PushEvent(&event);
-    }
+    s_ActiveSession->m_InputCallbacks.invoke([&](SdlInputHandler& input) {
+        if (input.handleRemoteCursorChunk(data, length)) {
+            SDL_Event event = {};
+            event.type = SDL_EVENT_USER;
+            event.user.code = SDL_CODE_PLANK_CURSOR;
+            SDL_PushEvent(&event);
+        }
+    });
 }
 
 void Session::clCursorPosition(const unsigned char* data, unsigned int length)
 {
-    if (s_ActiveSession == nullptr || s_ActiveSession->m_InputHandler == nullptr) {
+    if (s_ActiveSession == nullptr) {
         return;
     }
-    if (s_ActiveSession->m_InputHandler->handleRemoteCursorPosition(data, length)) {
-        SDL_Event event = {};
-        event.type = SDL_EVENT_USER;
-        event.user.code = SDL_CODE_PLANK_CURSOR_POSITION;
-        SDL_PushEvent(&event);
-    }
+    s_ActiveSession->m_InputCallbacks.invoke([&](SdlInputHandler& input) {
+        if (input.handleRemoteCursorPosition(data, length)) {
+            SDL_Event event = {};
+            event.type = SDL_EVENT_USER;
+            event.user.code = SDL_CODE_PLANK_CURSOR_POSITION;
+            SDL_PushEvent(&event);
+        }
+    });
+}
+
+void Session::destroyInputHandler()
+{
+    // Control callbacks keep running until deferred connection cleanup. Retire
+    // their borrowed target before destroying the input handler on this thread.
+    m_InputCallbacks.clear();
+    delete m_InputHandler;
+    m_InputHandler = nullptr;
 }
 
 void Session::notifyDecodedFrameSize(int width, int height)
@@ -2176,14 +2191,6 @@ int Session::getTargetDisplayIndex() const
 bool Session::snapshotClientDisplays()
 {
     m_ClientDisplays.clear();
-#ifdef Q_OS_DARWIN
-    bool matchMacDesktop;
-    {
-        QReadLocker lock(&m_Computer->lock);
-        matchMacDesktop = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT &&
-            m_Computer->plankHostLayout == NvOutputTopology::MatchClientHostLayout;
-    }
-#endif
     const int targetIndex = getTargetDisplayIndex();
     m_TargetDisplayId = StreamUtils::getDisplayId(targetIndex);
     const int displayCount = StreamUtils::getDisplayCount();
@@ -2200,19 +2207,44 @@ bool Session::snapshotClientDisplays()
         ClientDisplaySnapshot snapshot;
         snapshot.displayId = StreamUtils::getDisplayId(index);
         snapshot.primary = snapshot.displayId == SDL_GetPrimaryDisplay();
-        SDL_DisplayMode nativeMode;
-        SDL_Rect safeArea;
         if (snapshot.displayId == 0 ||
                 !SDL_GetDisplayBounds(snapshot.displayId,
-                                      &snapshot.logicalBounds) ||
-                !StreamUtils::getNativeDesktopMode(index, &nativeMode,
-                                                   &safeArea)) {
+                                      &snapshot.logicalBounds)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Unable to snapshot client display %d: %s",
+                         index, SDL_GetError());
+            return false;
+        }
+
+#ifdef Q_OS_DARWIN
+        {
+            SDL_DisplayMode currentMode;
+            SDL_Rect matchedBounds;
+            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
+                    &currentMode, &matchedBounds, m_IsFullScreen &&
+                    MacDisplayGeometry::useNativeFullscreen(displayCount))) return false;
+            snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
+                                             matchedBounds.w, matchedBounds.h);
+            snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
+            // Stream sizing and presentation must use the active backing-pixel
+            // canvas for every Host/layout, not the panel's advertised native
+            // mode. A virtual display's native mode can differ from its current
+            // size. Keep the logical bounds separately for Mac Match Client.
+            snapshot.nativeSize = snapshot.macBackingSize;
+            // A Mac host creates a desktop of exactly these pixels.
+            snapshot.matchTarget = snapshot.macBackingSize;
+        }
+#else
+        SDL_DisplayMode nativeMode;
+        SDL_Rect safeArea;
+        if (!StreamUtils::getNativeDesktopMode(index, &nativeMode, &safeArea)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Unable to snapshot client display %d: %s",
                          index, SDL_GetError());
             return false;
         }
         snapshot.nativeSize = QSize(nativeMode.w, nativeMode.h);
+#endif
         snapshot.probeView = ClientDisplayProbe::forSessionDisplay(
                     QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
                           snapshot.logicalBounds.w, snapshot.logicalBounds.h),
@@ -2226,23 +2258,10 @@ bool Session::snapshotClientDisplays()
             return false;
         }
 #endif
-        snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.probeView);
 #ifdef Q_OS_DARWIN
-        if (matchMacDesktop) {
-            SDL_DisplayMode currentMode;
-            SDL_Rect matchedBounds;
-            if (!StreamUtils::getMacCurrentDisplayModeForBounds(snapshot.logicalBounds,
-                    &currentMode, &matchedBounds, m_IsFullScreen &&
-                    MacDisplayGeometry::useNativeFullscreen(displayCount))) return false;
-            snapshot.macMatchedBounds = QRect(matchedBounds.x, matchedBounds.y,
-                                             matchedBounds.w, matchedBounds.h);
-            snapshot.macBackingSize = QSize(currentMode.w, currentMode.h);
-            // Presentation tiles must share the matched backing-pixel canvas,
-            // not mix differently scaled panel-native pixel dimensions.
-            snapshot.nativeSize = snapshot.macBackingSize;
-            // A Mac host creates a desktop of exactly these pixels.
-            snapshot.matchTarget = snapshot.macBackingSize;
-        }
+        snapshot.matchTarget = snapshot.macBackingSize;
+#else
+        snapshot.matchTarget = NvOutputTopology::clientMatchTarget(snapshot.probeView);
 #endif
         m_ClientDisplays.append(snapshot);
     }
@@ -4949,6 +4968,7 @@ void Session::execInternal()
     m_InputHandler = new SdlInputHandler(*m_Preferences,
                                          m_StreamConfig.width,
                                          m_StreamConfig.height);
+    m_InputCallbacks.publish(m_InputHandler);
 
     m_ConnectionStartCancelled.store(false);
     AsyncConnectionStartThread asyncConnThread(this);
@@ -4980,8 +5000,7 @@ void Session::execInternal()
 
     // If the connection failed, clean up and abort the connection.
     if (!m_AsyncConnectionSuccess) {
-        delete m_InputHandler;
-        m_InputHandler = nullptr;
+        destroyInputHandler();
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
         return;
@@ -5078,8 +5097,7 @@ void Session::execInternal()
                          "SDL_CreateWindow() failed: %s",
                          SDL_GetError());
 
-            delete m_InputHandler;
-            m_InputHandler = nullptr;
+            destroyInputHandler();
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
             QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
             return;
@@ -5092,8 +5110,7 @@ void Session::execInternal()
             !createSecondaryWindows(defaultWindowFlags, windowName)) {
         SDL_DestroyWindow(m_Window);
         m_Window = nullptr;
-        delete m_InputHandler;
-        m_InputHandler = nullptr;
+        destroyInputHandler();
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         QThreadPool::globalInstance()->start(
                     new DeferredSessionCleanupTask(this));
@@ -6165,8 +6182,7 @@ DispatchDeferredCleanup:
 
     // Destroy the input handler now. This must be destroyed
     // before allowing the UI to continue execution.
-    delete m_InputHandler;
-    m_InputHandler = nullptr;
+    destroyInputHandler();
     clearPlankReconnectCredentials();
     {
         QWriteLocker lock(&m_Computer->lock);

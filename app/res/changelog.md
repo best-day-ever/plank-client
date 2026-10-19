@@ -1,3 +1,60 @@
+## 1.1.037 — Client session recovery candidate
+
+### Client
+- Fix tablet-cursor cleanup that could crash the Linux client on Wayland.
+- Prevent late input callbacks from using a destroyed session input handler.
+- Handle failed toolbar/cursor allocations safely and improve stalled-callback diagnostics.
+- Retain all Wacom recovery changes from the previous candidate.
+
+### Host
+- No additional Host changes; retains the previous candidate's Wacom recovery fixes.
+
+## 1.1.036 — Wacom recovery candidate
+
+### Client
+- Improve Linux tablet handling during focus changes and reconnects.
+- Keep tablet control requests from blocking pen input.
+- Distribute the Mac Client directly as a signed PKG, without a disk-image wrapper.
+
+### Host
+- Release held pen and button state reliably when a Linux session ends or is replaced.
+- Recover unhealthy forwarded tablet devices while preserving healthy device identities.
+- Handle short input bursts without immediately ending the connection.
+
+## 1.1.035 — Consolidated mainline build
+
+### Client
+- Combine the Mac window-scaling improvements and Linux Wacom recovery fixes in one build.
+- Preserve fine detail in smaller Mac windows and keep the original stream size when leaving fullscreen.
+- Keep Linux pen input and cursor updates responsive during tablet queries and temporary connection congestion.
+
+### Host
+- Improve Linux GPU downscaling while preserving color precision.
+- Improve tablet reply, suspend and reconnect handling.
+
+## 1.1.034 — Scaling quality candidate
+
+### Client
+- Use the Mac's current display resolution when choosing the stream size.
+- Smoothly reduce video in smaller Mac windows without skipping fine lines.
+- Keep the stream resolution unchanged when switching between fullscreen and windowed mode.
+
+### Host
+- Improve Linux NvFBC/NVENC downscaling with GPU area averaging, preserving RGB identity and 10-bit conversion.
+- Keep exact-size capture conversion unchanged.
+
+## 1.1.033 — Wacom recovery candidate
+
+### Client
+- Preserve clicks and releases when the connection temporarily cannot accept more input.
+- Keep Linux tablet queries from blocking pen input and cursor updates.
+- Update the Wayland tablet cursor independently of video playback.
+
+### Host
+- Preserve tablet replies through temporary connection congestion.
+- Improve Linux tablet suspend and reconnect handling without changing a healthy tablet's identity.
+- Keep pen pressure and contact intact when pressing pen buttons.
+
 ## 1.1.030 — Audio synchronization and mainline release
 
 ### Client

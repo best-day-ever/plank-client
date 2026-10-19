@@ -1,3 +1,4 @@
+#include "fernwehupdatepolicy.h"
 #include "plankbrokerclient.h"
 #include "plankenrollment.h"
 
@@ -342,8 +343,7 @@ void PlankBrokerClient::download(const QString& path, const QString& destination
                                  qint64 expectedSize, const QByteArray& expectedSha256) const
 {
     checkConfigured();
-    if (!path.startsWith(QStringLiteral("/v1/client-updates/macos-arm64/")) ||
-            path.contains(QStringLiteral("..")) || expectedSize <= 0 ||
+    if (!FernwehUpdatePolicy::downloadPathAllowed(path) || expectedSize <= 0 ||
             expectedSize > 2LL * 1024 * 1024 * 1024 || expectedSha256.size() != 64) {
         throw PlankBrokerError(PlankBrokerError::Protocol);
     }
@@ -363,7 +363,8 @@ void PlankBrokerClient::download(const QString& path, const QString& destination
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
     request.setAttribute(QNetworkRequest::CacheSaveControlAttribute, false);
-    request.setRawHeader("Accept", "application/x-apple-diskimage");
+    request.setRawHeader("Accept", path.endsWith(QLatin1String(".msi")) ?
+                             "application/octet-stream" : "application/x-apple-diskimage");
 
     QFile output(destination);
     if (!output.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {

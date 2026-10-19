@@ -1,4 +1,7 @@
 #include "fernwehupdater.h"
+#include "fernwehupdatepolicy.h"
+#include "streaming/session.h"
+#include <QTimer>
 
 #include "settings/streamingpreferences.h"
 
@@ -6,19 +9,18 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QPointer>
 #include <QProcess>
-#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QThreadPool>
-#include <QVersionNumber>
 
 namespace {
-const QString feedPath = QStringLiteral("/v1/client-updates/macos-arm64");
-const QRegularExpression versionPattern(QStringLiteral("^[0-9]{1,9}\\.[0-9]{1,9}\\.[0-9]{1,9}$"));
-const QRegularExpression shaPattern(QStringLiteral("^[0-9a-f]{64}$"));
+#ifdef Q_OS_WIN32
+constexpr bool windowsUpdate = true;
+#else
+constexpr bool windowsUpdate = false;
+#endif
+const QString feedPath = FernwehUpdatePolicy::feedPath(windowsUpdate);
 }
 
 FernwehUpdater::FernwehUpdater(StreamingPreferences* preferences)
@@ -28,7 +30,7 @@ FernwehUpdater::FernwehUpdater(StreamingPreferences* preferences)
 
 bool FernwehUpdater::supported() const
 {
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || (defined(Q_OS_WIN32) && defined(_M_X64))
     return true;
 #else
     return false;
@@ -59,22 +61,14 @@ void FernwehUpdater::check(bool manual)
         try {
             const auto response = PlankBrokerClient(config).get(feedPath);
             if (response.status == 200) {
-                const auto doc = QJsonDocument::fromJson(response.body);
-                const auto object = doc.object();
-                version = object.value(QStringLiteral("version")).toString();
-                url = object.value(QStringLiteral("url")).toString();
-                sha = object.value(QStringLiteral("sha256")).toString().toLatin1();
-                size = static_cast<qint64>(object.value(QStringLiteral("size")).toDouble());
-                if (!doc.isObject() || !versionPattern.match(version).hasMatch() ||
-                        url != feedPath + QLatin1Char('/') + version + QStringLiteral(".dmg") ||
-                        !shaPattern.match(QString::fromLatin1(sha)).hasMatch() ||
-                        size <= 0 || size > 2LL * 1024 * 1024 * 1024 ||
-                        object.value(QStringLiteral("size")).toDouble() != size) {
+                FernwehUpdatePolicy::Release release;
+                if (!FernwehUpdatePolicy::parse(response.body, windowsUpdate, release)) {
                     error = QObject::tr("The update information was invalid.");
-                    version.clear();
-                } else if (QVersionNumber::compare(QVersionNumber::fromString(version),
-                                                   QVersionNumber::fromString(QCoreApplication::applicationVersion())) <= 0) {
-                    version.clear();
+                } else if (FernwehUpdatePolicy::newer(release.version, QCoreApplication::applicationVersion())) {
+                    version = release.version;
+                    url = release.url;
+                    sha = release.sha256;
+                    size = release.size;
                 }
             } else if (response.status != 404) {
                 error = QObject::tr("The update server returned an error.");
@@ -102,16 +96,18 @@ void FernwehUpdater::check(bool manual)
 void FernwehUpdater::install()
 {
     if (!supported() || m_Busy || m_Version.isEmpty()) return;
-    const QString script = QDir(QCoreApplication::applicationDirPath())
-                               .filePath(QStringLiteral("../Resources/fernweh-install-update.sh"));
+    if (waitForStreams()) return;
+    QString script, canonicalApp;
+#ifndef Q_OS_WIN32
+    script = QDir(QCoreApplication::applicationDirPath())
+                 .filePath(QStringLiteral("../Resources/fernweh-install-update.sh"));
     if (!QFileInfo::exists(script)) {
         m_Status = tr("The updater is missing from this app.");
         emit changed();
         return;
     }
-    const QString app = QDir(QCoreApplication::applicationDirPath())
-                            .canonicalPath() + QStringLiteral("/../..");
-    const QString canonicalApp = QDir(app).canonicalPath();
+    canonicalApp = QDir(QCoreApplication::applicationDirPath() + QStringLiteral("/../..")).canonicalPath();
+#endif
     m_Busy = true;
     m_Status = tr("Downloading BDE fernweh %1…").arg(m_Version);
     emit changed();
@@ -126,7 +122,7 @@ void FernwehUpdater::install()
         if (!temp.isValid()) {
             error = QObject::tr("Could not prepare the update download.");
         } else {
-            file = temp.filePath(version + QStringLiteral(".dmg"));
+            file = temp.filePath(version + (windowsUpdate ? QStringLiteral(".msi") : QStringLiteral(".dmg")));
             try {
                 PlankBrokerClient(config).download(url, file, size, sha);
                 temp.setAutoRemove(false);
@@ -142,8 +138,32 @@ void FernwehUpdater::install()
                 emit self->changed();
                 return;
             }
+            // A stream may have started while the background download ran.
+            if (Session::get() != nullptr) {
+                QFile::remove(file);
+                QDir().rmdir(QFileInfo(file).absolutePath());
+                self->m_Busy = false;
+                self->install();
+                return;
+            }
+#ifdef Q_OS_WIN32
+            const QString helper = QDir(QFileInfo(file).absolutePath()).filePath(QStringLiteral("install-update.ps1"));
+            const QString powershell = QDir(qEnvironmentVariable("SystemRoot"))
+                .filePath(QStringLiteral("System32/WindowsPowerShell/v1.0/powershell.exe"));
+            const bool started = QFile::copy(QStringLiteral(":/backend/fernweh-install-update.ps1"), helper) &&
+                QProcess::startDetached(powershell, {
+                    QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-STA"),
+                    QStringLiteral("-WindowStyle"), QStringLiteral("Hidden"),
+                    QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"), QStringLiteral("-File"), helper,
+                    QStringLiteral("-Installer"), file, QStringLiteral("-ExpectedHash"), QString::fromLatin1(self->m_Sha256),
+                    QStringLiteral("-ExpectedSize"), QString::number(self->m_Size), QStringLiteral("-ExpectedVersion"), version,
+                    QStringLiteral("-ParentProcessId"), QString::number(QCoreApplication::applicationPid()),
+                    QStringLiteral("-Executable"), QCoreApplication::applicationFilePath()});
+            if (!started) QFile::remove(helper);
+#else
             const bool started = QProcess::startDetached(QStringLiteral("/bin/bash"),
                 {script, file, canonicalApp, QString::number(QCoreApplication::applicationPid()), version});
+#endif
             if (!started) {
                 QFile::remove(file);
                 QDir().rmdir(QFileInfo(file).absolutePath());
@@ -155,4 +175,17 @@ void FernwehUpdater::install()
             }
         });
     });
+}
+
+bool FernwehUpdater::waitForStreams()
+{
+    if (Session::get() == nullptr) return false;
+    m_Busy = true;
+    m_Status = tr("The update will install after your workstation session ends.");
+    emit changed();
+    QTimer::singleShot(1000, this, [this]() {
+        m_Busy = false;
+        install();
+    });
+    return true;
 }
