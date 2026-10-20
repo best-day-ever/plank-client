@@ -26,6 +26,7 @@ struct PlankTransportNativeEndpoint {
     bool outgoingFinished = false;
     bool cancelIncomingAtMaterialize = false;
     unsigned outgoingOfferCount = 0, clientCancels = 0;
+    bool crossHostOffer = false, collisionInProgress = false, crossedHostPublished = false;
     QString protocolError;
     PlankClipboardFileOfferBegin outgoingBegin {};
     std::vector<OfferedEntry> outgoingEntries;
@@ -35,6 +36,9 @@ struct PlankTransportNativeEndpoint {
     size_t outgoingIndex = 0;
     std::deque<std::vector<std::uint8_t>> incomingControl, incomingData, sentControl, sentData;
 };
+
+static void queueHostFile(PlankTransportNativeEndpoint& endpoint,
+                          const std::string& name, const QByteArray& content);
 
 // A small Host-side PCF2 receiver. It chooses materialization/ranges itself,
 // validates Client sequences, reconstructs bytes, and checks complete hashes.
@@ -118,6 +122,13 @@ static bool receiveOutgoingRecord(PlankTransportNativeEndpoint& endpoint,
     if (record.type == PLANK_CLIPBOARD_FILE_OFFER_END) {
         if (data || record.payload_size || endpoint.outgoingEntries.size() !=
                 endpoint.outgoingBegin.entry_count) return false;
+        if (endpoint.crossHostOffer && endpoint.outgoingOfferCount == 1) {
+            // Deliberately do not ACK this first Client offer. The Host starts
+            // its own offer on the same control lane, winning arbitration.
+            endpoint.collisionInProgress = true;
+            queueHostFile(endpoint, "host-cross.exr", "crossed host pixels");
+            return true;
+        }
         if (endpoint.cancelOutgoing) {
             PlankClipboardFileTerminal terminal {0, PLANK_CLIPBOARD_FILE_REASON_CANCELLED_BY_USER, 0};
             std::array<uint8_t, PLANK_CLIPBOARD_FILE_TERMINAL_BYTES> payload {};
@@ -167,14 +178,25 @@ static int32_t sendRecord(PlankTransportNativeEndpoint* endpoint, const uint8_t*
 {
     std::lock_guard<std::mutex> lock(endpoint->mutex);
     (data ? endpoint->sentData : endpoint->sentControl).emplace_back(bytes, bytes + size);
-    if (endpoint->acceptOutgoing) {
+    PlankClipboardFileRecord record {};
+    const bool decoded = plank_clipboard_file_decode(bytes, size, data ?
+            PLANK_CLIPBOARD_FILE_DATA_PREFIX_BYTES + PLANK_CLIPBOARD_FILE_DATA_BYTES :
+            PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &record);
+    const std::array<uint8_t, 16> crossedOffer {{42}};
+    const bool crossedHostResponse = endpoint->collisionInProgress && decoded &&
+            record.session_epoch == 1 && std::memcmp(record.offer_id, crossedOffer.data(), 16) == 0;
+    if (endpoint->acceptOutgoing && !crossedHostResponse) {
         if (!receiveOutgoingRecord(*endpoint, bytes, size, data)) {
             endpoint->protocolError = QStringLiteral("Invalid outgoing PCF2 sequence or content");
             return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
         }
         return PLANK_TRANSPORT_OK;
     }
-    PlankClipboardFileRecord record {};
+    if (crossedHostResponse && record.type == PLANK_CLIPBOARD_FILE_TRANSFER_READY) {
+        endpoint->crossedHostPublished = true;
+        endpoint->collisionInProgress = false;
+        return PLANK_TRANSPORT_OK;
+    }
     if (!data && plank_clipboard_file_decode(bytes, size,
             PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &record) &&
             record.type == PLANK_CLIPBOARD_FILE_MATERIALIZE) {
@@ -515,6 +537,58 @@ private slots:
         QCOMPARE(ready.load(), 0);
         QVERIFY(endpoint.sentControl.empty());
         QVERIFY(endpoint.sentData.empty());
+        QVERIFY(setLocalText(L"file test complete"));
+    }
+    void crossedHostOfferPublishesThenRetriesOriginalLocalSnapshot()
+    {
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        QFile original(temporary.filePath(QStringLiteral("original.exr")));
+        QVERIFY(original.open(QIODevice::WriteOnly));
+        QCOMPARE(original.write("original local pixels"), qint64 {21}); original.close();
+        QVERIFY(setLocalFiles({original.fileName()}));
+        PlankTransportNativeEndpoint endpoint;
+        endpoint.acceptOutgoing = true; endpoint.crossHostOffer = true;
+        std::atomic_int ready {0}; std::atomic_bool hostPublication {false};
+        WindowsFileClipboard clipboard(&endpoint, "bidirectional", [&] { ++ready; }, [&] {
+            hostPublication = true; return true;
+        });
+        clipboard.start();
+        QVERIFY(clipboard.beginPasteOnMainThread());
+        QTRY_VERIFY_WITH_TIMEOUT(hostPublication.load(), 2000);
+        QCOMPARE(ready.load(), 0);
+        {
+            std::lock_guard<std::mutex> lock(endpoint.mutex);
+            QCOMPARE(endpoint.outgoingOfferCount, 1u);
+            QVERIFY(endpoint.sentData.empty()); // first Client manifest was never ACKed
+        }
+        // The Host wins first. Publication replaces CF_HDROP with its received
+        // files, so the subsequent outgoing offer must use the original saved
+        // selection rather than polling the now-replaced Windows clipboard.
+        QVERIFY(clipboard.publishPendingHostFilesOnMainThread());
+        QVERIFY(OpenClipboard(nullptr));
+        const auto drop = static_cast<HDROP>(GetClipboardData(CF_HDROP));
+        const UINT length = drop ? DragQueryFileW(drop, 0, nullptr, 0) : 0;
+        std::vector<wchar_t> path(length + 1);
+        if (drop) DragQueryFileW(drop, 0, path.data(), length + 1);
+        CloseClipboard();
+        QVERIFY(length > 0);
+        QFile hostFile(QString::fromWCharArray(path.data()));
+        QVERIFY(hostFile.open(QIODevice::ReadOnly));
+        QCOMPARE(hostFile.readAll(), QByteArray("crossed host pixels")); hostFile.close();
+        QTRY_COMPARE_WITH_TIMEOUT(ready.load(), 1, 3000);
+        QVERIFY(clipboard.takeReadyPasteOnMainThread());
+        QVERIFY(!clipboard.takeReadyPasteOnMainThread());
+        clipboard.stop();
+        QVERIFY2(endpoint.protocolError.isEmpty(), qPrintable(endpoint.protocolError));
+        QVERIFY(endpoint.crossedHostPublished);
+        QCOMPARE(endpoint.outgoingOfferCount, 2u);
+        QCOMPARE(endpoint.clientCancels, 0u); // yield has no destructive cancellation
+        QCOMPARE(endpoint.outgoingEntries.size(), size_t {1});
+        QCOMPARE(endpoint.outgoingEntries.front().name, std::string("original.exr"));
+        QCOMPARE(endpoint.outgoingEntries.front().received, QByteArray("original local pixels"));
+        QVERIFY(endpoint.outgoingEntries.front().complete);
+        QVERIFY(!QFile::exists(hostFile.fileName()));
         QVERIFY(setLocalText(L"file test complete"));
     }
     void focusCancellationDoesNotSwallowNewPasteOrReleaseStaleReady()

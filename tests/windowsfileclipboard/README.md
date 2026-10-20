@@ -10,7 +10,10 @@ cancellation with source-handle release, focus cancellation followed immediately
 by a new paste, stale ready-event rejection, duplicate-name preflight, and
 direction/disabled-mode restrictions. Native recovery cases also exercise a Host
 CANCEL while the data lane is silent and publication retry after another process
-releases its native clipboard lock.
+releases its native clipboard lock. A crossed-offer case starts a Host offer
+before ACKing the Client manifest, proves Host publication wins first, then
+checks the retried Client offer still transfers its original saved local
+selection despite CF_HDROP having been replaced by the Host files.
 Native cases also check
 frozen source handles, hard-link rejection, hashed incoming file publication as
 CF_HDROP, integrity failure without publication, rejection of reserved device
