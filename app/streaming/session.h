@@ -28,13 +28,14 @@
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
 #include "plankreconnectpolicy.h"
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
 #include "clipboardpolltimer.h"
 #endif
 
 class ComputerManager;
 class PlankToolbar;
-class MacClipboardSync;
+class ClipboardSync;
+class WindowsFileClipboard;
 #if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
 class MacFileClipboard;
 #endif
@@ -297,7 +298,7 @@ private:
                                           const unsigned char* payload,
                                           size_t payloadLength);
 #endif
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     void startClipboardSync();
     void stopClipboardSync();
     void startClipboardPollTimer();
@@ -306,6 +307,7 @@ private:
     bool clipboardSyncEnabled() const;
 #ifdef PLANK_TRANSPORT
     bool beginFileClipboardPasteOnMainThread();
+    bool deferTextClipboardPasteOnMainThread();
     void injectRemoteFilePasteOnMainThread();
 #endif
 #endif
@@ -589,11 +591,16 @@ private:
 
     Overlay::OverlayManager m_OverlayManager;
     std::unique_ptr<PlankToolbar> m_PlankToolbar;
-#ifdef Q_OS_MACOS
-    std::unique_ptr<MacClipboardSync> m_ClipboardSync;
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    std::unique_ptr<ClipboardSync> m_ClipboardSync;
     ClipboardPollTimer m_ClipboardPollTimer;
+    std::atomic_bool m_TextClipboardPastePending {false};
 #ifdef PLANK_TRANSPORT
+#ifdef Q_OS_WIN
+    std::unique_ptr<WindowsFileClipboard> m_FileClipboard;
+#else
     std::unique_ptr<MacFileClipboard> m_FileClipboard;
+#endif
 #endif
 #endif
     std::atomic<float> m_CurrentRenderedFps;

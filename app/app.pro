@@ -786,3 +786,17 @@ isEmpty(PLANK_VERSION) {
 }
 VERSION = "$$section(PLANK_VERSION, -, 0, 0)"
 DEFINES += PLANK_VERSION_STR=\\\"$$PLANK_VERSION\\\"
+
+# Shared clipboard protocol state; only native clipboard access varies by OS.
+macx|win32 {
+    SOURCES += streaming/clipboardsync.cpp
+    HEADERS += streaming/clipboardsync.h streaming/clipboardplatform.h streaming/clipboardpolltimer.h streaming/plankclipboard.h
+}
+win32 {
+    SOURCES += streaming/windowsclipboard.cpp
+    contains(CONFIG, plank-transport) {
+        SOURCES += streaming/windowsfileclipboard.cpp
+        HEADERS += streaming/windowsfileclipboard.h
+        LIBS += -ladvapi32
+    }
+}
