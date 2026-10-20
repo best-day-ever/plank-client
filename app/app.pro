@@ -380,9 +380,16 @@ contains(DEFINES, HAVE_LIBINPUT_TABLET) {
 
 HEADERS += streaming/input/pentiltencoding.h
 
-macx {
+win32 {
+    SOURCES += streaming/input/windowsrawwacom.cpp
+    HEADERS += streaming/input/windowsrawwacom.h streaming/input/windowswacomlogic.h \
+        streaming/input/macrawwacomlogic.h streaming/input/linuxwacomreportworker.h
+    LIBS += -lCfgmgr32
+}
+
+macx|win32 {
     # Normalized-pen forwarding via SDL3's pen events (SDL_EVENT_PEN_*),
-    # which its Cocoa backend derives from AppKit tablet events. Header-only;
+    # from AppKit on macOS and Windows Ink on Windows. Header-only;
     # see streaming/input/macpen.h.
     HEADERS += streaming/input/macpen.h
 }
