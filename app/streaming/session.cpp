@@ -5375,7 +5375,7 @@ void Session::execInternal()
             return true;
         case SDL_CODE_PLANK_FILE_CLIPBOARD_READY:
 #if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
-            if (reinterpret_cast<std::uintptr_t>(event.user.data1) == m_ClipboardEventGeneration &&
+            if (reinterpret_cast<std::uintptr_t>(userEvent.data1) == m_ClipboardEventGeneration &&
                     m_FileClipboard && clipboardSyncEnabled() && anyPresentationWindowFocused()
 #ifdef Q_OS_WIN
                     && m_FileClipboard->takeReadyPasteOnMainThread()
@@ -5386,7 +5386,7 @@ void Session::execInternal()
         case SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH:
 #if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
             if (m_FileClipboard != nullptr &&
-                    reinterpret_cast<std::uintptr_t>(event.user.data1) == m_ClipboardEventGeneration) {
+                    reinterpret_cast<std::uintptr_t>(userEvent.data1) == m_ClipboardEventGeneration) {
                 m_FileClipboard->publishPendingHostFilesOnMainThread();
             }
 #endif
