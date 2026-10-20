@@ -1,5 +1,6 @@
 #include "windowsrawwacom.h"
 #include "windowswacomlogic.h"
+#include "macrawwacomasync.h" // Shared bounded lifecycle barrier.
 #include "macrawwacomlogic.h" // Platform-independent bounded wire parser.
 #include "linuxwacomreportworker.h" // Epoch-isolated asynchronous report operations.
 
@@ -64,32 +65,50 @@ std::string physicalDevice(const char* path)
 }
 }
 
-class WindowsRawWacomInput::Impl {
+class WindowsRawWacomInput::Impl : public std::enable_shared_from_this<Impl> {
 public:
-    explicit Impl(std::function<void()> activity) : activity(std::move(activity)),
-        thread([this] { run(); }) {}
-    ~Impl() {
-        active = false;
+    explicit Impl(std::function<void()> callback) : activity(std::move(callback)) {}
+    void start() { thread = std::thread([self = shared_from_this()] { self->run(); }); }
+    ~Impl() { if (thread.joinable()) thread.detach(); }
+    bool barrier(std::uint64_t ticket) {
+        changed.notify_all();
+        if (lifecycle.wait(ticket, std::chrono::seconds(2))) return true;
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Windows Wacom release barrier timed out");
+        return false;
+    }
+    void shutdown() {
+        {
+            std::lock_guard<std::mutex> lock(activityMutex);
+            activity = nullptr;
+        }
+        barrier(lifecycle.stop());
+        shutdownRequested = true;
         stopping = true;
         changed.notify_all();
-        thread.join();
+        const bool exited = lifecycle.waitExited(std::chrono::seconds(2));
+        if (thread.joinable()) {
+            if (exited) thread.join();
+            else thread.detach(); // Worker owns its state until Windows returns.
+        }
+        if (!exited) SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Windows Wacom shutdown exceeded deadline");
+    }
+    void tabletActivity() {
+        std::lock_guard<std::mutex> lock(activityMutex);
+        if (activity && lifecycle.canForward()) activity();
     }
     struct Interface {
         HidHandle handle;
         std::vector<unsigned char> descriptor;
         WindowsWacom::ReportSizes sizes;
         std::string path;
+        int interfaceNumber;
     };
-    void suspend() {
-        std::unique_lock<std::mutex> lock(mutex);
-        const auto ticket = ++suspendRequested;
-        changed.notify_all();
-        changed.wait(lock, [&] { return finished || suspendCompleted >= ticket; });
-    }
     bool frame(std::uint16_t type, std::uint16_t interfaceId = 0,
                std::uint32_t transaction = 0, const unsigned char* payload = nullptr,
                std::size_t length = 0) {
-        if (length > PLANK_RAW_HID_MAX_PAYLOAD_SIZE) return false;
+        if (shutdownRequested || length > PLANK_RAW_HID_MAX_PAYLOAD_SIZE ||
+                (type != PLANK_RAW_HID_SUSPEND && type != PLANK_RAW_HID_DETACH &&
+                 !lifecycle.canForward())) return false;
         PLANK_RAW_HID_WIRE_HEADER h{};
         h.magic = qToLittleEndian<std::uint32_t>(PLANK_RAW_HID_WIRE_MAGIC);
         h.version = qToLittleEndian<std::uint16_t>(PLANK_RAW_HID_WIRE_VERSION);
@@ -115,12 +134,14 @@ public:
         std::map<std::string, std::vector<std::string>> groups;
         for (auto* info = list; info; info = info->next) {
             if (!info->path || info->bus_type != SDL_HID_API_BUS_USB ||
-                    WindowsWacom::normalizedOnlyProduct(info->product_id)) continue;
+                    WindowsWacom::normalizedOnlyProduct(info->product_id) ||
+                    WindowsWacom::compatibilityCollection(info->usage_page, info->usage)) continue;
             const auto parent = physicalDevice(info->path);
             if (!parent.empty()) groups[parent].push_back(info->path);
         }
         SDL_hid_free_enumeration(list);
         if (groups.empty()) return false;
+        if (!lifecycle.canForward()) return false;
         auto paths = groups.begin()->second;
         std::sort(paths.begin(), paths.end());
         paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
@@ -131,17 +152,18 @@ public:
         std::vector<Interface> opened;
         for (const auto& path : paths) {
             HidHandle handle(SDL_hid_open_path(path.c_str()), SDL_hid_close);
-            if (!handle) return false; // Never publish a partially opened tablet.
+            if (!handle || !lifecycle.canForward()) return false; // Never publish a partially opened tablet.
             std::vector<unsigned char> descriptor(PLANK_RAW_HID_MAX_DESCRIPTOR_SIZE);
             const int size = SDL_hid_get_report_descriptor(handle.get(), descriptor.data(), descriptor.size());
             if (size <= 0 || static_cast<std::size_t>(size) > descriptor.size()) return false;
+            if (!lifecycle.canForward()) return false;
             descriptor.resize(size);
             WindowsWacom::ReportSizes sizes;
             if (!WindowsWacom::reportSizes(descriptor.data(), descriptor.size(), sizes)) return false;
             if (SDL_hid_set_nonblocking(handle.get(), 1) < 0) return false;
+            const auto* info = SDL_hid_get_device_info(handle.get());
+            if (!info) return false;
             if (opened.empty()) {
-                const auto* info = SDL_hid_get_device_info(handle.get());
-                if (!info) return false;
                 device.product = qToLittleEndian<std::uint32_t>(info->product_id);
                 device.version = qToLittleEndian<std::uint32_t>(info->release_number);
                 const auto name = info->product_string ? QString::fromWCharArray(info->product_string).toUtf8() : QByteArray("Wacom tablet");
@@ -149,8 +171,9 @@ public:
                 // No Windows device path or physical serial is forwarded.
                 std::strcpy(device.physical, "windows-usb-wacom");
             }
-            opened.push_back({std::move(handle), std::move(descriptor), sizes, path});
+            opened.push_back({std::move(handle), std::move(descriptor), sizes, path, info->interface_number});
         }
+        if (!lifecycle.canForward()) return false;
         interfaces = std::move(opened);
         do { generation = static_cast<std::uint16_t>(++nextGeneration); } while (!generation);
         sequence = 0;
@@ -176,7 +199,7 @@ public:
             pending = false;
             if (qFromLittleEndian(status) != 0) { release(); retry = Clock::now() + std::chrono::seconds(5); return; }
             attached = true;
-            if (activity) activity();
+            tabletActivity();
             SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "Windows Wacom raw HID attached (%u collections)", unsigned(interfaces.size()));
             return;
         }
@@ -186,24 +209,33 @@ public:
         if (c.interfaceId < interfaces.size()) {
             // Open a separate handle for feature/output work. Driver control
             // transfers never stall the input loop or transport callback.
-            const auto path = interfaces[c.interfaceId].path;
-            const auto sizes = interfaces[c.interfaceId].sizes;
+            // A physical USB HID interface can contain multiple Windows
+            // top-level collections. hid-wacom mode requests belong to that
+            // USB interface, so route a feature ID to its owning collection.
+            const unsigned type = get ? payload[1] : payload[0];
+            const unsigned id = get ? payload[0] : payload[1];
+            const auto index = type == 0 ? 2 : type == 1 ? 1 : 0;
+            auto selected = c.interfaceId;
+            if (type <= 2 && !interfaces[selected].sizes.bytes[index][id]) {
+                for (std::size_t i = 0; i < interfaces.size(); ++i) {
+                    if (interfaces[i].interfaceNumber == interfaces[selected].interfaceNumber &&
+                            interfaces[i].sizes.bytes[index][id]) {
+                        selected = static_cast<std::uint16_t>(i);
+                        break;
+                    }
+                }
+            }
+            const auto path = interfaces[selected].path;
+            const auto sizes = interfaces[selected].sizes;
             std::vector<unsigned char> request(payload, payload + c.size);
             if (reports.submit([c, get, replyType, path, sizes, request = std::move(request)] {
                 int result = -1;
-                const unsigned type = get ? request[1] : request[0]; // UHID: feature/output/input = 0/1/2.
-                const unsigned id = get ? request[0] : request[1];
-                const auto index = type == 0 ? 2 : type == 1 ? 1 : 0;
-                const auto actual = type <= 2 ? sizes.bytes[index][id] : 0;
-                // Get/set APIs include the zero report ID even for an
-                // unnumbered device; interrupt reads do not include it.
-                const auto length = actual + (sizes.numbered ? 0 : 1);
-                std::vector<unsigned char> report(get ? length : request.size() - 1, 0);
-                if (get && !report.empty()) report[0] = static_cast<unsigned char>(id);
-                else if (!get) std::copy(request.begin() + 1, request.end(), report.begin());
+                auto transfer = WindowsWacom::reportRequest(sizes, get, request.data(), request.size());
+                const auto type = transfer.type;
+                const auto length = transfer.reportLength;
+                auto& report = transfer.buffer;
                 HidHandle handle(SDL_hid_open_path(path.c_str()), SDL_hid_close);
-                if (handle && actual && length <= PLANK_RAW_HID_MAX_REPORT_SIZE &&
-                        (get || report.size() == length)) {
+                if (handle && transfer.valid) {
                     if (get && type == 0) result = SDL_hid_get_feature_report(handle.get(), report.data(), report.size());
                     else if (get && type == 2) result = SDL_hid_get_input_report(handle.get(), report.data(), report.size());
                     else if (!get && type == 0) result = SDL_hid_send_feature_report(handle.get(), report.data(), report.size());
@@ -231,27 +263,26 @@ public:
             std::deque<std::vector<unsigned char>> queued;
             {
                 std::unique_lock<std::mutex> lock(mutex);
-                if (suspendRequested != suspendCompleted || overflow) {
-                    const auto ticket = suspendRequested;
+                const auto ticket = lifecycle.pendingTicket();
+                if (ticket || overflow) {
                     const bool wasOverflow = overflow;
                     overflow = false;
                     controls.clear();
                     lock.unlock();
                     release();
                     if (wasOverflow) retry = Clock::now() + std::chrono::seconds(1);
+                    if (ticket) lifecycle.complete(ticket);
                     lock.lock();
-                    suspendCompleted = ticket;
-                    changed.notify_all();
                 }
                 queued.swap(controls);
             }
-            if (active && !reconnecting) {
+            if (lifecycle.canForward()) {
                 for (const auto& bytes : queued) {
-                    if (!active || reconnecting || stopping) break;
+                    if (!lifecycle.canForward()) break;
                     control(bytes);
                 }
                 for (const auto& reply : reports.take()) {
-                    if (!active || reconnecting || stopping) break;
+                    if (!lifecycle.canForward()) break;
                     if (reply.type && !frame(reply.type, reply.interfaceId, reply.transaction,
                                              reply.payload.data(), reply.payload.size())) release();
                 }
@@ -266,7 +297,9 @@ public:
                     unsigned char report[PLANK_RAW_HID_MAX_REPORT_SIZE]{};
                     bool failed = false;
                     for (std::size_t i = 0; i < interfaces.size() && !failed; ++i) {
-                        for (unsigned count = 0; count < 32 && active && !reconnecting && !stopping; ++count) {
+                        const auto& inputSizes = interfaces[i].sizes.bytes[0];
+                        if (std::none_of(inputSizes.begin(), inputSizes.end(), [](std::size_t size) { return size != 0; })) continue;
+                        for (unsigned count = 0; count < 32 && lifecycle.canForward(); ++count) {
                             const int received = SDL_hid_read_timeout(interfaces[i].handle.get(), report, sizeof(report), 0);
                             if (received == 0) break;
                             if (received < 0) { failed = true; break; }
@@ -274,7 +307,7 @@ public:
                             if (!length || !frame(PLANK_RAW_HID_INPUT, static_cast<std::uint16_t>(i), ++sequence, report, length)) {
                                 failed = true; break;
                             }
-                            if (activity) activity();
+                            tabletActivity();
                         }
                     }
                     if (failed) { release(true); retry = Clock::now() + std::chrono::seconds(2); }
@@ -282,53 +315,50 @@ public:
             }
             else if (!interfaces.empty()) release();
             std::unique_lock<std::mutex> lock(mutex);
-            changed.wait_for(lock, std::chrono::milliseconds(2), [&] {
-                return stopping || suspendRequested != suspendCompleted || !controls.empty();
+            changed.wait_for(lock, std::chrono::milliseconds(attached ? 2 : 50), [&] {
+                return stopping || lifecycle.pendingTicket() || !controls.empty();
             });
         }
         release();
-        std::lock_guard<std::mutex> lock(mutex);
-        finished = true;
-        changed.notify_all();
+        lifecycle.markExited();
     }
-    std::atomic_bool active{false}, stopping{false}, reconnecting{false}, attached{false};
+    std::atomic_bool stopping{false}, shutdownRequested{false}, attached{false}, activeRequested{false};
+    MacWacomLifecycle lifecycle;
     std::mutex mutex;
     std::condition_variable changed;
     std::deque<std::vector<unsigned char>> controls;
-    std::uint64_t suspendRequested = 0, suspendCompleted = 0;
-    bool finished = false, overflow = false, pending = false;
+    bool overflow = false, pending = false;
     std::uint16_t generation = 0;
     std::uint32_t sequence = 0;
     std::vector<Interface> interfaces;
     Clock::time_point deadline{}, retry{};
     LinuxWacomReportWorker reports;
+    std::mutex activityMutex;
     std::function<void()> activity;
     std::thread thread;
 };
-WindowsRawWacomInput::WindowsRawWacomInput(std::function<void()> activity) : m_Impl(new Impl(std::move(activity))) {}
-WindowsRawWacomInput::~WindowsRawWacomInput() = default;
+WindowsRawWacomInput::WindowsRawWacomInput(std::function<void()> activity)
+    : m_Impl(std::make_shared<Impl>(std::move(activity))) { m_Impl->start(); }
+WindowsRawWacomInput::~WindowsRawWacomInput() { m_Impl->shutdown(); }
 void WindowsRawWacomInput::setActive(bool active) {
-    if (m_Impl->active.exchange(active) == active) return;
-    if (!active) m_Impl->suspend();
-    m_Impl->changed.notify_all();
+    if (m_Impl->activeRequested.exchange(active) == active) return;
+    m_Impl->barrier(m_Impl->lifecycle.setActive(active));
 }
 void WindowsRawWacomInput::beginReconnect() {
-    m_Impl->reconnecting = true;
-    m_Impl->suspend();
+    m_Impl->barrier(m_Impl->lifecycle.beginReconnect());
 }
 void WindowsRawWacomInput::finishReconnect() {
-    std::lock_guard<std::mutex> lock(m_Impl->mutex);
-    m_Impl->controls.clear();
-    m_Impl->reconnecting = false;
-    m_Impl->changed.notify_all();
+    m_Impl->barrier(m_Impl->lifecycle.finishReconnect());
 }
 void WindowsRawWacomInput::handleControl(const unsigned char* data, unsigned int length) {
     MacWacomWire::Control parsed;
     if (!MacWacomWire::parse(data, length, parsed)) return;
     std::lock_guard<std::mutex> lock(m_Impl->mutex);
-    if (!m_Impl->active || m_Impl->stopping || m_Impl->reconnecting) return;
+    if (!m_Impl->lifecycle.canForward()) return;
     if (m_Impl->controls.size() == 64) m_Impl->overflow = true;
     else m_Impl->controls.emplace_back(data, data + length);
     m_Impl->changed.notify_all();
 }
-bool WindowsRawWacomInput::attached() const { return m_Impl->attached.load(); }
+bool WindowsRawWacomInput::attached() const {
+    return m_Impl->attached.load() && m_Impl->lifecycle.canForward();
+}

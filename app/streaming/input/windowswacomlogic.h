@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -72,11 +73,49 @@ inline bool reportSizes(const unsigned char* data, std::size_t length,
             if (!bits[type][id]) continue;
             if (numbered && id == 0) return false;
             parsed.bytes[type][id] = (bits[type][id] + 7) / 8 + (numbered ? 1 : 0);
+            if (parsed.bytes[type][id] > 4096) return false;
             haveReport = true;
         }
     }
     result = parsed;
     return haveReport;
+}
+struct ReportRequest {
+    unsigned type = 0, id = 0;
+    std::size_t reportLength = 0;
+    std::vector<unsigned char> buffer;
+    bool valid = false;
+};
+inline ReportRequest reportRequest(const ReportSizes& sizes, bool get,
+                                   const unsigned char* payload, std::size_t length)
+{
+    ReportRequest request;
+    if (!payload || length < 2 || (get && length != 2)) return request;
+    request.type = get ? payload[1] : payload[0];
+    request.id = get ? payload[0] : payload[1];
+    if (request.type > 2 || (!sizes.numbered && request.id)) return request;
+    const unsigned index = request.type == 0 ? 2 : request.type == 1 ? 1 : 0;
+    const auto actual = sizes.bytes[index][request.id];
+    if (!actual) return request;
+    // Linux raw requests and HIDAPI both retain an ID slot for unnumbered
+    // reports. Only interrupt reads omit it. Preserve zero-valued data bytes.
+    const auto prefix = sizes.numbered ? 0 : 1;
+    request.reportLength = actual + prefix;
+    const auto maximum = *std::max_element(sizes.bytes[index].begin(), sizes.bytes[index].end()) + prefix;
+    if (maximum > 4096 || (!get && length - 1 != request.reportLength)) return request;
+    request.buffer.assign(get ? maximum : length - 1, 0);
+    if (get) request.buffer[0] = static_cast<unsigned char>(request.id);
+    else std::copy(payload + 1, payload + length, request.buffer.begin());
+    request.valid = true;
+    return request;
+}
+inline bool compatibilityCollection(unsigned page, unsigned usage)
+{
+    // Windows reserves keyboard/mouse TLCs. Their compatibility events use
+    // ordinary SDL keyboard/mouse input; full Wacom packets use digitizer or
+    // vendor collections. Do not let a protected compatibility TLC prevent
+    // opening every tablet-specific collection.
+    return page == 1 && (usage == 1 || usage == 2 || usage == 6 || usage == 7);
 }
 inline bool normalizedOnlyProduct(std::uint16_t product)
 {

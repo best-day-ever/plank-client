@@ -383,7 +383,8 @@ HEADERS += streaming/input/pentiltencoding.h
 win32 {
     SOURCES += streaming/input/windowsrawwacom.cpp
     HEADERS += streaming/input/windowsrawwacom.h streaming/input/windowswacomlogic.h \
-        streaming/input/macrawwacomlogic.h streaming/input/linuxwacomreportworker.h
+        streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h \
+        streaming/input/linuxwacomreportworker.h
     LIBS += -lCfgmgr32
 }
 

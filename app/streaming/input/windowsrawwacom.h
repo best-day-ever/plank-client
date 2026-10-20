@@ -16,5 +16,5 @@ public:
     bool attached() const;
 private:
     class Impl;
-    std::unique_ptr<Impl> m_Impl;
+    std::shared_ptr<Impl> m_Impl;
 };

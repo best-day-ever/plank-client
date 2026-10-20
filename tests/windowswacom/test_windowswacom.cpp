@@ -1,6 +1,7 @@
 #include <QtTest>
 #include "windowswacomlogic.h"
 #include "macrawwacomlogic.h"
+#include "macrawwacomasync.h"
 #include "linuxwacomreportworker.h"
 #include <atomic>
 
@@ -55,6 +56,67 @@ private slots:
             WindowsWacom::ReportSizes sizes;
             QVERIFY(!WindowsWacom::reportSizes(descriptor.data(), descriptor.size(), sizes));
         }
+    }
+    void controlReportsRetainSyntheticZeroId() {
+        const unsigned char descriptor[] = {0x75, 8, 0x95, 2, 0xb1, 2};
+        WindowsWacom::ReportSizes sizes;
+        QVERIFY(WindowsWacom::reportSizes(descriptor, sizeof(descriptor), sizes));
+        const unsigned char get[] = {0, 0}; // report ID zero, feature report
+        const auto read = WindowsWacom::reportRequest(sizes, true, get, sizeof(get));
+        QVERIFY(read.valid);
+        QCOMPARE(read.reportLength, std::size_t(3));
+        QCOMPARE(read.buffer, std::vector<unsigned char>({0, 0, 0}));
+        const unsigned char set[] = {0, 0, 0x12, 0}; // type, ID, two data bytes
+        const auto write = WindowsWacom::reportRequest(sizes, false, set, sizeof(set));
+        QVERIFY(write.valid);
+        QCOMPARE(write.buffer, std::vector<unsigned char>({0, 0x12, 0}));
+        QVERIFY(!WindowsWacom::reportRequest(sizes, false, set, sizeof(set) - 1).valid);
+    }
+    void getBuffersAccommodateLongestReportInCollection() {
+        const unsigned char descriptor[] = {
+            0x85, 1, 0x75, 8, 0x95, 2, 0xb1, 2,
+            0x85, 2, 0x95, 9, 0xb1, 2};
+        WindowsWacom::ReportSizes sizes;
+        QVERIFY(WindowsWacom::reportSizes(descriptor, sizeof(descriptor), sizes));
+        const unsigned char get[] = {1, 0};
+        const auto read = WindowsWacom::reportRequest(sizes, true, get, sizeof(get));
+        QVERIFY(read.valid);
+        QCOMPARE(read.reportLength, std::size_t(3));
+        QCOMPARE(read.buffer.size(), std::size_t(10));
+        QCOMPARE(read.buffer.front(), static_cast<unsigned char>(1));
+        const unsigned char invalid[] = {3, 0};
+        QVERIFY(!WindowsWacom::reportRequest(sizes, true, invalid, sizeof(invalid)).valid);
+    }
+    void timedOutReleaseCannotReattachBeforePhysicalCompletion() {
+        MacWacomLifecycle lifecycle; // Also used by the Windows capture worker.
+        lifecycle.setActive(true);
+        QVERIFY(lifecycle.canForward());
+        const auto release = lifecycle.setActive(false);
+        QVERIFY(!lifecycle.wait(release, std::chrono::milliseconds(1)));
+        lifecycle.setActive(true);
+        QVERIFY(!lifecycle.canForward());
+        lifecycle.complete(release);
+        QVERIFY(lifecycle.canForward());
+        const auto reconnect = lifecycle.beginReconnect();
+        const auto finish = lifecycle.finishReconnect();
+        lifecycle.complete(reconnect); // Old delayed discovery has returned.
+        QVERIFY(!lifecycle.canForward());
+        lifecycle.complete(finish);
+        QVERIFY(lifecycle.canForward());
+        const auto stop = lifecycle.stop();
+        QVERIFY(!lifecycle.wait(stop, std::chrono::milliseconds(1)));
+        lifecycle.setActive(true);
+        QVERIFY(!lifecycle.canForward());
+        lifecycle.markExited();
+        QVERIFY(lifecycle.waitExited(std::chrono::milliseconds(1)));
+    }
+    void protectedCompatibilityCollectionsDoNotBlockTabletCollections() {
+        QVERIFY(WindowsWacom::compatibilityCollection(1, 2)); // Mouse
+        QVERIFY(WindowsWacom::compatibilityCollection(1, 6)); // Keyboard
+        QVERIFY(!WindowsWacom::compatibilityCollection(0xd, 2)); // Pen
+        QVERIFY(!WindowsWacom::compatibilityCollection(0xd, 5)); // Touch pad
+        QVERIFY(!WindowsWacom::compatibilityCollection(0xff0d, 1)); // Wacom vendor
+        QVERIFY(!WindowsWacom::compatibilityCollection(0xc, 1)); // Consumer keys
     }
     void firstGenerationNeedsNormalizedFallback() {
         QVERIFY(WindowsWacom::normalizedOnlyProduct(0x0314));

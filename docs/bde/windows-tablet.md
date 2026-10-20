@@ -3,12 +3,14 @@
 Fernweh uses two complementary tablet paths on Windows:
 
 - For USB Wacom devices, SDL3 HIDAPI enumerates the physical tablet's Windows
-  HID collections and reconstructs their report descriptors from Windows HID
+  digitizer, vendor and consumer HID collections and reconstructs their report descriptors from Windows HID
   preparsed data. Fernweh forwards those descriptors and complete reports to
   the Linux host's existing UHID protocol. This retains device-specific pen,
   eraser, pad, wheel and touch reports where the installed Windows driver
   exposes those collections. Host feature and output requests go back to the
-  physical tablet on a bounded asynchronous worker.
+  physical tablet on a bounded asynchronous worker. Protected generic mouse/keyboard
+  compatibility collections keep using ordinary SDL input. Feature requests
+  route across collections belonging to the same physical USB interface.
 - Windows Ink pen events provide the automatic fallback if a tablet is not
   connected by USB, the Windows driver denies HID access, or raw attachment
   cannot complete. Enable **Use Windows Ink** in the Wacom driver for this
@@ -37,7 +39,8 @@ alone and uses Windows Ink rather than replacing or disabling their driver.
 Automated tests validate reconstructed-descriptor report sizes (including
 numbered and unnumbered reports, padding, global push/pop, malformed and
 oversized layouts), first-generation routing, bounded host-control parsing,
-and stale asynchronous completion rejection after reconnect. The existing
+bounded lifecycle barriers, unnumbered control-report ID slots, longest-report
+GET buffers, and stale asynchronous completion rejection after reconnect. The existing
 `macpen` suite exercises the shared SDL pen translation used by Windows.
 
 These checks do not qualify a physical tablet. Before declaring a device fully

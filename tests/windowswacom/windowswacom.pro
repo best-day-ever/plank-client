@@ -5,5 +5,6 @@ TEMPLATE = app
 SOURCES += test_windowswacom.cpp
 HEADERS += ../../app/streaming/input/windowswacomlogic.h \
     ../../app/streaming/input/macrawwacomlogic.h \
+    ../../app/streaming/input/macrawwacomasync.h \
     ../../app/streaming/input/linuxwacomreportworker.h
 INCLUDEPATH += ../../app/streaming/input ../../moonlight-common-c/moonlight-common-c/src
