@@ -7,6 +7,8 @@
 #include "windowsfileclipboard.cpp"
 #include <deque>
 #include <cwchar>
+#include <QProcess>
+#include <cstdio>
 
 struct OfferedEntry {
     uint64_t id = 0, parent = 0, size = 0;
@@ -22,6 +24,8 @@ struct PlankTransportNativeEndpoint {
     bool corruptHash = false;
     bool acceptOutgoing = false, cancelOutgoing = false, automaticReady = true;
     bool outgoingFinished = false;
+    bool cancelIncomingAtMaterialize = false;
+    unsigned outgoingOfferCount = 0, clientCancels = 0;
     QString protocolError;
     PlankClipboardFileOfferBegin outgoingBegin {};
     std::vector<OfferedEntry> outgoingEntries;
@@ -79,8 +83,14 @@ static bool receiveOutgoingRecord(PlankTransportNativeEndpoint& endpoint,
     PlankClipboardFileRecord record {};
     if (!plank_clipboard_file_decode(bytes, size, data ?
             PLANK_CLIPBOARD_FILE_DATA_PREFIX_BYTES + PLANK_CLIPBOARD_FILE_DATA_BYTES :
-            PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &record) ||
-            record.sequence != endpoint.clientSequence++) return false;
+            PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &record)) return false;
+    if (record.type == PLANK_CLIPBOARD_FILE_OFFER_BEGIN) {
+        endpoint.clientSequence = 1; endpoint.hostSequence = 1;
+        endpoint.outgoingEntries.clear(); endpoint.outgoingIndex = 0;
+        endpoint.outgoingFinished = false;
+        ++endpoint.outgoingOfferCount;
+    }
+    if (record.sequence != endpoint.clientSequence++) return false;
     if (record.type == PLANK_CLIPBOARD_FILE_OFFER_BEGIN) {
         std::memcpy(endpoint.outgoingOffer.data(), record.offer_id, 16);
         endpoint.outgoingEpoch = record.session_epoch;
@@ -90,6 +100,10 @@ static bool receiveOutgoingRecord(PlankTransportNativeEndpoint& endpoint,
     }
     if (record.session_epoch != endpoint.outgoingEpoch ||
             std::memcmp(record.offer_id, endpoint.outgoingOffer.data(), 16)) return false;
+    if (record.type == PLANK_CLIPBOARD_FILE_CANCEL) {
+        ++endpoint.clientCancels;
+        return !data;
+    }
     if (record.type == PLANK_CLIPBOARD_FILE_OFFER_ENTRY) {
         PlankClipboardFileOfferEntry entry {};
         if (data || !plank_clipboard_file_offer_entry_decode(record.payload,
@@ -175,6 +189,13 @@ static int32_t sendRecord(PlankTransportNativeEndpoint* endpoint, const uint8_t*
             std::memcpy(wire.data() + PLANK_CLIPBOARD_FILE_HEADER_BYTES, payload, count);
             (content ? endpoint->incomingData : endpoint->incomingControl).push_back(std::move(wire));
         };
+        if (endpoint->cancelIncomingAtMaterialize) {
+            PlankClipboardFileTerminal terminal {id, PLANK_CLIPBOARD_FILE_REASON_CANCELLED_BY_USER, 0};
+            std::array<uint8_t, PLANK_CLIPBOARD_FILE_TERMINAL_BYTES> payload {};
+            plank_clipboard_file_terminal_encode(payload.data(), &terminal);
+            queue(PLANK_CLIPBOARD_FILE_CANCEL, payload.data(), payload.size(), false);
+            return PLANK_TRANSPORT_OK;
+        }
         if (!endpoint->hostContent.isEmpty()) {
             std::vector<uint8_t> chunk(PLANK_CLIPBOARD_FILE_DATA_PREFIX_BYTES +
                                        size_t(endpoint->hostContent.size()));
@@ -460,8 +481,11 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(lastType(endpoint), uint16_t {PLANK_CLIPBOARD_FILE_OFFER_END}, 2000);
         // Cancellation must release all frozen source handles, without waiting
         // for stop or releasing the remote paste gesture.
-        QTRY_VERIFY_WITH_TIMEOUT(file.open(QIODevice::WriteOnly), 2000);
-        file.close();
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            if (!file.open(QIODevice::WriteOnly)) return false;
+            file.close();
+            return true;
+        })(), 2000);
         QCOMPARE(ready.load(), 0);
         clipboard.stop();
         QVERIFY(endpoint.sentData.empty());
@@ -492,6 +516,109 @@ private slots:
         QVERIFY(endpoint.sentControl.empty());
         QVERIFY(endpoint.sentData.empty());
         QVERIFY(setLocalText(L"file test complete"));
+    }
+    void focusCancellationDoesNotSwallowNewPasteOrReleaseStaleReady()
+    {
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        QFile file(temporary.filePath(QStringLiteral("retry.txt")));
+        QVERIFY(file.open(QIODevice::WriteOnly)); QCOMPARE(file.write("new paste"), qint64 {9}); file.close();
+        QVERIFY(setLocalFiles({file.fileName()}));
+        PlankTransportNativeEndpoint endpoint;
+        endpoint.acceptOutgoing = true; endpoint.automaticReady = false;
+        std::atomic_int ready {0};
+        WindowsFileClipboard clipboard(&endpoint, "bidirectional", [&] { ++ready; }, [] { return false; });
+        clipboard.start();
+        QVERIFY(clipboard.beginPasteOnMainThread());
+        QTRY_VERIFY_WITH_TIMEOUT(([&] {
+            std::lock_guard<std::mutex> lock(endpoint.mutex);
+            return endpoint.outgoingFinished;
+        })(), 2000);
+        clipboard.cancelPendingPasteOnMainThread();
+        QVERIFY(!clipboard.takeReadyPasteOnMainThread());
+        {
+            std::lock_guard<std::mutex> lock(endpoint.mutex);
+            endpoint.automaticReady = true;
+        }
+        // Issue a new request immediately, while the previous worker can still
+        // be finishing cancellation. It must not be cleared by that old epoch.
+        QVERIFY(clipboard.beginPasteOnMainThread());
+        QTRY_COMPARE_WITH_TIMEOUT(ready.load(), 1, 3000);
+        clipboard.cancelPendingPasteOnMainThread();
+        QVERIFY(!clipboard.takeReadyPasteOnMainThread()); // queued old SDL ready is stale
+        QVERIFY(clipboard.beginPasteOnMainThread());
+        QTRY_COMPARE_WITH_TIMEOUT(ready.load(), 2, 3000);
+        QVERIFY(clipboard.takeReadyPasteOnMainThread());
+        QVERIFY(!clipboard.takeReadyPasteOnMainThread());
+        clipboard.stop();
+        QCOMPARE(endpoint.outgoingOfferCount, 3u);
+        QCOMPARE(endpoint.clientCancels, 1u);
+        QVERIFY2(endpoint.protocolError.isEmpty(), qPrintable(endpoint.protocolError));
+        QVERIFY(setLocalText(L"file test complete"));
+    }
+    void duplicateTopLevelNamesNeverReachHost()
+    {
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        QDir root(temporary.path());
+        QVERIFY(root.mkpath(QStringLiteral("first"))); QVERIFY(root.mkpath(QStringLiteral("second")));
+        QFile first(root.filePath(QStringLiteral("first/same.exr")));
+        QFile second(root.filePath(QStringLiteral("second/SAME.exr")));
+        QVERIFY(first.open(QIODevice::WriteOnly)); first.close();
+        QVERIFY(second.open(QIODevice::WriteOnly)); second.close();
+        QVERIFY(setLocalFiles({first.fileName(), second.fileName()}));
+        PlankTransportNativeEndpoint endpoint;
+        endpoint.acceptOutgoing = true;
+        std::atomic_int ready {0};
+        WindowsFileClipboard clipboard(&endpoint, "bidirectional", [&] { ++ready; }, [] { return false; });
+        clipboard.start();
+        QVERIFY(clipboard.beginPasteOnMainThread());
+        QTest::qWait(200); // no completion callback exists for a rejected local preflight
+        clipboard.stop();
+        QCOMPARE(endpoint.outgoingOfferCount, 0u);
+        QVERIFY(endpoint.sentControl.empty()); QVERIFY(endpoint.sentData.empty());
+        QCOMPARE(ready.load(), 0);
+        QVERIFY(setLocalText(L"file test complete"));
+    }
+    void hostCancelUnblocksAwaitedDataLane()
+    {
+        PlankTransportNativeEndpoint endpoint;
+        queueHostFile(endpoint, "cancelled.exr", "no data will arrive");
+        endpoint.cancelIncomingAtMaterialize = true;
+        std::atomic_bool publication {false};
+        WindowsFileClipboard clipboard(&endpoint, "host-to-client", [] {}, [&] {
+            publication = true; return true;
+        });
+        clipboard.start();
+        // The Host sends CANCEL only on the control lane; the expected data
+        // record never arrives. Recovery must happen before the idle timeout.
+        QTRY_COMPARE_WITH_TIMEOUT(lastType(endpoint), uint16_t {PLANK_CLIPBOARD_FILE_ERROR}, 2000);
+        clipboard.stop();
+        QVERIFY(!publication);
+        QVERIFY(endpoint.sentData.empty());
+    }
+    void busyNativeClipboardPublicationRetries()
+    {
+        PlankTransportNativeEndpoint endpoint;
+        queueHostFile(endpoint, "retry.exr", "remote pixels");
+        std::atomic_bool requested {false};
+        WindowsFileClipboard clipboard(&endpoint, "host-to-client", [] {}, [&] {
+            requested = true; return true;
+        });
+        clipboard.start();
+        QTRY_VERIFY_WITH_TIMEOUT(requested.load(), 2000);
+        QProcess holder;
+        holder.start(QCoreApplication::applicationFilePath(), {QStringLiteral("--hold-file-clipboard")});
+        const bool acquired = holder.waitForReadyRead(5000) && holder.readLine().trimmed() == "LOCKED";
+        const bool firstAttempt = clipboard.publishPendingHostFilesOnMainThread();
+        holder.write("release\n"); holder.closeWriteChannel();
+        const bool released = holder.waitForFinished(5000);
+        QVERIFY(acquired); QVERIFY(released); QVERIFY(!firstAttempt);
+        // A busy native clipboard leaves the completed transfer pending so the
+        // ordinary next main-thread poll can publish it without retransfer.
+        QVERIFY(clipboard.publishPendingHostFilesOnMainThread());
+        QTRY_COMPARE_WITH_TIMEOUT(lastType(endpoint), uint16_t {PLANK_CLIPBOARD_FILE_TRANSFER_READY}, 2000);
+        clipboard.stop();
     }
     void receivesHashedFileAndCleansUpOnDisconnect_data()
     {
@@ -630,5 +757,21 @@ private slots:
     }
 #endif
 };
-QTEST_GUILESS_MAIN(TestWindowsFileClipboard)
+int main(int argc, char** argv)
+{
+#ifdef Q_OS_WIN
+    if (argc == 2 && std::strcmp(argv[1], "--hold-file-clipboard") == 0) {
+        HWND owner = CreateWindowExW(0, L"STATIC", L"File clipboard test lock", 0,
+                0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!owner || !OpenClipboard(owner)) return 2;
+        std::puts("LOCKED"); std::fflush(stdout);
+        std::getchar();
+        CloseClipboard(); DestroyWindow(owner);
+        return 0;
+    }
+#endif
+    QCoreApplication application(argc, argv);
+    TestWindowsFileClipboard test;
+    return QTest::qExec(&test, argc, argv);
+}
 #include "test_windowsfileclipboard.moc"

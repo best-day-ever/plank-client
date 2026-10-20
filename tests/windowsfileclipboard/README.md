@@ -6,7 +6,11 @@ using an in-memory replacement for the native transport ABI. A small fake Host
 requests receiver-selected ranges, reconstructs outgoing content and checks hashes
 before releasing the withheld paste. Outgoing cases cover nested folders, multiple
 top-level selections, Unicode filenames, an empty file, multichunk content, Host
-cancellation with source-handle release, and direction/disabled-mode restrictions.
+cancellation with source-handle release, focus cancellation followed immediately
+by a new paste, stale ready-event rejection, duplicate-name preflight, and
+direction/disabled-mode restrictions. Native recovery cases also exercise a Host
+CANCEL while the data lane is silent and publication retry after another process
+releases its native clipboard lock.
 Native cases also check
 frozen source handles, hard-link rejection, hashed incoming file publication as
 CF_HDROP, integrity failure without publication, rejection of reserved device
