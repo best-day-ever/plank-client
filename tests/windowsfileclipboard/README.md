@@ -2,7 +2,12 @@
 
 This suite exercises the shared PCF2 Windows filename policy on every Qt 6
 platform. On Windows it also compiles the actual Windows file clipboard engine,
-using an in-memory replacement for the native transport ABI. Native cases check
+using an in-memory replacement for the native transport ABI. A small fake Host
+requests receiver-selected ranges, reconstructs outgoing content and checks hashes
+before releasing the withheld paste. Outgoing cases cover nested folders, multiple
+top-level selections, Unicode filenames, an empty file, multichunk content, Host
+cancellation with source-handle release, and direction/disabled-mode restrictions.
+Native cases also check
 frozen source handles, hard-link rejection, hashed incoming file publication as
 CF_HDROP, integrity failure without publication, rejection of reserved device
 names, preservation of local copies and clipboard ownership when stream focus
