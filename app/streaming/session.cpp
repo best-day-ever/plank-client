@@ -1672,7 +1672,11 @@ void Session::startClipboardSync()
                         event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH;
                         event.user.timestamp = SDL_GetTicks();
                         return SDL_PushEvent(&event);
-                    });
+                    }
+#ifdef Q_OS_WIN
+                    , [this] { return anyPresentationWindowFocused(); }
+#endif
+                    );
     }
     if (m_FileClipboard) m_FileClipboard->start();
 #endif

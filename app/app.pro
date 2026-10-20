@@ -803,7 +803,7 @@ win32 {
     SOURCES += streaming/windowsclipboard.cpp
     contains(CONFIG, plank-transport) {
         SOURCES += streaming/windowsfileclipboard.cpp
-        HEADERS += streaming/windowsfileclipboard.h
-        LIBS += -ladvapi32
+        HEADERS += streaming/windowsfileclipboard.h streaming/windowsfileclipboardpaths.h
+        LIBS += -ladvapi32 -lshell32 -luser32
     }
 }
