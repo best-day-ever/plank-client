@@ -95,6 +95,7 @@ bool ClipboardSync::pollLocalClipboardOnMainThread()
     std::uint64_t epoch;
     {
         std::lock_guard<std::mutex> lock(m_StateMutex);
+        if (m_PendingHostText) return false;
         if (!m_Running || m_ApplyingRemote || changeCount < 0 ||
                 changeCount == m_LastPasteboardChangeCount) {
             return true;

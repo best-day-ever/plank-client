@@ -4,6 +4,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <cstdio>
+#include <QGuiApplication>
+#include <QProcess>
 
 class TestWindowsClipboardSync : public QObject {
     Q_OBJECT
@@ -100,6 +103,27 @@ private slots:
         QVERIFY(!sync.applyPendingHostTextOnMainThread());
         QCOMPARE(*ClipboardPlatform::readText(), std::string("local"));
     }
+    void busyClipboardRetriesReadsAndHostPublication() {
+        ClipboardSync sync([](const uint8_t*, size_t) { return true; },
+            [] { return true; }, [] { return true; }, [] { return true; });
+        QVERIFY(setText("local before lock"));
+        sync.start();
+        auto remote = offer("host after lock");
+        QVERIFY(sync.handleHostOffer(remote.data(), remote.size()));
+        QProcess holder;
+        holder.start(QCoreApplication::applicationFilePath(), {QStringLiteral("--hold-clipboard")});
+        const bool acquired = holder.waitForReadyRead(5000) && holder.readLine().trimmed() == "LOCKED";
+        const auto read = ClipboardPlatform::readText();
+        const bool applied = sync.applyPendingHostTextOnMainThread();
+        holder.write("release\n"); holder.closeWriteChannel();
+        holder.waitForFinished(5000);
+        QVERIFY(acquired);
+        QVERIFY(!read);
+        QVERIFY(!applied);
+        // A poll retries the pending Host offer instead of silently losing it.
+        QVERIFY(sync.pollLocalClipboardOnMainThread());
+        QCOMPARE(*ClipboardPlatform::readText(), std::string("host after lock"));
+    }
     void rejectsOversizeAndMalformedUnicode() {
         QVERIFY(setText("safe"));
         QVERIFY(!setText(std::string(PLANK_CLIPBOARD_MAX_TEXT_SIZE+1, 'x')));
@@ -108,5 +132,19 @@ private slots:
         QCOMPARE(*ClipboardPlatform::readText(), std::string("safe"));
     }
 };
-QTEST_MAIN(TestWindowsClipboardSync)
+int main(int argc, char** argv)
+{
+    if (argc == 2 && std::strcmp(argv[1], "--hold-clipboard") == 0) {
+        HWND window = CreateWindowExW(0, L"STATIC", L"Clipboard test lock", 0,
+            0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!window || !OpenClipboard(window)) return 2;
+        std::puts("LOCKED"); std::fflush(stdout);
+        std::getchar();
+        CloseClipboard(); DestroyWindow(window);
+        return 0;
+    }
+    QGuiApplication application(argc, argv);
+    TestWindowsClipboardSync test;
+    return QTest::qExec(&test, argc, argv);
+}
 #include "test_windowsclipboardsync.moc"
