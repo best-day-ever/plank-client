@@ -380,9 +380,17 @@ contains(DEFINES, HAVE_LIBINPUT_TABLET) {
 
 HEADERS += streaming/input/pentiltencoding.h
 
-macx {
+win32 {
+    SOURCES += streaming/input/windowsrawwacom.cpp
+    HEADERS += streaming/input/windowsrawwacom.h streaming/input/windowswacomlogic.h \
+        streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h \
+        streaming/input/linuxwacomreportworker.h
+    LIBS += -lCfgmgr32
+}
+
+macx|win32 {
     # Normalized-pen forwarding via SDL3's pen events (SDL_EVENT_PEN_*),
-    # which its Cocoa backend derives from AppKit tablet events. Header-only;
+    # from AppKit on macOS and Windows Ink on Windows. Header-only;
     # see streaming/input/macpen.h.
     HEADERS += streaming/input/macpen.h
 }
@@ -786,3 +794,17 @@ isEmpty(PLANK_VERSION) {
 }
 VERSION = "$$section(PLANK_VERSION, -, 0, 0)"
 DEFINES += PLANK_VERSION_STR=\\\"$$PLANK_VERSION\\\"
+
+# Shared clipboard protocol state; only native clipboard access varies by OS.
+macx|win32 {
+    SOURCES += streaming/clipboardsync.cpp
+    HEADERS += streaming/clipboardsync.h streaming/clipboardplatform.h streaming/clipboardpolltimer.h streaming/plankclipboard.h
+}
+win32 {
+    SOURCES += streaming/windowsclipboard.cpp
+    contains(CONFIG, plank-transport) {
+        SOURCES += streaming/windowsfileclipboard.cpp
+        HEADERS += streaming/windowsfileclipboard.h streaming/windowsfileclipboardpaths.h
+        LIBS += -ladvapi32 -lshell32 -luser32
+    }
+}

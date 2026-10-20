@@ -1,6 +1,9 @@
 #include "input.h"
 #include "plankpointerlogic.h"
 #include "plankmousemotion.h"
+#ifdef Q_OS_WIN
+#include "windowsrawwacom.h"
+#endif
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -40,6 +43,12 @@ void SdlInputHandler::routePresentationPointer(SDL_Window*& window, float& x, fl
 
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 {
+#if defined(Q_OS_WIN)
+    // SDL promotes Windows Ink pen input to mouse input as well. Forward
+    // only the pen/raw transport so a pressure stroke cannot click twice.
+    if (event->which == SDL_PEN_MOUSEID && (m_SdlPenInput || (m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached()))) return;
+#endif
+
     int button;
     SDL_Window* window = presentationWindow(event->windowID);
     if (window == nullptr) {
@@ -142,6 +151,12 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
                                              bool batchPendingEvents)
 {
+#if defined(Q_OS_WIN)
+    // SDL promotes Windows Ink pen input to mouse input as well. Forward
+    // only the pen/raw transport so a pressure stroke cannot click twice.
+    if (event->which == SDL_PEN_MOUSEID && (m_SdlPenInput || (m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached()))) return;
+#endif
+
     if (!isCaptureActive()) {
         // Not capturing
         return;
@@ -273,6 +288,12 @@ bool SdlInputHandler::sendAbsoluteMousePosition(
 
 void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
 {
+#if defined(Q_OS_WIN)
+    // SDL promotes Windows Ink pen input to mouse input as well. Forward
+    // only the pen/raw transport so a pressure stroke cannot click twice.
+    if (event->which == SDL_PEN_MOUSEID && (m_SdlPenInput || (m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached()))) return;
+#endif
+
     if (!isCaptureActive()) {
         // Not capturing
         return;

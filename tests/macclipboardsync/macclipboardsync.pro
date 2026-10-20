@@ -13,6 +13,7 @@ INCLUDEPATH += \
 
 SOURCES += \
     test_macclipboardsync.mm \
+    ../../app/streaming/clipboardsync.cpp \
     ../../app/streaming/macclipboardsync.mm
 
 HEADERS += \

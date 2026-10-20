@@ -12,10 +12,16 @@
 #include "streaming/streamutils.h"
 #include "backend/clientdisplayprobe.h"
 #include "backend/displayprofile.h"
-#ifdef Q_OS_MACOS
-#include "macclipboardsync.h"
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+#include "clipboardsync.h"
 #ifdef PLANK_TRANSPORT
+#ifdef Q_OS_WIN
+#include "windowsfileclipboard.h"
+using PlatformFileClipboard = WindowsFileClipboard;
+#else
 #include "macfileclipboard.h"
+using PlatformFileClipboard = MacFileClipboard;
+#endif
 #endif
 #endif
 #include "backend/computermanager.h"
@@ -1208,7 +1214,7 @@ void Session::startPlankTransportMediaReceivers()
     m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
     m_LastPlankVideoReceived.store(0);
     m_PlankTransportReceiversStopping.store(false);
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     startClipboardSync();
 #endif
     m_PlankTransportVideoThread = std::thread([this]() {
@@ -1226,7 +1232,7 @@ void Session::startPlankTransportMediaReceivers()
 
 void Session::stopPlankTransportMediaReceivers()
 {
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     stopClipboardPollTimer();
 #endif
     m_PlankTransportReceiversStopping.store(true);
@@ -1239,7 +1245,7 @@ void Session::stopPlankTransportMediaReceivers()
     if (m_PlankTransportDataThread.joinable()) {
         m_PlankTransportDataThread.join();
     }
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     stopClipboardSync();
 #endif
 }
@@ -1540,7 +1546,7 @@ void Session::plankTransportDataReceiveLoop()
                 LiNotifyPlankHostTermination(-1);
                 return;
             }
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
             if (m_ClipboardSync && clipboardSyncEnabled() &&
                     !m_ClipboardSync->handleHostOffer(event.payload, event.payload_size)) {
                 LiNotifyPlankHostTermination(-1);
@@ -1607,7 +1613,7 @@ int Session::plankTransportNativeInputSender(void* context, uint8_t type,
 }
 #endif
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
 bool Session::clipboardSyncEnabled() const
 {
     return m_Computer != nullptr &&
@@ -1623,7 +1629,7 @@ void Session::startClipboardSync()
         return;
     }
     if (!m_ClipboardSync) {
-        m_ClipboardSync = std::make_unique<MacClipboardSync>(
+        m_ClipboardSync = std::make_unique<ClipboardSync>(
                     [this](const std::uint8_t* payload, std::size_t size) {
                         return plankTransportNativeInputSender(
                                    m_PlankTransportEndpoint,
@@ -1650,23 +1656,30 @@ void Session::startClipboardSync()
     m_ClipboardSync->start();
 #ifdef PLANK_TRANSPORT
     if (m_FileClipboardMode != QStringLiteral("off") && !m_FileClipboard) {
-        m_FileClipboard = std::make_unique<MacFileClipboard>(
+        const auto generation = ++m_ClipboardEventGeneration;
+        m_FileClipboard = std::make_unique<PlatformFileClipboard>(
                     m_PlankTransportEndpoint,
                     m_FileClipboardMode.toStdString(),
-                    [] {
+                    [generation] {
                         SDL_Event event {};
                         event.type = SDL_EVENT_USER;
+                        event.user.data1 = reinterpret_cast<void*>(generation);
                         event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_READY;
                         event.user.timestamp = SDL_GetTicks();
                         return SDL_PushEvent(&event);
                     },
-                    [] {
+                    [generation] {
                         SDL_Event event {};
                         event.type = SDL_EVENT_USER;
+                        event.user.data1 = reinterpret_cast<void*>(generation);
                         event.user.code = SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH;
                         event.user.timestamp = SDL_GetTicks();
                         return SDL_PushEvent(&event);
-                    });
+                    }
+#ifdef Q_OS_WIN
+                    , [this] { return anyPresentationWindowFocused(); }
+#endif
+                    );
     }
     if (m_FileClipboard) m_FileClipboard->start();
 #endif
@@ -1677,6 +1690,8 @@ void Session::startClipboardSync()
 void Session::stopClipboardSync()
 {
     stopClipboardPollTimer();
+    m_TextClipboardPastePending = false;
+    ++m_ClipboardEventGeneration;
     if (m_ClipboardSync) {
         m_ClipboardSync->stop();
     }
@@ -1689,6 +1704,16 @@ void Session::stopClipboardSync()
 }
 
 #ifdef PLANK_TRANSPORT
+bool Session::deferTextClipboardPasteOnMainThread()
+{
+    if (m_ClipboardSync && clipboardSyncEnabled() && anyPresentationWindowFocused() &&
+            !m_ClipboardSync->pollLocalClipboardOnMainThread()) {
+        m_TextClipboardPastePending = true;
+        return true;
+    }
+    return false;
+}
+
 bool Session::beginFileClipboardPasteOnMainThread()
 {
     return m_FileClipboard != nullptr && anyPresentationWindowFocused() &&
@@ -4731,7 +4756,7 @@ bool Session::finishPlankReconnect(
     if (state.inputCaptureWasActive) {
         m_InputHandler->setCaptureActive(true);
     }
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     // Receiver teardown removes this timer on every reconnect attempt. Resume
     // periodic polling only after success, back on the SDL/AppKit main thread.
     startClipboardPollTimer();
@@ -5006,7 +5031,7 @@ void Session::execInternal()
         return;
     }
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     startClipboardPollTimer();
 #endif
 
@@ -5316,32 +5341,52 @@ void Session::execInternal()
             }
             return true;
         case SDL_CODE_PLANK_CLIPBOARD:
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
             if (m_ClipboardSync != nullptr) {
                 m_ClipboardSync->applyPendingHostTextOnMainThread();
             }
 #endif
             return true;
         case SDL_CODE_PLANK_CLIPBOARD_POLL:
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
             if (m_ClipboardSync != nullptr) {
-                m_ClipboardSync->pollLocalClipboardOnMainThread();
+                const bool ready = m_ClipboardSync->pollLocalClipboardOnMainThread();
+#ifdef PLANK_TRANSPORT
+                if (m_TextClipboardPastePending) {
+                    if (!anyPresentationWindowFocused()) m_TextClipboardPastePending = false;
+                    else if (ready) {
+                        m_TextClipboardPastePending = false;
+                        injectRemoteFilePasteOnMainThread();
+                    }
+                }
+#else
+                Q_UNUSED(ready);
+#endif
             }
 #ifdef PLANK_TRANSPORT
             if (m_FileClipboard != nullptr) {
                 m_FileClipboard->pollLocalClipboardOnMainThread();
+#ifdef Q_OS_WIN
+                m_FileClipboard->publishPendingHostFilesOnMainThread();
+#endif
             }
 #endif
 #endif
             return true;
         case SDL_CODE_PLANK_FILE_CLIPBOARD_READY:
-#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
-            injectRemoteFilePasteOnMainThread();
+#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
+            if (reinterpret_cast<std::uintptr_t>(userEvent.data1) == m_ClipboardEventGeneration &&
+                    m_FileClipboard && clipboardSyncEnabled() && anyPresentationWindowFocused()
+#ifdef Q_OS_WIN
+                    && m_FileClipboard->takeReadyPasteOnMainThread()
+#endif
+                    ) injectRemoteFilePasteOnMainThread();
 #endif
             return true;
         case SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH:
-#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
-            if (m_FileClipboard != nullptr) {
+#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
+            if (m_FileClipboard != nullptr &&
+                    reinterpret_cast<std::uintptr_t>(userEvent.data1) == m_ClipboardEventGeneration) {
                 m_FileClipboard->publishPendingHostFilesOnMainThread();
             }
 #endif
@@ -5611,11 +5656,17 @@ void Session::execInternal()
                         m_PlankToolbar->notifyFocusLost();
                     }
                     m_InputHandler->notifyFocusLost();
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+                m_TextClipboardPastePending = false;
+#if defined(Q_OS_WIN) && defined(PLANK_TRANSPORT)
+                if (m_FileClipboard) m_FileClipboard->cancelPendingPasteOnMainThread();
+#endif
+#endif
                 }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 m_InputHandler->notifyFocusGained();
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
                 queueClipboardPollEvent();
 #endif
                 break;
@@ -5771,6 +5822,12 @@ void Session::execInternal()
                         m_AudioMuted = true;
                     }
                     m_InputHandler->notifyFocusLost();
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+                m_TextClipboardPastePending = false;
+#if defined(Q_OS_WIN) && defined(PLANK_TRANSPORT)
+                if (m_FileClipboard) m_FileClipboard->cancelPendingPasteOnMainThread();
+#endif
+#endif
                 }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
@@ -5778,7 +5835,7 @@ void Session::execInternal()
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
                 queueClipboardPollEvent();
 #endif
                 break;
@@ -6120,7 +6177,7 @@ void Session::execInternal()
             }
             m_InputHandler->handleMouseWheelEvent(&event.wheel);
             break;
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
         case SDL_EVENT_PEN_PROXIMITY_IN:
         case SDL_EVENT_PEN_PROXIMITY_OUT:
             m_InputHandler->handlePenProximityEvent(&event.pproximity);

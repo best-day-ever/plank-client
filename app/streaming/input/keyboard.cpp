@@ -183,7 +183,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         return;
     }
 
-#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
     if (event->scancode == SDL_SCANCODE_V && !event->down &&
             m_FilePasteKeyUpConsumed) {
         m_FilePasteKeyUpConsumed = false;
@@ -193,7 +193,8 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
             !m_ImmersiveKeyboardMode &&
             (event->mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0 &&
             (event->mod & SDL_KMOD_ALT) == 0 && Session::get() != nullptr &&
-            Session::get()->beginFileClipboardPasteOnMainThread()) {
+            (Session::get()->beginFileClipboardPasteOnMainThread() ||
+             Session::get()->deferTextClipboardPasteOnMainThread())) {
         raiseAllKeys();
         m_FilePasteKeyUpConsumed = true;
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

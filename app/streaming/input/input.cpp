@@ -10,7 +10,12 @@
 #include "streaming/macquitshortcut.h"
 #include "streaming/mackeyboardcapture.h"
 #include "streaming/macwindow.h"
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
 #include "streaming/input/macpen.h"
+#endif
+#ifdef Q_OS_WIN
+#include "streaming/input/windowsrawwacom.h"
 #endif
 
 #ifdef HAVE_MAC_RAW_WACOM
@@ -174,8 +179,11 @@ SdlInputHandler::~SdlInputHandler()
     m_LinuxWacomInput.reset();
     m_LinuxRawWacomInput.reset();
 #endif
-#ifdef Q_OS_MACOS
-    m_MacPenInput.reset();
+#ifdef Q_OS_WIN
+    m_WindowsRawWacomInput.reset();
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    m_SdlPenInput.reset();
 #endif
 
     for (auto& output : m_WaylandTabletCursorOutputs) {
@@ -215,7 +223,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
         m_MouseCursorCapturedVisibilityState = false;
         SDL_LogInfo(SDL_LOG_CATEGORY_INPUT, "PLANK embedded host cursor enabled");
     }
-#if defined(HAVE_LIBINPUT_TABLET) || defined(Q_OS_MACOS)
+#if defined(HAVE_LIBINPUT_TABLET) || defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     const auto requestTabletCursor = [this]() {
         if (!m_TabletCursorActivationPending.exchange(true)) {
             Session::postTabletCursorActivationEvent();
@@ -274,14 +282,30 @@ void SdlInputHandler::setWindow(SDL_Window *window)
             (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     }
 #endif
+#ifdef Q_OS_WIN
+    if (qEnvironmentVariableIntValue("PLANK_WINDOWS_PEN_INPUT") == 0 &&
+            (LiGetHostFeatureFlags() &
+             (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) ==
+            (LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND)) {
+        m_WindowsRawWacomInput.reset(new WindowsRawWacomInput(requestTabletCursor));
+        m_WindowsRawWacomInput->setActive(
+            (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    // SDL pen events provide Windows Ink fallback. macOS retains its
+    // explicit fallback opt-in; raw and normalized never forward together.
+    if (
 #ifdef Q_OS_MACOS
-    // Gap-closing, unqualified on real Wacom hardware: opt in explicitly.
-    // See docs/bde/gap-analysis.md and docs/bde/mac-pen-testplan.md.
-    if (qEnvironmentVariableIntValue("PLANK_MACOS_PEN_INPUT") != 0) {
+            qEnvironmentVariableIntValue("PLANK_MACOS_PEN_INPUT") != 0
+#else
+            true // Windows Ink fallback remains available if raw USB capture fails.
+#endif
+            ) {
         if ((LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) != 0) {
             SDL_LogInfo(SDL_LOG_CATEGORY_INPUT,
                         "Using SDL3 pen events for PLANK normalized pen transport");
-            m_MacPenInput.reset(new PlankMacPenInput(
+            m_SdlPenInput.reset(new PlankMacPenInput(
                 [](const PlankMacPenPacket& packet) {
                     LiSendPenEvent(packet.eventType, packet.toolType,
                                    packet.buttons, packet.x, packet.y,
@@ -290,13 +314,13 @@ void SdlInputHandler::setWindow(SDL_Window *window)
                                    packet.rotation, packet.tilt);
                 },
                 requestTabletCursor));
-            m_MacPenInput->setActive(
+            m_SdlPenInput->setActive(
                 (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0);
         }
         else {
             SDL_LogError(SDL_LOG_CATEGORY_INPUT,
                          "Host lacks normalized pen support (LI_FF_PEN_TOUCH_EVENTS); "
-                         "macOS pen/tablet input will not be forwarded");
+                         "normalized pen/tablet input will not be forwarded");
         }
     }
 #endif
@@ -655,6 +679,9 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
 
 void SdlInputHandler::applyPendingTabletCursorActivation()
 {
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    refreshNormalizedPen();
+#endif
     // A mouse or toolbar event can cancel tablet ownership after this SDL event
     // was queued. Never let that stale event steal ownership back.
     if (!m_TabletCursorActivationPending.load()) {
@@ -702,6 +729,7 @@ void SdlInputHandler::raiseAllKeys()
     }
 
     m_KeysDown.clear();
+    m_FilePasteKeyUpConsumed = false;
 }
 
 void SdlInputHandler::notifyMouseLeave()
@@ -742,9 +770,12 @@ void SdlInputHandler::notifyFocusLost()
         m_LinuxRawWacomInput->setActive(false);
     }
 #endif
-#ifdef Q_OS_MACOS
-    if (m_MacPenInput) {
-        m_MacPenInput->setActive(false);
+#ifdef Q_OS_WIN
+    refreshTabletFocus();
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    if (m_SdlPenInput) {
+        m_SdlPenInput->setActive(false);
     }
 #endif
 
@@ -770,15 +801,24 @@ void SdlInputHandler::notifyFocusGained()
         m_LinuxRawWacomInput->setActive(true);
     }
 #endif
-#ifdef Q_OS_MACOS
-    if (m_MacPenInput) {
-        m_MacPenInput->setActive(true);
-    }
+#ifdef Q_OS_WIN
+    refreshTabletFocus();
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    refreshNormalizedPen();
 #endif
 }
 
 void SdlInputHandler::refreshTabletFocus()
 {
+#ifdef Q_OS_WIN
+    bool focused = m_Window && (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS);
+    for (const auto& output : m_PresentationLayout.outputs) {
+        if (output.window && (SDL_GetWindowFlags(output.window) & SDL_WINDOW_INPUT_FOCUS)) focused = true;
+    }
+    if (m_WindowsRawWacomInput) m_WindowsRawWacomInput->setActive(isCaptureActive() && focused);
+    refreshNormalizedPen();
+#endif
 #ifdef HAVE_MAC_RAW_WACOM
     if (!m_MacRawWacomInput) return;
 
@@ -801,6 +841,8 @@ void SdlInputHandler::handleRawHidControl(const unsigned char* data,
 {
 #ifdef HAVE_MAC_RAW_WACOM
     if (m_MacRawWacomInput) m_MacRawWacomInput->handleControl(data, length);
+#elif defined(Q_OS_WIN)
+    if (m_WindowsRawWacomInput) m_WindowsRawWacomInput->handleControl(data, length);
 #elif defined(HAVE_LIBINPUT_TABLET)
     if (m_LinuxRawWacomInput) {
         m_LinuxRawWacomInput->handleControl(data, length);
@@ -813,6 +855,12 @@ void SdlInputHandler::handleRawHidControl(const unsigned char* data,
 
 void SdlInputHandler::beginRawHidReconnect()
 {
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    if (m_SdlPenInput) m_SdlPenInput->setActive(false);
+#endif
+#ifdef Q_OS_WIN
+    if (m_WindowsRawWacomInput) m_WindowsRawWacomInput->beginReconnect();
+#endif
 #ifdef HAVE_MAC_RAW_WACOM
     if (m_MacRawWacomInput) m_MacRawWacomInput->beginReconnect();
 #endif
@@ -828,6 +876,12 @@ void SdlInputHandler::beginRawHidReconnect()
 
 void SdlInputHandler::finishRawHidReconnect()
 {
+#ifdef Q_OS_WIN
+    if (m_WindowsRawWacomInput) m_WindowsRawWacomInput->finishReconnect();
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    refreshNormalizedPen();
+#endif
 #ifdef HAVE_MAC_RAW_WACOM
     if (m_MacRawWacomInput) m_MacRawWacomInput->finishReconnect();
 #endif
@@ -1259,7 +1313,22 @@ void SdlInputHandler::updateTabletCursorVisibility()
     }
 }
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+
+void SdlInputHandler::refreshNormalizedPen()
+{
+    if (!m_SdlPenInput) return;
+    bool raw = false;
+#ifdef Q_OS_WIN
+    raw = m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached();
+#endif
+    bool focused = false;
+    for (const auto& output : m_PresentationLayout.outputs) {
+        if (output.window && (SDL_GetWindowFlags(output.window) & SDL_WINDOW_INPUT_FOCUS)) focused = true;
+    }
+    if (m_Window && (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS)) focused = true;
+    m_SdlPenInput->setActive(isCaptureActive() && focused && !raw);
+}
 
 bool SdlInputHandler::mapWindowPointToNormalizedStream(
         SDL_Window* window, float windowX, float windowY,
@@ -1302,20 +1371,22 @@ bool SdlInputHandler::mapWindowPointToNormalizedStream(
 
 void SdlInputHandler::handlePenProximityEvent(SDL_PenProximityEvent* event)
 {
-    if (!m_MacPenInput) {
+    refreshNormalizedPen();
+    if (!m_SdlPenInput) {
         return;
     }
     if (event->type == SDL_EVENT_PEN_PROXIMITY_IN) {
-        m_MacPenInput->handleProximityIn(event->which);
+        m_SdlPenInput->handleProximityIn(event->which);
     }
     else {
-        m_MacPenInput->handleProximityOut(event->which);
+        m_SdlPenInput->handleProximityOut(event->which);
     }
 }
 
 void SdlInputHandler::handlePenTouchEvent(SDL_PenTouchEvent* event)
 {
-    if (!m_MacPenInput) {
+    refreshNormalizedPen();
+    if (!m_SdlPenInput) {
         return;
     }
     SDL_Window* window = presentationWindow(event->windowID);
@@ -1328,13 +1399,14 @@ void SdlInputHandler::handlePenTouchEvent(SDL_PenTouchEvent* event)
                                           normalizedX, normalizedY)) {
         return;
     }
-    m_MacPenInput->handleTouch(event->which, event->down, normalizedX,
+    m_SdlPenInput->handleTouch(event->which, event->down, normalizedX,
                                normalizedY, event->pen_state);
 }
 
 void SdlInputHandler::handlePenMotionEvent(SDL_PenMotionEvent* event)
 {
-    if (!m_MacPenInput) {
+    refreshNormalizedPen();
+    if (!m_SdlPenInput) {
         return;
     }
     SDL_Window* window = presentationWindow(event->windowID);
@@ -1347,24 +1419,26 @@ void SdlInputHandler::handlePenMotionEvent(SDL_PenMotionEvent* event)
                                           normalizedX, normalizedY)) {
         return;
     }
-    m_MacPenInput->handlePosition(event->which, normalizedX, normalizedY,
+    m_SdlPenInput->handlePosition(event->which, normalizedX, normalizedY,
                                   event->pen_state);
 }
 
 void SdlInputHandler::handlePenButtonEvent(SDL_PenButtonEvent* event)
 {
-    if (!m_MacPenInput) {
+    refreshNormalizedPen();
+    if (!m_SdlPenInput) {
         return;
     }
     // x, y, pressure, tilt and rotation are ignored host-side for
     // LI_TOUCH_EVENT_BUTTON_ONLY (see Limelight.h and macpen.h), so this
     // does not need to map event->x/y through the presentation layout.
-    m_MacPenInput->handleButton(event->which, event->pen_state);
+    m_SdlPenInput->handleButton(event->which, event->pen_state);
 }
 
 void SdlInputHandler::handlePenAxisEvent(SDL_PenAxisEvent* event)
 {
-    if (!m_MacPenInput) {
+    refreshNormalizedPen();
+    if (!m_SdlPenInput) {
         return;
     }
     if (static_cast<int>(event->axis) < 0 ||
@@ -1372,9 +1446,9 @@ void SdlInputHandler::handlePenAxisEvent(SDL_PenAxisEvent* event)
                 static_cast<int>(PlankMacPenAxis::TangentialPressure)) {
         return;
     }
-    m_MacPenInput->handleAxis(event->which,
+    m_SdlPenInput->handleAxis(event->which,
                               static_cast<PlankMacPenAxis>(event->axis),
                               event->value);
 }
 
-#endif // Q_OS_MACOS
+#endif // Q_OS_MACOS || Q_OS_WIN

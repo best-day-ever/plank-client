@@ -21,10 +21,15 @@ class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
 class PlankWaylandCursor;
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+class PlankMacPenInput;
+#endif
+#ifdef Q_OS_WIN
+class WindowsRawWacomInput;
+#endif
 #ifdef Q_OS_MACOS
 class MacQuitShortcut;
 class MacKeyboardCapture;
-class PlankMacPenInput;
 #endif
 #ifdef HAVE_MAC_RAW_WACOM
 class MacRawWacomInput;
@@ -73,7 +78,7 @@ public:
 
     void handleMouseWheelEvent(SDL_MouseWheelEvent* event);
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     void handlePenProximityEvent(SDL_PenProximityEvent* event);
     void handlePenTouchEvent(SDL_PenTouchEvent* event);
     void handlePenMotionEvent(SDL_PenMotionEvent* event);
@@ -250,7 +255,8 @@ private:
     const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
 
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    void refreshNormalizedPen();
     bool mapWindowPointToNormalizedStream(SDL_Window* window,
                                           float windowX, float windowY,
                                           float& normalizedX,
@@ -276,8 +282,11 @@ private:
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;
     std::unique_ptr<LinuxRawWacomInput> m_LinuxRawWacomInput;
 #endif
-#ifdef Q_OS_MACOS
-    std::unique_ptr<PlankMacPenInput> m_MacPenInput;
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    std::unique_ptr<PlankMacPenInput> m_SdlPenInput;
+#endif
+#ifdef Q_OS_WIN
+    std::unique_ptr<WindowsRawWacomInput> m_WindowsRawWacomInput;
 #endif
 
     static const int k_ButtonMap[];
