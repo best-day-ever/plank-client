@@ -174,6 +174,10 @@ public:
         : m_Endpoint(endpoint), m_Offer(offer), m_Epoch(epoch), m_Stop(stop),
           m_ReceiveSequence(receiveSequence) {}
 
+    void allowHostPreemption(bool enabled) { m_AllowHostPreemption = enabled; }
+    bool hasForeignOffer() const { return !m_ForeignOffer.empty(); }
+    std::vector<std::uint8_t> takeForeignOffer() { return std::move(m_ForeignOffer); }
+
     bool sendControl(std::uint16_t type, std::uint32_t flags,
                      const std::uint8_t* payload, std::size_t size)
     {
@@ -228,11 +232,41 @@ private:
                 PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT;
         storage.resize(PLANK_CLIPBOARD_FILE_HEADER_BYTES + payloadLimit);
         std::size_t size = 0;
-        const auto result = content ?
-                plank_transport_native_file_data_receive(
-                    m_Endpoint, storage.data(), storage.size(), &size, timeoutMs) :
-                plank_transport_native_file_control_receive(
-                    m_Endpoint, storage.data(), storage.size(), &size, timeoutMs);
+        int32_t result;
+        if (!content && !m_DeferredControl.empty()) {
+            storage = std::move(m_DeferredControl);
+            m_DeferredControl.clear();
+            size = storage.size();
+            result = PLANK_TRANSPORT_OK;
+        } else {
+            result = content ?
+                    plank_transport_native_file_data_receive(
+                        m_Endpoint, storage.data(), storage.size(), &size, timeoutMs) :
+                    plank_transport_native_file_control_receive(
+                        m_Endpoint, storage.data(), storage.size(), &size, timeoutMs);
+        }
+        if (content && result == PLANK_TRANSPORT_TIMEOUT && m_DeferredControl.empty()) {
+            std::vector<std::uint8_t> control(PLANK_CLIPBOARD_FILE_HEADER_BYTES + PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT);
+            std::size_t count = 0;
+            const auto controlResult = plank_transport_native_file_control_receive(
+                m_Endpoint, control.data(), control.size(), &count, 1);
+            if (controlResult == PLANK_TRANSPORT_OK) {
+                control.resize(count);
+                PlankClipboardFileRecord terminal {};
+                if (plank_clipboard_file_decode(control.data(), control.size(),
+                        PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &terminal) &&
+                        (terminal.type == PLANK_CLIPBOARD_FILE_CANCEL || terminal.type == PLANK_CLIPBOARD_FILE_ERROR) &&
+                        terminal.sequence == m_ReceiveSequence && terminal.session_epoch == m_Epoch &&
+                        std::memcmp(terminal.offer_id, m_Offer.data(), m_Offer.size()) == 0) {
+                    storage = std::move(control);
+                    size = storage.size();
+                    result = PLANK_TRANSPORT_OK;
+                } else m_DeferredControl = std::move(control);
+            } else if (controlResult != PLANK_TRANSPORT_TIMEOUT) {
+                m_Failed = true;
+                return std::nullopt;
+            }
+        }
         if (result == PLANK_TRANSPORT_TIMEOUT) {
             if (std::chrono::steady_clock::now() - m_LastActivity > 60s) m_Failed = true;
             return std::nullopt;
@@ -245,8 +279,21 @@ private:
         storage.resize(size);
         PlankClipboardFileRecord record {};
         if (!plank_clipboard_file_decode(storage.data(), storage.size(),
-                static_cast<std::uint32_t>(payloadLimit), &record) ||
-                std::memcmp(record.offer_id, m_Offer.data(), m_Offer.size()) != 0 ||
+                static_cast<std::uint32_t>(payloadLimit), &record)) {
+            m_Failed = true;
+            return std::nullopt;
+        }
+        if (!content && m_AllowHostPreemption && record.type == PLANK_CLIPBOARD_FILE_OFFER_BEGIN &&
+                record.sequence == 1 &&
+                (std::memcmp(record.offer_id, m_Offer.data(), m_Offer.size()) != 0 || record.session_epoch != m_Epoch)) {
+            PlankClipboardFileOfferBegin begin {};
+            if (plank_clipboard_file_offer_begin_decode(record.payload, record.payload_size, &begin) &&
+                    begin.direction == PLANK_CLIPBOARD_FILE_HOST_TO_CLIENT) {
+                m_ForeignOffer = storage;
+                return std::nullopt; // Host source wins; no Client data is in flight yet.
+            }
+        }
+        if (std::memcmp(record.offer_id, m_Offer.data(), m_Offer.size()) != 0 ||
                 record.session_epoch != m_Epoch ||
                 record.sequence != m_ReceiveSequence++) {
             m_Failed = true;
@@ -278,6 +325,9 @@ private:
     std::uint64_t m_SendSequence = 1;
     std::uint64_t m_ReceiveSequence = 1;
     bool m_Failed = false;
+    bool m_AllowHostPreemption = false;
+    std::vector<std::uint8_t> m_ForeignOffer;
+    std::vector<std::uint8_t> m_DeferredControl;
     std::chrono::steady_clock::time_point m_LastActivity = std::chrono::steady_clock::now();
 };
 
@@ -417,6 +467,8 @@ void WindowsFileClipboard::stop()
         if (!m_Running) return;
         m_Stop.store(true, std::memory_order_release);
         m_PasteRequested = false;
+        ++m_PasteEpoch;
+        m_ReadyPaste = false;
         m_HostPublishPending = false;
     }
     m_Changed.notify_all();
@@ -479,13 +531,30 @@ bool WindowsFileClipboard::beginPasteOnMainThread()
 {
     pollLocalClipboardOnMainThread();
     std::lock_guard<std::mutex> lock(m_Mutex);
-    if (!m_Running || m_Current.paths.empty()) return false;
-    if (!m_PasteRequested) {
+    if (!m_Running || m_Current.paths.empty() ||
+            m_Current.changeCount != GetClipboardSequenceNumber()) return false;
+    if (!m_PasteRequested || m_Requested.pasteEpoch != m_PasteEpoch) {
         m_Requested = m_Current;
+        m_Requested.pasteEpoch = m_PasteEpoch;
         m_PasteRequested = true;
         m_Changed.notify_one();
     }
     return true;
+}
+
+void WindowsFileClipboard::cancelPendingPasteOnMainThread()
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    ++m_PasteEpoch;
+    m_ReadyPaste = false;
+}
+
+bool WindowsFileClipboard::takeReadyPasteOnMainThread()
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    const bool ready = m_Running && m_ReadyPaste;
+    m_ReadyPaste = false;
+    return ready;
 }
 
 bool WindowsFileClipboard::publishPendingHostFilesOnMainThread()
@@ -505,7 +574,7 @@ bool WindowsFileClipboard::publishPendingHostFilesOnMainThread()
                 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
         ~ClipboardOwner() { if (window) DestroyWindow(window); }
     } owner;
-    bool success = false;
+    bool success = false, busy = false;
     std::vector<wchar_t> names;
     for (const auto& path : paths) {
         const auto native = fs::u8path(path).wstring();
@@ -537,10 +606,13 @@ bool WindowsFileClipboard::publishPendingHostFilesOnMainThread()
                     m_Current.changeCount = m_PublishedSequence.load();
                 }
                 CloseClipboard();
+            } else if (owner.window && GetClipboardSequenceNumber() == expectedSequence) {
+                busy = true;
             }
         }
     }
     if (memory) GlobalFree(memory);
+    if (busy) return false; // Keep pending; the SDL clipboard poll retries.
 
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
@@ -568,14 +640,28 @@ void WindowsFileClipboard::workerLoop()
         }
         if (pasteRequested) {
             bool ready = false;
-            try { ready = transferSnapshot(snapshot); }
+            try {
+                for (unsigned attempt = 0; attempt < 3 && !m_Stop.load(std::memory_order_acquire); ++attempt) {
+                    std::vector<std::uint8_t> foreignOffer;
+                    const auto result = transferSnapshot(snapshot, foreignOffer);
+                    ready = result == SourceResult::Ready;
+                    if (result != SourceResult::Yielded) break;
+                    if (!receiveHostOffer(std::move(foreignOffer))) break;
+                    std::lock_guard<std::mutex> lock(m_Mutex);
+                    if (snapshot.pasteEpoch != m_PasteEpoch) break;
+                }
+            }
             catch (const std::exception&) {
                 qWarning("File clipboard source is unavailable");
             }
             {
                 std::lock_guard<std::mutex> lock(m_Mutex);
-                m_PasteRequested = false;
-                m_Requested = {};
+                if (m_Requested.pasteEpoch == snapshot.pasteEpoch) {
+                    m_PasteRequested = false;
+                    m_Requested = {};
+                }
+                ready = ready && snapshot.pasteEpoch == m_PasteEpoch;
+                m_ReadyPaste = ready;
             }
             if (ready && !m_Stop.load(std::memory_order_acquire) && m_ReadyCallback) {
                 m_ReadyCallback();
@@ -607,31 +693,54 @@ void WindowsFileClipboard::workerLoop()
     }
 }
 
-bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
+WindowsFileClipboard::SourceResult WindowsFileClipboard::transferSnapshot(
+        const PasteboardSnapshot& snapshot, std::vector<std::uint8_t>& yieldedOffer)
 {
+    const auto cancelled = [&] {
+        if (m_Stop.load(std::memory_order_acquire)) return true;
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        return snapshot.pasteEpoch != m_PasteEpoch;
+    };
+    if (cancelled()) return SourceResult::Failed;
     std::map<fs::path, NativeHandle> ancestors;
     std::vector<SourceEntry> entries;
     std::uint64_t totalBytes = 0;
     for (const auto& path : snapshot.paths) {
         if (!appendTree(fs::u8path(path), 0, 1, entries, totalBytes, ancestors)) {
             qWarning("File clipboard source manifest was rejected");
-            return false;
+            return SourceResult::Failed;
         }
     }
-    if (entries.empty() || totalBytes > (1ULL << 40)) return false;
+    if (entries.empty() || totalBytes > (1ULL << 40)) return SourceResult::Failed;
     std::size_t manifestBytes = PLANK_CLIPBOARD_FILE_OFFER_BEGIN_BYTES;
+    std::set<std::pair<std::uint64_t, QString>> siblingNames;
     for (const auto& entry : entries) {
+        if (!siblingNames.emplace(entry.parent,
+                plank::clipboard::windows::foldedPath(entry.name)).second) return SourceResult::Failed;
         const auto amount = PLANK_CLIPBOARD_FILE_OFFER_ENTRY_PREFIX_BYTES + entry.name.size();
-        if (amount > PLANK_CLIPBOARD_FILE_MAX_MANIFEST_BYTES - manifestBytes) return false;
+        if (amount > PLANK_CLIPBOARD_FILE_MAX_MANIFEST_BYTES - manifestBytes) return SourceResult::Failed;
         manifestBytes += amount;
-        if (!statStable(entry.handle.get(), entry)) return false;
+        if (!statStable(entry.handle.get(), entry)) return SourceResult::Failed;
     }
 
     std::array<std::uint8_t, 16> offer {};
     std::uint64_t epoch = 0;
     if (!secureRandom(offer.data(), offer.size()) ||
-            !secureRandom(&epoch, sizeof(epoch)) || epoch == 0) return false;
+            !secureRandom(&epoch, sizeof(epoch)) || epoch == 0) return SourceResult::Failed;
     WireSession wire(m_Endpoint, offer, epoch, m_Stop);
+    wire.allowHostPreemption(true);
+    std::uint64_t materialization = 0;
+    bool offered = false, complete = false, peerTerminated = false, yielded = false;
+    struct SourceAbort {
+        std::function<void()> abort;
+        ~SourceAbort() { abort(); }
+    } sourceAbort{[&] {
+        if (!offered || complete || peerTerminated || yielded || m_Stop.load(std::memory_order_acquire)) return;
+        PlankClipboardFileTerminal terminal {materialization, PLANK_CLIPBOARD_FILE_REASON_SOURCE_UNAVAILABLE, 0};
+        std::array<std::uint8_t, PLANK_CLIPBOARD_FILE_TERMINAL_BYTES> payload {};
+        if (plank_clipboard_file_terminal_encode(payload.data(), &terminal))
+            wire.sendControl(PLANK_CLIPBOARD_FILE_CANCEL, 0, payload.data(), payload.size());
+    }};
     PlankClipboardFileOfferBegin begin {
         PLANK_CLIPBOARD_FILE_CLIENT_TO_HOST,
         static_cast<std::uint64_t>(snapshot.changeCount + 1),
@@ -642,7 +751,8 @@ bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
     std::array<std::uint8_t, PLANK_CLIPBOARD_FILE_OFFER_BEGIN_BYTES> beginPayload {};
     if (!plank_clipboard_file_offer_begin_encode(beginPayload.data(), &begin) ||
             !wire.sendControl(PLANK_CLIPBOARD_FILE_OFFER_BEGIN, 0,
-                              beginPayload.data(), beginPayload.size())) return false;
+                              beginPayload.data(), beginPayload.size())) return SourceResult::Failed;
+    offered = true;
     for (const auto& entry : entries) {
         std::array<std::uint8_t,
             PLANK_CLIPBOARD_FILE_OFFER_ENTRY_PREFIX_BYTES +
@@ -657,52 +767,61 @@ bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
         if (!plank_clipboard_file_offer_entry_encode(
                     payload.data(), payload.size(), &encoded, &payloadSize) ||
                 !wire.sendControl(PLANK_CLIPBOARD_FILE_OFFER_ENTRY, 0,
-                                  payload.data(), payloadSize)) return false;
+                                  payload.data(), payloadSize)) return SourceResult::Failed;
     }
-    if (!wire.sendControl(PLANK_CLIPBOARD_FILE_OFFER_END, 0, nullptr, 0)) return false;
+    if (!wire.sendControl(PLANK_CLIPBOARD_FILE_OFFER_END, 0, nullptr, 0)) return SourceResult::Failed;
 
     std::vector<std::uint8_t> storage;
-    std::uint64_t materialization = 0;
     bool acknowledged = false;
-    while (!m_Stop.load(std::memory_order_acquire) && !materialization) {
+    while (!cancelled() && !materialization) {
         const auto record = wire.receiveControl(storage, 100);
         if (!record) {
-            if (wire.failed()) return false;
+            if (wire.hasForeignOffer()) {
+                yielded = true;
+                yieldedOffer = wire.takeForeignOffer();
+                return SourceResult::Yielded;
+            }
+            if (wire.failed()) return SourceResult::Failed;
             continue;
         }
         if (record->type == PLANK_CLIPBOARD_FILE_OFFER_ACK) {
             PlankClipboardFileOfferAck ack {};
             if (acknowledged || !plank_clipboard_file_offer_ack_decode(
-                    record->payload, record->payload_size, &ack)) return false;
+                    record->payload, record->payload_size, &ack)) return SourceResult::Failed;
             acknowledged = true;
+            wire.allowHostPreemption(false);
         } else if (record->type == PLANK_CLIPBOARD_FILE_MATERIALIZE) {
             if (!acknowledged || record->flags != PLANK_CLIPBOARD_FILE_FLAG_ALL_ITEMS ||
                     !plank_clipboard_file_materialization_decode(
-                        record->payload, record->payload_size, &materialization)) return false;
+                        record->payload, record->payload_size, &materialization)) return SourceResult::Failed;
         } else if (record->type == PLANK_CLIPBOARD_FILE_CANCEL ||
                    record->type == PLANK_CLIPBOARD_FILE_ERROR) {
-            return false;
+            peerTerminated = true;
+            return SourceResult::Failed;
         } else {
-            return false;
+            return SourceResult::Failed;
         }
     }
 
     for (const auto& entry : entries) {
+        if (cancelled()) return SourceResult::Failed;
         if (entry.kind != PLANK_CLIPBOARD_FILE_REGULAR) continue;
         QCryptographicHash digest(QCryptographicHash::Sha256);
         std::uint64_t offset = 0;
         HANDLE fd = entry.handle.get();
-        if (!fd || !statStable(fd, entry)) return false;
+        if (!fd || !statStable(fd, entry)) return SourceResult::Failed;
         while (offset < entry.size) {
+            if (cancelled()) return SourceResult::Failed;
             const auto record = wire.receiveControl(storage, 100);
             if (!record) {
                 if (wire.failed() || m_Stop.load(std::memory_order_acquire)) {
-                    return false;
+                    return SourceResult::Failed;
                 }
                 continue;
             }
             if (record->type != PLANK_CLIPBOARD_FILE_READ_REQUEST) {
-                return false;
+                peerTerminated = record->type == PLANK_CLIPBOARD_FILE_CANCEL || record->type == PLANK_CLIPBOARD_FILE_ERROR;
+                return SourceResult::Failed;
             }
             PlankClipboardFileRange range {};
             if (!plank_clipboard_file_decode_range(
@@ -710,25 +829,25 @@ bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
                     range.materialization_id != materialization ||
                     range.entry_id != entry.id || range.offset != offset ||
                     range.size > entry.size - offset) {
-                return false;
+                return SourceResult::Failed;
             }
             std::vector<std::uint8_t> payload(
                     PLANK_CLIPBOARD_FILE_DATA_PREFIX_BYTES + range.size);
             if (!plank_clipboard_file_range_header(payload.data(), materialization,
                     entry.id, offset, range.size)) {
-                return false;
+                return SourceResult::Failed;
             }
             DWORD count = 0;
             if (!ReadFile(fd, payload.data() + PLANK_CLIPBOARD_FILE_DATA_PREFIX_BYTES,
-                          range.size, &count, nullptr) || count != range.size) return false;
+                          range.size, &count, nullptr) || count != range.size) return SourceResult::Failed;
             digest.addData(QByteArrayView(reinterpret_cast<const char*>(
                     payload.data() + PLANK_CLIPBOARD_FILE_DATA_PREFIX_BYTES), range.size));
             if (!wire.sendData(payload.data(), payload.size())) {
-                return false;
+                return SourceResult::Failed;
             }
             offset += range.size;
         }
-        if (!statStable(fd, entry)) return false;
+        if (!statStable(fd, entry)) return SourceResult::Failed;
         const QByteArray hash = digest.result();
         PlankClipboardFileEntryComplete complete {
             materialization, entry.id, entry.size, {0}
@@ -737,13 +856,13 @@ bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
         std::array<std::uint8_t, PLANK_CLIPBOARD_FILE_ENTRY_COMPLETE_BYTES> payload {};
         if (!plank_clipboard_file_entry_complete_encode(payload.data(), &complete) ||
                 !wire.sendControl(PLANK_CLIPBOARD_FILE_ENTRY_COMPLETE, 0,
-                                  payload.data(), payload.size())) return false;
+                                  payload.data(), payload.size())) return SourceResult::Failed;
     }
 
-    while (!m_Stop.load(std::memory_order_acquire)) {
+    while (!cancelled()) {
         const auto record = wire.receiveControl(storage, 100);
         if (!record) {
-            if (wire.failed()) return false;
+            if (wire.failed()) return SourceResult::Failed;
             continue;
         }
         std::uint64_t ready = 0;
@@ -752,14 +871,18 @@ bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
                     record->payload, record->payload_size, &ready) &&
                 ready == materialization) {
             for (const auto& entry : entries)
-                if (!statStable(entry.handle.get(), entry)) return false;
-            return true;
+                if (!statStable(entry.handle.get(), entry)) return SourceResult::Failed;
+            complete = true;
+            return SourceResult::Ready;
         }
         if (record->type == PLANK_CLIPBOARD_FILE_CANCEL ||
-                record->type == PLANK_CLIPBOARD_FILE_ERROR) return false;
-        return false;
+                record->type == PLANK_CLIPBOARD_FILE_ERROR) {
+            peerTerminated = true;
+            return SourceResult::Failed;
+        }
+        return SourceResult::Failed;
     }
-    return false;
+    return SourceResult::Failed;
 }
 
 bool WindowsFileClipboard::receiveHostOffer(std::vector<std::uint8_t> firstRecord)
@@ -803,7 +926,7 @@ bool WindowsFileClipboard::receiveHostOffer(std::vector<std::uint8_t> firstRecor
     bool valid = true;
     for (std::uint32_t index = 0; valid && index < begin.entry_count; ++index) {
         std::optional<PlankClipboardFileRecord> record;
-        while (!record && !m_Stop.load(std::memory_order_acquire)) {
+        while (valid && !record && !m_Stop.load(std::memory_order_acquire)) {
             record = wire.receiveControl(storage, 100);
             if (!record && wire.failed()) valid = false;
         }
@@ -1049,9 +1172,10 @@ bool WindowsFileClipboard::receiveHostOffer(std::vector<std::uint8_t> firstRecor
     bool published = false;
     {
         std::unique_lock<std::mutex> lock(m_Mutex);
-        m_Changed.wait(lock, [&] {
+        m_Changed.wait_for(lock, 60s, [&] {
             return m_Stop.load(std::memory_order_acquire) || m_HostPublishComplete;
         });
+        m_HostPublishPending = false;
         published = m_HostPublishComplete && m_HostPublishSuccess;
         m_HostPublishComplete = false;
         m_HostPublishSuccess = false;

@@ -595,6 +595,7 @@ private:
     std::unique_ptr<ClipboardSync> m_ClipboardSync;
     ClipboardPollTimer m_ClipboardPollTimer;
     std::atomic_bool m_TextClipboardPastePending {false};
+    std::atomic<std::uintptr_t> m_ClipboardEventGeneration {0};
 #ifdef PLANK_TRANSPORT
 #ifdef Q_OS_WIN
     std::unique_ptr<WindowsFileClipboard> m_FileClipboard;

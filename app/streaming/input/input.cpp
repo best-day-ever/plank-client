@@ -729,6 +729,7 @@ void SdlInputHandler::raiseAllKeys()
     }
 
     m_KeysDown.clear();
+    m_FilePasteKeyUpConsumed = false;
 }
 
 void SdlInputHandler::notifyMouseLeave()

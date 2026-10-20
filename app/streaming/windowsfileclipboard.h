@@ -41,15 +41,20 @@ public:
     bool beginPasteOnMainThread();
     /** Publish a completed Host transfer to the Windows clipboard. */
     bool publishPendingHostFilesOnMainThread();
+    void cancelPendingPasteOnMainThread();
+    bool takeReadyPasteOnMainThread();
 
 private:
     struct PasteboardSnapshot {
         std::int64_t changeCount = -1;
+        std::uint64_t pasteEpoch = 0;
         std::vector<std::string> paths;
     };
 
     void workerLoop();
-    bool transferSnapshot(const PasteboardSnapshot& snapshot);
+    enum class SourceResult { Failed, Ready, Yielded };
+    SourceResult transferSnapshot(const PasteboardSnapshot& snapshot,
+                                  std::vector<std::uint8_t>& yieldedOffer);
     bool receiveHostOffer(std::vector<std::uint8_t> firstRecord);
     bool clientToHostAllowed() const;
     bool hostToClientAllowed() const;
@@ -68,6 +73,8 @@ private:
     std::atomic_bool m_Stop {false};
     bool m_Running = false;
     bool m_PasteRequested = false;
+    std::uint64_t m_PasteEpoch = 1;
+    bool m_ReadyPaste = false;
     PasteboardSnapshot m_Current;
     PasteboardSnapshot m_Requested;
     std::vector<std::string> m_PendingHostPaths;
