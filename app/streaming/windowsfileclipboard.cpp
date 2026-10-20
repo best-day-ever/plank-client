@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <sddl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include "windowsfileclipboardpaths.h"
 #include <QStandardPaths>
 #include <QRandomGenerator>
