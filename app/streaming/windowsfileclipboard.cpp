@@ -374,11 +374,13 @@ bool writeAll(HANDLE handle, const std::uint8_t* bytes, std::size_t size)
 WindowsFileClipboard::WindowsFileClipboard(PlankTransportNativeEndpoint* endpoint,
                                    std::string mode,
                                    ReadyCallback readyCallback,
-                                   PublishCallback publishCallback)
+                                   PublishCallback publishCallback,
+                                   FocusPredicate focusPredicate)
     : m_Endpoint(endpoint),
       m_Mode(std::move(mode)),
       m_ReadyCallback(std::move(readyCallback)),
-      m_PublishCallback(std::move(publishCallback))
+      m_PublishCallback(std::move(publishCallback)),
+      m_FocusPredicate(std::move(focusPredicate))
 {
 }
 
@@ -427,7 +429,7 @@ void WindowsFileClipboard::stop()
     m_HostPublishSuccess = false;
     if (m_PublishedSequence && GetClipboardSequenceNumber() == m_PublishedSequence &&
             OpenClipboard(nullptr)) {
-        EmptyClipboard();
+        if (GetClipboardSequenceNumber() == m_PublishedSequence) EmptyClipboard();
         CloseClipboard();
     }
     m_PublishedSequence = 0;
@@ -488,12 +490,15 @@ bool WindowsFileClipboard::beginPasteOnMainThread()
 bool WindowsFileClipboard::publishPendingHostFilesOnMainThread()
 {
     std::vector<std::string> paths;
+    std::uint32_t expectedSequence = 0;
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         if (!m_Running || !m_HostPublishPending) return false;
         paths = m_PendingHostPaths;
+        expectedSequence = m_HostClipboardSequence;
     }
 
+    const bool mayPublish = !m_FocusPredicate || m_FocusPredicate();
     struct ClipboardOwner {
         HWND window = CreateWindowExW(0, L"STATIC", L"Fernweh file clipboard", 0,
                 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -509,7 +514,7 @@ bool WindowsFileClipboard::publishPendingHostFilesOnMainThread()
     names.push_back(L'\0');
     const auto bytes = sizeof(DROPFILES) + names.size() * sizeof(wchar_t);
     HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes);
-    if (memory && !paths.empty()) {
+    if (mayPublish && memory && !paths.empty()) {
         auto* drop = static_cast<DROPFILES*>(GlobalLock(memory));
         if (drop) {
             drop->pFiles = sizeof(DROPFILES);
@@ -518,7 +523,11 @@ bool WindowsFileClipboard::publishPendingHostFilesOnMainThread()
                         names.data(), names.size() * sizeof(wchar_t));
             GlobalUnlock(memory);
             if (owner.window && OpenClipboard(owner.window)) {
-                success = EmptyClipboard() && SetClipboardData(CF_HDROP, memory) != nullptr;
+                // Check after acquiring the clipboard: a local Copy made during
+                // network IO or while OpenClipboard was blocked always wins.
+                success = GetClipboardSequenceNumber() == expectedSequence &&
+                        (!m_FocusPredicate || m_FocusPredicate()) &&
+                        EmptyClipboard() && SetClipboardData(CF_HDROP, memory) != nullptr;
                 if (success) {
                     memory = nullptr; // clipboard now owns this allocation
                     m_PublishedSequence = GetClipboardSequenceNumber();
@@ -754,6 +763,7 @@ bool WindowsFileClipboard::transferSnapshot(const PasteboardSnapshot& snapshot)
 
 bool WindowsFileClipboard::receiveHostOffer(std::vector<std::uint8_t> firstRecord)
 {
+    const auto clipboardSequenceAtOffer = GetClipboardSequenceNumber();
     PlankClipboardFileRecord first {};
     if (!plank_clipboard_file_decode(firstRecord.data(), firstRecord.size(),
             PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &first) ||
@@ -1021,6 +1031,7 @@ bool WindowsFileClipboard::receiveHostOffer(std::vector<std::uint8_t> firstRecor
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         m_PendingHostPaths = std::move(paths);
+        m_HostClipboardSequence = clipboardSequenceAtOffer;
         m_HostPublishPending = true;
         m_HostPublishComplete = false;
         m_HostPublishSuccess = false;

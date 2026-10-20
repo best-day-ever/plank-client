@@ -5,7 +5,8 @@ platform. On Windows it also compiles the actual Windows file clipboard engine,
 using an in-memory replacement for the native transport ABI. Native cases check
 frozen source handles, hard-link rejection, hashed incoming file publication as
 CF_HDROP, integrity failure without publication, rejection of reserved device
-names, and cleanup when the session stops.
+names, preservation of local copies and clipboard ownership when stream focus
+is absent, and cleanup when the session stops.
 
 Use an empty build directory and a Qt 6 C++17 toolchain:
 

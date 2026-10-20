@@ -6,6 +6,7 @@
 // replaced at its C ABI by deterministic, bounded in-memory queues below.
 #include "windowsfileclipboard.cpp"
 #include <deque>
+#include <cwchar>
 
 struct PlankTransportNativeEndpoint {
     std::mutex mutex;
@@ -114,6 +115,30 @@ static void queueHostFile(PlankTransportNativeEndpoint& endpoint, const std::str
 #endif
 
 #ifdef Q_OS_WIN
+static bool setLocalText(const wchar_t* text)
+{
+    HWND owner = CreateWindowExW(0, L"STATIC", L"clipboard fixture", 0,
+            0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!owner) return false;
+    const auto size = (std::wcslen(text) + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
+    bool success = false;
+    if (memory) {
+        void* data = GlobalLock(memory);
+        if (data) {
+            std::memcpy(data, text, size);
+            GlobalUnlock(memory);
+            if (OpenClipboard(owner)) {
+                success = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory);
+                CloseClipboard();
+            }
+        }
+        if (!success) GlobalFree(memory);
+    }
+    DestroyWindow(owner);
+    return success;
+}
+
 static uint16_t lastType(PlankTransportNativeEndpoint& endpoint)
 {
     std::lock_guard<std::mutex> lock(endpoint.mutex);
@@ -223,6 +248,31 @@ private slots:
         QVERIFY(!clipboard.beginPasteOnMainThread());
         clipboard.stop();
         QVERIFY(!QFile::exists(received));
+    }
+    void preservesLocalClipboardWhenIncomingPublicationIsDenied_data()
+    {
+        QTest::addColumn<bool>("localCopy");
+        QTest::newRow("stream-unfocused") << false;
+        QTest::newRow("new-local-copy") << true;
+    }
+    void preservesLocalClipboardWhenIncomingPublicationIsDenied()
+    {
+        QFETCH(bool, localCopy);
+        PlankTransportNativeEndpoint endpoint;
+        queueHostFile(endpoint, "render.exr", "remote pixels");
+        std::atomic_bool requested {false};
+        WindowsFileClipboard clipboard(&endpoint, "bidirectional", [] {}, [&] {
+            requested = true; return true;
+        }, [localCopy] { return localCopy; });
+        clipboard.start();
+        QTRY_VERIFY_WITH_TIMEOUT(requested.load(), 2000);
+        if (localCopy) QVERIFY(setLocalText(L"new local copy"));
+        const auto sequence = GetClipboardSequenceNumber();
+        QVERIFY(!clipboard.publishPendingHostFilesOnMainThread());
+        QCOMPARE(GetClipboardSequenceNumber(), sequence);
+        QTRY_VERIFY_WITH_TIMEOUT(lastType(endpoint) == PLANK_CLIPBOARD_FILE_ERROR, 2000);
+        clipboard.stop();
+        QCOMPARE(GetClipboardSequenceNumber(), sequence);
     }
     void rejectsReservedHostNameWithoutPublication()
     {

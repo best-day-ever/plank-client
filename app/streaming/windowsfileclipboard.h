@@ -20,11 +20,13 @@ class WindowsFileClipboard {
 public:
     using ReadyCallback = std::function<void()>;
     using PublishCallback = std::function<bool()>;
+    using FocusPredicate = std::function<bool()>;
 
     WindowsFileClipboard(PlankTransportNativeEndpoint* endpoint,
                      std::string mode,
                      ReadyCallback readyCallback,
-                     PublishCallback publishCallback);
+                     PublishCallback publishCallback,
+                     FocusPredicate focusPredicate = [] { return true; });
     ~WindowsFileClipboard();
 
     void start();
@@ -58,6 +60,8 @@ private:
     std::string m_Mode;
     ReadyCallback m_ReadyCallback;
     PublishCallback m_PublishCallback;
+    FocusPredicate m_FocusPredicate;
+    std::uint32_t m_HostClipboardSequence = 0;
     std::mutex m_Mutex;
     std::condition_variable m_Changed;
     std::thread m_Worker;
