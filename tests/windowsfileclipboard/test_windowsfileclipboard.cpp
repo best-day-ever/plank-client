@@ -561,6 +561,52 @@ private slots:
         clipboard.stop();
         QCOMPARE(GetClipboardSequenceNumber(), sequence);
     }
+    void recoversFromMalformedManifestOnSameWorker_data()
+    {
+        QTest::addColumn<bool>("outOfOrder");
+        QTest::newRow("out-of-order-entry") << true;
+        QTest::newRow("truncated-entry") << false;
+    }
+    void recoversFromMalformedManifestOnSameWorker()
+    {
+        QFETCH(bool, outOfOrder);
+        PlankTransportNativeEndpoint endpoint;
+        queueHostFile(endpoint, "invalid.exr", "bad transfer");
+        endpoint.incomingControl.pop_back(); // no trailing old OFFER_END
+        auto& invalid = endpoint.incomingControl.back();
+        if (outOfOrder) {
+            PlankClipboardFileRecord entry {};
+            QVERIFY(plank_clipboard_file_decode(invalid.data(), invalid.size(),
+                    PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &entry));
+            std::array<uint8_t, 16> offer {};
+            std::memcpy(offer.data(), entry.offer_id, offer.size());
+            QVERIFY(plank_clipboard_file_header(invalid.data(), invalid.size(), entry.type,
+                    entry.flags, entry.payload_size, offer.data(), entry.session_epoch, 99));
+        } else {
+            invalid.pop_back(); // header advertises a longer payload than received
+        }
+        queueHostFile(endpoint, "recovered.exr", "valid transfer");
+        std::atomic_bool requested {false};
+        WindowsFileClipboard clipboard(&endpoint, "bidirectional", [] {}, [&] {
+            requested = true; return true;
+        });
+        clipboard.start();
+        // The malformed manifest must terminate promptly and allow the next
+        // offer through the same session worker, rather than waiting for stop.
+        QTRY_VERIFY_WITH_TIMEOUT(requested.load(), 3000);
+        {
+            std::lock_guard<std::mutex> lock(endpoint.mutex);
+            QVERIFY(!endpoint.sentControl.empty());
+            const auto& bytes = endpoint.sentControl.front();
+            PlankClipboardFileRecord rejected {};
+            QVERIFY(plank_clipboard_file_decode(bytes.data(), bytes.size(),
+                    PLANK_CLIPBOARD_FILE_CONTROL_PAYLOAD_LIMIT, &rejected));
+            QCOMPARE(rejected.type, uint16_t {PLANK_CLIPBOARD_FILE_ERROR});
+        }
+        QVERIFY(clipboard.publishPendingHostFilesOnMainThread());
+        QTRY_COMPARE_WITH_TIMEOUT(lastType(endpoint), uint16_t {PLANK_CLIPBOARD_FILE_TRANSFER_READY}, 2000);
+        clipboard.stop();
+    }
     void rejectsReservedHostNameWithoutPublication()
     {
         PlankTransportNativeEndpoint endpoint;

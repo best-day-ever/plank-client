@@ -34,6 +34,7 @@ in both directions: a file, nested folder, empty file, Unicode filename,
 large multichunk file, collision rejection, interrupted session, and new local
 copy after a Host transfer. Network shares, reparse points/junctions, symlinks,
 hard-linked source files, alternate streams, and Windows device-name aliases
-are deliberately rejected. Transfers preserve content and modification times;
+are deliberately rejected. Malformed and out-of-order incoming manifests must
+fail promptly while permitting a subsequent valid offer on the same worker. Transfers preserve content and modification times;
 Unix executable/readonly modes do not map to Windows access control. Received
 files use a private user/SYSTEM ACL and remain available until the stream ends.
