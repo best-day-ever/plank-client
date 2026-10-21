@@ -29,6 +29,8 @@ constexpr int MicrophoneWidth = 34;
 // The "screens changed" strip below the toolbar row.
 constexpr int ScreensPromptHeight = 36;
 constexpr int CameraWidth = 34;
+constexpr int FilesWidth = 55;
+constexpr int FileStatusHeight = 28;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
@@ -385,6 +387,7 @@ void PlankToolbar::notifyWindowChanged()
     m_Width = std::min(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
                       (m_MicrophoneSupported ? MicrophoneWidth : 0) +
                       (m_CameraSupported ? CameraWidth : 0) +
+                      (m_FilesSupported ? FilesWidth : 0) +
                       PlankToolbarStats::WindowControlsWidth,
                       std::max(m_WindowWidth, 1));
     if (m_ToolbarLeft < 0) {
@@ -642,6 +645,9 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
             break;
         case Control::Fullscreen:
             action = Action::ToggleFullscreen;
+            break;
+        case Control::Files:
+            action = Action::SendFiles;
             break;
         case Control::Camera:
             action = Action::ToggleCamera;
@@ -1147,6 +1153,22 @@ void PlankToolbar::redraw()
         }
     }
 
+    if (m_FilesSupported) {
+        const qreal right = m_Width - 105 - (m_MicrophoneSupported ? MicrophoneWidth : 0) -
+                (m_CameraSupported ? CameraWidth : 0);
+        painter.setPen(QPen(QColor(104, 116, 131), 1));
+        painter.setBrush(filesContains(m_PointerX, m_PointerY) ? QColor(68, 78, 90) : QColor(48, 57, 68));
+        painter.drawRoundedRect(QRectF(right - FilesWidth + 3, 6, FilesWidth - 6, 27), 4, 4);
+        painter.setFont(labelFont);
+        painter.setPen(QColor(246, 248, 250));
+        painter.drawText(QRectF(right - FilesWidth, 6, FilesWidth, 27), Qt::AlignCenter, "Files…");
+    }
+    if (!m_FileTransferStatus.isEmpty()) {
+        painter.setFont(labelFont);
+        painter.setPen(QColor(235, 239, 244));
+        painter.drawText(QRect(10, toolbarHeight() - FileStatusHeight, m_Width - 20, FileStatusHeight),
+                         Qt::AlignLeft | Qt::AlignVCenter, m_FileTransferStatus);
+    }
     painter.end();
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
@@ -1491,7 +1513,8 @@ bool PlankToolbar::contains(int x, int y) const
 
 int PlankToolbar::toolbarHeight() const
 {
-    return ToolbarHeight + (m_ScreensPromptVisible ? ScreensPromptHeight : 0);
+    return ToolbarHeight + (m_ScreensPromptVisible ? ScreensPromptHeight : 0) +
+            (m_FileTransferStatus.isEmpty() ? 0 : FileStatusHeight);
 }
 
 // Toolbar-local rectangles of the prompt's buttons, right to left:
@@ -1538,6 +1561,24 @@ void PlankToolbar::setCameraState(bool supported, PlankCamera::State state)
     m_CameraSupported = supported; m_CameraState = state;
     if (geometryChanged) notifyWindowChanged();
     redraw();
+}
+
+void PlankToolbar::setFileTransferState(bool supported, const QString& status)
+{
+    if (supported == m_FilesSupported && status == m_FileTransferStatus) return;
+    m_FilesSupported = supported;
+    const bool statusChanged = status != m_FileTransferStatus;
+    m_FileTransferStatus = status;
+    notifyWindowChanged();
+    if (statusChanged && !status.isEmpty()) show(SDL_GetTicks());
+    redraw();
+}
+
+bool PlankToolbar::filesContains(int x, int y) const
+{
+    const int right = toolbarLeft() + m_Width - 105 -
+            (m_MicrophoneSupported ? MicrophoneWidth : 0) - (m_CameraSupported ? CameraWidth : 0);
+    return m_FilesSupported && x >= right - FilesWidth && x < right && y >= 2 && y <= 37;
 }
 
 bool PlankToolbar::cameraContains(int x, int y) const
@@ -1591,6 +1632,7 @@ PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
     if (fullscreenContains(x, y)) {
         return Control::Fullscreen;
     }
+    if (filesContains(x, y)) return Control::Files;
     if (cameraContains(x, y)) return Control::Camera;
     if (microphoneContains(x, y)) return Control::Microphone;
     if (minimizeContains(x, y)) {
@@ -1620,5 +1662,6 @@ int PlankToolbar::sliderRight() const
     return toolbarLeft() + std::max(PlankToolbarStats::EncoderTargetLeft,
                                    m_Width - PlankToolbarStats::WindowControlsWidth -
                                    (m_MicrophoneSupported ? MicrophoneWidth : 0) -
-                                   (m_CameraSupported ? CameraWidth : 0));
+                                   (m_CameraSupported ? CameraWidth : 0) -
+                                   (m_FilesSupported ? FilesWidth : 0));
 }

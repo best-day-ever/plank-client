@@ -1676,7 +1676,7 @@ void Session::startClipboardSync()
                         event.user.timestamp = SDL_GetTicks();
                         return SDL_PushEvent(&event);
                     }
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
                     , [this] { return anyPresentationWindowFocused(); }
 #endif
                     );
@@ -5377,7 +5377,7 @@ void Session::execInternal()
 #if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
             if (reinterpret_cast<std::uintptr_t>(userEvent.data1) == m_ClipboardEventGeneration &&
                     m_FileClipboard && clipboardSyncEnabled() && anyPresentationWindowFocused()
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
                     && m_FileClipboard->takeReadyPasteOnMainThread()
 #endif
                     ) injectRemoteFilePasteOnMainThread();
@@ -5463,6 +5463,12 @@ void Session::execInternal()
                 m_PlankToolbar->setCameraState(m_Camera != nullptr,
                     m_Camera ? m_Camera->state() : PlankCamera::State::Off);
             }
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+            m_PlankToolbar->setFileTransferState(m_FileClipboard &&
+                    (m_FileClipboardMode == QStringLiteral("bidirectional") ||
+                     m_FileClipboardMode == QStringLiteral("client-to-host")),
+                    m_FileClipboard ? QString::fromStdString(m_FileClipboard->status()) : QString());
+#endif
             const auto action = m_PlankToolbar->update(
                         SDL_GetTicks(), !m_Reconnecting.load());
             if (action == PlankToolbar::Action::ToggleCamera)
@@ -5658,7 +5664,7 @@ void Session::execInternal()
                     m_InputHandler->notifyFocusLost();
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
                 m_TextClipboardPastePending = false;
-#if defined(Q_OS_WIN) && defined(PLANK_TRANSPORT)
+#if (defined(Q_OS_WIN) || defined(Q_OS_MACOS)) && defined(PLANK_TRANSPORT)
                 if (m_FileClipboard) m_FileClipboard->cancelPendingPasteOnMainThread();
 #endif
 #endif
@@ -5824,7 +5830,7 @@ void Session::execInternal()
                     m_InputHandler->notifyFocusLost();
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
                 m_TextClipboardPastePending = false;
-#if defined(Q_OS_WIN) && defined(PLANK_TRANSPORT)
+#if (defined(Q_OS_WIN) || defined(Q_OS_MACOS)) && defined(PLANK_TRANSPORT)
                 if (m_FileClipboard) m_FileClipboard->cancelPendingPasteOnMainThread();
 #endif
 #endif
@@ -6099,6 +6105,14 @@ void Session::execInternal()
             if (m_PlankToolbar &&
                     event.button.windowID == SDL_GetWindowID(m_Window)) {
                 const auto action = m_PlankToolbar->handleMouseButton(event.button);
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+                if (action == PlankToolbar::Action::SendFiles) {
+                    m_InputHandler->raiseAllKeys();
+                    if (m_FileClipboard) m_FileClipboard->chooseFilesOnMainThread();
+                    m_PlankToolbar->notifyFocusLost();
+                    break;
+                }
+#endif
                 if (action == PlankToolbar::Action::ToggleCamera) {
                     m_CameraRequested.store(!m_CameraRequested.load());
                     break;
