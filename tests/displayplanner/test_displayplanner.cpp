@@ -123,6 +123,7 @@ private slots:
     void honoursProfileChoices();
     void manualPlacement();
     void legacyHostFallback();
+    void legacyFallbackKeepsSelectedPrimary();
     void legacyPresentationUsesOneWindowPerSelectedMonitor();
     void arrangementPresentationBindsTheLiveDisplayOrder();
     void twoExternalDisplaysExcludeTheMacBookPanel();
@@ -953,6 +954,29 @@ void TestDisplayPlanner::twoExternalDisplaysExcludeTheMacBookPanel()
     QCOMPARE(targets.planIndices, QVector<int>({-1, 1, 2}));
     QCOMPARE(targets.primaryDisplay, 1);
     QCOMPARE(plan.includedCount(), 2);
+}
+
+void TestDisplayPlanner::legacyFallbackKeepsSelectedPrimary()
+{
+    QVector<NvClientDisplay> displays {
+        monitor("left", QRect(-2560, 0, 2560, 1440), QSize(2560, 1440)),
+        monitor("right", QRect(0, 0, 2560, 1440), QSize(2560, 1440))};
+    auto profile = DisplayPlanner::proposal(displays);
+    profile.primary = "right";
+    DisplayPlanner::HostInfo host;
+    host.known = true;
+    host.platform = 1;
+    auto plan = DisplayPlanner::plan(displays, profile, host);
+    QVERIFY(plan.ok);
+    QVERIFY(plan.legacy);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, true), 1);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, false), -1);
+    profile.primary = "left";
+    plan = DisplayPlanner::plan(displays, profile, host);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, true), 0);
+    profile.choice("left").on = false;
+    plan = DisplayPlanner::plan(displays, profile, host);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, true), -1);
 }
 
 void TestDisplayPlanner::presentationHonoursSingleWindowAndSpacesLimits()

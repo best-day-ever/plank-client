@@ -3334,6 +3334,9 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
         // No extension: today's layout request for the planned displays.
         m_ResolvedHostLayout = m_DisplayPlan.legacyHostLayout;
         m_ResolvedVirtualModes = m_DisplayPlan.legacyModes;
+        m_ResolvedPrimaryOutput = DisplayPlanner::legacyPrimaryOutput(m_DisplayPlan,
+                    topology.startupLayoutKind == NvOutputTopology::SingleHostLayout &&
+                    (hostFeatureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature) != 0);
         matchedExactly = !m_DisplayPlan.legacyFitted;
         if (m_DisplayPlan.legacyFitted && m_ResolvedScalingMode != NvOutputTopology::ScaledSpanMode) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

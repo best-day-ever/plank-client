@@ -172,6 +172,11 @@ struct PresentationTargets
 PresentationTargets presentationTargets(const Plan& plan, const QVector<NvClientDisplay>& displays,
                                          bool supportsSeparateWindows);
 
+// The host's legacy connector hint is ordered from the left, independently
+// of the request order used by modern arrangements. Omit it on hosts whose
+// physical/startup layout does not permit changing the primary connector.
+int legacyPrimaryOutput(const Plan& plan, bool supportsPrimarySelection);
+
 // A user-facing sentence for a PlankDisplayArrangementError code (the
 // host's 400/409 answers and the preview's own checks).
 QString errorText(const QString& code, const DisplayArrangement::Capabilities& capabilities);
