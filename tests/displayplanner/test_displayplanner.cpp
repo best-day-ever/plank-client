@@ -125,6 +125,7 @@ private slots:
     void legacyHostFallback();
     void legacyPresentationUsesOneWindowPerSelectedMonitor();
     void arrangementPresentationBindsTheLiveDisplayOrder();
+    void twoExternalDisplaysExcludeTheMacBookPanel();
     void presentationHonoursSingleWindowAndSpacesLimits();
     void macHostMatchesTheDesktop();
     void warnsWithActions();
@@ -933,6 +934,25 @@ void TestDisplayPlanner::arrangementPresentationBindsTheLiveDisplayOrder()
     QVERIFY(targets.separateWindows);
     QCOMPARE(targets.primaryDisplay, 0);
     QCOMPARE(targets.planIndices, QVector<int>({1, 0}));
+}
+
+void TestDisplayPlanner::twoExternalDisplaysExcludeTheMacBookPanel()
+{
+    const QVector<NvClientDisplay> displays {
+        macBook14(),
+        mac(QStringLiteral("uuid:LEFT"), QRect(-2560, 0, 2560, 1440), QSize(2560, 1440)),
+        mac(QStringLiteral("uuid:RIGHT"), QRect(1512, 0, 2560, 1440), QSize(2560, 1440))};
+    auto profile = DisplayPlanner::proposal(displays);
+    profile.choice(displays.first().key).on = false;
+    profile.primary = displays.at(1).key;
+    const auto plan = DisplayPlanner::plan(displays, profile, {});
+    QVERIFY2(plan.ok, qPrintable(plan.error));
+    QVERIFY(!plan.legacy);
+    const auto targets = DisplayPlanner::presentationTargets(plan, displays, true);
+    QVERIFY(targets.separateWindows);
+    QCOMPARE(targets.planIndices, QVector<int>({-1, 1, 2}));
+    QCOMPARE(targets.primaryDisplay, 1);
+    QCOMPARE(plan.includedCount(), 2);
 }
 
 void TestDisplayPlanner::presentationHonoursSingleWindowAndSpacesLimits()

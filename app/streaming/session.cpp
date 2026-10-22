@@ -2405,7 +2405,8 @@ void Session::rebuildPresentationLayout()
     }
 
     const bool multiOutputActive = m_UseMultiDisplayPresentation &&
-            m_PresentationFullscreen && !m_SecondaryWindows.isEmpty();
+            (m_PresentationFullscreen || strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) &&
+            !m_SecondaryWindows.isEmpty();
     if (multiOutputActive) {
         int canvasWidth = 0;
         int canvasHeight = 0;
@@ -2710,6 +2711,15 @@ bool Session::createSecondaryWindows(Uint32 defaultWindowFlags, const std::strin
         else {
             // Borderless desktop fullscreen in its own Space, on this display.
             SDL_SetWindowFullscreenMode(secondary, nullptr);
+            SDL_Rect usable;
+            if (SDL_GetDisplayUsableBounds(display.displayId, &usable)) {
+                const QSize source = m_DisplayPlan.ok && display.planIndex >= 0 ?
+                            m_DisplayPlan.outputs.at(display.planIndex).size : display.nativeSize;
+                const QRect bounds = PlankPresentation::windowedOutputRect(
+                            QRect(usable.x, usable.y, usable.w, usable.h), source);
+                SDL_SetWindowSize(secondary, bounds.width(), bounds.height());
+                SDL_SetWindowPosition(secondary, bounds.x(), bounds.y());
+            }
         }
         SDL_StopTextInput(secondary);
         m_SecondaryWindows.append(secondary);
@@ -2845,6 +2855,18 @@ void Session::applyPendingPresentation()
     collapseToSingleWindow();
     m_UseMultiDisplayPresentation = m_PendingMultiDisplayPresentation;
     m_TargetDisplayId = SDL_GetDisplayForWindow(m_Window);
+    if (m_UseMultiDisplayPresentation && m_PlannedPrimaryDisplay != 0 &&
+            m_TargetDisplayId != m_PlannedPrimaryDisplay) {
+        // Applying a layout may exclude the screen where the old main window
+        // lives (for example the laptop panel). Move it to the selected primary
+        // before creating the other windows; do not discard the new selection.
+        SDL_SetWindowFullscreen(m_Window, false);
+        SDL_SyncWindow(m_Window);
+        m_TargetDisplayId = m_PlannedPrimaryDisplay;
+        SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED_DISPLAY(m_TargetDisplayId),
+                              SDL_WINDOWPOS_CENTERED_DISPLAY(m_TargetDisplayId));
+        SDL_SyncWindow(m_Window);
+    }
     if (m_UseMultiDisplayPresentation) {
         bool primaryShown = false;
         for (const auto& display : std::as_const(m_ClientDisplays)) {
@@ -2966,8 +2988,12 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
         return;
     }
     m_PresentationFullscreen = fullscreen;
-    if (!SDL_SetWindowFullscreen(m_Window,
-                                 fullscreen ? m_FullScreenFlag : 0)) {
+#ifdef Q_OS_DARWIN
+    const bool primaryChanged = MacWindow::setPresentationFullscreen(m_Window, fullscreen);
+#else
+    const bool primaryChanged = SDL_SetWindowFullscreen(m_Window, fullscreen ? m_FullScreenFlag : 0);
+#endif
+    if (!primaryChanged) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Failed to set presentation fullscreen state: %s",
                     SDL_GetError());
@@ -3015,6 +3041,20 @@ void Session::setPresentationWindowsFullscreen(bool fullscreen)
     }
     int secondaryIndex = 0;
     for (SDL_Window* window : m_SecondaryWindows) {
+#ifdef Q_OS_DARWIN
+        // A per-display selection owns a visible window in both modes. Native
+        // fullscreen changes its placement, never its monitor/crop selection.
+        if (cocoa) {
+            if (!MacWindow::setPresentationFullscreen(window, fullscreen)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Failed to change secondary presentation state: %s", SDL_GetError());
+            }
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "PLANK secondary window %d fullscreen=%s on display %u",
+                        secondaryIndex++, fullscreen ? "yes" : "no", SDL_GetDisplayForWindow(window));
+            continue;
+        }
+#endif
         if (fullscreen) {
             SDL_ShowWindow(window);
             if (!SDL_SetWindowFullscreen(window, m_FullScreenFlag)) {
@@ -3291,7 +3331,6 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
                         "PLANK match client fitted a closest supported mode; scaling to fit");
             m_ResolvedScalingMode = NvOutputTopology::ScaledSpanMode;
         }
-        applyArrangementPresentation();
         return true;
     }
     m_ResolvedHostLayout = QStringLiteral("arrangement");
@@ -3310,7 +3349,6 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
                 qPrintable(m_DisplayPlan.presentation),
                 resolved.source == DisplayProfile::Resolved::HostCustom ? "workstation" :
                 resolved.source == DisplayProfile::Resolved::Global ? "saved" : "proposal");
-    applyArrangementPresentation();
     return true;
 }
 
@@ -3332,6 +3370,7 @@ void Session::applyArrangementPresentation()
     const SDL_DisplayID primary = targets.primaryDisplay >= 0 ?
                 m_ClientDisplays.at(targets.primaryDisplay).displayId : 0;
     const bool multi = targets.separateWindows;
+    m_PlannedPrimaryDisplay = primary;
     if (m_Window != nullptr) {
         // The windows exist (in-session reconnect on another thread): the SDL
         // thread applies the new presentation when the reconnect finishes.
@@ -3339,7 +3378,6 @@ void Session::applyArrangementPresentation()
         m_PresentationChangePending.store(true);
     } else {
         m_UseMultiDisplayPresentation = multi;
-        m_PlannedPrimaryDisplay = primary;
         if (primary != 0) {
             m_TargetDisplayId = primary;
         }
@@ -3488,7 +3526,12 @@ bool Session::configurePlankLaunchGeometry()
         return false;
     }
 
-    {
+    if (m_DisplayPlan.ok) {
+        // Preserve the selected subset, primary and crops. The older counter
+        // returns zero for arrangement; its client check also rejects a third
+        // connected screen even when the user excludes it from the session.
+        applyArrangementPresentation();
+    } else {
         QReadLocker lock(&m_Computer->lock);
         const int hostOutputs = m_Computer->outputTopology.outputCountForLayout(m_ResolvedHostLayout);
         m_UseMultiDisplayPresentation = m_MultiDisplayPresentationAvailable;
@@ -3529,6 +3572,18 @@ void Session::getWindowDimensions(int& x, int& y,
     const int displayIndex = getTargetDisplayIndex();
 
     SDL_Rect usableBounds;
+    if (m_UseMultiDisplayPresentation && m_DisplayPlan.ok &&
+            SDL_GetDisplayUsableBounds(StreamUtils::getDisplayId(displayIndex), &usableBounds)) {
+        for (const auto& display : std::as_const(m_ClientDisplays)) {
+            if (display.displayId == m_TargetDisplayId && display.planIndex >= 0) {
+                const QRect bounds = PlankPresentation::windowedOutputRect(
+                            QRect(usableBounds.x, usableBounds.y, usableBounds.w, usableBounds.h),
+                            m_DisplayPlan.outputs.at(display.planIndex).size);
+                x = bounds.x(); y = bounds.y(); width = bounds.width(); height = bounds.height();
+                return;
+            }
+        }
+    }
     if (SDL_GetDisplayUsableBounds(StreamUtils::getDisplayId(displayIndex), &usableBounds)) {
         // Don't use more than 80% of the display to leave room for system UI
         // and ensure the target size is not odd (otherwise one of the sides
@@ -5526,6 +5581,8 @@ void Session::execInternal()
         } else {
             setPresentationWindowsFullscreen(true);
         }
+    } else if (m_UseMultiDisplayPresentation && strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0) {
+        setPresentationWindowsFullscreen(false);
     }
 
     bool needsFirstEnterCapture = false;

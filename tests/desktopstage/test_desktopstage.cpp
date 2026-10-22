@@ -43,7 +43,10 @@ private slots:
         QVERIFY(!videoSilent(10000, 0)); // No first frame yet.
         QVERIFY(!videoSilent(999, 1000));
         QVERIFY(!videoSilent(1999, 1000));
-        QVERIFY(videoSilent(2000, 1000));
+        QVERIFY(!videoSilent(2000, 1000)); // Healthy idle cadence is 1 fps.
+        QVERIFY(!videoSilent(2300, 1000)); // Scheduling/network jitter is normal.
+        QVERIFY(!videoSilent(3999, 1000));
+        QVERIFY(videoSilent(4000, 1000));
         QVERIFY(!videoSilent(2001, 2000)); // Incoming video cancels recovery.
     }
 

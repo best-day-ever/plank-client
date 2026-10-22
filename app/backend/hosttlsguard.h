@@ -19,6 +19,7 @@ public:
     static QByteArray identityKey(const QList<QSslCertificate>& chain);
     static QSslConfiguration negotiated(QNetworkReply* reply);
     bool checked() const { return m_Checked; }
+    QNetworkReply::NetworkError completionError(QNetworkReply::NetworkError replyError) const;
     const HostTrustStore::Result& result() const { return m_Result; }
     const QByteArray& key() const { return m_Key; }
 

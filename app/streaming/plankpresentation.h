@@ -123,6 +123,7 @@ struct PlankPresentationSlice
 class PlankPresentation
 {
 public:
+    static QRect windowedOutputRect(const QRect& usableBounds, const QSize& sourceSize);
     // Captured drags stay relative to the window where the button went
     // down, even after crossing into another presentation window. Return
     // the window under that point and its local coordinates, or -1 outside

@@ -818,10 +818,9 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body, bool
     disconnect(sslErrorsConnection);
     disconnect(encryptedConnection);
     if (pinConnection) disconnect(pinConnection);
-    if (trustGuard) {
+    if (trustGuard && trustGuard->completionError(reply->error()) == QNetworkReply::SslHandshakeFailedError) {
         checkTlsGuard(*trustGuard);
-        if (!trustGuard->checked())
-            throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "PLANK TLS identity was not validated");
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "PLANK TLS identity was not validated");
     }
     if (reply->property("plankPinRejected").toBool()) {
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
@@ -1137,12 +1136,13 @@ QJsonObject NvHTTP::requestPinnedMacJson(const QString& path, const QJsonObject&
     if (!reply->isFinished()) reply->abort();
     if (!oversized) drain();
     checkTlsGuard(guard);
+    const auto completionError = guard.completionError(reply->error());
     if (!guard.checked() &&
-            reply->error() != QNetworkReply::NoError &&
-            reply->error() != QNetworkReply::SslHandshakeFailedError) {
-        throw QtNetworkReplyException(reply->error(), "Mac control connection failed or timed out");
+            completionError != QNetworkReply::NoError &&
+            completionError != QNetworkReply::SslHandshakeFailedError) {
+        throw QtNetworkReplyException(completionError, "Mac control connection failed or timed out");
     }
-    if (!guard.checked()) {
+    if (completionError == QNetworkReply::SslHandshakeFailedError) {
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
                                       "Mac preview TLS certificate changed or was rejected");
     }
@@ -1275,10 +1275,9 @@ NvHTTP::openConnection(QUrl baseUrl,
     disconnect(encryptedConnection);
     if (pinConnection) disconnect(pinConnection);
 
-    if (trustGuard) {
-        if (trustMode != HostTlsGuard::Mode::Observe) checkTlsGuard(*trustGuard);
-        if (!trustGuard->checked())
-            throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "PLANK TLS identity was not validated");
+    if (trustGuard && trustGuard->completionError(reply->error()) == QNetworkReply::SslHandshakeFailedError) {
+        checkTlsGuard(*trustGuard);
+        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, "PLANK TLS identity was not validated");
     }
 
     // Handle error

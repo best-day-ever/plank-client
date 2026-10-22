@@ -5,6 +5,7 @@
 
 namespace MacWindow {
 int activeDisplayCount();
+bool setPresentationFullscreen(SDL_Window* window, bool fullscreen);
 bool hasKeyboardFocus(SDL_Window* window);
 bool fullscreenTopInset(Uint32 displayId, int* top);
 void logGeometry(SDL_Window* window);
