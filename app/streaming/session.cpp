@@ -1,4 +1,5 @@
 #include "session.h"
+#include "sessionguidispatch.h"
 #include "backend/collaboration.h"
 #include <QDeadlineTimer>
 #include "streaming/clientframeflowtrace.h"
@@ -5293,6 +5294,18 @@ void Session::exec(QWindow* qtWindow)
     if (m_ThreadedExec) {
         // Run the streaming session on a separate thread for Linux/BSD
         ExecThread execThread(this);
+        SessionGuiDispatch guiDispatch(this, QCoreApplication::instance(), [this, &execThread] {
+            execThread.requestInterruption();
+            cancelConnectionStart();
+            m_ReconnectCancelled.store(true);
+            m_CanReconnect.store(false);
+            m_GuiDisplaySnapshot.cancel();
+            SDL_Event quit = {};
+            quit.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&quit);
+        });
+        connect(this, &Session::readyForDeletion, &guiDispatch,
+                [&guiDispatch] { guiDispatch.readyForDeletion(); });
         execThread.start();
 
         // Until the SDL streaming window is created, we should continue
@@ -5317,14 +5330,11 @@ void Session::exec(QWindow* qtWindow)
                         QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
 
-        // SDL is in charge now. Wait until the streaming thread exits
-        // to further update the Qt window.
+        // The screen-setup dialog and Apply live on Qt's GUI thread. Keep it
+        // interactive while SDL runs, but retain Session until the join.
         while (!execThread.wait(10)) {
+            SessionGuiDispatch::dispatch();
             if (m_GuiDisplaySnapshot.requested()) {
-                // Only service an explicit display refresh. Deliver native
-                // screen notifications without enabling ordinary Qt UI input
-                // or running a second interactive event loop during streaming.
-                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
                 if (QCoreApplication::closingDown()) m_GuiDisplaySnapshot.cancel();
                 else m_GuiDisplaySnapshot.publish(ClientDisplayProbe::probe());
             }
@@ -5346,15 +5356,15 @@ void Session::execInternal()
     // NB: This initializes the SDL video subsystem, so it must be
     // called on the main thread.
     const bool initialized = initialize();
-    if (!initialized
+    if (!initialized || QThread::currentThread()->isInterruptionRequested()
 #ifdef Q_OS_MACOS
             || m_ApplicationExitRequested.load()
 #endif
             ) {
-#ifdef Q_OS_MACOS
         if (initialized) {
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
         }
+#ifdef Q_OS_MACOS
         if (!m_ApplicationExitRequested.load())
 #endif
         emit sessionFinished();
@@ -5377,7 +5387,7 @@ void Session::execInternal()
                                          m_StreamConfig.height);
     m_InputCallbacks.publish(m_InputHandler);
 
-    m_ConnectionStartCancelled.store(false);
+    m_ConnectionStartCancelled.store(QThread::currentThread()->isInterruptionRequested());
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {
         // Kick off the async connection thread while we sit here and pump the event loop

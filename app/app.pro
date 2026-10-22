@@ -316,6 +316,7 @@ HEADERS += \
     backend/outputtopology.h \
     backend/clientdisplayprobe.h \
     backend/guidisplaysnapshot.h \
+    streaming/sessionguidispatch.h \
     backend/displayarrangement.h \
     backend/displaymonitor.h \
     backend/displayplanner.h \

@@ -7,10 +7,13 @@
 #include "outputtopology.h"
 #include "guidisplaysnapshot.h"
 #include "streaming/plankpresentation.h"
+#include "streaming/sessionguidispatch.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QScopeGuard>
+#include <QPointer>
+#include <QTimer>
 #include <future>
 #include <thread>
 
@@ -92,6 +95,10 @@ class TestDisplayPlanner : public QObject
 private slots:
     void sessionSnapshotPreservesProfilesAndRefreshes();
     void sessionSnapshotCancellationWakesWaiter();
+    void guiDispatchProcessesSetupAndApply();
+    void guiDispatchDefersDeletionUntilJoined();
+    void guiDispatchKeepsEarlyReadySessionAliveAcrossGc();
+    void guiDispatchQuitCancelsOnce();
     void monitorKeysPreferTheUuid();
     void fingerprintIgnoresSizeAndPosition();
     void sessionUsesSavedWindowsMonitorChoice();
@@ -960,6 +967,79 @@ void TestDisplayPlanner::twoExternalDisplaysExcludeTheMacBookPanel()
     QCOMPARE(targets.planIndices, QVector<int>({-1, 1, 2}));
     QCOMPARE(targets.primaryDisplay, 1);
     QCOMPARE(plan.includedCount(), 2);
+}
+
+void TestDisplayPlanner::guiDispatchProcessesSetupAndApply()
+{
+    QObject session, application;
+    int applied = 0;
+    SessionGuiDispatch guard(&session, &application, [] {});
+    bool setupOpen = false;
+    QTimer::singleShot(0, &session, [&] {
+        setupOpen = true;
+        QTimer::singleShot(0, &session, [&] { if (setupOpen) ++applied; });
+    });
+    for (int iteration = 0; iteration < 5 && !applied; ++iteration) SessionGuiDispatch::dispatch();
+    QVERIFY(setupOpen);
+    QCOMPARE(applied, 1);
+}
+
+void TestDisplayPlanner::guiDispatchDefersDeletionUntilJoined()
+{
+    QObject application;
+    QPointer<QObject> session = new QObject;
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::JavaScriptOwnership);
+    int cancelled = 0;
+    {
+        SessionGuiDispatch guard(session, &application, [&] { ++cancelled; });
+        QCOMPARE(QQmlEngine::objectOwnership(session), QQmlEngine::CppOwnership);
+        session->deleteLater();
+        QCoreApplication::sendPostedEvents(session, QEvent::DeferredDelete);
+        QVERIFY(session);
+        QCOMPARE(cancelled, 1);
+        guard.readyForDeletion();
+        // Scope exit represents the joined worker, after all dispatch stops.
+    }
+    QVERIFY(session);
+    QCoreApplication::sendPostedEvents(session, QEvent::MetaCall);
+    QVERIFY(session.isNull());
+}
+
+void TestDisplayPlanner::guiDispatchKeepsEarlyReadySessionAliveAcrossGc()
+{
+    QQmlEngine engine;
+    QObject application;
+    QPointer<QObject> session = new QObject;
+    engine.globalObject().setProperty("session", engine.newQObject(session));
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::JavaScriptOwnership);
+    {
+        SessionGuiDispatch guard(session, &application, [] {});
+        guard.readyForDeletion();
+        // Match StreamSegue's ready handler: drop the JS reference and gc.
+        engine.globalObject().deleteProperty("session");
+        engine.collectGarbage();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(session);
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(session.isNull());
+}
+
+void TestDisplayPlanner::guiDispatchQuitCancelsOnce()
+{
+    QObject session, application;
+    GuiDisplaySnapshot snapshot;
+    auto waiting = std::async(std::launch::async, [&] { return snapshot.request(); });
+    const auto cancelWait = qScopeGuard([&] { snapshot.cancel(); });
+    QTRY_VERIFY_WITH_TIMEOUT(snapshot.requested(), 1000);
+    int cancelled = 0;
+    SessionGuiDispatch guard(&session, &application, [&] { ++cancelled; snapshot.cancel(); });
+    QEvent first(QEvent::Quit), second(QEvent::Quit);
+    QCoreApplication::sendEvent(&application, &first);
+    QCoreApplication::sendEvent(&application, &second);
+    QCOMPARE(cancelled, 1);
+    QVERIFY(waiting.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    QVERIFY(waiting.get().isEmpty());
 }
 
 void TestDisplayPlanner::sessionSnapshotPreservesProfilesAndRefreshes()

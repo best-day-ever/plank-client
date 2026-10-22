@@ -1,4 +1,4 @@
-QT += core testlib
+QT += core testlib qml
 CONFIG += console testcase c++17
 CONFIG -= app_bundle
 TEMPLATE = app
@@ -14,6 +14,7 @@ HEADERS += \
     ../../app/backend/outputtopology.h \
     ../../app/backend/clientdisplayprobe.h \
     ../../app/backend/guidisplaysnapshot.h \
+    ../../app/streaming/sessionguidispatch.h \
     ../../app/backend/displayarrangement.h \
     ../../app/backend/displayprofile.h \
     ../../app/backend/displayplanner.h \
