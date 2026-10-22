@@ -13,6 +13,7 @@ SOURCES += \
 HEADERS += \
     ../../app/backend/outputtopology.h \
     ../../app/backend/clientdisplayprobe.h \
+    ../../app/backend/guidisplaysnapshot.h \
     ../../app/backend/displayarrangement.h \
     ../../app/backend/displayprofile.h \
     ../../app/backend/displayplanner.h \

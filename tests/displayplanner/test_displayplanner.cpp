@@ -5,10 +5,14 @@
 #include "displayplanner.h"
 #include "displayprofile.h"
 #include "outputtopology.h"
+#include "guidisplaysnapshot.h"
 #include "streaming/plankpresentation.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QScopeGuard>
+#include <future>
+#include <thread>
 
 // Display setup: monitor identity, profiles and the layout planner.
 
@@ -86,6 +90,8 @@ class TestDisplayPlanner : public QObject
     Q_OBJECT
 
 private slots:
+    void sessionSnapshotPreservesProfilesAndRefreshes();
+    void sessionSnapshotCancellationWakesWaiter();
     void monitorKeysPreferTheUuid();
     void fingerprintIgnoresSizeAndPosition();
     void sessionUsesSavedWindowsMonitorChoice();
@@ -954,6 +960,56 @@ void TestDisplayPlanner::twoExternalDisplaysExcludeTheMacBookPanel()
     QCOMPARE(targets.planIndices, QVector<int>({-1, 1, 2}));
     QCOMPARE(targets.primaryDisplay, 1);
     QCOMPARE(plan.includedCount(), 2);
+}
+
+void TestDisplayPlanner::sessionSnapshotPreservesProfilesAndRefreshes()
+{
+    GuiDisplaySnapshot handoff;
+    QVector<NvClientDisplay> gui {
+        monitor("qt:vendor/model/left", QRect(-2560, 0, 2560, 1440), QSize(2560, 1440)),
+        monitor("qt:vendor/model/right", QRect(0, 0, 2560, 1440), QSize(2560, 1440))};
+    auto profile = DisplayPlanner::proposal(gui);
+    profile.choice(gui.first().key).on = false;
+    profile.primary = gui.last().key;
+    handoff.publish(gui);
+    const auto initial = handoff.current();
+    QVector<NvClientDisplay> session;
+    for (const auto& display : gui)
+        session.append(ClientDisplayProbe::forSessionDisplay(display.bounds, display.nativeSize, initial));
+    QCOMPARE(ClientDisplayProbe::fingerprint(session), ClientDisplayProbe::fingerprint(gui));
+    DisplayPlanner::HostInfo legacy;
+    legacy.known = true; legacy.platform = 1;
+    const auto plan = DisplayPlanner::plan(session, profile, legacy);
+    QVERIFY(plan.ok);
+    QVERIFY(!plan.outputs.first().included);
+    QVERIFY(plan.outputs.last().primary);
+
+    auto refreshed = std::async(std::launch::async, [&] { return handoff.request(); });
+    const auto cancelRefresh = qScopeGuard([&] { handoff.cancel(); });
+    QTRY_VERIFY_WITH_TIMEOUT(handoff.requested(), 1000);
+    // Hotplug replaces a monitor with another of the same pixel size. The
+    // refreshed immutable value carries its new identity, never the old one.
+    gui.last().key = "qt:vendor/model/replacement";
+    handoff.publish(gui);
+    QVERIFY(refreshed.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    const auto next = refreshed.get();
+    QCOMPARE(next.last().key, gui.last().key);
+    QCOMPARE(initial.last().key, QString("qt:vendor/model/right"));
+    QVERIFY(ClientDisplayProbe::fingerprint(next) != ClientDisplayProbe::fingerprint(initial));
+    QVERIFY(ClientDisplayProbe::forSessionDisplay(QRect(9000, 0, 1000, 1000), QSize(1000, 1000), next).key.isEmpty());
+}
+
+void TestDisplayPlanner::sessionSnapshotCancellationWakesWaiter()
+{
+    GuiDisplaySnapshot handoff;
+    auto waiting = std::async(std::launch::async, [&] { return handoff.request(); });
+    const auto cancelWait = qScopeGuard([&] { handoff.cancel(); });
+    QTRY_VERIFY_WITH_TIMEOUT(handoff.requested(), 1000);
+    handoff.cancel();
+    QVERIFY(waiting.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    QVERIFY(waiting.get().isEmpty());
+    QVERIFY(!handoff.requested());
+    QVERIFY(handoff.request().isEmpty());
 }
 
 void TestDisplayPlanner::legacyFallbackKeepsSelectedPrimary()

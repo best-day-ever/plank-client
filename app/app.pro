@@ -315,6 +315,7 @@ HEADERS += \
     backend/nvaddress.h \
     backend/outputtopology.h \
     backend/clientdisplayprobe.h \
+    backend/guidisplaysnapshot.h \
     backend/displayarrangement.h \
     backend/displaymonitor.h \
     backend/displayplanner.h \

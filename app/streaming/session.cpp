@@ -2213,9 +2213,8 @@ int Session::getTargetDisplayIndex() const
     // was being displayed on.
     else {
         if (m_QtWindow != nullptr) {
-            QScreen* screen = m_QtWindow->screen();
-            if (screen != nullptr) {
-                QRect displayRect = screen->geometry();
+            if (m_QtTargetDisplayBounds.isValid()) {
+                const QRect displayRect = m_QtTargetDisplayBounds;
 
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Qt UI screen is at (%d,%d)",
@@ -2250,6 +2249,11 @@ int Session::getTargetDisplayIndex() const
     return displayIndex;
 }
 
+QVector<NvClientDisplay> Session::probeClientDisplays()
+{
+    return m_ThreadedExec ? m_GuiDisplaySnapshot.request() : ClientDisplayProbe::probe();
+}
+
 bool Session::snapshotClientDisplays()
 {
     m_ClientDisplays.clear();
@@ -2262,8 +2266,9 @@ bool Session::snapshotClientDisplays()
 #if defined(Q_OS_DARWIN) || defined(Q_OS_WIN32)
     const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
 #else
-    // Linux may run this session on a worker thread, where QScreen is unsafe.
-    const QVector<NvClientDisplay> probed;
+    // Captured on the GUI thread before SDL starts, refreshed by explicit
+    // value handoffs after hotplug or Apply. QScreen stays on its owner thread.
+    const QVector<NvClientDisplay> probed = m_ClientDisplayProbe;
 #endif
     for (int index = 0; index < displayCount; ++index) {
         ClientDisplaySnapshot snapshot;
@@ -2311,10 +2316,10 @@ bool Session::snapshotClientDisplays()
                     QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
                           snapshot.logicalBounds.w, snapshot.logicalBounds.h),
                     snapshot.nativeSize, probed);
-#ifdef Q_OS_WIN32
+#ifndef Q_OS_DARWIN
         if (snapshot.probeView.key.isEmpty()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Could not match SDL output %u to a Windows display setup monitor",
+                         "Could not match SDL output %u to a display setup monitor",
                          snapshot.displayId);
             emit displayLaunchError(tr("Your displays changed during setup. Check the connected displays and try again."));
             return false;
@@ -2783,7 +2788,8 @@ QString presentedDisplaySignature(const QVector<NvClientDisplay>& displays)
 void Session::handleClientDisplaysChanged()
 {
     if (isCollaborator()) return;
-    const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
+    const QVector<NvClientDisplay> probed = probeClientDisplays();
+    m_ClientDisplayProbe = probed;
     const QString fingerprint = ClientDisplayProbe::fingerprint(probed);
     const QString signature = presentedDisplaySignature(probed);
     if (signature == m_PresentedDisplaySignature) {
@@ -2831,8 +2837,12 @@ bool Session::requestDisplayLayoutApply()
     }
     // The saved layout for the monitors connected now; the reconnect plans
     // and launches it (425 wait included) while the desktop keeps running.
+    m_ClientDisplayProbe = probeClientDisplays();
+    if (m_ClientDisplayProbe.isEmpty() || !snapshotClientDisplays()) {
+        m_ReconnectRequested.store(false);
+        return false;
+    }
     collapseToSingleWindow();
-    snapshotClientDisplays();
     m_DisplayReconfigureRequested.store(true);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK applying the display layout for the current screens");
     SDL_Event event = {};
@@ -2886,7 +2896,7 @@ void Session::applyPendingPresentation()
         }
     }
     setPresentationWindowsFullscreen(m_PresentationFullscreen);
-    const QVector<NvClientDisplay> presented = ClientDisplayProbe::probe();
+    const QVector<NvClientDisplay> presented = m_ClientDisplayProbe;
     m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
     m_PresentedDisplaySignature = presentedDisplaySignature(presented);
     SDL_Event resetEvent = {};
@@ -5271,6 +5281,9 @@ void Session::exec(QWindow* qtWindow)
     }, Qt::QueuedConnection);
 #endif
     m_QtWindow = qtWindow;
+    m_QtTargetDisplayBounds = qtWindow && qtWindow->screen() ? qtWindow->screen()->geometry() : QRect();
+    m_ClientDisplayProbe = ClientDisplayProbe::probe();
+    m_GuiDisplaySnapshot.publish(m_ClientDisplayProbe);
 
     // Use a separate thread for the streaming session on X11 or Wayland
     // to ensure we don't stomp on Qt's GL context. This breaks when using
@@ -5306,7 +5319,17 @@ void Session::exec(QWindow* qtWindow)
 
         // SDL is in charge now. Wait until the streaming thread exits
         // to further update the Qt window.
-        execThread.wait();
+        while (!execThread.wait(10)) {
+            if (m_GuiDisplaySnapshot.requested()) {
+                // Only service an explicit display refresh. Deliver native
+                // screen notifications without enabling ordinary Qt UI input
+                // or running a second interactive event loop during streaming.
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+                if (QCoreApplication::closingDown()) m_GuiDisplaySnapshot.cancel();
+                else m_GuiDisplaySnapshot.publish(ClientDisplayProbe::probe());
+            }
+        }
+        m_GuiDisplaySnapshot.cancel();
     }
     else {
         // Run the streaming session on the main thread for Windows and macOS
@@ -5551,7 +5574,7 @@ void Session::execInternal()
     rebuildPresentationLayout();
     // The monitor set this stream presents, to tell a rearrangement from new screens.
     {
-        const QVector<NvClientDisplay> presented = ClientDisplayProbe::probe();
+        const QVector<NvClientDisplay> presented = m_ClientDisplayProbe;
         m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
         m_PresentedDisplaySignature = presentedDisplaySignature(presented);
     }
