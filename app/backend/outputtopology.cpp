@@ -23,6 +23,12 @@ bool NvOutputTopology::supportsDescription(int version, int featureFlags)
     return (featureFlags & linuxDescription) == linuxDescription;
 }
 
+int NvOutputTopology::launchFeatureFlags(int discoveryFlags) const
+{
+    return (supportsDescription(schemaVersion, featureFlags) ? featureFlags : discoveryFlags) &
+            SupportedFeatureFlags;
+}
+
 namespace {
 QJsonObject applePreviewProfile(const QString& mode)
 {
@@ -113,10 +119,31 @@ QStringList NvOutputTopology::qualifiedVirtualModes()
     return {QStringLiteral("1024x2160"), QStringLiteral("1280x2160"),
             QStringLiteral("1920x1080"), QStringLiteral("1920x1200"),
             QStringLiteral("2560x1440"), QStringLiteral("2560x1600"),
-            QStringLiteral("2560x2160"),
+            QStringLiteral("2560x2160"), QStringLiteral("3024x1890"),
             QStringLiteral("3440x1440"), QStringLiteral("3840x1600"),
             QStringLiteral("3840x2160"), QStringLiteral("4096x2160"),
             QStringLiteral("5120x2160")};
+}
+
+bool NvOutputTopology::hostAcceptsVirtualMode(const QString& mode, int hostFeatureFlags)
+{
+    if (!qualifiedVirtualModes().contains(mode)) {
+        return false;
+    }
+    // A 14-inch MacBook Pro's fullscreen viewport below the camera housing.
+    return mode != QLatin1String("3024x1890") ||
+            (hostFeatureFlags & NotchSafeLaptopModesFeature) != 0;
+}
+
+QStringList NvOutputTopology::virtualModesForHost(int hostFeatureFlags)
+{
+    QStringList modes;
+    for (const QString& mode : qualifiedVirtualModes()) {
+        if (hostAcceptsVirtualMode(mode, hostFeatureFlags)) {
+            modes.append(mode);
+        }
+    }
+    return modes;
 }
 
 QSize NvOutputTopology::virtualModeSize(const QString& mode)
@@ -148,6 +175,21 @@ QSize NvOutputTopology::virtualCanvasSize(const QString& hostLayout,
         return QSize();
     }
     return QSize(width, qMax(first.height(), second.height()));
+}
+
+bool NvOutputTopology::temporarilyEmpty(const QJsonObject& object)
+{
+    const QJsonValue outputs = object.value("outputs");
+    const QJsonValue layout = object.value("layout");
+    const QJsonValue count = layout.toObject().value("output_count");
+    const QJsonObject desktop = object.value("desktop").toObject();
+    const bool zeroDesktop = desktop.value("width").toInt(-1) == 0 ||
+            desktop.value("height").toInt(-1) == 0;
+    return object.value("schema_version").toInt(-1) == ProtocolVersion &&
+            (object.value("feature_flags").toInt() & OutputTopologyFeature) != 0 &&
+            (object.value("feature_flags").toInt() & FixedCaptureFeature) == 0 &&
+            outputs.isArray() && layout.isObject() && count.isDouble() &&
+            (zeroDesktop || (outputs.toArray().isEmpty() && count.toInt(-1) == 0));
 }
 
 bool NvOutputTopology::fromJson(const QJsonObject& object,
@@ -220,7 +262,7 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
     for (const QJsonValue& mode : layout.value("virtual_modes").toArray()) {
-        if (!mode.isString() || !qualifiedVirtualModes().contains(mode.toString())) {
+        if (!mode.isString() || !hostAcceptsVirtualMode(mode.toString(), parsed.featureFlags)) {
             if (error != nullptr) {
                 *error = QStringLiteral("Invalid host virtual mode");
             }
@@ -273,6 +315,27 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         return false;
     }
 
+    // The encoded capture: the desktop, unless a host with the display
+    // arrangement extension publishes capture_size (during an arrangement
+    // lease; with each output's capture_rect). source_rect keeps its schema-13
+    // meaning (desktop coordinates) either way. Ignored without the bit.
+    parsed.captureWidth = parsed.desktopWidth;
+    parsed.captureHeight = parsed.desktopHeight;
+    if ((parsed.featureFlags & DisplayArrangementFeature) != 0 && object.contains("capture_size")) {
+        const QJsonObject capture = object.value("capture_size").toObject();
+        if (!object.value("capture_size").isObject() || capture.size() != 2 ||
+                !requireInteger(capture, "width", parsed.captureWidth) ||
+                !requireInteger(capture, "height", parsed.captureHeight) ||
+                parsed.captureWidth < 2 || parsed.captureHeight < 2 ||
+                parsed.captureWidth > 16384 || parsed.captureHeight > 16384) {
+            if (error != nullptr) {
+                *error = QStringLiteral("Invalid capture size");
+            }
+            return false;
+        }
+        parsed.capturePublished = true;
+    }
+
     for (const QJsonValue& value : object.value("outputs").toArray()) {
         if (!value.isObject()) {
             return false;
@@ -320,6 +383,34 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
             }
             return false;
         }
+        // Display arrangement: where the output sits in the encoded capture.
+        // Published with capture_size (during an arrangement lease), and the
+        // same as source_rect unless the capture is packed. Ignored without
+        // the bit, like capture_size.
+        output.captureX = output.sourceX;
+        output.captureY = output.sourceY;
+        output.captureWidth = output.sourceWidth;
+        output.captureHeight = output.sourceHeight;
+        if ((parsed.featureFlags & DisplayArrangementFeature) != 0) {
+            const bool hasCaptureRect = entry.contains("capture_rect");
+            const QJsonObject captureRect = entry.value("capture_rect").toObject();
+            if (hasCaptureRect != parsed.capturePublished ||
+                    (hasCaptureRect &&
+                     (!entry.value("capture_rect").isObject() || captureRect.size() != 4 ||
+                      !requireInteger(captureRect, "x", output.captureX) ||
+                      !requireInteger(captureRect, "y", output.captureY) ||
+                      !requireInteger(captureRect, "width", output.captureWidth) ||
+                      !requireInteger(captureRect, "height", output.captureHeight) ||
+                      output.captureX < 0 || output.captureY < 0 ||
+                      output.captureWidth <= 0 || output.captureHeight <= 0 ||
+                      output.captureX + output.captureWidth > parsed.captureWidth ||
+                      output.captureY + output.captureHeight > parsed.captureHeight))) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("Invalid output capture rectangle");
+                }
+                return false;
+            }
+        }
         parsed.outputs.append(output);
     }
     if (parsed.outputs.isEmpty() || parsed.outputs.size() != declaredOutputCount ||
@@ -330,7 +421,87 @@ bool NvOutputTopology::fromJson(const QJsonObject& object,
         }
         return false;
     }
+    // Display arrangement: additive fields, read (strictly) only when the
+    // host advertises the extension. Without the bit they are ignored, as
+    // every schema-13 parser before it does.
+    if ((parsed.featureFlags & DisplayArrangementFeature) != 0 &&
+            !parseDisplayArrangement(object, layout, parsed, error)) {
+        return false;
+    }
     topology = parsed;
+    return true;
+}
+
+bool NvOutputTopology::parseDisplayArrangement(const QJsonObject& object, const QJsonObject& layout,
+                                               NvOutputTopology& parsed, QString* error)
+{
+    const auto fail = [error](const char* message) {
+        if (error != nullptr) *error = QString::fromLatin1(message);
+        return false;
+    };
+    QString capabilitiesError;
+    if (!object.value(QStringLiteral("display_capabilities")).isObject() ||
+            !DisplayArrangement::Capabilities::fromJson(object.value(QStringLiteral("display_capabilities")).toObject(),
+                                                        parsed.displayCapabilities, &capabilitiesError)) {
+        if (error != nullptr) *error = QStringLiteral("Invalid display capabilities: ") + capabilitiesError;
+        return false;
+    }
+    parsed.startupPolicy = layout.value(QStringLiteral("startup_policy")).toString();
+    if (parsed.startupPolicy != QLatin1String("physical") && parsed.startupPolicy != QLatin1String("virtual") &&
+            parsed.startupPolicy != QLatin1String("hybrid")) {
+        return fail("Invalid host display startup policy");
+    }
+    const QJsonValue arrangementValue = layout.value(QStringLiteral("arrangement"));
+    const QJsonObject arrangement = arrangementValue.toObject();
+    const QJsonObject transition = arrangement.value(QStringLiteral("transition")).toObject();
+    parsed.arrangementRequest = arrangement.value(QStringLiteral("request")).toString();
+    parsed.arrangementState = transition.value(QStringLiteral("state")).toString();
+    parsed.arrangementReason = transition.value(QStringLiteral("reason")).toString();
+    QVector<DisplayArrangement::Entry> entries;
+    if (!arrangementValue.isObject() || !arrangement.value(QStringLiteral("request")).isString() ||
+            !arrangement.value(QStringLiteral("transition")).isObject() ||
+            !transition.value(QStringLiteral("reason")).isString() || parsed.arrangementReason.size() > 64 ||
+            (parsed.arrangementState != QLatin1String("idle") && parsed.arrangementState != QLatin1String("pending") &&
+             parsed.arrangementState != QLatin1String("applied") && parsed.arrangementState != QLatin1String("failed")) ||
+            (!parsed.arrangementRequest.isEmpty() &&
+             !DisplayArrangement::parse(parsed.arrangementRequest, entries).isEmpty())) {
+        return fail("Invalid host display arrangement state");
+    }
+    const QJsonArray outputs = object.value(QStringLiteral("outputs")).toArray();
+    QVector<bool> seen(DisplayArrangement::MaximumEntries, false);
+    for (int index = 0; index < outputs.size(); ++index) {
+        const QJsonObject entry = outputs.at(index).toObject();
+        NvOutput& output = parsed.outputs[index];
+        DisplayArrangement::Backing backing;
+        output.backing = entry.value(QStringLiteral("backing")).toString();
+        if (!DisplayArrangement::backingFromName(output.backing, backing) ||
+                !requireInteger(entry, "arrangement_index", output.arrangementIndex) ||
+                output.arrangementIndex < -1 || output.arrangementIndex >= DisplayArrangement::MaximumEntries ||
+                (output.arrangementIndex >= 0 && seen.at(output.arrangementIndex))) {
+            return fail("Invalid output backing or arrangement index");
+        }
+        if (output.arrangementIndex >= 0) seen[output.arrangementIndex] = true;
+    }
+    return true;
+}
+
+bool NvOutputTopology::matchesRequestedArrangement(const QString& request) const
+{
+    QVector<DisplayArrangement::Entry> entries;
+    if (!displayArrangementPublished() || request.isEmpty() || arrangementRequest != request ||
+            arrangementState != QLatin1String("applied") ||
+            !DisplayArrangement::parse(request, entries).isEmpty() || outputs.size() != entries.size()) {
+        return false;
+    }
+    QVector<bool> seen(entries.size(), false);
+    for (const NvOutput& output : outputs) {
+        const int index = output.arrangementIndex;
+        if (index < 0 || index >= entries.size() || seen.at(index) ||
+                QRect(output.x - desktopX, output.y - desktopY, output.width, output.height) != entries.at(index).rect) {
+            return false;
+        }
+        seen[index] = true;
+    }
     return true;
 }
 
@@ -344,9 +515,10 @@ QJsonObject NvOutputTopology::toJson() const
                         {"width", captureLogicalBounds.width()}, {"height", captureLogicalBounds.height()}}},
                     {"encoding_profile", applePreviewProfile(appleEncodingMode)}}}};
     }
+    const bool arrangement = displayArrangementPublished();
     QJsonArray serializedOutputs;
     for (const NvOutput& output : outputs) {
-        serializedOutputs.append(QJsonObject {
+        QJsonObject entry {
             {"id", output.id}, {"name", output.name},
             {"x", output.x}, {"y", output.y},
             {"width", output.width}, {"height", output.height},
@@ -359,25 +531,48 @@ QJsonObject NvOutputTopology::toJson() const
                 {"x", output.sourceX}, {"y", output.sourceY},
                 {"width", output.sourceWidth}, {"height", output.sourceHeight},
             }},
+        };
+        if (arrangement) {
+            entry.insert("backing", output.backing);
+            entry.insert("arrangement_index", output.arrangementIndex);
+            if (capturePublished) {
+                entry.insert("capture_rect", QJsonObject {
+                    {"x", output.captureX}, {"y", output.captureY},
+                    {"width", output.captureWidth}, {"height", output.captureHeight}});
+            }
+        }
+        serializedOutputs.append(entry);
+    }
+    QJsonObject serializedLayout {
+        {"kind", layoutKind}, {"virtual", virtualLayout},
+        {"virtual_modes", QJsonArray::fromStringList(virtualModes)},
+        {"output_count", outputs.size()},
+        {"startup_kind", startupLayoutKind},
+        {"allowed_kinds", QJsonArray::fromStringList(allowedLayoutKinds)},
+    };
+    if (arrangement) {
+        serializedLayout.insert("startup_policy", startupPolicy);
+        serializedLayout.insert("arrangement", QJsonObject {
+            {"request", arrangementRequest},
+            {"transition", QJsonObject {{"state", arrangementState}, {"reason", arrangementReason}}},
         });
     }
-    return QJsonObject {
+    QJsonObject document {
         {"schema_version", schemaVersion},
         {"feature_flags", featureFlags},
         {"generation", generation},
-        {"layout", QJsonObject {
-            {"kind", layoutKind}, {"virtual", virtualLayout},
-            {"virtual_modes", QJsonArray::fromStringList(virtualModes)},
-            {"output_count", outputs.size()},
-            {"startup_kind", startupLayoutKind},
-            {"allowed_kinds", QJsonArray::fromStringList(allowedLayoutKinds)},
-        }},
+        {"layout", serializedLayout},
         {"desktop", QJsonObject {
             {"x", desktopX}, {"y", desktopY},
             {"width", desktopWidth}, {"height", desktopHeight},
         }},
         {"outputs", serializedOutputs},
     };
+    if (arrangement) document.insert("display_capabilities", displayCapabilities.toJson());
+    if (arrangement && capturePublished) {
+        document.insert("capture_size", QJsonObject {{"width", captureWidth}, {"height", captureHeight}});
+    }
+    return document;
 }
 
 bool NvOutputTopology::contains(QString outputId) const
@@ -409,6 +604,15 @@ bool NvOutputTopology::allowsBookmarkHostLayout(const QString& layout) const
                 allowedLayoutKinds.contains(DualHorizontalHostLayout);
     }
     return allowedLayoutKinds.contains(layout);
+}
+
+int NvOutputTopology::outputCountForLayout(const QString& resolvedLayout) const
+{
+    if (resolvedLayout == SingleHostLayout) return 1;
+    if (resolvedLayout == DualHorizontalHostLayout) return 2;
+    if (resolvedLayout == PhysicalHostLayout || resolvedLayout == QStringLiteral("fixed"))
+        return outputs.size();
+    return 0;
 }
 
 bool NvOutputTopology::matchesRequestedHostLayout(const QString& layout,
@@ -509,13 +713,94 @@ QString NvOutputTopology::resolveMacClientDisplayMode(const QVector<NvClientDisp
     return mode;
 }
 
+QSize NvOutputTopology::clientMatchTarget(const QSize& desktopPixels, const QSize& panelPixels)
+{
+    const QSize base = desktopPixels.isValid() ? desktopPixels : panelPixels;
+    if (!base.isValid() || base.isEmpty()) {
+        return QSize();
+    }
+    if (!panelPixels.isValid() || panelPixels.isEmpty() ||
+            (base.width() <= panelPixels.width() && base.height() <= panelPixels.height())) {
+        return base;
+    }
+    const double scale = qMin(double(panelPixels.width()) / base.width(),
+                              double(panelPixels.height()) / base.height());
+    return QSize(qBound(1, int(std::lround(base.width() * scale)), panelPixels.width()),
+                 qBound(1, int(std::lround(base.height() * scale)), panelPixels.height()));
+}
+
+QSize NvOutputTopology::clientMatchTarget(const NvClientDisplay& display)
+{
+    // Streams are presented in native fullscreen, which macOS places below the camera housing: match that
+    // viewport (16:10 on notched MacBooks) rather than the full desktop, or it is always letterboxed.
+    const QSize desktop = display.fullscreenSize.isValid() ? display.fullscreenSize : display.backingSize;
+    return clientMatchTarget(desktop, display.nativeSize);
+}
+
+QStringList NvOutputTopology::rankedVirtualModes(const QSize& target, const QStringList& candidateModes)
+{
+    if (!target.isValid() || target.isEmpty()) {
+        return {};
+    }
+    struct Candidate {
+        QString mode;
+        bool fits;
+        double aspectError;
+        qint64 area;
+    };
+    const QString exact = QStringLiteral("%1x%2").arg(target.width()).arg(target.height());
+    const bool portrait = target.height() > target.width();
+    const double targetAspect = double(target.width()) / target.height();
+    QVector<Candidate> candidates;
+    QStringList ranked;
+    for (const QString& mode : candidateModes) {
+        const QSize size = virtualModeSize(mode);
+        if (!size.isValid()) {
+            continue;
+        }
+        if (mode == exact) {
+            ranked.append(mode);
+            continue;
+        }
+        // The ultra-tall halves (1024/1280/2560x2160, narrower than 4:3) are
+        // made for pairs: a landscape display only gets a landscape mode, a
+        // portrait display only a portrait one.
+        const bool landscapeMode = size.width() * 3 >= size.height() * 4;
+        const bool portraitMode = size.height() > size.width();
+        if (portrait ? !portraitMode : !landscapeMode) {
+            continue;
+        }
+        candidates.append({mode,
+                           size.width() <= target.width() && size.height() <= target.height(),
+                           std::fabs(std::log((double(size.width()) / size.height()) / targetAspect)),
+                           qint64(size.width()) * size.height()});
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.fits != b.fits) return a.fits;
+        // 1920x1200 and 2560x1600 share one aspect ratio; compare with a
+        // tolerance so rounding never decides between them.
+        if (std::fabs(a.aspectError - b.aspectError) > 1e-9) return a.aspectError < b.aspectError;
+        return a.fits ? a.area > b.area : a.area < b.area;
+    });
+    for (const Candidate& candidate : std::as_const(candidates)) {
+        ranked.append(candidate.mode);
+    }
+    return ranked;
+}
+
 bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displays,
                                                   QString& hostLayout,
                                                   QStringList& virtualModes,
-                                                  QString* error)
+                                                  QString* error,
+                                                  bool* fitted,
+                                                  const QStringList& candidateModes,
+                                                  int* primaryOutput)
 {
     hostLayout.clear();
     virtualModes.clear();
+    if (fitted != nullptr) {
+        *fitted = false;
+    }
     if (displays.size() < 1 || displays.size() > 2) {
         if (error != nullptr) {
             *error = QStringLiteral("Match client displays requires exactly one or two active client monitors.");
@@ -541,21 +826,103 @@ bool NvOutputTopology::resolveClientDisplayLayout(QVector<NvClientDisplay> displ
         }
     }
 
-    for (const NvClientDisplay& display : displays) {
-        const QString mode = QStringLiteral("%1x%2")
-                .arg(display.nativeSize.width()).arg(display.nativeSize.height());
-        if (!qualifiedVirtualModes().contains(mode)) {
+    QVector<QStringList> rankings;
+    QStringList targets;
+    QVector<int> choice;
+    for (const NvClientDisplay& display : std::as_const(displays)) {
+        const QSize target = clientMatchTarget(display);
+        const QStringList ranked = rankedVirtualModes(target, candidateModes);
+        if (ranked.isEmpty()) {
             if (error != nullptr) {
-                *error = QStringLiteral("Client monitor resolution %1 is not a qualified PLANK virtual mode.")
-                        .arg(mode);
+                *error = QStringLiteral("The size of a client monitor could not be detected.");
             }
+            return false;
+        }
+        rankings.append(ranked);
+        targets.append(QStringLiteral("%1x%2").arg(target.width()).arg(target.height()));
+        choice.append(0);
+    }
+
+    // Two displays share one virtual canvas; step the wider display down its
+    // own ranking until the pair fits the host's canvas limit.
+    const auto canvasWidth = [&]() {
+        int width = 0;
+        for (int index = 0; index < rankings.size(); ++index) {
+            width += virtualModeSize(rankings[index][choice[index]]).width();
+        }
+        return width;
+    };
+    while (canvasWidth() > MaximumVirtualCanvasWidth) {
+        int widest = -1;
+        for (int index = 0; index < rankings.size(); ++index) {
+            const int width = virtualModeSize(rankings[index][choice[index]]).width();
+            bool narrower = false;
+            for (int next = choice[index] + 1; next < rankings[index].size(); ++next) {
+                narrower = narrower || virtualModeSize(rankings[index][next]).width() < width;
+            }
+            if (narrower && (widest < 0 ||
+                             width > virtualModeSize(rankings[widest][choice[widest]]).width())) {
+                widest = index;
+            }
+        }
+        if (widest < 0) {
+            if (error != nullptr) {
+                *error = QStringLiteral("The client monitors are too wide together for a matched virtual layout.");
+            }
+            return false;
+        }
+        const int width = virtualModeSize(rankings[widest][choice[widest]]).width();
+        do {
+            ++choice[widest];
+        } while (virtualModeSize(rankings[widest][choice[widest]]).width() >= width);
+    }
+
+    bool anyFitted = false;
+    for (int index = 0; index < rankings.size(); ++index) {
+        const QString& mode = rankings[index][choice[index]];
+        anyFitted = anyFitted || mode != targets[index];
+        virtualModes.append(mode);
+    }
+    if (fitted != nullptr) {
+        *fitted = anyFitted;
+    }
+    hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
+                                       QString::fromLatin1(DualHorizontalHostLayout);
+    if (primaryOutput) {
+        *primaryOutput = clientPrimaryIndex(displays, displays.size());
+        if (*primaryOutput < 0) {
+            if (error) *error = QStringLiteral("Unable to identify one primary client display. Please reconnect.");
             hostLayout.clear();
             virtualModes.clear();
             return false;
         }
-        virtualModes.append(mode);
     }
-    hostLayout = displays.size() == 1 ? QString::fromLatin1(SingleHostLayout) :
-                                       QString::fromLatin1(DualHorizontalHostLayout);
     return true;
+}
+
+int NvOutputTopology::clientPrimaryIndex(QVector<NvClientDisplay> displays, int outputCount)
+{
+    if (outputCount < 1 || outputCount > 2 || displays.size() != outputCount) {
+        return -1;
+    }
+    std::sort(displays.begin(), displays.end(), [](const auto& left, const auto& right) {
+        return std::make_tuple(left.bounds.x(), left.bounds.y()) <
+                std::make_tuple(right.bounds.x(), right.bounds.y());
+    });
+    if (displays.size() == 2) {
+        const QRect& left = displays.at(0).bounds;
+        const QRect& right = displays.at(1).bounds;
+        if (left.right() >= right.left() ||
+                left.top() > right.bottom() || right.top() > left.bottom()) {
+            return -1;
+        }
+    }
+    int primary = -1;
+    for (int index = 0; index < displays.size(); ++index) {
+        if (!displays[index].bounds.isValid()) return -1;
+        if (!displays[index].main) continue;
+        if (primary != -1) return -1;
+        primary = index;
+    }
+    return primary;
 }

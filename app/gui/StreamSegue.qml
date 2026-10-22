@@ -54,11 +54,34 @@ Item {
         activeSessionTakeoverDialog.open()
     }
 
+    function desktopSignOutRequested(text)
+    {
+        desktopSignOutDialog.text = text
+        desktopSignOutDialog.open()
+    }
+
+    function desktopCollaborationRequested(text, signOutAvailable)
+    {
+        desktopCollaborationDialog.text = text
+        desktopCollaborationDialog.signOutAvailable = signOutAvailable
+        desktopCollaborationDialog.open()
+    }
+
     function displayLaunchError(text)
     {
         // Display the error dialog after Session::exec() returns
         streamSegueErrorDialog.text = text
         console.error(text)
+    }
+
+    // "Set up…" in the stream's screens-changed prompt: the display setup
+    // over the stream; saving applies it to this session.
+    function displaySetupRequested()
+    {
+        window.visible = true
+        window.raise()
+        window.requestActivate()
+        screensDialog.openForSession(session)
     }
 
     function displayLaunchWarning(text)
@@ -76,6 +99,8 @@ Item {
     function sessionFinished()
     {
         activeSessionTakeoverDialog.close()
+        desktopSignOutDialog.close()
+        desktopCollaborationDialog.close()
         if (quitAfter) {
             if (streamSegueErrorDialog.text) {
                 // Quit when the error dialog is acknowledged
@@ -126,8 +151,11 @@ Item {
         session.connectionStarted.connect(connectionStarted)
         session.sessionCleanupWaitChanged.connect(sessionCleanupWaitChanged)
         session.activeSessionTakeoverRequested.connect(activeSessionTakeoverRequested)
+        session.desktopSignOutRequested.connect(desktopSignOutRequested)
+        session.desktopCollaborationRequested.connect(desktopCollaborationRequested)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
+        session.displaySetupRequested.connect(displaySetupRequested)
         session.sessionFinished.connect(sessionFinished)
         session.readyForDeletion.connect(sessionReadyForDeletion)
 
@@ -136,15 +164,32 @@ Item {
         streamLoader.active = true
     }
 
-    NavigableMessageDialog {
+    SessionTakeoverDialog {
         id: activeSessionTakeoverDialog
-        title: qsTr("Active PLANK session")
+        title: qsTr("Active BDE fernweh session")
         standardButtons: Dialog.Yes | Dialog.No
         acceptButtonText: qsTr("Take Over")
         rejectButtonText: qsTr("Cancel")
 
         onAccepted: session.respondToActiveSessionTakeover(true)
         onRejected: session.respondToActiveSessionTakeover(false)
+    }
+
+    CollaborationDialog {
+        id: desktopCollaborationDialog
+        onChosen: function(choice) { session.respondToDesktopCollaboration(choice) }
+    }
+
+    NavigableMessageDialog {
+        id: desktopSignOutDialog
+        title: qsTr("Workstation in use")
+        standardButtons: Dialog.Yes | Dialog.No
+        acceptButtonText: qsTr("Sign out and continue")
+        acceptButtonDestructive: true
+        rejectButtonText: qsTr("Cancel")
+
+        onAccepted: session.respondToDesktopSignOut(true)
+        onRejected: session.respondToDesktopSignOut(false)
     }
 
     Timer {
@@ -165,7 +210,7 @@ Item {
         asynchronous: true
 
         onLoaded: {
-            hintText.text = qsTr("Tip:") + " " + qsTr("Press %1 to disconnect your session").arg(qsTr("Ctrl+Alt+Shift+Q"))
+            hintText.text = qsTr("Tip:") + " " + qsTr("Press %1 to show the toolbar and %2 to disconnect your session").arg(qsTr("Ctrl+Alt+Shift+T")).arg(qsTr("Ctrl+Alt+Shift+Q"))
 
             // Garbage collect QML stuff before we start streaming,
             // since we'll probably be streaming for a while and we

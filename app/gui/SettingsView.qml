@@ -6,6 +6,9 @@ import QtQuick.Window 2.2
 import StreamingPreferences 1.0
 import ComputerManager 1.0
 import SystemProperties 1.0
+import RemoteBroker 1.0
+import DisplaySetup 1.0
+import FernwehUpdater 1.0
 
 Flickable {
     id: settingsPage
@@ -16,6 +19,12 @@ Flickable {
     }
 
     signal languageChanged()
+
+    Loader {
+        id: macPermissionsDialog
+        active: Qt.platform.os === "osx"
+        source: active ? "MacPermissionsDialog.qml" : ""
+    }
 
     boundsBehavior: Flickable.OvershootBounds
 
@@ -71,6 +80,9 @@ Flickable {
             }
         }
     }
+
+    // Settings > Displays shows what is saved for the screens connected now.
+    StackView.onActivated: DisplaySetup.begin("", "", "")
 
     StackView.onDeactivating: {
         // Save the prefs so the Session can observe the changes
@@ -319,6 +331,16 @@ Flickable {
                         }
                 }
 
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    text: qsTr("BDE fernweh workstations always stream at %1 FPS; this applies to other hosts only.")
+                          .arg(StreamingPreferences.plankFramesPerSecond())
+                }
+
                 PlankSettingLabel {
                     id: windowModeTitle
                     text: qsTr("Window Mode")
@@ -477,14 +499,69 @@ Flickable {
                 }
 
                 PlankSettingLabel {
-                    text: qsTr("Mute host PC speakers while streaming")
+                    text: qsTr("Forward camera")
+                    visible: StreamingPreferences.nativeCameraSupported
+                }
+                AutoResizingComboBox {
+                    id: cameraComboBox
+                    visible: StreamingPreferences.nativeCameraSupported
+                    Layout.fillWidth: true
+                    textRole: "name"
+                    valueRole: "id"
+                    model: []
+                    function refreshCameras() {
+                        let entries = [{id: "", name: qsTr("Automatic (first supported camera)")}]
+                        let devices = StreamingPreferences.cameraDevices()
+                        for (let i = 0; i < devices.length; ++i) entries.push(devices[i])
+                        let selected = entries.findIndex(item => item.id === StreamingPreferences.cameraDevice)
+                        if (selected < 0) {
+                            entries.push({id: StreamingPreferences.cameraDevice, name: qsTr("Selected camera (disconnected)")})
+                            selected = entries.length - 1
+                        }
+                        model = entries
+                        currentIndex = selected
+                    }
+                    Component.onCompleted: refreshCameras()
+                    onPressedChanged: if (pressed) refreshCameras()
+                    onActivated: StreamingPreferences.cameraDevice = currentValue
+                    Accessible.name: qsTr("Forward camera")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 1000
+                    ToolTip.text: qsTr("Camera starts off. Enable it from the session toolbar, then select PLANK Camera in the host application. Native H.264 or MJPEG cameras are supported.")
+                }
+
+                PlankSettingLabel { text: qsTr("Enable microphone") }
+                AutoResizingComboBox {
+                    Layout.fillWidth: true
+                    model: [qsTr("Automatic"), qsTr("Manual")]
+                    currentIndex: StreamingPreferences.microphoneAutomatic ? 0 : 1
+                    onActivated: StreamingPreferences.microphoneAutomatic = currentIndex === 0
+                    Accessible.name: qsTr("Enable microphone")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 1000
+                    ToolTip.text: qsTr("Automatic starts the OS-selected microphone on a supported host after permission is granted. Manual starts muted; use the toolbar to enable it.")
+                }
+                PlankSettingLabel { text: qsTr("Select PLANK Microphone as host input") }
+                AutoResizingComboBox {
+                    Layout.fillWidth: true
+                    model: [qsTr("Automatic"), qsTr("Manual")]
+                    currentIndex: StreamingPreferences.microphoneAutomaticInput ? 0 : 1
+                    onActivated: StreamingPreferences.microphoneAutomaticInput = currentIndex === 0
+                    Accessible.name: qsTr("Select PLANK Microphone as host input")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 1000
+                    ToolTip.text: qsTr("Automatic temporarily selects PLANK Microphone on the host. Manual leaves the input selection to you or the application. Muting always sends silence.")
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Mute workstation speakers while streaming")
                 }
 
                 PlankCheckBox {
                     id: audioPcCheck
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
-                    Accessible.name: qsTr("Mute host PC speakers while streaming")
+                    Accessible.name: qsTr("Mute workstation speakers while streaming")
                     checked: !StreamingPreferences.playAudioOnHost
                     onCheckedChanged: {
                         StreamingPreferences.playAudioOnHost = !checked
@@ -493,7 +570,7 @@ Flickable {
                     ToolTip.delay: 1000
                     ToolTip.timeout: 5000
                     ToolTip.visible: hovered
-                    ToolTip.text: qsTr("You must restart any game currently in progress for this setting to take effect")
+                    ToolTip.text: qsTr("Keeps the workstation's own speakers silent while you stream.")
                 }
 
                 PlankSettingLabel {
@@ -678,7 +755,7 @@ Flickable {
                         if (StreamingPreferences.language !== new_language) {
                             StreamingPreferences.language = languageListModel.get(currentIndex).val
                             if (!StreamingPreferences.retranslate()) {
-                                ToolTip.show(qsTr("You must restart PLANK Client for this change to take effect"), 5000)
+                                ToolTip.show(qsTr("You must restart BDE fernweh for this change to take effect"), 5000)
                             }
                             else {
                                 // Signal other controls to adjust their text
@@ -742,6 +819,18 @@ Flickable {
             PlankSettingsGrid {
 
                 PlankSettingLabel {
+                    visible: Qt.platform.os === "osx"
+                    text: qsTr("macOS permissions")
+                }
+                Button {
+                    visible: Qt.platform.os === "osx"
+                    Layout.fillWidth: true
+                    text: qsTr("Review permissions…")
+                    enabled: macPermissionsDialog.status === Loader.Ready
+                    onClicked: macPermissionsDialog.item.open()
+                }
+
+                PlankSettingLabel {
                     text: qsTr("Capture system keyboard shortcuts")
                 }
 
@@ -763,7 +852,7 @@ Flickable {
                         ToolTip.timeout: 10000
                         ToolTip.visible: hovered
                         ToolTip.text: qsTr("This enables the capture of system-wide keyboard shortcuts like Alt+Tab that would normally be handled by the client OS while streaming.") + "\n\n" +
-                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including PLANK Client.")
+                                      qsTr("NOTE: Certain keyboard shortcuts like Ctrl+Alt+Del on Windows cannot be intercepted by any application, including BDE fernweh.")
                     }
 
                     AutoResizingComboBox {
@@ -824,6 +913,24 @@ Flickable {
                     }
                 }
 
+                PlankSettingLabel {
+                    text: qsTr("Immersive keyboard mode")
+                    visible: Qt.platform.os === "osx"
+                }
+
+                PlankCheckBox {
+                    visible: Qt.platform.os === "osx"
+                    Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                    Accessible.name: qsTr("Immersive keyboard mode")
+                    checked: StreamingPreferences.immersiveKeyboardMode
+                    onToggled: StreamingPreferences.immersiveKeyboardMode = checked
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 10000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("On your next connection, forward keyboard shortcuts to the remote desktop while its window has focus. Ctrl+Alt+Shift+Q always disconnects and Ctrl+Alt+Shift+T always shows or hides the toolbar, including in immersive mode. Ctrl+Alt+Shift+Z leaves immersive mode for this session. macOS Accessibility permission is required. Some protected system keys remain local.")
+                }
+
             }
         }
 
@@ -864,6 +971,9 @@ Flickable {
                     enabled: !automaticQuicMtuCheckBox.checked
                     value: StreamingPreferences.quicUdpPayloadMtu === 0 ? 1344 :
                                StreamingPreferences.quicUdpPayloadMtu
+                    // A byte count: no locale group separator ("1.344").
+                    textFromValue: function(value) { return value.toString() }
+                    valueFromText: function(text) { return parseInt(text) }
                     onValueModified: {
                         if (enabled) {
                             StreamingPreferences.quicUdpPayloadMtu = value
@@ -947,7 +1057,486 @@ Flickable {
                 }
 
                 PlankSettingHelp {
-                    text: qsTr("The stream window and toolbar remain responsive while PLANK retries the host.")
+                    text: qsTr("The stream window and toolbar remain responsive while BDE fernweh retries the host.")
+                }
+            }
+        }
+
+        PlankSection {
+            id: displaysGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            title: qsTr("Displays")
+
+            PlankSettingsGrid {
+                PlankSettingLabel {
+                    text: qsTr("Screens connected now")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 6
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: DisplaySetup.label
+                        color: theme.textPrimary
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: DisplaySetup.hasSavedLayout ? DisplaySetup.summary :
+                                                            qsTr("No display setup for these screens yet.")
+                        color: theme.textSecondary
+                        wrapMode: Text.Wrap
+                        font.pointSize: 10
+                    }
+                    Button {
+                        text: DisplaySetup.hasSavedLayout ? qsTr("Run display setup again…") : qsTr("Set up displays…")
+                        onClicked: screensDialog.openFor("", "", "", false, 0)
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Saved layouts")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 2
+
+                    Label {
+                        visible: DisplaySetup.savedLayouts.length === 0
+                        text: qsTr("None yet")
+                        color: theme.textSecondary
+                    }
+                    Repeater {
+                        model: DisplaySetup.savedLayouts
+
+                        delegate: RowLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.spaceMedium
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.current ? qsTr("%1 (connected now)").arg(modelData.label) : modelData.label
+                                color: theme.textPrimary
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: modelData.saved
+                                color: theme.textSecondary
+                                font.pointSize: 10
+                            }
+                            Button {
+                                text: qsTr("Forget")
+                                flat: true
+                                onClicked: DisplaySetup.forget(modelData.fingerprint)
+                            }
+                        }
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("When your screens change")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 0
+
+                    PlankCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Ask when my screens change")
+                        checked: DisplaySetup.askOnChange
+                        onToggled: DisplaySetup.askOnChange = checked
+                    }
+                    PlankCheckBox {
+                        Layout.fillWidth: true
+                        text: qsTr("Always use the suggested layout for new screens")
+                        checked: DisplaySetup.autoAccept
+                        onToggled: DisplaySetup.autoAccept = checked
+                    }
+                }
+            }
+        }
+
+        PlankSection {
+            id: remoteAccessGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            title: qsTr("Remote Access")
+
+            PlankSettingsGrid {
+
+                // Stream quality for remote workstations without their own
+                // settings (each workstation's Settings… can override it).
+                PlankSettingLabel {
+                    text: qsTr("Default stream quality")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    id: remoteDefaults
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 6
+
+                    function reload() {
+                        var defaults = RemoteBroker.remoteStreamDefaults()
+                        remoteDefaultsVideo.load(defaults.captureSource, defaults.videoProfile,
+                                                 defaults.officeBitratesKbps, defaults.internetBitratesKbps)
+                    }
+
+                    Component.onCompleted: reload()
+
+                    PlankVideoSettings {
+                        id: remoteDefaultsVideo
+                        Layout.fillWidth: true
+                        // Linux workstations; remote Macs keep their own default.
+                        hostPlatform: 1
+                        showRoutes: true
+                        onEdited: {
+                            if (!RemoteBroker.saveRemoteStreamDefaults(captureSource, videoProfile,
+                                                                       officeBitratesKbps, internetBitratesKbps)) {
+                                remoteDefaults.reload()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("Restore default quality")
+                            onClicked: {
+                                RemoteBroker.resetRemoteStreamDefaults()
+                                remoteDefaults.reload()
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    text: qsTr("Used for every remote workstation that has no stream settings of its own. The built-in default is H.265 10-bit 4:4:4 (NVENC) at 50 Mbps on both routes.")
+                }
+
+                // Touch ID sign-in (bde-linux docs/plank-broker.md 13.4): a
+                // Secure Enclave key on this Mac replaces the authenticator code.
+                PlankSettingLabel {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Touch ID sign-in")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    id: passkeySettings
+                    visible: RemoteBroker.passkeySupported
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 6
+
+                    property string createdUser: ""
+                    property string mapping: ""
+                    property string errorText: ""
+                    property bool copied: false
+                    property string removeUser: ""
+
+                    Component.onCompleted: RemoteBroker.refreshPasskeys()
+
+                    Connections {
+                        target: RemoteBroker
+                        function onPasskeyCreated(username, mapping) {
+                            passkeySettings.createdUser = username
+                            passkeySettings.mapping = mapping
+                            passkeySettings.errorText = ""
+                            passkeySettings.copied = false
+                        }
+                        function onPasskeyError(message) {
+                            passkeySettings.errorText = message
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        PlankTextField {
+                            id: passkeyUserField
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            placeholderText: qsTr("Studio user name")
+                            enabled: !RemoteBroker.passkeyBusy
+                            inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+                        }
+                        Button {
+                            text: qsTr("Set up Touch ID sign-in")
+                            enabled: !RemoteBroker.passkeyBusy && passkeyUserField.text.trim() !== ""
+                            onClicked: {
+                                passkeySettings.mapping = ""
+                                passkeySettings.errorText = ""
+                                RemoteBroker.createPasskey(passkeyUserField.text)
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        visible: passkeySettings.mapping !== ""
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        spacing: 4
+
+                        Label {
+                            text: qsTr("Touch ID sign-in key for %1 on this Mac:").arg(passkeySettings.createdUser)
+                            color: theme.textPrimary
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        TextArea {
+                            id: passkeyMappingArea
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            readOnly: true
+                            selectByMouse: true
+                            wrapMode: TextEdit.WrapAnywhere
+                            font.family: "Menlo"
+                            font.pointSize: 9
+                            color: theme.textPrimary
+                            text: passkeySettings.mapping
+                            background: Rectangle {
+                                color: theme.surfaceRaised
+                                radius: theme.radiusSmall
+                                border.width: 1
+                                border.color: theme.border
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Button {
+                                text: passkeySettings.copied ? qsTr("Copied") : qsTr("Copy")
+                                onClicked: {
+                                    passkeyMappingArea.selectAll()
+                                    passkeyMappingArea.copy()
+                                    passkeyMappingArea.deselect()
+                                    passkeySettings.copied = true
+                                }
+                            }
+                            PlankSettingHelp {
+                                text: qsTr("Send this to your admin; it is not secret.")
+                            }
+                        }
+                    }
+
+                    Label {
+                        visible: passkeySettings.errorText !== ""
+                        text: passkeySettings.errorText
+                        color: theme.danger
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+
+                    Repeater {
+                        model: RemoteBroker.passkeys
+                        delegate: RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: modelData.username
+                                color: theme.textPrimary
+                                elide: Label.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Button {
+                                text: qsTr("Show key")
+                                flat: true
+                                onClicked: {
+                                    passkeySettings.createdUser = modelData.username
+                                    passkeySettings.mapping = modelData.mapping
+                                    passkeySettings.copied = false
+                                }
+                            }
+                            Button {
+                                text: qsTr("Remove Touch ID sign-in")
+                                enabled: !RemoteBroker.passkeyBusy
+                                onClicked: {
+                                    passkeySettings.removeUser = modelData.username
+                                    removePasskeyDialog.open()
+                                }
+                            }
+                        }
+                    }
+
+                    NavigableMessageDialog {
+                        id: removePasskeyDialog
+                        text: qsTr("Remove Touch ID sign-in for '%1' from this Mac? You will sign in with your password and authenticator code until you set it up again and your admin adds the new key.").arg(passkeySettings.removeUser)
+                        standardButtons: Dialog.Yes | Dialog.No
+                        onAccepted: {
+                            if (passkeySettings.mapping !== "" && passkeySettings.createdUser === passkeySettings.removeUser) {
+                                passkeySettings.mapping = ""
+                            }
+                            RemoteBroker.removePasskey(passkeySettings.removeUser)
+                        }
+                    }
+                }
+
+                Item {
+                    visible: RemoteBroker.passkeySupported
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Sign in to remote access with Touch ID instead of the authenticator code. The key never leaves this Mac; your admin enables it for your account.")
+                }
+            }
+        }
+
+        // Where remote access connects to and how it recognises the server:
+        // set up once by the studio, rarely touched by the person signing in.
+        PlankSection {
+            id: remoteServerGroupBox
+            width: (parent.width - (parent.leftPadding + parent.rightPadding))
+            title: qsTr("Remote Access Server")
+
+            PlankSettingsGrid {
+
+                PlankSettingLabel {
+                    text: qsTr("Broker server")
+                }
+
+                PlankTextField {
+                    id: brokerHostField
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: StreamingPreferences.brokerHost
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
+                    onEditingFinished: {
+                        if (text.trim() !== "" && text.trim() !== StreamingPreferences.brokerHost) {
+                            StreamingPreferences.brokerHost = text.trim()
+                        }
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Broker port")
+                }
+
+                SpinBox {
+                    id: brokerPortSpinBox
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    from: 1
+                    to: 65535
+                    editable: true
+                    value: StreamingPreferences.brokerPort
+                    textFromValue: function(value) { return value.toString() }
+                    valueFromText: function(text) { return parseInt(text) }
+                    onValueModified: {
+                        StreamingPreferences.brokerPort = value
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Broker key pins (SPKI SHA-256)")
+                    Layout.alignment: Qt.AlignTop
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: 4
+
+                    TextArea {
+                        id: brokerPinsArea
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        wrapMode: TextEdit.WrapAnywhere
+                        font.family: "Menlo"
+                        font.pointSize: 9
+                        color: theme.textPrimary
+                        text: StreamingPreferences.brokerPins.join("\n")
+                        background: Rectangle {
+                            color: theme.surfaceRaised
+                            radius: theme.radiusSmall
+                            border.width: 1
+                            border.color: brokerPinsArea.activeFocus ? theme.accent : theme.border
+                        }
+                        onActiveFocusChanged: {
+                            if (!activeFocus) {
+                                var rejected = StreamingPreferences.setBrokerPinsFromText(text)
+                                brokerPinsHelp.rejectedCount = rejected.length
+                                text = StreamingPreferences.brokerPins.join("\n")
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("Restore studio defaults")
+                            onClicked: {
+                                StreamingPreferences.resetBrokerDefaults()
+                                brokerHostField.text = StreamingPreferences.brokerHost
+                                brokerPortSpinBox.value = StreamingPreferences.brokerPort
+                                brokerPinsArea.text = StreamingPreferences.brokerPins.join("\n")
+                                brokerPinsHelp.rejectedCount = 0
+                                passkeyRpIdField.text = StreamingPreferences.passkeyRpId
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    id: brokerPinsHelp
+                    property int rejectedCount: 0
+                    text: (rejectedCount > 0 ? qsTr("%1 invalid entries were ignored. ").arg(rejectedCount) : "") +
+                          (StreamingPreferences.brokerPins.length === 0 ?
+                               qsTr("No pins: remote access will refuse to connect. ") : "") +
+                          qsTr("One SHA-256 of the broker's public key per line (current and spare). The broker is trusted only if its key matches a pin; public certificate authorities are not used.")
+                }
+
+                PlankSettingLabel {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Touch ID sign-in domain")
+                }
+
+                PlankTextField {
+                    id: passkeyRpIdField
+                    visible: RemoteBroker.passkeySupported
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: StreamingPreferences.passkeyRpId
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhUrlCharactersOnly
+                    onEditingFinished: {
+                        var value = text.trim().toLowerCase()
+                        if (/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9-]*[a-z][a-z0-9-]*$/.test(value) &&
+                                value !== StreamingPreferences.passkeyRpId) {
+                            StreamingPreferences.passkeyRpId = value
+                        }
+                        text = StreamingPreferences.passkeyRpId
+                    }
+                }
+
+                Item {
+                    visible: RemoteBroker.passkeySupported
+                    Layout.preferredWidth: 280
+                    Layout.preferredHeight: 1
+                }
+
+                PlankSettingHelp {
+                    visible: RemoteBroker.passkeySupported
+                    text: qsTr("Your studio's identity domain, which Touch ID sign-in keys belong to (default ipa.bde.run).")
                 }
             }
         }
@@ -960,14 +1549,38 @@ Flickable {
             PlankSettingsGrid {
 
                 PlankSettingLabel {
-                    text: qsTr("Automatically find PCs on the local network")
+                    visible: FernwehUpdater.supported
+                    text: qsTr("BDE fernweh updates")
+                }
+
+                ColumnLayout {
+                    visible: FernwehUpdater.supported
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    // Without the (often hidden) status line nothing in here
+                    // fills, which capped this column and shifted the whole
+                    // section's controls out of line with the others.
+                    Layout.maximumWidth: Number.POSITIVE_INFINITY
+                    Button {
+                        text: FernwehUpdater.available ? qsTr("Update to %1").arg(FernwehUpdater.version) : qsTr("Check for updates")
+                        enabled: !FernwehUpdater.busy
+                        onClicked: FernwehUpdater.available ? FernwehUpdater.install() : FernwehUpdater.check(true)
+                    }
+                    PlankSettingHelp {
+                        visible: FernwehUpdater.status !== ""
+                        text: FernwehUpdater.status
+                    }
+                }
+
+                PlankSettingLabel {
+                    text: qsTr("Automatically find workstations on the local network")
                 }
 
                 PlankCheckBox {
                     id: enableMdns
                     Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                     text: ""
-                    Accessible.name: qsTr("Automatically find PCs on the local network")
+                    Accessible.name: qsTr("Automatically find workstations on the local network")
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged
                     ToolTip.visible: hovered && StreamingPreferences.mdnsDiscoveryManaged

@@ -4,6 +4,10 @@
 #include "backend/computermanager.h"
 #include "streaming/plankpresentation.h"
 #include "streaming/plankembeddedcursor.h"
+#include "streaming/planksessionhotkeys.h"
+#ifdef Q_OS_MACOS
+#include "macrawwacomfocus.h"
+#endif
 
 #include <SDL3/SDL.h>
 
@@ -18,8 +22,18 @@ class LinuxWacomInput;
 class LinuxRawWacomInput;
 #endif
 class PlankWaylandCursor;
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+class PlankMacPenInput;
+#endif
+#ifdef Q_OS_WIN
+class WindowsRawWacomInput;
+#endif
 #ifdef Q_OS_MACOS
 class MacQuitShortcut;
+class MacKeyboardCapture;
+#endif
+#ifdef HAVE_MAC_RAW_WACOM
+class MacRawWacomInput;
 #endif
 
 class SdlInputHandler
@@ -32,14 +46,33 @@ public:
     ~SdlInputHandler();
 
     void setWindow(SDL_Window* window);
+    void setViewOnly(bool viewOnly) { m_ViewOnly = viewOnly; }
 
     void setStreamDimensions(int streamWidth, int streamHeight);
 
     void setPresentationLayout(const PlankPresentationLayout& layout);
 
+    // The active renderer letterboxes against the live drawable
+    // (IVideoDecoder::letterboxesAgainstLiveDrawable()). Single-output input
+    // then maps against the live drawable instead of the layout snapshot.
+    void setLiveDrawableGeometry(bool live);
+
+    // The decoded frame size, reported by the decoder only when its renderer
+    // letterboxes the decoded frames (not the negotiated size). If it differs
+    // from the negotiated stream size, input follows the frames.
+    void updateDecodedStreamDimensions(int frameWidth, int frameHeight);
+
+    // A presentation window changed size, scale or fullscreen state: log the
+    // geometry input now maps against and re-apply pointer confinement.
+    void notifyWindowGeometryChanged(SDL_Window* window, const char* reason);
+
     void refreshWaylandTabletCursorParents();
 
     void handleKeyEvent(SDL_KeyboardEvent* event);
+    PlankSessionHotkeys::Action takeSessionHotkey() { return m_SessionHotkeys.take(); }
+#ifdef Q_OS_MACOS
+    bool handleCapturedMacKeyEvent(const SDL_Event& event);
+#endif
 
     void handleMouseButtonEvent(SDL_MouseButtonEvent* event);
 
@@ -47,6 +80,14 @@ public:
                                 bool batchPendingEvents = true);
 
     void handleMouseWheelEvent(SDL_MouseWheelEvent* event);
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    void handlePenProximityEvent(SDL_PenProximityEvent* event);
+    void handlePenTouchEvent(SDL_PenTouchEvent* event);
+    void handlePenMotionEvent(SDL_PenMotionEvent* event);
+    void handlePenButtonEvent(SDL_PenButtonEvent* event);
+    void handlePenAxisEvent(SDL_PenAxisEvent* event);
+#endif
 
     void sendText(QString& string);
 
@@ -75,6 +116,8 @@ public:
 
     void notifyFocusGained();
 
+    void refreshTabletFocus();
+
     bool isCaptureActive();
 
     void setToolbarInteractionActive(bool active);
@@ -85,10 +128,8 @@ public:
 
     void setCaptureActive(bool active);
 
-    bool isMouseInVideoRegion(int mouseX, int mouseY,
-                              Uint32 windowId = 0,
-                              int windowWidth = -1,
-                              int windowHeight = -1);
+    bool isMouseInVideoRegion(float mouseX, float mouseY,
+                              Uint32 windowId = 0);
 
     void updateKeyboardGrabState();
 
@@ -97,9 +138,10 @@ public:
 private:
 #ifdef Q_OS_MACOS
     std::unique_ptr<MacQuitShortcut> m_MacQuitShortcut;
+    std::unique_ptr<MacKeyboardCapture> m_MacKeyboardCapture;
+    bool hasMacStreamKeyboardFocus() const;
 #endif
     enum KeyCombo {
-        KeyComboQuit,
         KeyComboUngrabInput,
         KeyComboToggleFullScreen,
         KeyComboToggleStatsOverlay,
@@ -111,7 +153,9 @@ private:
     };
 
     void performSpecialKeyCombo(KeyCombo combo);
+    PlankSessionHotkeys m_SessionHotkeys;
 
+    bool m_ViewOnly = false;
     SDL_Window* m_Window;
     PlankPresentationLayout m_PresentationLayout;
     bool m_NeedsManualCaptureOnLeave;
@@ -128,8 +172,12 @@ private:
 
     QSet<short> m_KeysDown;
     bool m_FakeMouseCaptureActive;
+    bool m_HasActivatedCapture;
+    unsigned m_MousePressFailureLogs;
     bool m_KeyboardCaptureActive;
+    bool m_FilePasteKeyUpConsumed = false;
     StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
+    bool m_ImmersiveKeyboardMode;
     bool m_MouseCursorCapturedVisibilityState;
 
     struct RemoteCursorState {
@@ -187,13 +235,36 @@ private:
                                          int& x, int& y) const;
     void updateTabletCursorVisibility();
     QSize streamDimensions() const;
+    void routePresentationPointer(SDL_Window*& window, float& x, float& y) const;
     bool sendAbsoluteMousePosition(SDL_Window* window,
-                                   int windowX, int windowY,
+                                   float windowX, float windowY,
                                    bool allowClampedPosition);
+    // Geometry of one presentation window at event time: live drawable for a
+    // single output whose renderer letterboxes live, snapshot otherwise.
+    // Outputs with source rectangles (display arrangements): a window point
+    // as a host desktop point (PlankPresentation::mapWindowPointToDesktop).
+    bool mapWindowPointToDesktop(SDL_Window* window, float windowX, float windowY,
+                                 QPointF& desktopPoint, bool allowClampedPosition) const;
+
+    bool outputGeometry(SDL_Window* window,
+                        PlankOutputGeometry& geometry) const;
 
     SDL_Window* presentationWindow(Uint32 windowId) const;
+    SDL_Window* pointerPresentationWindow(SDL_Window* source,
+                                          float& x, float& y) const;
+    enum class PointerFocusPosition { LocalMouse, HostTablet };
+    void followPointerFocus(SDL_Window* target, SDL_MouseButtonFlags eventButtons,
+                            PointerFocusPosition position = PointerFocusPosition::LocalMouse);
     const PlankPresentationOutput* presentationOutput(
         SDL_Window* window) const;
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    void refreshNormalizedPen();
+    bool mapWindowPointToNormalizedStream(SDL_Window* window,
+                                          float windowX, float windowY,
+                                          float& normalizedX,
+                                          float& normalizedY) const;
+#endif
 
     struct {
         KeyCombo keyCombo;
@@ -203,10 +274,22 @@ private:
     } m_SpecialKeyCombos[KeyComboMax];
 
     std::atomic_uint64_t m_StreamDimensions;
+    std::atomic_bool m_LiveDrawableGeometry{false};
+
+#ifdef HAVE_MAC_RAW_WACOM
+    std::unique_ptr<MacRawWacomInput> m_MacRawWacomInput;
+    MacRawWacomFocus m_MacRawWacomFocus;
+#endif
 
 #ifdef HAVE_LIBINPUT_TABLET
     std::unique_ptr<LinuxWacomInput> m_LinuxWacomInput;
     std::unique_ptr<LinuxRawWacomInput> m_LinuxRawWacomInput;
+#endif
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    std::unique_ptr<PlankMacPenInput> m_SdlPenInput;
+#endif
+#ifdef Q_OS_WIN
+    std::unique_ptr<WindowsRawWacomInput> m_WindowsRawWacomInput;
 #endif
 
     static const int k_ButtonMap[];

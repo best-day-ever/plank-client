@@ -25,6 +25,12 @@ QString virtualModeFromChoice(int choice)
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
 
+ComputerModel::~ComputerModel()
+{
+    if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(false);
+    if (m_HostTrustDecision) m_HostTrustDecision->respond(false);
+}
+
 void ComputerModel::initialize(ComputerManager* computerManager)
 {
     m_ComputerManager = computerManager;
@@ -32,6 +38,30 @@ void ComputerModel::initialize(ComputerManager* computerManager)
             this, &ComputerModel::handleComputerStateChanged);
     connect(m_ComputerManager, &ComputerManager::authenticationCompleted,
             this, &ComputerModel::handleAuthenticationCompleted);
+    connect(m_ComputerManager, &ComputerManager::authenticationTakeoverRequested,
+            this, [this](NvComputer* computer, AuthenticationTakeover decision) {
+        if (computer != m_AuthenticatingComputer) return;
+        if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(false);
+        m_AuthenticationTakeover = decision;
+        emit authenticationTakeoverRequested();
+    });
+    connect(m_ComputerManager, &ComputerManager::authenticationCancelled,
+            this, [this](NvComputer* computer) {
+        if (computer != m_AuthenticatingComputer) return;
+        m_AuthenticatingComputer = nullptr;
+        m_AuthenticationTakeover.clear();
+        m_HostTrustDecision.clear();
+        emit authenticationCancelled();
+    });
+
+    connect(m_ComputerManager, &ComputerManager::authenticationTrustRequested, this,
+            [this](NvComputer* computer, QString endpoint, QString previous, QString replacement,
+                   AuthenticationTakeover decision) {
+        if (computer != m_AuthenticatingComputer) return;
+        if (m_HostTrustDecision) m_HostTrustDecision->respond(false);
+        m_HostTrustDecision = decision;
+        emit authenticationTrustRequested(endpoint, previous, replacement);
+    });
 
     m_Computers = m_ComputerManager->getComputers();
 }
@@ -56,6 +86,11 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
         return computer->authorizationState == NvComputer::AS_AUTHORIZED;
     case StatusUnknownRole:
         return computer->state == NvComputer::CS_UNKNOWN;
+    case InSessionRole:
+        return computer->state == NvComputer::CS_ONLINE && computer->plankOccupied;
+    case SessionUserRole:
+        return computer->state == NvComputer::CS_ONLINE && computer->plankOccupied ?
+                    computer->plankSessionUser : QString();
     case PlankHostVersionRole:
         return computer->plankHostMetadataVersion >= 1 ?
                     computer->plankHostVersion : QString();
@@ -105,6 +140,8 @@ QHash<int, QByteArray> ComputerModel::roleNames() const
     names[OnlineRole] = "online";
     names[AuthorizedRole] = "authorized";
     names[StatusUnknownRole] = "statusUnknown";
+    names[InSessionRole] = "inSession";
+    names[SessionUserRole] = "sessionUser";
     names[PlankHostVersionRole] = "plankHostVersion";
     names[ManualBookmarkRole] = "manualBookmark";
     names[AddressRole] = "address";
@@ -309,17 +346,41 @@ void ComputerModel::requestRelayWake(int computerIndex)
     request->start();
 }
 
+QString ComputerModel::rememberedUsername(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.count()) return QString();
+    return m_Computers[computerIndex]->rememberedUsername();
+}
+
 void ComputerModel::authenticateComputer(int computerIndex, QString username,
                                          QString password)
 {
     Q_ASSERT(computerIndex < m_Computers.count());
+    if (m_AuthenticatingComputer) return;
+    m_AuthenticatingComputer = m_Computers[computerIndex];
     m_ComputerManager->authenticateHost(m_Computers[computerIndex],
-                                        std::move(username), std::move(password));
+                                        std::move(username), std::move(password), true);
 }
 
-void ComputerModel::handleAuthenticationCompleted(NvComputer*, QString error)
+void ComputerModel::handleAuthenticationCompleted(NvComputer* computer, QString error)
 {
-    emit authenticationCompleted(error.isEmpty() ? QVariant() : error);
+    if (computer != m_AuthenticatingComputer) return;
+    m_AuthenticatingComputer = nullptr;
+    m_AuthenticationTakeover.clear();
+    m_HostTrustDecision.clear();
+    const int index = m_Computers.indexOf(computer);
+    if (index < 0 && error.isEmpty()) error = tr("The bookmark was removed during sign-in.");
+    emit authenticationCompleted(error.isEmpty() ? QVariant() : error, index);
+}
+
+void ComputerModel::respondToAuthenticationTakeover(bool accepted)
+{
+    if (m_AuthenticationTakeover) m_AuthenticationTakeover->respond(accepted);
+}
+
+void ComputerModel::respondToHostTrust(bool accepted)
+{
+    if (m_HostTrustDecision) m_HostTrustDecision->respond(accepted);
 }
 
 void ComputerModel::handleComputerStateChanged(NvComputer* computer)

@@ -5,6 +5,7 @@
 
 #ifdef Q_OS_MACOS
 #include "streaming/macclipboardsync.h"
+#include "streaming/mackeyboardcapture.h"
 #endif
 
 #define VK_0 0x30
@@ -20,18 +21,16 @@
 void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 {
     switch (combo) {
-    case KeyComboQuit:
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Detected quit key combo");
-
-        // Push a quit event to the main loop
-        SDL_Event event;
-        event.type = SDL_EVENT_QUIT;
-        event.quit.timestamp = SDL_GetTicks();
-        SDL_PushEvent(&event);
-        break;
-
     case KeyComboUngrabInput:
+        if (m_ImmersiveKeyboardMode) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Leaving immersive keyboard mode for this session");
+            m_ImmersiveKeyboardMode = false;
+            m_CaptureSystemKeysMode = StreamingPreferences::CSK_OFF;
+            raiseAllKeys();
+            updateKeyboardGrabState();
+            break;
+        }
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected mouse capture toggle combo");
 
@@ -141,8 +140,24 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
     }
 }
 
+#ifdef Q_OS_MACOS
+bool SdlInputHandler::handleCapturedMacKeyEvent(const SDL_Event& event)
+{
+    return m_MacKeyboardCapture->dispatch(event, [this](SDL_KeyboardEvent* key) {
+        handleKeyEvent(key);
+    });
+}
+#endif
+
 void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
 {
+#ifdef Q_OS_MACOS
+    if (m_MacKeyboardCapture->suppressSdlKeyEvent() || !hasMacStreamKeyboardFocus()) return;
+#endif
+    if (m_SessionHotkeys.handle(*event)) {
+        if (event->down && !event->repeat) raiseAllKeys();
+        return;
+    }
     short keyCode;
     char modifiers;
     bool shouldNotConvertToScanCodeOnServer = false;
@@ -152,6 +167,26 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         SDL_assert(event->down);
         return;
     }
+
+#if (defined(Q_OS_MACOS) || defined(Q_OS_WIN)) && defined(PLANK_TRANSPORT)
+    if (event->scancode == SDL_SCANCODE_V && !event->down &&
+            m_FilePasteKeyUpConsumed) {
+        m_FilePasteKeyUpConsumed = false;
+        return;
+    }
+    if (event->scancode == SDL_SCANCODE_V && event->down &&
+            ((event->mod & SDL_KMOD_CTRL) != 0 ||
+             (!m_ImmersiveKeyboardMode && (event->mod & SDL_KMOD_GUI) != 0)) &&
+            (event->mod & SDL_KMOD_ALT) == 0 && Session::get() != nullptr &&
+            (Session::get()->beginFileClipboardPasteOnMainThread() ||
+             (!m_ImmersiveKeyboardMode && Session::get()->deferTextClipboardPasteOnMainThread()))) {
+        raiseAllKeys();
+        m_FilePasteKeyUpConsumed = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Preparing local file clipboard for remote paste");
+        return;
+    }
+#endif
 
     // Check for our special key combos
     if ((event->down) &&
@@ -170,6 +205,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         // the scancode of another.
 
         for (int i = 0; i < KeyComboMax; i++) {
+            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput) continue;
             if (m_SpecialKeyCombos[i].enabled && event->key == m_SpecialKeyCombos[i].keyCode) {
                 performSpecialKeyCombo(m_SpecialKeyCombos[i].keyCombo);
                 return;
@@ -177,12 +213,15 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         }
 
         for (int i = 0; i < KeyComboMax; i++) {
+            if (m_ImmersiveKeyboardMode && i != KeyComboUngrabInput) continue;
             if (m_SpecialKeyCombos[i].enabled && event->scancode == m_SpecialKeyCombos[i].scanCode) {
                 performSpecialKeyCombo(m_SpecialKeyCombos[i].keyCombo);
                 return;
             }
         }
     }
+
+    if (m_ViewOnly) return;
 
     // Set modifier flags
     modifiers = 0;

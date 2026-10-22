@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include <wrl/client.h>
+#include <array>
 
 class D3D11VARenderer : public IFFmpegRenderer
 {
@@ -99,4 +100,3 @@ private:
     AVBufferRef* m_HwDeviceContext;
     AVBufferRef* m_HwFramesContext;
 };
-

@@ -1,5 +1,7 @@
 #include "streamingpreferences.h"
+#include "streaming/camera/camera.h"
 #include "backend/planknetwork.h"
+#include "backend/plankbroker.h"
 #include "plankclientpolicy.h"
 #include <QSettings>
 #include <QTranslator>
@@ -13,6 +15,9 @@
 #define SER_VSYNC "vsync"
 #define SER_HOSTAUDIO "hostaudio"
 #define SER_AUDIOCFG "audiocfg"
+#define SER_CAMERA_DEVICE "camera-device"
+#define SER_MICROPHONE_AUTOMATIC "microphone-automatic"
+#define SER_MICROPHONE_AUTOMATIC_INPUT "microphone-automatic-host-input"
 #define SER_PLANK_TOOLBAR_PINNED "planktoolbarpinned"
 #define SER_WINDOWMODE "windowmode"
 #define SER_MDNS "mdns"
@@ -23,8 +28,13 @@
 #define SER_SHOWPERFOVERLAY "showperfoverlay"
 #define SER_MUTEONFOCUSLOSS "muteonfocusloss"
 #define SER_CAPTURESYSKEYS "capturesyskeys"
+#define SER_IMMERSIVE_KEYBOARD "plank-immersive-keyboard"
 #define SER_KEEPAWAKE "keepawake"
 #define SER_LANGUAGE "language"
+#define SER_BROKER_HOST "plank-broker-host"
+#define SER_BROKER_PORT "plank-broker-port"
+#define SER_BROKER_PINS "plank-broker-spki-pins"
+#define SER_PASSKEY_RP_ID "plank-passkey-rp-id"
 
 static StreamingPreferences* s_GlobalPrefs;
 static QReadWriteLock s_GlobalPrefsLock;
@@ -79,10 +89,12 @@ void StreamingPreferences::reload()
     recommendedFullScreenMode = WindowMode::WM_FULLSCREEN_DESKTOP;
 
     fps = settings.value(SER_FPS, 60).toInt();
-    identityGbrBitDepth = 10;
     plankToolbarPinned = settings.value(SER_PLANK_TOOLBAR_PINNED, false).toBool();
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
+    cameraDevice = settings.value(SER_CAMERA_DEVICE, QString()).toString();
+    microphoneAutomatic = settings.value(SER_MICROPHONE_AUTOMATIC, false).toBool();
+    microphoneAutomaticInput = settings.value(SER_MICROPHONE_AUTOMATIC_INPUT, true).toBool();
     enableMdns = settings.value(SER_MDNS, false).toBool();
     const PlankClientPolicy systemPolicy;
     mdnsDiscoveryManaged = systemPolicy.managedBoolean(
@@ -114,12 +126,30 @@ void StreamingPreferences::reload()
     keepAwake = settings.value(SER_KEEPAWAKE, true).toBool();
     captureSysKeysMode = static_cast<CaptureSysKeysMode>(settings.value(SER_CAPTURESYSKEYS,
                                                          static_cast<int>(CaptureSysKeysMode::CSK_ALWAYS)).toInt());
+    immersiveKeyboardMode = settings.value(SER_IMMERSIVE_KEYBOARD, false).toBool();
     audioConfig = static_cast<AudioConfig>(settings.value(SER_AUDIOCFG,
                                                   static_cast<int>(AudioConfig::AC_STEREO)).toInt());
     windowMode = static_cast<WindowMode>(settings.value(SER_WINDOWMODE,
                                                         static_cast<int>(recommendedFullScreenMode)).toInt());
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
+    brokerHost = settings.value(SER_BROKER_HOST, PlankBroker::defaultHost()).toString().trimmed();
+    if (brokerHost.isEmpty()) {
+        brokerHost = PlankBroker::defaultHost();
+    }
+    brokerPort = settings.value(SER_BROKER_PORT, PlankBroker::DefaultPort).toInt();
+    if (brokerPort < 1 || brokerPort > 65535) {
+        brokerPort = PlankBroker::DefaultPort;
+    }
+    // An explicitly stored (possibly empty) list overrides the shipped pins;
+    // an empty list makes Remote mode refuse to connect.
+    brokerPins = settings.contains(SER_BROKER_PINS) ?
+                PlankBroker::normalizePins(settings.value(SER_BROKER_PINS).toStringList()) :
+                PlankBroker::defaultPins();
+    passkeyRpId = settings.value(SER_PASSKEY_RP_ID, PlankBroker::defaultPasskeyRpId()).toString().trimmed().toLower();
+    if (!PlankBroker::isPasskeyRpId(passkeyRpId)) {
+        passkeyRpId = PlankBroker::defaultPasskeyRpId();
+    }
 
 }
 
@@ -248,6 +278,9 @@ void StreamingPreferences::save()
     settings.setValue(SER_FPS, fps);
     settings.setValue(SER_VSYNC, enableVsync);
     settings.setValue(SER_HOSTAUDIO, playAudioOnHost);
+    settings.setValue(SER_CAMERA_DEVICE, cameraDevice);
+    settings.setValue(SER_MICROPHONE_AUTOMATIC, microphoneAutomatic);
+    settings.setValue(SER_MICROPHONE_AUTOMATIC_INPUT, microphoneAutomaticInput);
     if (!mdnsDiscoveryManaged) {
         settings.setValue(SER_MDNS, enableMdns);
     }
@@ -264,5 +297,54 @@ void StreamingPreferences::save()
     settings.setValue(SER_LANGUAGE, static_cast<int>(language));
     settings.setValue(SER_MUTEONFOCUSLOSS, muteOnFocusLoss);
     settings.setValue(SER_CAPTURESYSKEYS, captureSysKeysMode);
+    settings.setValue(SER_IMMERSIVE_KEYBOARD, immersiveKeyboardMode);
     settings.setValue(SER_KEEPAWAKE, keepAwake);
+    settings.setValue(SER_BROKER_HOST, brokerHost.trimmed());
+    settings.setValue(SER_BROKER_PORT, brokerPort);
+    if (brokerPins == PlankBroker::defaultPins()) {
+        // Keep following shipped pin updates unless the user overrode them.
+        settings.remove(SER_BROKER_PINS);
+    } else {
+        settings.setValue(SER_BROKER_PINS, PlankBroker::normalizePins(brokerPins));
+    }
+    const QString rpId = passkeyRpId.trimmed().toLower();
+    if (rpId == PlankBroker::defaultPasskeyRpId() || !PlankBroker::isPasskeyRpId(rpId)) {
+        settings.remove(SER_PASSKEY_RP_ID);
+    } else {
+        settings.setValue(SER_PASSKEY_RP_ID, rpId);
+    }
+}
+
+QStringList StreamingPreferences::setBrokerPinsFromText(const QString& text)
+{
+    QStringList rejected;
+    const QStringList pins = PlankBroker::parsePinList(text, &rejected);
+    if (pins != brokerPins) {
+        brokerPins = pins;
+        emit brokerChanged();
+    }
+    return rejected;
+}
+
+void StreamingPreferences::resetBrokerDefaults()
+{
+    brokerHost = PlankBroker::defaultHost();
+    brokerPort = PlankBroker::DefaultPort;
+    brokerPins = PlankBroker::defaultPins();
+    passkeyRpId = PlankBroker::defaultPasskeyRpId();
+    emit brokerChanged();
+}
+
+QVariantList StreamingPreferences::cameraDevices() const
+{
+    return PlankCamera::devices();
+}
+
+bool StreamingPreferences::nativeCameraSupported() const
+{
+#if defined(Q_OS_LINUX) && defined(PLANK_TRANSPORT)
+    return true;
+#else
+    return false;
+#endif
 }

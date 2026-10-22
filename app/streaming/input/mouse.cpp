@@ -1,12 +1,54 @@
 #include "input.h"
 #include "plankpointerlogic.h"
+#include "plankmousemotion.h"
+#ifdef Q_OS_WIN
+#include "windowsrawwacom.h"
+#endif
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
 #include "streaming/streamutils.h"
 
+void SdlInputHandler::routePresentationPointer(SDL_Window*& window, float& x, float& y) const
+{
+#ifdef Q_OS_MACOS
+    if (!m_PresentationLayout.isMultiOutput()) return;
+    int originX, originY;
+    if (!SDL_GetWindowPosition(window, &originX, &originY)) return;
+    QVector<QRect> bounds;
+    for (const auto& output : m_PresentationLayout.outputs) {
+        int left, top, width, height;
+        if ((SDL_GetWindowFlags(output.window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) == 0 &&
+                SDL_GetWindowPosition(output.window, &left, &top) &&
+                SDL_GetWindowSize(output.window, &width, &height)) {
+            bounds.append(QRect(left, top, width, height));
+        } else {
+            bounds.append(QRect());
+        }
+    }
+    QPointF local;
+    const int target = PlankPresentation::capturedPointerTarget(
+                QPointF(x, y), QPoint(originX, originY), bounds, local);
+    if (target >= 0) {
+        window = m_PresentationLayout.outputs.at(target).window;
+        x = float(local.x());
+        y = float(local.y());
+    }
+#else
+    Q_UNUSED(window);
+    Q_UNUSED(x);
+    Q_UNUSED(y);
+#endif
+}
+
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 {
+#if defined(Q_OS_WIN)
+    // SDL promotes Windows Ink pen input to mouse input as well. Forward
+    // only the pen/raw transport so a pressure stroke cannot click twice.
+    if (event->which == SDL_PEN_MOUSEID && (m_SdlPenInput || (m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached()))) return;
+#endif
+
     int button;
     SDL_Window* window = presentationWindow(event->windowID);
     if (window == nullptr) {
@@ -17,11 +59,27 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Ignore synthetic mouse events
         return;
     }
+    SDL_MouseButtonEvent routedEvent = *event;
+    routePresentationPointer(window, routedEvent.x, routedEvent.y);
+    routedEvent.windowID = SDL_GetWindowID(window);
+    event = &routedEvent;
+    const float x = routedEvent.x;
+    const float y = routedEvent.y;
     activateCompositorCursor();
     if (!isCaptureActive()) {
+        if (!m_HasActivatedCapture && event->down &&
+                isMouseInVideoRegion(qRound(x), qRound(y),
+                                     SDL_GetWindowID(window))) {
+            // A first click can arrive before the deferred renderer event
+            // activates capture. Preserve the deliberate click; an explicit
+            // later ungrab still uses the normal release-to-recapture path.
+            setCaptureActive(true);
+        }
+    }
+    if (!isCaptureActive()) {
         if (event->button == SDL_BUTTON_LEFT && !event->down &&
-                isMouseInVideoRegion(event->x, event->y,
-                                     event->windowID)) {
+                isMouseInVideoRegion(qRound(x), qRound(y),
+                                     SDL_GetWindowID(window))) {
             // Capture the mouse again if clicked when unbound.
             // We start capture on left button released instead of
             // pressed to avoid sending an errant mouse button released
@@ -33,8 +91,8 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
         // Not capturing
         return;
     }
-    else if (!isMouseInVideoRegion(event->x, event->y,
-                                   event->windowID) && event->down) {
+    else if (!isMouseInVideoRegion(qRound(x), qRound(y),
+                                   SDL_GetWindowID(window)) && event->down) {
         // Ignore button presses outside the video region, but allow button releases
         return;
     }
@@ -66,20 +124,39 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
     // Button packets carry no coordinates. Reassert the SDL button event's
     // absolute position immediately before the button so a stale tablet or
     // coalesced motion sample cannot make the remote click land elsewhere.
-    if (event->down && !sendAbsoluteMousePosition(
-                window, qRound(event->x), qRound(event->y), false)) {
+    const bool positioned = sendAbsoluteMousePosition(
+                window, event->x, event->y, !event->down);
+    if (event->down && !positioned) {
+        if (m_MousePressFailureLogs++ < 3) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                        "Remote mouse press dropped: pointer position unavailable");
+        }
         return;
     }
 
-    LiSendMouseButtonEvent(event->down ?
-                               BUTTON_ACTION_PRESS :
-                               BUTTON_ACTION_RELEASE,
-                           button);
+    if (LiSendMouseButtonEvent(event->down ?
+                                   BUTTON_ACTION_PRESS :
+                                   BUTTON_ACTION_RELEASE,
+                               button) != 0 && m_MousePressFailureLogs++ < 3) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Remote mouse button could not be queued");
+    }
+    if (!event->down) {
+        // A captured drag can finish on the other output without another move.
+        // Forward its release before transferring native window focus.
+        followPointerFocus(window, 0);
+    }
 }
 
 void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
                                              bool batchPendingEvents)
 {
+#if defined(Q_OS_WIN)
+    // SDL promotes Windows Ink pen input to mouse input as well. Forward
+    // only the pen/raw transport so a pressure stroke cannot click twice.
+    if (event->which == SDL_PEN_MOUSEID && (m_SdlPenInput || (m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached()))) return;
+#endif
+
     if (!isCaptureActive()) {
         // Not capturing
         return;
@@ -95,35 +172,21 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         return;
     }
 
-    // Batch all pending mouse motion events to save CPU time
-    Sint32 x = event->x, y = event->y;
-    SDL_Event nextEvent;
-    while (batchPendingEvents &&
-           SDL_PeepEvents(&nextEvent, 1, SDL_GETEVENT,
-                          SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
-        event = &nextEvent.motion;
-
-        // Ignore synthetic mouse events
-        if (event->which != SDL_TOUCH_MOUSEID &&
-                event->windowID == SDL_GetWindowID(window)) {
-            x = event->x;
-            y = event->y;
-        } else if (event->windowID != SDL_GetWindowID(window)) {
-            SDL_PushEvent(&nextEvent);
-            break;
-        }
-    }
+    SDL_MouseMotionEvent motion = *event;
+    if (batchPendingEvents) PlankMouseMotion::coalescePending(motion);
+    // Keep SDL's fractional point coordinates for Retina input.
+    float x = motion.x, y = motion.y;
 
     // We should not reference the original event anymore
     event = nullptr;
 
-    int windowWidth, windowHeight;
-    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+    // Cocoa/SDL auto-capture keeps a drag addressed to its starting window.
+    // Route the coordinates across our windows without releasing the button
+    // or transferring native capture/focus between them.
+    routePresentationPointer(window, x, y);
 
-    bool mouseInVideoRegion;
-
-    mouseInVideoRegion = isMouseInVideoRegion(
-                x, y, SDL_GetWindowID(window), windowWidth, windowHeight);
+    const bool mouseInVideoRegion = isMouseInVideoRegion(
+                x, y, SDL_GetWindowID(window));
 
     // Send the mouse position update if one of the following is true:
     // a) it is in the video region now
@@ -139,7 +202,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
         }
     }
     if (mouseInVideoRegion || m_MouseWasInVideoRegion || m_PendingMouseButtonsAllUpOnVideoRegionLeave) {
-        sendAbsoluteMousePosition(window, x, y, true);
+        sendAbsoluteMousePosition(window, qRound(x), qRound(y), true);
     }
 
     // Adjust the cursor visibility if applicable
@@ -155,11 +218,11 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
 
     m_MouseWasInVideoRegion = mouseInVideoRegion;
+    followPointerFocus(window, motion.state);
 }
 
-bool SdlInputHandler::sendAbsoluteMousePosition(
-        SDL_Window* window, int windowX, int windowY,
-        bool allowClampedPosition)
+bool SdlInputHandler::mapWindowPointToDesktop(SDL_Window* window, float windowX, float windowY,
+                                              QPointF& desktopPoint, bool allowClampedPosition) const
 {
     const auto* output = presentationOutput(window);
     if (output == nullptr) {
@@ -167,31 +230,70 @@ bool SdlInputHandler::sendAbsoluteMousePosition(
     }
     int windowWidth = 0;
     int windowHeight = 0;
+    int drawableWidth = 0;
+    int drawableHeight = 0;
     SDL_GetWindowSize(window, &windowWidth, &windowHeight);
-    if (windowWidth <= 0 || windowHeight <= 0) {
+    SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight);
+    return PlankPresentation::mapWindowPointToDesktop(
+                QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
+                QSize(drawableWidth, drawableHeight), *output, streamDimensions(),
+                desktopPoint, allowClampedPosition);
+}
+
+bool SdlInputHandler::sendAbsoluteMousePosition(
+        SDL_Window* window, float windowX, float windowY,
+        bool allowClampedPosition)
+{
+    if (m_PresentationLayout.usesSourceRects()) {
+        // One window per workstation display: positions go out in desktop
+        // coordinates with the desktop as the reference, so they stay right
+        // however the host packs its capture.
+        QPointF desktopPoint;
+        if (!mapWindowPointToDesktop(window, windowX, windowY, desktopPoint,
+                                     allowClampedPosition)) {
+            return false;
+        }
+        const QSize desktop = m_PresentationLayout.desktopSize;
+        const QPoint position =
+                PlankPresentation::absoluteDesktopPosition(desktopPoint, desktop);
+        return LiSendMousePositionEvent(
+                    static_cast<short>(position.x()),
+                    static_cast<short>(position.y()),
+                    static_cast<short>(desktop.width()),
+                    static_cast<short>(desktop.height())) == 0;
+    }
+
+    PlankOutputGeometry geometry;
+    if (!outputGeometry(window, geometry)) {
         return false;
     }
 
     const QSize streamSize = streamDimensions();
     QPointF streamPoint;
     if (!PlankPresentation::mapWindowPointToStream(
-                QPointF(windowX, windowY), QSize(windowWidth, windowHeight),
-                streamSize,
-                m_PresentationLayout.canvasSize, output->canvasRect,
+                QPointF(windowX, windowY), geometry, streamSize,
                 streamPoint, allowClampedPosition)) {
         return false;
     }
+    // Keep the coordinates inside the streamed image: the host treats
+    // width/height as one past its last pixel.
+    const QPoint position =
+            PlankPresentation::absoluteStreamPosition(streamPoint, streamSize);
     return LiSendMousePositionEvent(
-                static_cast<short>(qBound(0, qRound(streamPoint.x()),
-                                          streamSize.width())),
-                static_cast<short>(qBound(0, qRound(streamPoint.y()),
-                                          streamSize.height())),
+                static_cast<short>(position.x()),
+                static_cast<short>(position.y()),
                 static_cast<short>(streamSize.width()),
                 static_cast<short>(streamSize.height())) == 0;
 }
 
 void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
 {
+#if defined(Q_OS_WIN)
+    // SDL promotes Windows Ink pen input to mouse input as well. Forward
+    // only the pen/raw transport so a pressure stroke cannot click twice.
+    if (event->which == SDL_PEN_MOUSEID && (m_SdlPenInput || (m_WindowsRawWacomInput && m_WindowsRawWacomInput->attached()))) return;
+#endif
+
     if (!isCaptureActive()) {
         // Not capturing
         return;
@@ -207,9 +309,8 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
         return;
     }
 
-    const int mouseX = qRound(event->mouse_x);
-    const int mouseY = qRound(event->mouse_y);
-    if (!isMouseInVideoRegion(mouseX, mouseY, event->windowID)) {
+    if (!isMouseInVideoRegion(event->mouse_x, event->mouse_y,
+                              event->windowID)) {
         // Ignore scroll events outside the video region
         return;
     }
@@ -235,26 +336,45 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
     }
 }
 
-bool SdlInputHandler::isMouseInVideoRegion(int mouseX, int mouseY,
-                                           Uint32 windowId,
-                                           int windowWidth, int windowHeight)
+bool SdlInputHandler::isMouseInVideoRegion(float mouseX, float mouseY,
+                                           Uint32 windowId)
 {
     SDL_Window* window = presentationWindow(windowId);
-    const auto* output = presentationOutput(window);
-    if (window == nullptr || output == nullptr) {
+    if (window != nullptr && m_PresentationLayout.usesSourceRects()) {
+        QPointF desktopPoint;
+        return mapWindowPointToDesktop(window, mouseX, mouseY, desktopPoint, false);
+    }
+    PlankOutputGeometry geometry;
+    if (window == nullptr || !outputGeometry(window, geometry)) {
         return false;
     }
 
-    if (windowWidth < 0 || windowHeight < 0) {
-        SDL_GetWindowSize(window, &windowWidth, &windowHeight);
-    }
-    const QSize streamSize = streamDimensions();
     QPointF streamPoint;
     return PlankPresentation::mapWindowPointToStream(
-                QPointF(mouseX, mouseY), QSize(windowWidth, windowHeight),
-                streamSize,
-                m_PresentationLayout.canvasSize, output->canvasRect,
+                QPointF(mouseX, mouseY), geometry, streamDimensions(),
                 streamPoint, false);
+}
+
+bool SdlInputHandler::outputGeometry(SDL_Window* window,
+                                     PlankOutputGeometry& geometry) const
+{
+    const auto* output = presentationOutput(window);
+    if (output == nullptr) {
+        return false;
+    }
+
+    int windowWidth = 0;
+    int windowHeight = 0;
+    int drawableWidth = 0;
+    int drawableHeight = 0;
+    SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+    SDL_GetWindowSizeInPixels(window, &drawableWidth, &drawableHeight);
+    geometry = PlankPresentation::outputGeometry(
+                m_PresentationLayout, *output,
+                QSize(windowWidth, windowHeight),
+                QSize(drawableWidth, drawableHeight),
+                m_LiveDrawableGeometry.load(std::memory_order_relaxed));
+    return geometry.isValid();
 }
 
 SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
@@ -264,6 +384,70 @@ SDL_Window* SdlInputHandler::presentationWindow(Uint32 windowId) const
     }
     SDL_Window* window = SDL_GetWindowFromID(windowId);
     return presentationOutput(window) != nullptr ? window : nullptr;
+}
+
+void SdlInputHandler::followPointerFocus(SDL_Window* target,
+                                        SDL_MouseButtonFlags eventButtons,
+                                        PointerFocusPosition position)
+{
+#ifdef Q_OS_DARWIN
+    // The fullscreen surfaces are one remote desktop. Transfer native focus
+    // on hover so a secondary click does not need a preceding activation click.
+    // Never switch away from the Cocoa window that owns an in-progress drag.
+    if (!m_PresentationLayout.isMultiOutput() || !isCaptureActive() ||
+            eventButtons != 0 || SDL_GetMouseState(nullptr, nullptr) != 0) {
+        return;
+    }
+    const bool tablet = position == PointerFocusPosition::HostTablet;
+    if (tablet && !PlankPointerLogic::tabletFocusPositionIsCurrent(
+                m_TabletCursorActive, m_AppliedRemoteCursorPositionValid,
+                m_AppliedRemoteCursorPositionSequence, m_TabletCursorActivationSequence)) {
+        return;
+    }
+    SDL_Window* focused = SDL_GetKeyboardFocus();
+    if (focused == nullptr || focused == target ||
+            presentationOutput(focused) == nullptr ||
+            presentationOutput(target) == nullptr) {
+        return;
+    }
+    const auto targetFlags = SDL_GetWindowFlags(target);
+    if (!(targetFlags & SDL_WINDOW_FULLSCREEN) ||
+            (targetFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))) {
+        return;
+    }
+
+    // Raw tablet reports go directly to the Host and do not move the Mac's
+    // mouse pointer. Their target was mapped from the fresh Host position.
+    // Only local mouse events can be checked against the Mac desktop pointer.
+    // Both paths retain native mouse drags and require owned presentation focus.
+    float gx, gy;
+    if (SDL_GetGlobalMouseState(&gx, &gy) != 0) {
+        return;
+    }
+    if (!tablet) {
+        int wx, wy, width, height;
+        if (!SDL_GetWindowPosition(target, &wx, &wy) ||
+                !SDL_GetWindowSize(target, &width, &height) ||
+                gx < wx || gy < wy || gx >= wx + width || gy >= wy + height) {
+            return;
+        }
+    }
+    if (!SDL_RaiseWindow(target)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
+                    "Unable to transfer fullscreen pointer focus: %s",
+                    SDL_GetError());
+    }
+    else {
+        SDL_LogInfo(tablet ? SDL_LOG_CATEGORY_APPLICATION : SDL_LOG_CATEGORY_INPUT,
+                    "PLANK fullscreen %s focus: %u -> %u",
+                    tablet ? "tablet" : "pointer",
+                    SDL_GetWindowID(focused), SDL_GetWindowID(target));
+    }
+#else
+    Q_UNUSED(target);
+    Q_UNUSED(eventButtons);
+    Q_UNUSED(position);
+#endif
 }
 
 const PlankPresentationOutput* SdlInputHandler::presentationOutput(
@@ -293,22 +477,17 @@ void SdlInputHandler::updatePointerRegionLock()
     }
 
     // If region lock is enabled, grab the cursor so it can't accidentally leave our window.
-    if (isCaptureActive() && m_PointerRegionLockActive) {
-        SDL_Rect src, videoRect;
-        const QSize streamSize = streamDimensions();
-
-        src.x = src.y = 0;
-        src.w = streamSize.width();
-        src.h = streamSize.height();
-
-        videoRect.x = videoRect.y = 0;
-        SDL_GetWindowSize(m_Window, &videoRect.w, &videoRect.h);
+    PlankOutputGeometry geometry;
+    if (isCaptureActive() && m_PointerRegionLockActive &&
+            outputGeometry(m_Window, geometry)) {
+        // Use the same video rectangle the pointer is mapped into.
+        const QRect video = PlankPresentation::videoRectInWindow(
+                    streamDimensions(), geometry).toAlignedRect()
+                .intersected(QRect(QPoint(0, 0), geometry.windowSize));
         const PlankPointerLogic::Rect windowRect = {
-            0, 0, videoRect.w, videoRect.h
+            0, 0, geometry.windowSize.width(), geometry.windowSize.height()
         };
 
-        // Use the stream and window sizes to determine the video region.
-        StreamUtils::scaleSourceToDestinationSurface(&src, &videoRect);
         // A PLANK toolbar is anchored to the window's top edge, not
         // the scaled video's top edge. Keep the pointer inside the window while
         // allowing it to cross letterbox/pillarbox regions and reach the reveal
@@ -317,7 +496,7 @@ void SdlInputHandler::updatePointerRegionLock()
         const auto confinementRect =
                 PlankPointerLogic::pointerConfinementRect(
                     windowRect,
-                    {videoRect.x, videoRect.y, videoRect.w, videoRect.h},
+                    {video.x(), video.y(), video.width(), video.height()},
                     m_LocalToolbarAvailable);
         const SDL_Rect dst = {
             confinementRect.x,

@@ -26,6 +26,8 @@ public:
     virtual AVPixelFormat getPreferredPixelFormat(int videoFormat) override;
     virtual int getDecoderColorspace() override;
     virtual int getDecoderColorRange() override;
+    // renderFrame() slices frame->width/height.
+    virtual bool letterboxesDecodedFrameSize() override { return true; }
 
 private:
 
@@ -49,6 +51,8 @@ private:
     SDL_Window *m_Window;
     QSize m_PresentationCanvasSize;
     std::vector<PlankPresentationOutput> m_PresentationTargets;
+    // Every output shows its own source rectangle (display arrangement).
+    bool m_PresentationSourceRects = false;
     IFFmpegRenderer *m_Backend;
     unsigned int m_VAO;
     unsigned int m_VideoVbo;

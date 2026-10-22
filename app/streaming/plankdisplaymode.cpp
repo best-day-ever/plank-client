@@ -7,6 +7,27 @@ QSize PlankDisplayMode::qualifiedMaximum()
     return QSize(3840, 2160);
 }
 
+QSize PlankDisplayMode::resolveClient(const QSize& canvas, const QSize& limit, QString* error)
+{
+    if (error != nullptr) error->clear();
+    if (!canvas.isValid() || canvas.width() < 2 || canvas.height() < 2 || (canvas.width() & 1) ||
+            (canvas.height() & 1)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The workstation desktop size %1x%2 cannot be streamed.")
+                    .arg(canvas.width()).arg(canvas.height());
+        }
+        return QSize();
+    }
+    if (limit.isValid() && (canvas.width() > limit.width() || canvas.height() > limit.height())) {
+        if (error != nullptr) {
+            *error = QStringLiteral("The workstation desktop (%1x%2) is larger than this stream can carry (%3x%4).")
+                    .arg(canvas.width()).arg(canvas.height()).arg(limit.width()).arg(limit.height());
+        }
+        return QSize();
+    }
+    return canvas;
+}
+
 QSize PlankDisplayMode::resolve(const QSize& detectedResolution,
                                          const QSize& hostCanvasResolution,
                                          const QSize& maximumResolution)

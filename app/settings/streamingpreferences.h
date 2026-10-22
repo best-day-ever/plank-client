@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QRect>
+#include <QStringList>
 #include <QQmlEngine>
 #include <QVariantList>
 #include <QVector>
@@ -36,6 +37,9 @@ public:
         PLANK_PROFILE_NVENC_HEVC_10BIT_444,
         PLANK_PROFILE_APPLE_HEVC_10BIT_420,
         PLANK_PROFILE_APPLE_HEVC_10BIT_444,
+        // NVENC 4:2:0, limited-range BT.709: bandwidth profiles for remote links.
+        PLANK_PROFILE_NVENC_H264_8BIT_420,
+        PLANK_PROFILE_NVENC_HEVC_10BIT_420,
         PLANK_PROFILE_COUNT,
     };
     Q_ENUM(PlankVideoProfile)
@@ -67,6 +71,27 @@ public:
                profile < PLANK_PROFILE_COUNT;
     }
 
+    // Host encoding mode for a profile, as the host names it in launch
+    // requests and in its advertised PlankEncodingModes list; empty for an
+    // invalid profile.
+    static QString plankEncodingMode(int profile)
+    {
+        switch (profile) {
+        case PLANK_PROFILE_H264_8BIT_422: return QStringLiteral("h264-8-422-software");
+        case PLANK_PROFILE_H264_8BIT_444: return QStringLiteral("h264-8-444-software");
+        case PLANK_PROFILE_H264_10BIT_422: return QStringLiteral("h264-10-422-software");
+        case PLANK_PROFILE_H264_10BIT_444: return QStringLiteral("h264-10-444-software");
+        case PLANK_PROFILE_NVENC_H264_8BIT_444: return QStringLiteral("h264-8-444-nvenc");
+        case PLANK_PROFILE_NVENC_HEVC_8BIT_444: return QStringLiteral("hevc-8-444-nvenc");
+        case PLANK_PROFILE_NVENC_HEVC_10BIT_444: return QStringLiteral("hevc-10-444-nvenc");
+        case PLANK_PROFILE_APPLE_HEVC_10BIT_420:
+        case PLANK_PROFILE_APPLE_HEVC_10BIT_444: return plankAppleEncodingMode(profile);
+        case PLANK_PROFILE_NVENC_H264_8BIT_420: return QStringLiteral("h264-8-420-nvenc");
+        case PLANK_PROFILE_NVENC_HEVC_10BIT_420: return QStringLiteral("hevc-10-420-nvenc");
+        default: return {};
+        }
+    }
+
     static bool isPlankProfileValidForCaptureSource(
             int profile, int captureSource)
     {
@@ -90,15 +115,23 @@ public:
         return true;
     }
 
+    static bool isPlankNvenc420Profile(int profile)
+    {
+        return profile == PLANK_PROFILE_NVENC_H264_8BIT_420 ||
+               profile == PLANK_PROFILE_NVENC_HEVC_10BIT_420;
+    }
+
     static bool isPlankNvencProfile(int profile)
     {
-        return profile >= PLANK_PROFILE_NVENC_H264_8BIT_444 &&
-               profile <= PLANK_PROFILE_NVENC_HEVC_10BIT_444;
+        return (profile >= PLANK_PROFILE_NVENC_H264_8BIT_444 &&
+                profile <= PLANK_PROFILE_NVENC_HEVC_10BIT_444) ||
+               isPlankNvenc420Profile(profile);
     }
 
     static bool isPlankH264NvencProfile(int profile)
     {
-        return profile == PLANK_PROFILE_NVENC_H264_8BIT_444;
+        return profile == PLANK_PROFILE_NVENC_H264_8BIT_444 ||
+               profile == PLANK_PROFILE_NVENC_H264_8BIT_420;
     }
 
     static bool isPlankVirtualModeValidForProfile(const QString& mode,
@@ -121,14 +154,27 @@ public:
                (width <= 4096 && height <= 2160);
     }
 
+    // Every PLANK session streams at this rate; the Frame rate preference
+    // applies to non-PLANK hosts only.
+    static constexpr int PlankFramesPerSecond = 60;
+
     static constexpr int PlankBitrateMinimumKbps = 10000;
     static constexpr int PlankBitrateMaximumKbps = 150000;
     static constexpr int PlankBitrateStepKbps = 500;
     static constexpr int PlankH264DefaultBitrateKbps = 80000;
     static constexpr int PlankHevcDefaultBitrateKbps = 50000;
+    // 4:2:0 exists for links that cannot carry the 4:4:4 targets.
+    static constexpr int PlankH264Yuv420DefaultBitrateKbps = 50000;
+    static constexpr int PlankHevcYuv420DefaultBitrateKbps = 30000;
 
     static int plankDefaultBitrateForProfile(int profile)
     {
+        if (profile == PLANK_PROFILE_NVENC_H264_8BIT_420) {
+            return PlankH264Yuv420DefaultBitrateKbps;
+        }
+        if (profile == PLANK_PROFILE_NVENC_HEVC_10BIT_420) {
+            return PlankHevcYuv420DefaultBitrateKbps;
+        }
         return profile == PLANK_PROFILE_NVENC_HEVC_8BIT_444 ||
                profile == PLANK_PROFILE_NVENC_HEVC_10BIT_444 ||
                isPlankAppleProfile(profile) ?
@@ -275,15 +321,32 @@ public:
     Q_PROPERTY(PlankUnreachableAction plankUnreachableAction MEMBER plankUnreachableAction NOTIFY plankUnreachableActionChanged)
     Q_PROPERTY(bool showPerformanceOverlay MEMBER showPerformanceOverlay NOTIFY showPerformanceOverlayChanged)
     Q_PROPERTY(AudioConfig audioConfig MEMBER audioConfig NOTIFY audioConfigChanged)
+    Q_PROPERTY(QString cameraDevice MEMBER cameraDevice NOTIFY cameraDeviceChanged)
+    Q_INVOKABLE QVariantList cameraDevices() const;
+    Q_PROPERTY(bool nativeCameraSupported READ nativeCameraSupported CONSTANT)
+    bool nativeCameraSupported() const;
+    Q_PROPERTY(bool microphoneAutomatic MEMBER microphoneAutomatic NOTIFY microphoneAutomaticChanged)
+    Q_PROPERTY(bool microphoneAutomaticInput MEMBER microphoneAutomaticInput NOTIFY microphoneAutomaticInputChanged)
     Q_PROPERTY(bool plankToolbarPinned MEMBER plankToolbarPinned NOTIFY plankToolbarPinnedChanged)
     Q_PROPERTY(WindowMode windowMode MEMBER windowMode NOTIFY windowModeChanged)
     Q_PROPERTY(WindowMode recommendedFullScreenMode MEMBER recommendedFullScreenMode CONSTANT)
     Q_PROPERTY(bool muteOnFocusLoss MEMBER muteOnFocusLoss NOTIFY muteOnFocusLossChanged)
     Q_PROPERTY(bool keepAwake MEMBER keepAwake NOTIFY keepAwakeChanged)
     Q_PROPERTY(CaptureSysKeysMode captureSysKeysMode MEMBER captureSysKeysMode NOTIFY captureSysKeysModeChanged)
+    Q_PROPERTY(bool immersiveKeyboardMode MEMBER immersiveKeyboardMode NOTIFY immersiveKeyboardModeChanged)
     Q_PROPERTY(Language language MEMBER language NOTIFY languageChanged);
+    // Remote (broker) mode, bde-linux docs/plank-broker.md section 10.1
+    Q_PROPERTY(QString brokerHost MEMBER brokerHost NOTIFY brokerChanged)
+    Q_PROPERTY(int brokerPort MEMBER brokerPort NOTIFY brokerChanged)
+    Q_PROPERTY(QStringList brokerPins MEMBER brokerPins NOTIFY brokerChanged)
+    // Passkey relying party (FreeIPA domain), section 13.4
+    Q_PROPERTY(QString passkeyRpId MEMBER passkeyRpId NOTIFY brokerChanged)
 
     Q_INVOKABLE bool retranslate();
+    // Replaces the broker SPKI pin list from user text (one pin per line or
+    // comma separated); returns the entries that were rejected as invalid.
+    Q_INVOKABLE QStringList setBrokerPinsFromText(const QString& text);
+    Q_INVOKABLE void resetBrokerDefaults();
     Q_INVOKABLE int plankDefaultBitrateKbps(int profile) const
     {
         return plankDefaultBitrateForProfile(profile);
@@ -292,6 +355,10 @@ public:
     {
         return plankProfileBitratesToVariantList(
                     plankDefaultProfileBitrates());
+    }
+    Q_INVOKABLE int plankFramesPerSecond() const
+    {
+        return PlankFramesPerSecond;
     }
     Q_INVOKABLE int plankBitrateMinimumKbps() const
     {
@@ -326,12 +393,19 @@ public:
     int plankUnreachableTimeoutSeconds;
     PlankUnreachableAction plankUnreachableAction;
     AudioConfig audioConfig;
-    int identityGbrBitDepth;
+    QString cameraDevice;
+    bool microphoneAutomatic;
+    bool microphoneAutomaticInput;
     bool plankToolbarPinned;
     WindowMode windowMode;
     WindowMode recommendedFullScreenMode;
     Language language;
+    QString brokerHost;
+    int brokerPort;
+    QStringList brokerPins;
+    QString passkeyRpId;
     CaptureSysKeysMode captureSysKeysMode;
+    bool immersiveKeyboardMode;
 
 signals:
     void displayModeChanged();
@@ -340,6 +414,9 @@ signals:
     void unsupportedFpsChanged();
     void enableMdnsChanged();
     void audioConfigChanged();
+    void cameraDeviceChanged();
+    void microphoneAutomaticChanged();
+    void microphoneAutomaticInputChanged();
     void plankToolbarPinnedChanged();
     void windowModeChanged();
     void connectionWarningsChanged();
@@ -349,8 +426,10 @@ signals:
     void showPerformanceOverlayChanged();
     void muteOnFocusLossChanged();
     void captureSysKeysModeChanged();
+    void immersiveKeyboardModeChanged();
     void keepAwakeChanged();
     void languageChanged();
+    void brokerChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);

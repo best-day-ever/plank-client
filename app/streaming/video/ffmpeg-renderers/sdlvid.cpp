@@ -225,11 +225,11 @@ void SdlRenderer::renderOverlay(Overlay::OverlayType type)
                 SDL_DestroyTexture(m_OverlayTextures[type]);
             }
 
-            if (type == Overlay::OverlayStatusUpdate) {
+            if (type == Overlay::OverlayStatusUpdate || type == Overlay::OverlayCollaboration) {
                 // Bottom Left
                 SDL_Rect viewportRect;
                 SDL_GetRenderViewport(m_Renderer, &viewportRect);
-                m_OverlayRects[type].x = 0;
+                m_OverlayRects[type].x = type == Overlay::OverlayCollaboration ? SDL_max(0, viewportRect.w - newSurface->w) : 0;
                 m_OverlayRects[type].y = viewportRect.h - newSurface->h;
             }
             else if (type == Overlay::OverlayDebug) {

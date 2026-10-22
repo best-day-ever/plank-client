@@ -11,6 +11,8 @@ ToolButton {
     }
 
     activeFocusOnTab: true
+    // Icon-only: the tooltip is its name for VoiceOver.
+    Accessible.name: ToolTip.text
 
     icon.source: iconSource
     icon.width: 21

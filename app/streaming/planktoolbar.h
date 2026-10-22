@@ -3,9 +3,12 @@
 #include <SDL3/SDL.h>
 
 #include <memory>
+#include <QRect>
 #include <QString>
 
 #include "planktoolbarlogic.h"
+#include "audio/microphone.h"
+#include "camera/camera.h"
 
 class StreamingPreferences;
 class SdlInputHandler;
@@ -25,6 +28,13 @@ public:
         Minimize,
         Disconnect,
         KeepWaiting,
+        // "Screens changed" prompt.
+        ApplyScreens,
+        KeepScreens,
+        SetUpScreens,
+        ToggleMicrophone,
+        ToggleCamera,
+        SendFiles,
     };
 
     PlankToolbar(SDL_Window* window,
@@ -34,15 +44,27 @@ public:
                           int initialBitrateKbps);
     ~PlankToolbar();
 
-    void setRenderedStats(float fps, float videoMbps, float packetLossPercent);
+    void setFileTransferState(bool supported, const QString& status);
+    void setRenderedStats(float fps, float videoMbps, float packetLossPercent,
+                          std::uint32_t networkRttMs);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
+    void setCameraState(bool supported, PlankCamera::State state);
+    void setMicrophoneState(bool supported, PlankMicrophone::State state);
     Action update(Uint64 now, bool transportAvailable = true);
     void showReconnectPrompt(int unreachableSeconds);
     void hideReconnectPrompt();
+    // "Screens changed — [Apply layout] [Keep] [Set up…]" under the toolbar,
+    // shown (and kept visible) until answered or hidden.
+    void showScreensPrompt(const QString& text);
+    void hideScreensPrompt();
+    bool screensPromptVisible() const { return m_ScreensPromptVisible; }
     // Returns true when status is presented independently of video frames.
     bool setReconnectStatus(const QString& text, bool warning);
     void notifyWindowChanged();
     void notifyFocusLost();
+    // Keyboard shortcut: show a hidden toolbar (auto-hide and pin apply as for
+    // the edge reveal) or hide a visible one.
+    void toggleFromShortcut(Uint64 now);
 
     bool observeMouseMotion(const SDL_MouseMotionEvent& event);
     Action handleMouseButton(const SDL_MouseButtonEvent& event);
@@ -56,12 +78,21 @@ private:
         Handle,
         Slider,
         Pin,
+        Microphone,
+        Camera,
+        Files,
         Fullscreen,
         Minimize,
         Disconnect,
+        ScreensApply,
+        ScreensKeep,
+        ScreensSetUp,
     };
 
     void show(Uint64 now);
+    void restartAutoHideTimer(Uint64 now);
+    int toolbarHeight() const;
+    QRect screensButtonRect(int index) const;
     void hide();
     void beginLocalPointerInteraction();
     void endLocalPointerInteraction();
@@ -88,6 +119,9 @@ private:
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
     bool pinContains(int x, int y) const;
+    bool filesContains(int x, int y) const;
+    bool cameraContains(int x, int y) const;
+    bool microphoneContains(int x, int y) const;
     bool fullscreenContains(int x, int y) const;
     bool minimizeContains(int x, int y) const;
     bool disconnectContains(int x, int y) const;
@@ -113,7 +147,15 @@ private:
     bool m_PointerInitialized;
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
+    bool m_FilesSupported = false;
+    QString m_FileTransferStatus;
+    bool m_CameraSupported = false;
+    PlankCamera::State m_CameraState = PlankCamera::State::Off;
+    bool m_MicrophoneSupported = false;
+    PlankMicrophone::State m_MicrophoneState = PlankMicrophone::State::Off;
     bool m_ReconnectPromptVisible;
+    bool m_ScreensPromptVisible = false;
+    QString m_ScreensPromptText;
     bool m_ReconnectPromptPointerInside;
     bool m_ReconnectPromptButtonDown;
     int m_ReconnectPromptPointerX;
@@ -125,6 +167,7 @@ private:
     int m_WindowPixelWidth;
     int m_WindowPixelHeight;
     float m_PixelDensity;
+    const int m_EncoderTargetWidth;
     int m_Width;
     int m_ToolbarLeft;
     int m_ToolbarDragOffsetX;
@@ -139,9 +182,11 @@ private:
     float m_RenderedFps;
     float m_VideoMbps;
     float m_PacketLossPercent;
+    std::uint32_t m_NetworkRttMs;
     float m_LastDrawnFps;
     float m_LastDrawnVideoMbps;
     float m_LastDrawnPacketLossPercent;
+    std::uint32_t m_LastDrawnNetworkRttMs;
     Uint64 m_HideDeadline;
     Uint64 m_LastBitrateSendTime;
     Uint64 m_LastBitrateChangeTime;

@@ -1,6 +1,7 @@
 #include "commandlineparser.h"
 
 #include <QCommandLineParser>
+#include <QCoreApplication>
 #include <QFile>
 #include <QRegularExpression>
 
@@ -96,7 +97,7 @@ public:
             showInfo(helpText());
         }
         if (isSet("version")) {
-            showVersion();
+            showInfo(QStringLiteral("BDE fernweh %1").arg(QCoreApplication::applicationVersion()));
         }
     }
 
@@ -112,7 +113,7 @@ public:
     #if defined(Q_OS_WIN32)
         UINT flags = MB_OK | MB_TOPMOST | MB_SETFOREGROUND;
         flags |= (type == Info ? MB_ICONINFORMATION : MB_ICONERROR);
-        QString title = "PLANK";
+        QString title = "BDE fernweh";
         MessageBoxW(nullptr, reinterpret_cast<const wchar_t *>(message.utf16()),
                     reinterpret_cast<const wchar_t *>(title.utf16()), flags);
     #endif
@@ -201,7 +202,7 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
     parser.setupCommonOptions();
     parser.setApplicationDescription(
         "\n"
-        "Starts PLANK normally if no arguments are given.\n"
+        "Starts BDE fernweh normally if no arguments are given.\n"
         "\n"
         "Available actions:\n"
         "  stream          Start a workstation session\n"
@@ -209,8 +210,20 @@ GlobalCommandLineParser::ParseResult GlobalCommandLineParser::parse(const QStrin
         "See 'plank-client <action> --help' for help of specific action."
     );
     parser.addPositionalArgument("action", "Action to execute", "<action>");
+#ifdef Q_OS_MACOS
+    parser.addOption(QCommandLineOption("setup-permissions", "Review macOS permissions without opening bookmarks or connecting."));
+#endif
     parser.parse(args);
     auto posArgs = parser.positionalArguments();
+
+#ifdef Q_OS_MACOS
+    if (parser.isSet("setup-permissions")) {
+        parser.handleUnknownOptions();
+        if (!posArgs.isEmpty()) parser.showError("Permission setup cannot be combined with a stream action");
+        parser.handleHelpAndVersionOptions();
+        return PermissionsSetupRequested;
+    }
+#endif
 
     if (posArgs.isEmpty()) {
         // This method will not return and terminates the process if --version
@@ -280,7 +293,7 @@ void StreamCommandLineParser::parse(const QStringList &args, StreamingPreference
     parser.addChoiceOption("display-mode", "display mode", m_WindowModeMap.keys());
     parser.addChoiceOption("audio-config", "audio config", m_AudioConfigMap.keys());
     parser.addToggleOption("audio-on-host", "audio on host PC");
-    parser.addToggleOption("mute-on-focus-loss", "mute audio when PLANK Client window loses focus");
+    parser.addToggleOption("mute-on-focus-loss", "mute audio when BDE fernweh window loses focus");
     parser.addToggleOption("keep-awake", "prevent display sleep while streaming");
     parser.addToggleOption("performance-overlay", "show performance overlay");
     parser.addChoiceOption("capture-system-keys", "capture system key combos", m_CaptureSysKeysModeMap.keys());

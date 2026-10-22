@@ -27,6 +27,9 @@ private slots:
             QVERIFY(PlankReconnectPolicy::terminalStatus(status, false));
         }
         QVERIFY(PlankReconnectPolicy::terminalStatus(401, true));
+        QVERIFY(!PlankReconnectPolicy::terminalStatus(401, true, true)); // Confirmed desktop handover or sign-out.
+        QVERIFY(PlankReconnectPolicy::terminalStatus(403, true, true));
+        QVERIFY(PlankReconnectPolicy::terminalStatus(423, true, true));
         QVERIFY(!PlankReconnectPolicy::terminalStatus(401, false)); // Expired worker token.
         for (int status : {409, 425, 429, 500, 502, 503, 504}) {
             QVERIFY(!PlankReconnectPolicy::terminalStatus(status, true));
@@ -40,7 +43,10 @@ private slots:
         QVERIFY(!videoSilent(10000, 0)); // No first frame yet.
         QVERIFY(!videoSilent(999, 1000));
         QVERIFY(!videoSilent(1999, 1000));
-        QVERIFY(videoSilent(2000, 1000));
+        QVERIFY(!videoSilent(2000, 1000)); // Healthy idle cadence is 1 fps.
+        QVERIFY(!videoSilent(2300, 1000)); // Scheduling/network jitter is normal.
+        QVERIFY(!videoSilent(3999, 1000));
+        QVERIFY(videoSilent(4000, 1000));
         QVERIFY(!videoSilent(2001, 2000)); // Incoming video cancels recovery.
     }
 
@@ -86,6 +92,68 @@ private slots:
         response["session_token"] = 123;
         QVERIFY(!plankAuthenticatedGreeter(response));
         QVERIFY(!plankAuthenticatedGreeter({}));
+    }
+
+    void parsesDesktopSignOut()
+    {
+        using State = PlankDesktopSignOut::State;
+        const QString alice = QStringLiteral("alice");
+        PlankDesktopSignOut reply = PlankDesktopSignOut::fromResponse(409, alice, "available");
+        QCOMPARE(reply.state, State::Available);
+        QCOMPARE(reply.owner, alice);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(409, alice, "connected").state, State::Connected);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(503, alice, "started").state, State::Started);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(409, "alice@ipa.example", "available").owner,
+                 QStringLiteral("alice@ipa.example"));
+
+        // Status and offer must agree; other launch refusals are not ours.
+        QCOMPARE(PlankDesktopSignOut::fromResponse(503, alice, "available").state, State::None);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(409, alice, "started").state, State::None);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(200, alice, "available").state, State::None);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(409, alice, "Available").state, State::None);
+        QCOMPARE(PlankDesktopSignOut::fromResponse(409, alice, QString()).state, State::None);
+        for (const QString& owner : {QString(), QStringLiteral("alice bob"), QStringLiteral(" alice"),
+                                     QStringLiteral("alice\n"), QStringLiteral("a\tb"),
+                                     QString(257, QChar('a'))}) {
+            reply = PlankDesktopSignOut::fromResponse(409, owner, "available");
+            QCOMPARE(reply.state, State::None);
+            QVERIFY(reply.owner.isEmpty());
+        }
+    }
+
+    void decidesDesktopSignOutStep()
+    {
+        using Step = PlankDesktopSignOut::Step;
+        const auto reply = [](int status, const char* owner, const char* offer) {
+            return PlankDesktopSignOut::fromResponse(status, owner, offer);
+        };
+        const auto step = PlankDesktopSignOut::nextStep;
+        const QString none;
+        const QString alice = QStringLiteral("alice");
+
+        QCOMPARE(step({}, false, true, none), Step::NotApplicable);
+        // Available: offer once, and only with credentials for the reconnect.
+        QCOMPARE(step(reply(409, "alice", "available"), false, true, none), Step::Confirm);
+        QCOMPARE(step(reply(409, "alice", "available"), false, false, none), Step::InUse);
+        QCOMPARE(step(reply(409, "alice", "available"), true, true, none), Step::InUse);
+        QCOMPARE(step(reply(409, "alice", "available"), false, true, alice), Step::Unexpected);
+        // The owner changed between the offer and the confirmed retry.
+        QCOMPARE(step(reply(409, "bob", "available"), false, true, alice), Step::Confirm);
+        // Connected never offers sign-out, before or after a retry.
+        QCOMPARE(step(reply(409, "alice", "connected"), false, true, none), Step::InUse);
+        QCOMPARE(step(reply(409, "bob", "connected"), false, true, alice), Step::InUse);
+        QCOMPARE(step(reply(409, "alice", "connected"), true, true, none), Step::InUse);
+        // Started only answers the sign-out this Client asked for.
+        QCOMPARE(step(reply(503, "alice", "started"), false, true, alice), Step::AwaitGreeter);
+        QCOMPARE(step(reply(503, "alice", "started"), false, true, none), Step::Unexpected);
+        QCOMPARE(step(reply(503, "bob", "started"), false, true, alice), Step::Unexpected);
+
+        // While waiting for the sign-in screen.
+        QVERIFY(PlankDesktopSignOut::stillSigningOut(reply(409, "alice", "available"), alice));
+        QVERIFY(!PlankDesktopSignOut::stillSigningOut(reply(409, "bob", "available"), alice));
+        QVERIFY(!PlankDesktopSignOut::stillSigningOut(reply(409, "alice", "connected"), alice));
+        QVERIFY(!PlankDesktopSignOut::stillSigningOut(reply(409, "alice", "available"), none));
+        QVERIFY(!PlankDesktopSignOut::stillSigningOut({}, alice));
     }
 };
 

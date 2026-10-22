@@ -22,6 +22,7 @@ public:
     Q_PROPERTY(bool hasDesktopEnvironment MEMBER hasDesktopEnvironment CONSTANT)
     Q_PROPERTY(QSize maximumResolution MEMBER maximumResolution CONSTANT)
     Q_PROPERTY(QString plankVersionString MEMBER plankVersionString CONSTANT)
+    Q_PROPERTY(QString plankChangelog READ plankChangelog CONSTANT)
     Q_PROPERTY(bool usesMaterial3Theme MEMBER usesMaterial3Theme CONSTANT)
 
     Q_INVOKABLE void refreshDisplays();
@@ -30,6 +31,7 @@ public:
     Q_INVOKABLE int getRefreshRate(int displayIndex);
 
 private:
+    QString plankChangelog() const;
     void querySdlVideoInfo();
     void querySdlVideoInfoInternal();
     void refreshDisplaysInternal();

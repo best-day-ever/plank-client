@@ -15,6 +15,8 @@
 #include <QTemporaryFile>
 #include <QThreadPool>
 #include <QRegularExpression>
+#include <QPointer>
+#include <QTimer>
 
 #ifdef Q_OS_UNIX
 #include <sys/socket.h>
@@ -30,6 +32,10 @@
 
 #ifdef Q_OS_MACOS
 #include "macapplication.h"
+#include "streaming/mackeyboardcapture.h"
+#include "streaming/input/macrawwacom.h"
+#include "streaming/audio/macmicrophonepermission.h"
+#include "backend/macpermissions.h"
 #endif
 
 #ifdef HAVE_FFMPEG
@@ -51,7 +57,11 @@
 #include "path.h"
 #include "utils.h"
 #include "gui/computermodel.h"
+#include "gui/remotebroker.h"
+#include "gui/onboardingcontroller.h"
+#include "gui/displaysetupcontroller.h"
 #include "backend/computermanager.h"
+#include "backend/fernwehupdater.h"
 #include <QSslSocket>
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
@@ -401,7 +411,7 @@ int main(int argc, char *argv[])
     // Set the SDL3 application identity before any subsystem can initialize.
     // On Wayland, GNOME uses this ID to match the stream window to our desktop
     // entry and persist the user's keyboard-shortcut inhibitor decision.
-    SDL_SetAppMetadata("PLANK Client",
+    SDL_SetAppMetadata("BDE fernweh",
                        PLANK_VERSION_STR,
                        "la.instinctual.Plank.Client");
 
@@ -566,7 +576,7 @@ int main(int argc, char *argv[])
 
             if (!QFile("/dev/dri").exists()) {
                 qWarning() << "Unable to find a KMSDRM display device!";
-                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use PLANK Client outside of the GUI environment.";
+                qWarning() << "On the Raspberry Pi, you must enable the 'fake KMS' driver in raspi-config to use BDE fernweh outside of the GUI environment.";
             }
             else if (!qEnvironmentVariableIsSet("QT_QPA_EGLFS_KMS_CONFIG")) {
                 // HACK: Remove this when Qt is fixed to properly check for display support before picking a card
@@ -715,9 +725,15 @@ int main(int argc, char *argv[])
     // the mouse motion exactly how it was given to us.
     SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
 
-    // We handle capturing the mouse ourselves when it leaves the window, so we don't need
-    // SDL doing it for us behind our backs.
-    SDL_SetHint("SDL_MOUSE_AUTO_CAPTURE", "0");
+#ifdef Q_OS_MACOS
+    // Cocoa keeps a held drag addressed to its starting window. Auto-capture
+    // lets SDL deliver coordinates beyond that window so the presentation
+    // input router can continue the drag onto another display. The old SDL2
+    // manual capture-on-leave path is no longer active.
+    SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "1");
+#else
+    SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
+#endif
 
     // PLANK is a Wayland desktop client. Prefer libdecor so windowed
     // streams consistently receive a title bar and resize borders on GNOME.
@@ -772,7 +788,7 @@ int main(int argc, char *argv[])
     qInfo() << "PLANK TLS backend:" << QSslSocket::activeBackend()
             << QSslSocket::sslLibraryVersionString();
 #endif
-    QGuiApplication::setApplicationDisplayName("PLANK Client");
+    QGuiApplication::setApplicationDisplayName("BDE fernweh");
 
 #ifdef Q_OS_DARWIN
     // macOS defaults "Keyboard navigation" to text fields and lists only, which
@@ -917,6 +933,30 @@ int main(int argc, char *argv[])
                                               [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                   return new ComputerManager(StreamingPreferences::get(qmlEngine));
                                               });
+    qmlRegisterSingletonType<RemoteBroker>("RemoteBroker", 1, 0,
+                                           "RemoteBroker",
+                                           [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
+                                               return new RemoteBroker(StreamingPreferences::get(qmlEngine));
+                                           });
+    qmlRegisterSingletonType<FernwehUpdater>("FernwehUpdater", 1, 0,
+                                             "FernwehUpdater",
+                                             [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
+                                                 return new FernwehUpdater(StreamingPreferences::get(qmlEngine));
+                                             });
+    // First sign-in wizard ("Welcome to BDE Fernweh"); ends in RemoteBroker's session.
+    qmlRegisterSingletonType<OnboardingController>("Onboarding", 1, 0,
+                                                   "Onboarding",
+                                                   [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
+                                                       auto* broker = qmlEngine->singletonInstance<RemoteBroker*>(
+                                                                   qmlTypeId("RemoteBroker", 1, 0, "RemoteBroker"));
+                                                       return new OnboardingController(broker);
+                                                   });
+    // Display setup: the wizard, Settings > Displays and the change banner.
+    qmlRegisterSingletonType<DisplaySetupController>("DisplaySetup", 1, 0,
+                                                     "DisplaySetup",
+                                                     [](QQmlEngine*, QJSEngine*) -> QObject* {
+                                                         return new DisplaySetupController();
+                                                     });
     qmlRegisterSingletonType<SystemProperties>("SystemProperties", 1, 0,
                                                "SystemProperties",
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
@@ -928,8 +968,14 @@ int main(int argc, char *argv[])
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
 
-    // We require the Material theme
-    QQuickStyle::setStyle("Material");
+    // Installer setup is a standalone process: use native macOS controls there
+    // without changing the established Material launcher/streaming UI.
+#ifdef Q_OS_MACOS
+    if (commandLineParserResult == GlobalCommandLineParser::PermissionsSetupRequested)
+        QQuickStyle::setStyle("macOS");
+    else
+#endif
+        QQuickStyle::setStyle("Material");
 
     // Our icons are styled for a dark theme, so we do not allow the user to override this
     qputenv("QT_QUICK_CONTROLS_MATERIAL_THEME", "Dark");
@@ -947,10 +993,21 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     QString initialView;
+    bool showOnboarding = false;
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::NormalStartRequested:
-        initialView = "qrc:/gui/PcView.qml";
+        // BDE build: people sign in through the studio broker (remote.bde.run);
+        // LAN bookmarks stay one click away ("Local workstations").
+        initialView = "qrc:/gui/RemoteView.qml";
+        // A brand-new installation opens with the first sign-in wizard on
+        // top of it; anyone who used this Mac before never sees it unasked.
+        showOnboarding = OnboardingController::shouldShowOnLaunch(StreamingPreferences::get());
         break;
+#ifdef Q_OS_MACOS
+    case GlobalCommandLineParser::PermissionsSetupRequested:
+        // The installer opens only the permission view, never the bookmark UI.
+        break;
+#endif
     case GlobalCommandLineParser::StreamRequested:
         {
             initialView = "qrc:/gui/CliStartStreamSegue.qml";
@@ -971,14 +1028,53 @@ int main(int argc, char *argv[])
     }
 
     engine.rootContext()->setContextProperty("initialView", initialView);
+    engine.rootContext()->setContextProperty("showOnboarding", showOnboarding);
     engine.rootContext()->setContextProperty(
                 "runConfigChecks",
                 commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
 
-    // Load the main.qml file
-    engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
-    if (engine.rootObjects().isEmpty()) {
-        return -1;
+#ifdef Q_OS_MACOS
+    // Ask before any stream can capture the pointer. Also handle enabling the
+    // preference later in Settings, without ever prompting from a live stream.
+    auto permissions = new MacPermissions([] { return Session::get() == nullptr; }, &engine);
+    engine.rootContext()->setContextProperty("macPermissions", permissions);
+    auto requestKeyboardPermission = [] {
+        if (Session::get() == nullptr) {
+            MacKeyboardCapture::requestPermissionIfNeeded(
+                        StreamingPreferences::get()->captureSysKeysMode != StreamingPreferences::CSK_OFF ||
+                        StreamingPreferences::get()->immersiveKeyboardMode);
+        }
+    };
+    QObject::connect(StreamingPreferences::get(), &StreamingPreferences::captureSysKeysModeChanged,
+                     &app, requestKeyboardPermission);
+    QObject::connect(StreamingPreferences::get(), &StreamingPreferences::immersiveKeyboardModeChanged,
+                     &app, requestKeyboardPermission);
+    // Resolve launch-time consent before constructing the launcher: no
+    // sign-in or autoconnect can race a pending native permission dialog.
+    // CLI autoconnect remains non-prompting; provision via the launcher first.
+    // BDE: Fernweh streams from Linux Hosts, which never negotiate the Client
+    // microphone, so launch asks only for keyboard capture and an attached
+    // raw-HID Wacom. Microphone access stays available in Permissions.
+    if (commandLineParserResult == GlobalCommandLineParser::NormalStartRequested ||
+            commandLineParserResult == GlobalCommandLineParser::PermissionsSetupRequested) {
+        const QString startupView = commandLineParserResult == GlobalCommandLineParser::PermissionsSetupRequested ?
+                    QStringLiteral("qrc:/gui/MacPermissionSetup.qml") : QStringLiteral("qrc:/gui/main.qml");
+        QTimer::singleShot(0, &engine, [context = QPointer<QQmlApplicationEngine>(&engine), requestKeyboardPermission, startupView] {
+            requestKeyboardPermission();
+            MacRawWacomInput::requestPermissionIfNeeded();
+            if (!context) return;
+            context->load(QUrl(startupView));
+            if (context->rootObjects().isEmpty()) QCoreApplication::exit(-1);
+        });
+    }
+    else
+#endif
+    {
+        // Load immediately on Linux and for non-prompting CLI autoconnect.
+        engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
+        if (engine.rootObjects().isEmpty()) {
+            return -1;
+        }
     }
 
     int err = app.exec();

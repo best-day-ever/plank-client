@@ -22,20 +22,20 @@ RelayWakeClient::RelayWakeClient(QString address, quint16 port, QObject* parent)
 {
     m_Timeout->setSingleShot(true);
     connect(m_Timeout, &QTimer::timeout, this, [this]() {
-        finish(tr("The PLANK Relay wake service did not respond."));
+        finish(tr("The remote wake service did not respond."));
     });
     connect(m_Socket, &QTcpSocket::readyRead,
             this, &RelayWakeClient::handleReadyRead);
     connect(m_Socket, &QTcpSocket::disconnected, this, [this]() {
         handleReadyRead();
         if (!m_Complete) {
-            finish(tr("The PLANK Relay wake service closed the connection without a response."));
+            finish(tr("The remote wake service closed the connection without a response."));
         }
     });
     connect(m_Socket, &QTcpSocket::errorOccurred, this,
             [this](QAbstractSocket::SocketError) {
         if (!m_Complete) {
-            finish(tr("Unable to reach the PLANK Relay wake service: %1")
+            finish(tr("Unable to reach the remote wake service: %1")
                    .arg(m_Socket->errorString()));
         }
     });
@@ -55,7 +55,7 @@ void RelayWakeClient::handleReadyRead()
 
     m_Response.append(m_Socket->readAll());
     if (m_Response.size() > MaximumResponseBytes) {
-        finish(tr("The PLANK Relay wake service returned an invalid response."));
+        finish(tr("The remote wake service returned an invalid response."));
         return;
     }
 
@@ -73,7 +73,7 @@ void RelayWakeClient::handleReadyRead()
         finish(response.mid(6));
     }
     else {
-        finish(tr("The PLANK Relay wake service returned an invalid response."));
+        finish(tr("The remote wake service returned an invalid response."));
     }
 }
 

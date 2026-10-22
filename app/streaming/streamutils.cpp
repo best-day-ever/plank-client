@@ -1,4 +1,5 @@
 #include "streamutils.h"
+#include "plankpresentation.h"
 
 #include <Qt>
 #include <QDir>
@@ -7,6 +8,7 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include "macwindow.h"
 #include "macdisplaygeometry.h"
+#include "macdisplaymode.h"
 #endif
 
 #ifdef Q_OS_UNIX
@@ -119,17 +121,18 @@ bool StreamUtils::getDisplayMode(int displayIndex, int modeIndex, SDL_DisplayMod
 
 void StreamUtils::scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst)
 {
-    int dstH = SDL_ceilf((float)dst->w * src->h / src->w);
-    int dstW = SDL_ceilf((float)dst->h * src->w / src->h);
-
-    if (dstH > dst->h) {
-        dst->x += (dst->w - dstW) / 2;
-        dst->w = dstW;
+    // Input mapping uses the same function (PlankPresentation), so the video
+    // rectangle a renderer draws and the one the pointer maps into are always
+    // identical.
+    const QRect fitted = PlankPresentation::aspectFitRect(
+                QSize(src->w, src->h), QRect(dst->x, dst->y, dst->w, dst->h));
+    if (fitted.isEmpty()) {
+        return;
     }
-    else {
-        dst->y += (dst->h - dstH) / 2;
-        dst->h = dstH;
-    }
+    dst->x = fitted.x();
+    dst->y = fitted.y();
+    dst->w = fitted.width();
+    dst->h = fitted.height();
 }
 
 void StreamUtils::screenSpaceToNormalizedDeviceCoords(SDL_FRect* rect, int viewportWidth, int viewportHeight)
@@ -182,14 +185,13 @@ int StreamUtils::getDisplayRefreshRate(SDL_Window* window)
 bool StreamUtils::getMacCurrentDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* bounds, bool fullscreen)
 {
     SDL_zerop(mode);
-    const auto current = CGDisplayCopyDisplayMode(displayId);
-    if (!current) return false;
-    mode->w = static_cast<int>(CGDisplayModeGetPixelWidth(current));
-    mode->h = static_cast<int>(CGDisplayModeGetPixelHeight(current));
+    MacDisplayMode::Snapshot current;
+    if (!MacDisplayMode::currentSnapshot(displayId, current)) return false;
+    mode->w = current.width;
+    mode->h = current.height;
     const CGRect logical = CGDisplayBounds(displayId);
     *bounds = {qRound(logical.origin.x), qRound(logical.origin.y),
                qRound(logical.size.width), qRound(logical.size.height)};
-    CGDisplayModeRelease(current);
     if (fullscreen) {
         int top = 0;
         if (!MacWindow::fullscreenTopInset(displayId, &top) ||
@@ -197,7 +199,7 @@ bool StreamUtils::getMacCurrentDisplayMode(Uint32 displayId, SDL_DisplayMode* mo
             return false;
         bounds->y += top;
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "PLANK Mac Match Client: fullscreen viewport=%dx%d backing=%dx%d top-inset=%d",
+                    "PLANK Mac display: fullscreen viewport=%dx%d backing=%dx%d top-inset=%d",
                     bounds->w, bounds->h, mode->w, mode->h, top);
     }
     return mode->w > 0 && mode->h > 0 && bounds->w > 0 && bounds->h > 0;
@@ -224,59 +226,19 @@ bool StreamUtils::getMacCurrentDisplayModeForBounds(const SDL_Rect& bounds, SDL_
 bool StreamUtils::getMacNativeDisplayMode(Uint32 displayId, SDL_DisplayMode* mode, SDL_Rect* safeArea)
 {
     SDL_zerop(mode);
-
-    // Retina displays have non-native resolutions both below and above (!) their
-    // native resolution, so it's impossible for us to figure out what's actually
-    // native on macOS using the SDL API alone. We'll talk to CoreGraphics to
-    // find the correct resolution and match it in our SDL list.
-    CFArrayRef modeList = CGDisplayCopyAllDisplayModes(displayId, nullptr);
-    if (!modeList) return false;
-    CFIndex count = CFArrayGetCount(modeList);
-    for (CFIndex i = 0; i < count; i++) {
-        auto cgMode = (CGDisplayModeRef)(CFArrayGetValueAtIndex(modeList, i));
-        if ((CGDisplayModeGetIOFlags(cgMode) & kDisplayModeNativeFlag) != 0) {
-            mode->w = static_cast<int>(CGDisplayModeGetPixelWidth(cgMode));
-            mode->h = static_cast<int>(CGDisplayModeGetPixelHeight(cgMode));
-            break;
-        }
-    }
-
-    if (mode->w <= 0 || mode->h <= 0) {
-        CFRelease(modeList);
+    MacDisplayMode::Snapshot snapshot;
+    if (!MacDisplayMode::snapshot(displayId, snapshot)) {
+        SDL_SetError("The Mac display has neither a valid native nor current pixel mode");
         return false;
     }
-
-    safeArea->x = 0;
-    safeArea->y = 0;
-    safeArea->w = mode->w;
-    safeArea->h = mode->h;
-
-#if TARGET_CPU_ARM64
-    // Now that we found the native full-screen mode, let's look for one that matches along
-    // the width but not the height and we'll assume that's the safe area full-screen mode.
-    //
-    // There doesn't appear to be a CG API or flag that will tell us that a given mode
-    // is a "safe area" mode, so we have to use our own (brittle) heuristics. :(
-    //
-    // To avoid potential false positives, let's avoid checking for external displays, since
-    // we might have scenarios like a 1920x1200 display with an alternate 1920x1080 mode
-    // which would falsely trigger our notch detection here.
-    if (CGDisplayIsBuiltin(displayId)) {
-        for (CFIndex i = 0; i < count; i++) {
-            auto cgMode = (CGDisplayModeRef)(CFArrayGetValueAtIndex(modeList, i));
-            auto cgModeWidth = static_cast<int>(CGDisplayModeGetPixelWidth(cgMode));
-            auto cgModeHeight = static_cast<int>(CGDisplayModeGetPixelHeight(cgMode));
-
-            // If the modes differ by more than 100, we'll assume it's not a notch mode
-            if (mode->w == cgModeWidth && mode->h != cgModeHeight && mode->h <= cgModeHeight + 100) {
-                safeArea->w = cgModeWidth;
-                safeArea->h = cgModeHeight;
-            }
-        }
+    mode->w = snapshot.width;
+    mode->h = snapshot.height;
+    *safeArea = {0, 0, snapshot.width, snapshot.safeHeight};
+    if (!snapshot.native) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "Mac display has no advertised native mode; using current backing pixels %dx%d",
+                    mode->w, mode->h);
     }
-#endif
-
-    CFRelease(modeList);
     return true;
 }
 #endif

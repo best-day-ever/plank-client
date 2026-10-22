@@ -31,8 +31,26 @@
 #define SER_OUTPUTTOPOLOGY "plank-output-topology"
 #define SER_MANUALBOOKMARK "plank-manual-bookmark"
 #define SER_SERVERUUID "plank-server-uuid"
+#define SER_AUTH_USERNAME "plank-auth-username"
 
 namespace {
+bool validRememberedUsername(const QString& username)
+{
+    // Preserve the exact authenticated spelling, including directory realms and
+    // non-ASCII names. Do not apply the public session-indicator name restrictions.
+    if (username.isEmpty() || username.size() > 256 || username.toUtf8().size() > 256) {
+        return false;
+    }
+    for (const QChar character : username) {
+        if (character.category() == QChar::Other_Control ||
+                character.category() == QChar::Separator_Line ||
+                character.category() == QChar::Separator_Paragraph) {
+            return false;
+        }
+    }
+    return true;
+}
+
 QString manualBookmarkUuid(const NvAddress& address)
 {
     const QByteArray bookmarkKey = address.toString().toUtf8();
@@ -61,6 +79,8 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->state = CS_UNKNOWN;
     this->authorizationState = AS_UNKNOWN;
     this->currentGameId = 0;
+    this->plankOccupied = false;
+    this->plankSessionUser.clear();
     this->serverCodecModeSupport = 0;
     this->externalPort = address.port();
 }
@@ -91,11 +111,15 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         authorizationState = AS_UNKNOWN;
         state = CS_UNKNOWN;
         currentGameId = 0;
+        plankOccupied = false;
+        plankSessionUser.clear();
+        m_RememberedUsername.clear();
         plankAuthentication = false;
         plankHostMetadataVersion = 0;
         plankHostVersion.clear();
         plankTopologyVersion = 0;
         plankFeatureFlags = 0;
+        plankEncodingModes.clear();
         displayModes.clear();
         serverCodecModeSupport = 0;
         appVersion.clear();
@@ -113,9 +137,16 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     return addressChanged;
 }
 
-NvComputer::NvComputer(QSettings& settings)
+NvComputer::NvComputer(QSettings& settings, const PlankClientPolicy& policy)
 {
-    const quint16 defaultPort = PlankClientPolicy().networkPort();
+    const quint16 defaultPort = policy.networkPort();
+    const QString savedUsername = settings.value(SER_AUTH_USERNAME).toString();
+    if (policy.rememberUsername() && validRememberedUsername(savedUsername)) {
+        m_RememberedUsername = savedUsername;
+    }
+    else {
+        forgetSavedUsername(settings);
+    }
     this->name = settings.value(SER_NAME).toString();
     this->uuid = settings.value(SER_UUID).toString();
     this->hasCustomName = settings.value(SER_CUSTOMNAME).toBool();
@@ -204,6 +235,8 @@ NvComputer::NvComputer(QSettings& settings)
     sortAppList();
 
     this->currentGameId = 0;
+    this->plankOccupied = false;
+    this->plankSessionUser.clear();
     this->authorizationState = AS_UNKNOWN;
     this->state = CS_UNKNOWN;
     this->appVersion = nullptr;
@@ -214,10 +247,12 @@ NvComputer::NvComputer(QSettings& settings)
     this->plankHostVersion.clear();
     this->plankTopologyVersion = 0;
     this->plankFeatureFlags = 0;
+    this->plankEncodingModes.clear();
     this->sessionToken.clear();
 }
 
-void NvComputer::serialize(QSettings& settings, bool serializeApps) const
+void NvComputer::serialize(QSettings& settings, bool serializeApps,
+                           const PlankClientPolicy& policy) const
 {
     QReadLocker lock(&this->lock);
 
@@ -245,6 +280,12 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
                     plankProfileBitratesKbps));
     settings.setValue(SER_MANUALBOOKMARK, manualBookmark);
     settings.setValue(SER_SERVERUUID, serverUuid);
+    if (policy.rememberUsername() && validRememberedUsername(m_RememberedUsername)) {
+        settings.setValue(SER_AUTH_USERNAME, m_RememberedUsername);
+    }
+    else {
+        forgetSavedUsername(settings);
+    }
     if (!outputTopology.outputs.isEmpty()) {
         settings.setValue(SER_OUTPUTTOPOLOGY,
                           QJsonDocument(outputTopology.toJson()).toJson(QJsonDocument::Compact));
@@ -262,6 +303,47 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
         }
         settings.endArray();
     }
+}
+
+QString NvComputer::rememberedUsername(const PlankClientPolicy& policy) const
+{
+    if (!policy.rememberUsername()) return QString();
+    QReadLocker locker(&lock);
+    return m_RememberedUsername;
+}
+
+void NvComputer::rememberAuthenticatedUsername(const QString& username,
+                                                const NvAddress& expectedAddress,
+                                                const PlankClientPolicy& policy)
+{
+    const bool enabled = policy.rememberUsername();
+    QWriteLocker locker(&lock);
+    if (!enabled) {
+        m_RememberedUsername.clear();
+        return;
+    }
+    // A bookmark may have been edited while authentication was in flight.
+    const NvAddress bookmarkAddress = manualAddress.isNull() ? activeAddress : manualAddress;
+    if (!expectedAddress.isNull() && expectedAddress == bookmarkAddress &&
+            validRememberedUsername(username)) {
+        m_RememberedUsername = username;
+    }
+}
+
+void NvComputer::forgetSavedUsername(QSettings& settings)
+{
+    settings.remove(SER_AUTH_USERNAME);
+}
+
+void NvComputer::forgetSavedUsernames(QSettings& settings, const QString& array)
+{
+    settings.beginGroup(array);
+    for (const auto& bookmark : settings.childGroups()) {
+        settings.beginGroup(bookmark);
+        forgetSavedUsername(settings);
+        settings.endGroup();
+    }
+    settings.endGroup();
 }
 
 bool NvComputer::isEqualSerialized(const NvComputer &that) const
@@ -283,6 +365,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
                that.plankProfileBitratesKbps &&
            this->manualBookmark == that.manualBookmark &&
            this->serverUuid == that.serverUuid &&
+           this->m_RememberedUsername == that.m_RememberedUsername &&
            this->outputTopology.toJson() == that.outputTopology.toJson() &&
            this->appList == that.appList;
 }
@@ -329,7 +412,9 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     }
 
     const QString advertisedControlPort = NvHTTP::getXmlString(serverInfo, "HttpsPort");
-    if (!advertisedControlPort.isEmpty() &&
+    // Behind the broker the control port is the leased session port, while
+    // the host still advertises its own (28989); the pin binds the identity.
+    if (!http.isBrokered() && !advertisedControlPort.isEmpty() &&
             advertisedControlPort.toUShort() != http.controlPort()) {
         throw GfeHttpResponseException(
                     400, "Host advertised a different PLANK control port");
@@ -360,9 +445,19 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
             NvHTTP::getXmlString(serverInfo, "PlankTopologyVersion").toInt();
     this->plankFeatureFlags =
             NvHTTP::getXmlString(serverInfo, "PlankFeatureFlags").toInt();
+    for (const QString& mode : NvHTTP::getXmlString(serverInfo, "PlankEncodingModes")
+                 .split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const QString trimmed = mode.trimmed();
+        if (!trimmed.isEmpty() && !this->plankEncodingModes.contains(trimmed)) {
+            this->plankEncodingModes.append(trimmed);
+        }
+    }
     this->authorizationState = NvHTTP::getXmlString(serverInfo, "PairStatus") == "1" ?
                 AS_AUTHORIZED : AS_UNAUTHORIZED;
     this->currentGameId = NvHTTP::getCurrentGame(serverInfo);
+    this->plankOccupied = NvHTTP::getPlankOccupied(serverInfo);
+    this->plankSessionUser = this->plankOccupied ?
+                NvHTTP::getPlankSessionUser(serverInfo) : QString();
     this->appVersion = NvHTTP::getXmlString(serverInfo, "appversion");
     this->activeAddress = http.address();
     this->state = NvComputer::CS_ONLINE;
@@ -609,6 +704,7 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
     ASSIGN_IF_CHANGED(plankHostVersion);
     ASSIGN_IF_CHANGED(plankTopologyVersion);
     ASSIGN_IF_CHANGED(plankFeatureFlags);
+    ASSIGN_IF_CHANGED(plankEncodingModes);
     if (plankAuthentication && sessionToken.isEmpty()) {
         if (authorizationState != AS_UNAUTHORIZED) {
             authorizationState = AS_UNAUTHORIZED;
@@ -620,6 +716,8 @@ bool NvComputer::update(const NvComputer& that, NvAddress expectedAddress)
     }
     ASSIGN_IF_CHANGED(serverCodecModeSupport);
     ASSIGN_IF_CHANGED(currentGameId);
+    ASSIGN_IF_CHANGED(plankOccupied);
+    ASSIGN_IF_CHANGED(plankSessionUser);
     ASSIGN_IF_CHANGED(activeAddress);
     ASSIGN_IF_CHANGED(state);
     ASSIGN_IF_CHANGED(appVersion);

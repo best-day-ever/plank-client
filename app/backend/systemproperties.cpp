@@ -2,6 +2,7 @@
 #include "utils.h"
 
 #include <QGuiApplication>
+#include <QFile>
 #include <QLibraryInfo>
 
 #include "streaming/session.h"
@@ -70,6 +71,13 @@ SystemProperties::SystemProperties()
     Q_ASSERT(!monitorRefreshRates.isEmpty());
     Q_ASSERT(!monitorNativeResolutions.isEmpty());
     Q_ASSERT(!monitorSafeAreaResolutions.isEmpty());
+}
+
+QString SystemProperties::plankChangelog() const
+{
+    // Release notes travel with the installed Client; no network or Host lookup.
+    QFile notes(QStringLiteral(":/res/changelog.md"));
+    return notes.open(QIODevice::ReadOnly) ? QString::fromUtf8(notes.readAll()) : QString();
 }
 
 QRect SystemProperties::getNativeResolution(int displayIndex)

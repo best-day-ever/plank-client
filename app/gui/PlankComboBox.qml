@@ -28,13 +28,19 @@ ComboBox {
         contextType: "2d"
 
         onPaint: {
-            context.reset()
-            context.moveTo(1, 1)
-            context.lineTo(width / 2, height - 1)
-            context.lineTo(width - 1, 1)
-            context.lineWidth = 1.5
-            context.strokeStyle = control.enabled ? theme.textSecondary : theme.textDisabled
-            context.stroke()
+            // getContext: the context property is still null on the first
+            // paint of a combo box created inside an open popup.
+            var ctx = getContext("2d")
+            if (!ctx) {
+                return
+            }
+            ctx.reset()
+            ctx.moveTo(1, 1)
+            ctx.lineTo(width / 2, height - 1)
+            ctx.lineTo(width - 1, 1)
+            ctx.lineWidth = 1.5
+            ctx.strokeStyle = control.enabled ? theme.textSecondary : theme.textDisabled
+            ctx.stroke()
         }
     }
 

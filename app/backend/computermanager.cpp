@@ -1,4 +1,5 @@
 #include "computermanager.h"
+#include "clientdisplayprobe.h"
 #include "nvhttp.h"
 #include "settings/plankclientpolicy.h"
 
@@ -9,11 +10,6 @@
 #include <QThreadPool>
 #include <QCoreApplication>
 #include <QGuiApplication>
-#include <QScreen>
-#ifdef Q_OS_DARWIN
-#include "streaming/streamutils.h"
-#include <ApplicationServices/ApplicationServices.h>
-#endif
 
 #include <utility>
 #include <limits>
@@ -109,16 +105,35 @@ private:
     bool tryPollComputer(QNetworkAccessManager* nam, NvAddress address, bool& changed)
     {
         QString sessionToken;
+        QByteArray sessionIdentity;
+        NvAddress trustAddress;
         {
             QReadLocker lock(&m_Computer->lock);
             sessionToken = m_Computer->sessionToken;
+            sessionIdentity = m_Computer->sessionIdentityKey;
+            trustAddress = m_Computer->manualAddress.isNull() ? address : m_Computer->manualAddress;
         }
         NvHTTP http(address, nam);
-        http.setPlankSessionToken(sessionToken);
+        http.setTrustAddress(trustAddress);
+        http.setPlankSessionToken(sessionToken, sessionIdentity);
 
         QString serverInfo;
         try {
             serverInfo = http.getServerInfo(NvHTTP::NvLogLevel::NVLL_NONE, true);
+        } catch (const QtNetworkReplyException& error) {
+            if (sessionToken.isEmpty() || error.getError() != QNetworkReply::SslHandshakeFailedError) return false;
+            // Keep an otherwise reachable replacement available for explicit
+            // sign-in/consent, but never retry a bearer token to the new key.
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->sessionToken.clear();
+                m_Computer->sessionIdentityKey.clear();
+                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+                changed = true;
+            }
+            http.setPlankSessionToken({}, {});
+            try { serverInfo = http.getServerInfo(NvHTTP::NVLL_NONE, true); }
+            catch (...) { return false; }
         } catch (...) {
             return false;
         }
@@ -132,11 +147,23 @@ private:
         // Ensure the machine that responded is the one we intended to contact.
         // An unresolved manual bookmark binds to the first identity it reaches.
         if (!m_Computer->acceptsServerUuid(newState.uuid)) {
+            QWriteLocker lock(&m_Computer->lock);
+            if (m_Computer->manualBookmark && address == m_Computer->manualAddress) {
+                // This is reachability, not trust. Only authenticated sign-in
+                // below may bind a replacement UUID/update its capabilities.
+                m_Computer->state = NvComputer::CS_ONLINE;
+                m_Computer->activeAddress = address;
+                m_Computer->authorizationState = NvComputer::AS_UNAUTHORIZED;
+                m_Computer->sessionToken.clear();
+                m_Computer->sessionIdentityKey.clear();
+                changed = true;
+                return true;
+            }
             qInfo() << "Found unexpected PC" << newState.name << "looking for" << m_Computer->name;
             return false;
         }
 
-        changed = m_Computer->update(newState, address);
+        changed = m_Computer->update(newState, address) || changed;
         return true;
     }
 
@@ -257,6 +284,14 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs)
       m_NeedsDelayedFlush(false)
 {
     QSettings settings;
+
+    if (!PlankClientPolicy().rememberUsername()) {
+        // Purge both copies, including stale backup entries outside array size.
+        // Otherwise a restored backup could revive a disabled saved username.
+        for (const auto array : {SER_HOSTS, SER_HOSTS_BACKUP}) {
+            NvComputer::forgetSavedUsernames(settings, QString::fromLatin1(array));
+        }
+    }
 
     // If there's a hosts backup copy, we must have failed to commit
     // a previous update before exiting. Restore the backup now.
@@ -677,16 +712,34 @@ class PendingAuthenticationTask : public QObject, public QRunnable
 
 public:
     PendingAuthenticationTask(ComputerManager* computerManager, NvComputer* computer,
-                              QString username, QString password, QString matchedDesktopMode, int matchedDesktopScale)
+                              QString username, QString password, QString matchedDesktopMode, int matchedDesktopScale,
+                              bool allowTakeoverPrompt)
         : m_ComputerManager(computerManager),
           m_Computer(computer),
           m_Username(std::move(username)),
           m_Password(std::move(password)),
           m_MatchedDesktopMode(std::move(matchedDesktopMode)),
-          m_MatchedDesktopScale(matchedDesktopScale)
+          m_MatchedDesktopScale(matchedDesktopScale),
+          m_TakeoverDecision(allowTakeoverPrompt ? AuthenticationTakeover::create() : AuthenticationTakeover()),
+          m_TrustDecision(allowTakeoverPrompt ? AuthenticationTakeover::create() : AuthenticationTakeover())
     {
         connect(this, &PendingAuthenticationTask::authenticationCompleted,
                 computerManager, &ComputerManager::authenticationCompleted);
+        qRegisterMetaType<AuthenticationTakeover>();
+        connect(this, &PendingAuthenticationTask::authenticationTakeoverRequested,
+                computerManager, &ComputerManager::authenticationTakeoverRequested);
+        connect(this, &PendingAuthenticationTask::authenticationCancelled,
+                computerManager, &ComputerManager::authenticationCancelled);
+        connect(this, &PendingAuthenticationTask::authenticationTrustRequested,
+                computerManager, &ComputerManager::authenticationTrustRequested);
+        // Register before starting the worker. Shutdown may occur while TLS
+        // authentication is still in progress, before a conflict is received.
+        if (m_TakeoverDecision) {
+            connect(qApp, &QCoreApplication::aboutToQuit, this,
+                    [decision = m_TakeoverDecision] { decision->respond(false); }, Qt::DirectConnection);
+            connect(qApp, &QCoreApplication::aboutToQuit, this,
+                    [decision = m_TrustDecision] { decision->respond(false); }, Qt::DirectConnection);
+        }
     }
 
     ~PendingAuthenticationTask()
@@ -697,6 +750,10 @@ public:
 
 signals:
     void authenticationCompleted(NvComputer* computer, QString error);
+    void authenticationTakeoverRequested(NvComputer* computer, AuthenticationTakeover decision);
+    void authenticationTrustRequested(NvComputer* computer, QString endpoint, QString previousKey,
+                                      QString replacementKey, AuthenticationTakeover decision);
+    void authenticationCancelled(NvComputer* computer);
 
 private:
     void run()
@@ -705,13 +762,30 @@ private:
             // An explicit sign-in starts a new conversation, not a request
             // authorized with a previous (possibly expired) session token.
             NvAddress address;
+            NvAddress trustAddress;
             {
                 QReadLocker lock(&m_Computer->lock);
                 address = m_Computer->activeAddress;
+                trustAddress = m_Computer->manualAddress.isNull() ? address : m_Computer->manualAddress;
             }
             NvHTTP http(address);
+            http.setTrustAddress(trustAddress);
+            if (m_TrustDecision) http.setTrustPrompt([this](const HostIdentityChangedException& change) {
+                emit authenticationTrustRequested(m_Computer, change.endpoint,
+                    HostTrustStore::displayFingerprint(change.previousKey),
+                    HostTrustStore::displayFingerprint(change.replacementKey), m_TrustDecision);
+                return m_TrustDecision->wait();
+            });
             bool greeter = false;
             const QString token = http.authenticate(m_Username, m_Password, &greeter);
+            NvComputer authenticated(http, http.getServerInfo(NvHTTP::NVLL_NONE));
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                if (m_Computer->manualBookmark) m_Computer->serverUuid = authenticated.uuid;
+            }
+            if (!m_Computer->acceptsServerUuid(authenticated.uuid))
+                throw GfeHttpResponseException(409, "Workstation identity changed. Recreate its bookmark.");
+            m_Computer->update(authenticated, address);
             NvOutputTopology topology;
             bool topologySupported;
             bool macDesktop;
@@ -726,7 +800,21 @@ private:
                 appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(m_Computer->plankVideoProfile);
             }
             if (topologySupported) {
-                topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode, m_MatchedDesktopScale) : http.getOutputTopology();
+                try {
+                    topology = macDesktop ? http.prepareMacDisplay(desktopMode, appleEncodingMode, m_MatchedDesktopScale) : http.getOutputTopology();
+                } catch (const MacSessionActiveException& conflict) {
+                    // Only a fresh user-initiated GUI connection may request
+                    // consent. CLI and automatic reconnect never evict a peer.
+                    if (!m_TakeoverDecision) throw;
+                    emit authenticationTakeoverRequested(m_Computer, m_TakeoverDecision);
+                    const bool accepted = m_TakeoverDecision->wait();
+                    if (!accepted) {
+                        emit authenticationCancelled(m_Computer);
+                        return;
+                    }
+                    topology = http.prepareMacDisplay(desktopMode, appleEncodingMode,
+                                                      m_MatchedDesktopScale, conflict.sessionId());
+                }
             }
             const QVector<NvApp> apps = http.getAppList();
             m_ComputerManager->rememberPlankReconnectCredentials(
@@ -736,6 +824,7 @@ private:
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
+                m_Computer->sessionIdentityKey = http.hostIdentityKey();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
@@ -745,6 +834,7 @@ private:
                 }
                 m_Computer->updateAppList(apps);
             }
+            m_Computer->rememberAuthenticatedUsername(m_Username, trustAddress);
             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
             emit authenticationCompleted(m_Computer, nullptr);
         } catch (const GfeHttpResponseException& error) {
@@ -754,7 +844,9 @@ private:
         } catch (const QtNetworkReplyException& error) {
             m_Password.fill(QChar('\0'));
             m_Password.clear();
-            emit authenticationCompleted(m_Computer, error.toQString());
+            if (error.getError() == QNetworkReply::OperationCanceledError)
+                emit authenticationCancelled(m_Computer);
+            else emit authenticationCompleted(m_Computer, error.toQString());
         }
     }
 
@@ -764,10 +856,12 @@ private:
     QString m_Password;
     QString m_MatchedDesktopMode;
     int m_MatchedDesktopScale;
+    AuthenticationTakeover m_TakeoverDecision;
+    AuthenticationTakeover m_TrustDecision;
 };
 
 void ComputerManager::authenticateHost(NvComputer* computer, QString username,
-                                       QString password)
+                                       QString password, bool allowTakeoverPrompt)
 {
     QString matchedMode;
     int matchedScale = 1;
@@ -782,30 +876,10 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         // current backing pixels AND logical size used by Session. Panel-native
         // pixels alone lose the user's Retina "Looks like" setting.
         Q_ASSERT(QThread::currentThread() == qApp->thread());
-        QVector<NvClientDisplay> displays;
-#ifdef Q_OS_DARWIN
-        CGDirectDisplayID ids[16];
-        uint32_t count = 0;
-        if (CGGetActiveDisplayList(16, ids, &count) == kCGErrorSuccess) {
-            for (uint32_t index = 0; index < count; ++index) {
-                SDL_DisplayMode mode;
-                SDL_Rect safeArea;
-                if (!StreamUtils::getMacCurrentDisplayMode(ids[index], &mode, &safeArea,
-                        m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED)) {
-                    displays.clear();
-                    break;
-                }
-                displays.append({QRect(safeArea.x, safeArea.y, safeArea.w, safeArea.h),
-                    QSize(mode.w, mode.h), QSize(mode.w, mode.h)});
-            }
-        }
-#else
-        for (QScreen* screen : QGuiApplication::screens()) {
-            const QRect geometry = screen->geometry();
-            const qreal ratio = screen->devicePixelRatio();
-            displays.append({geometry, QSize(qRound(geometry.width() * ratio), qRound(geometry.height() * ratio))});
-        }
-#endif
+        // The display probe the dialogs and the Session use; in fullscreen
+        // each display's viewport below the camera housing.
+        const QVector<NvClientDisplay> displays = ClientDisplayProbe::macMatchDisplays(
+                    ClientDisplayProbe::probe(), m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED);
         QString error;
         matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &matchedScale);
         if (matchedMode.isEmpty()) {
@@ -819,7 +893,7 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         }
     }
     PendingAuthenticationTask* authentication = new PendingAuthenticationTask(
-        this, computer, std::move(username), std::move(password), matchedMode, matchedScale);
+        this, computer, std::move(username), std::move(password), matchedMode, matchedScale, allowTakeoverPrompt);
     QThreadPool::globalInstance()->start(authentication);
 }
 
@@ -930,6 +1004,22 @@ QStringList ComputerManager::plankVirtualModeChoices() const
         choice.replace(QLatin1Char('x'), QChar(0x00D7));
     }
     return choices;
+}
+
+QString ComputerManager::plankMatchClientSummary() const
+{
+    const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
+    const ClientDisplayProbe::MatchPreview match = ClientDisplayProbe::matchPreview(displays);
+#ifdef Q_OS_DARWIN
+    const QString client = tr("This Mac: %1").arg(ClientDisplayProbe::describe(displays));
+#else
+    const QString client = tr("This computer: %1").arg(ClientDisplayProbe::describe(displays));
+#endif
+    if (!match.ok) {
+        return client + QLatin1Char('\n') + tr("Matching is unavailable: %1").arg(match.reason);
+    }
+    return client + QLatin1Char('\n') +
+            tr("Match client displays → %1").arg(ClientDisplayProbe::matchSummary(match));
 }
 
 void ComputerManager::addNewHostManually(QString address, QString nickname,
@@ -1238,15 +1328,19 @@ private:
                 }
             }
             QString token;
+            QByteArray identityKey;
             if (existingComputer != nullptr) {
                 QReadLocker computerLock(&existingComputer->lock);
                 token = existingComputer->sessionToken;
+                identityKey = existingComputer->sessionIdentityKey;
+                http.setTrustAddress(existingComputer->manualAddress.isNull() ? m_Address : existingComputer->manualAddress);
             }
             newComputer->sessionToken = token;
+            newComputer->sessionIdentityKey = identityKey;
             if (!token.isEmpty()) {
                 newComputer->authorizationState = NvComputer::AS_AUTHORIZED;
             }
-            http.setPlankSessionToken(token);
+            http.setPlankSessionToken(token, identityKey);
         }
 
         if (!newComputer->sessionToken.isEmpty()) {

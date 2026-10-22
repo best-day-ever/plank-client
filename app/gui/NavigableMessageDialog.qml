@@ -1,5 +1,6 @@
 import QtQuick 2.0
 import QtQuick.Controls 2.2
+import QtQuick.Controls.Material 2.2
 import QtQuick.Layouts 1.2
 
 NavigableDialog {
@@ -14,6 +15,8 @@ NavigableDialog {
     property alias imageSrc: dialogImage.source
     property string acceptButtonText
     property string rejectButtonText
+    // A red accept button, for actions that discard someone's work.
+    property bool acceptButtonDestructive: false
 
     onOpened: {
         var acceptButton = standardButton(Dialog.Yes)
@@ -72,9 +75,21 @@ NavigableDialog {
     footer: DialogButtonBox {
         id: dialogButtonBox
         standardButtons: dialog.standardButtons
+        leftPadding: dialog.padding - 6
+        rightPadding: dialog.padding - 6
+        topPadding: 4
+        bottomPadding: 10
+        Material.foreground: messageTheme.textPrimary
+        background: Item {}
 
+        // The accepting answer is the one filled button; red when it
+        // discards someone's work.
         delegate: Button {
-            flat: true
+            highlighted: DialogButtonBox.buttonRole === DialogButtonBox.AcceptRole ||
+                         DialogButtonBox.buttonRole === DialogButtonBox.YesRole
+            flat: !highlighted
+            Material.accent: highlighted && dialog.acceptButtonDestructive ?
+                                 messageTheme.danger : messageTheme.accent
 
             Keys.onReturnPressed: clicked()
             Keys.onEnterPressed: clicked()

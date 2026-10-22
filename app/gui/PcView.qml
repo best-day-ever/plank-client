@@ -12,6 +12,7 @@ CenteredGridView {
     property ComputerModel computerModel : createModel()
 
     id: pcGrid
+    objectName: qsTr("Local workstations")
 
     PlankTheme {
         id: theme
@@ -45,9 +46,10 @@ CenteredGridView {
         ComputerManager.computerAddCompleted.disconnect(addComplete)
     }
 
-    function authenticationComplete(error)
+    function authenticationComplete(error, pcIndex)
     {
-        var pcIndex = loginDialog.pcIndex
+        authenticationTakeoverDialog.close()
+        hostTrustDialog.close()
         loginDialog.close()
         if (error !== undefined) {
             errorDialog.text = error
@@ -78,7 +80,7 @@ CenteredGridView {
     function addComplete(success)
     {
         if (!success) {
-            errorDialog.text = qsTr("Unable to connect to the specified PC.")
+            errorDialog.text = qsTr("Could not reach that workstation. Check the address and try again.")
 
             errorDialog.open()
         }
@@ -89,6 +91,18 @@ CenteredGridView {
         var model = Qt.createQmlObject('import ComputerModel 1.0; ComputerModel {}', parent, '')
         model.initialize(ComputerManager)
         model.authenticationCompleted.connect(authenticationComplete)
+        model.authenticationTakeoverRequested.connect(function() { authenticationTakeoverDialog.open() })
+        model.authenticationTrustRequested.connect(function(endpoint, previousKey, replacementKey) {
+            hostTrustDialog.endpoint = endpoint
+            hostTrustDialog.previousKey = previousKey
+            hostTrustDialog.replacementKey = replacementKey
+            hostTrustDialog.open()
+        })
+        model.authenticationCancelled.connect(function() {
+            authenticationTakeoverDialog.close()
+            hostTrustDialog.close()
+            loginDialog.close()
+        })
         model.relayWakeCompleted.connect(function(error) {
             if (error !== undefined) {
                 errorDialog.text = error
@@ -111,8 +125,8 @@ CenteredGridView {
         Label {
             height: searchSpinner.height
             elide: Label.ElideRight
-            text: StreamingPreferences.enableMdns ? qsTr("Searching for compatible hosts on your local network...")
-                                                  : qsTr("Automatic PC discovery is disabled. Add your PC manually.")
+            text: StreamingPreferences.enableMdns ? qsTr("Searching for workstations on your local network…")
+                                                  : qsTr("No workstations yet. Add one with the button at the top right.")
             color: theme.textSecondary
             font.pointSize: 15
             verticalAlignment: Text.AlignVCenter
@@ -127,7 +141,22 @@ CenteredGridView {
         width: pcGrid.cellWidth
         height: 76
         grid: pcGrid
-        Accessible.name: model.name
+        function sessionStatusText() {
+            if (model.statusUnknown)
+                return qsTr("Checking")
+            if (!model.online)
+                return qsTr("Offline")
+            if (!model.inSession)
+                return qsTr("Online")
+            if (model.sessionUser)
+                return qsTr("In Session - %1").arg(model.sessionUser)
+            return qsTr("In Session")
+        }
+
+        Accessible.name: model.inSession ?
+                          (model.sessionUser ? qsTr("%1, in session - %2").arg(model.name).arg(model.sessionUser)
+                                             : qsTr("%1, in session").arg(model.name))
+                          : model.name
         hoverEnabled: true
 
         background: Rectangle {
@@ -198,21 +227,37 @@ CenteredGridView {
 
         Column {
             id: workstationStatus
-            width: 190
+            width: model.inSession && model.sessionUser ? 280 : 190
             anchors.right: parent.right
             anchors.rightMargin: 18
             anchors.verticalCenter: parent.verticalCenter
             spacing: 3
 
-            Label {
+            RowLayout {
                 width: parent.width
-                text: model.statusUnknown ? qsTr("Checking") :
-                      (model.online ? qsTr("Online") : qsTr("Offline"))
-                color: model.statusUnknown ? theme.textSecondary :
-                       (model.online ? theme.success : theme.textDisabled)
-                font.pointSize: 11
-                font.weight: Font.DemiBold
-                horizontalAlignment: Text.AlignRight
+                spacing: 0
+                Item { Layout.fillWidth: true }
+                Label {
+                    id: occupancyLabel
+                    text: model.statusUnknown ? qsTr("Checking") :
+                          !model.online ? qsTr("Offline") :
+                          model.inSession ? qsTr("In Session") : qsTr("Online")
+                    color: model.statusUnknown ? theme.textSecondary :
+                           !model.online ? theme.textDisabled :
+                           model.inSession ? theme.warning : theme.success
+                    font.pointSize: 11
+                    font.weight: Font.DemiBold
+                    Layout.minimumWidth: implicitWidth
+                }
+                Label {
+                    visible: model.online && !model.statusUnknown && model.inSession && !!model.sessionUser
+                    text: " - " + (model.sessionUser || "")
+                    elide: Text.ElideRight
+                    color: occupancyLabel.color
+                    font: occupancyLabel.font
+                    Layout.minimumWidth: 0
+                    Layout.maximumWidth: Math.max(0, workstationStatus.width - occupancyLabel.implicitWidth)
+                }
             }
 
             Label {
@@ -232,13 +277,13 @@ CenteredGridView {
             sourceComponent: NavigableMenu {
                 id: pcContextMenu
                 MenuItem {
-                    text: qsTr("PC Status: %1").arg(model.online ? qsTr("Online") : qsTr("Offline"))
+                    text: qsTr("Status: %1").arg(pcEntry.sessionStatusText())
                     font.bold: true
                     enabled: false
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Wake PC")
+                    text: qsTr("Wake workstation")
                     visible: computerModel.relayWakeEnabled && model.manualBookmark &&
                              !model.statusUnknown && !model.online
                     onTriggered: computerModel.requestRelayWake(index)
@@ -269,7 +314,7 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Rename PC")
+                    text: qsTr("Rename…")
                     onTriggered: {
                         renamePcDialog.pcIndex = index
                         renamePcDialog.originalName = model.name
@@ -279,7 +324,7 @@ CenteredGridView {
                 }
                 NavigableMenuItem {
                     parentMenu: pcContextMenu
-                    text: qsTr("Delete PC")
+                    text: qsTr("Remove…")
                     onTriggered: {
                         deletePcDialog.pcIndex = index
                         deletePcDialog.pcName = model.name
@@ -340,6 +385,19 @@ CenteredGridView {
         id: errorDialog
     }
 
+    SessionTakeoverDialog {
+        id: authenticationTakeoverDialog
+        onAccepted: computerModel.respondToAuthenticationTakeover(true)
+        onRejected: computerModel.respondToAuthenticationTakeover(false)
+    }
+
+    HostTrustDialog {
+        id: hostTrustDialog
+        onAccepted: computerModel.respondToHostTrust(true)
+        onRejected: computerModel.respondToHostTrust(false)
+        onClosed: computerModel.respondToHostTrust(false)
+    }
+
     NavigableDialog {
         id: loginDialog
         property int pcIndex: -1
@@ -348,7 +406,15 @@ CenteredGridView {
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
 
-        onOpened: usernameField.forceActiveFocus()
+        onOpened: {
+            standardButton(Dialog.Ok).text = qsTr("Sign in")
+            usernameField.text = computerModel.rememberedUsername(pcIndex)
+            passwordField.clear()
+            if (usernameField.text)
+                passwordField.forceActiveFocus()
+            else
+                usernameField.forceActiveFocus()
+        }
         onClosed: {
             usernameField.clear()
             passwordField.clear()
@@ -408,38 +474,15 @@ CenteredGridView {
         property int originalProfile: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
         property int originalCaptureSource: StreamingPreferences.PLANK_CAPTURE_NVFBC_8BIT
         property var originalProfileBitratesKbps: []
-        property var profileBitratesKbps: []
         title: qsTr("Edit workstation bookmark")
         width: Math.min(640, parent.width - 40)
         height: Math.min(implicitHeight, parent.height - 20)
-        dim: false
         modal: true
         closePolicy: Popup.CloseOnEscape
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         function currentVideoProfile() {
-            if (editEncodingProfile.currentIndex >= 0 &&
-                    editEncodingProfile.currentIndex < editEncodingProfile.model.count) {
-                return editEncodingProfile.model.get(
-                            editEncodingProfile.currentIndex).val
-            }
-            return StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-        }
-
-        function applyProfileBitrate() {
-            var profile = currentVideoProfile()
-            var saved = profileBitratesKbps[profile]
-            editBitrateSlider.value = saved === undefined ?
-                        StreamingPreferences.plankDefaultBitrateKbps(profile) : saved
-        }
-
-        function rememberProfileBitrate() {
-            var values = []
-            for (var i = 0; i < profileBitratesKbps.length; ++i) {
-                values.push(profileBitratesKbps[i])
-            }
-            values[currentVideoProfile()] = Math.round(editBitrateSlider.value)
-            profileBitratesKbps = values
+            return editVideoSettings.videoProfile
         }
 
         function virtualModeSupported(mode) {
@@ -448,7 +491,7 @@ CenteredGridView {
         }
 
         function ensureVirtualModesCompatible() {
-            if (editCaptureSource.captureSource === 2) return
+            if (editVideoSettings.captureSource === 2) return
             var fallback = -1
             for (var i = 0; i < virtualModeChoices.length; ++i) {
                 if (virtualModeChoices[i] === "4096\u00d72160") {
@@ -472,26 +515,14 @@ CenteredGridView {
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
             hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
-            editCaptureSource.selectCaptureSource(originalCaptureSource)
+            editVideoSettings.load(originalCaptureSource, originalProfile,
+                                   originalProfileBitratesKbps, [])
             editHostLayout.currentIndex = hostLayoutIndex
             editVirtualMode1.currentIndex = virtualMode1Index
             editVirtualMode2.currentIndex = virtualMode2Index
-            for (var i = 0; i < editEncodingProfile.model.count; i++) {
-                if (editEncodingProfile.model.get(i).val === originalProfile) {
-                    editEncodingProfile.currentIndex = i
-                    break
-                }
-            }
-            var loadedBitrates = []
-            for (var bitrateIndex = 0;
-                 bitrateIndex < originalProfileBitratesKbps.length;
-                 ++bitrateIndex) {
-                loadedBitrates.push(originalProfileBitratesKbps[bitrateIndex])
-            }
-            profileBitratesKbps = loadedBitrates
-            applyProfileBitrate()
             ensureVirtualModesCompatible()
             editAddressText.forceActiveFocus()
+            standardButton(Dialog.Ok).text = qsTr("Save")
             standardButton(Dialog.Ok).enabled = Qt.binding(function() {
                 return editAddressText.text.trim() !== "" &&
                        editNicknameText.text.trim() !== "" &&
@@ -503,7 +534,6 @@ CenteredGridView {
             editNicknameText.clear()
             hostDisplayPolicy = -1
             originalProfileBitratesKbps = []
-            profileBitratesKbps = []
         }
         onAccepted: {
             if (!computerModel.editComputerBookmark(pcIndex,
@@ -513,10 +543,9 @@ CenteredGridView {
                                                     editHostLayout.currentIndex,
                                                     editVirtualMode1.currentIndex,
                                                     editVirtualMode2.currentIndex,
-                                                    editEncodingProfile.model.get(
-                                                        editEncodingProfile.currentIndex).val,
-                                                    editCaptureSource.captureSource,
-                                                    profileBitratesKbps)) {
+                                                    editVideoSettings.videoProfile,
+                                                    editVideoSettings.captureSource,
+                                                    editVideoSettings.officeBitratesKbps)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.open()
             }
@@ -543,128 +572,27 @@ CenteredGridView {
                 Layout.fillWidth: true
             }
 
-            Label {
-                text: qsTr("Capture source")
-                font.bold: true
-            }
-            PlankCaptureSourceBox {
-                id: editCaptureSource
+            PlankVideoSettings {
+                id: editVideoSettings
                 Layout.fillWidth: true
                 hostAddress: editAddressText.text
                 probingEnabled: editBookmarkDialog.visible
-                onCaptureSourceChanged: {
-                    editHostLayout.currentIndex = 0
-                    editEncodingProfile.currentIndex = captureSource === 0 ? 3 : 0
-                    Qt.callLater(editBookmarkDialog.applyProfileBitrate)
-                }
+                nvfbcDefaultProfile: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
+                onCaptureSourceEdited: editHostLayout.currentIndex = 0
+                onProfileActivated: editBookmarkDialog.ensureVirtualModesCompatible()
             }
 
             Label {
-                text: qsTr("Encoding profile")
-                font.bold: true
-            }
-            PlankComboBox {
-                id: editEncodingProfile
-                Layout.fillWidth: true
-                textRole: "text"
-                model: editCaptureSource.captureSource === 2 ? editAppleEncodingProfileModel :
-                       editCaptureSource.captureSource === 0 ?
-                           editNvfbcEncodingProfileModel : editNativeEncodingProfileModel
-                onActivated: {
-                    editBookmarkDialog.applyProfileBitrate()
-                    editBookmarkDialog.ensureVirtualModesCompatible()
-                }
-            }
-
-            ListModel {
-                id: editNvfbcEncodingProfileModel
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:2:2")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_422
-                }
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:2:2")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_422
-                }
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR)")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.264 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_H264_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 8-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_8BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-                }
-            }
-
-            ListModel {
-                id: editAppleEncodingProfileModel
-                ListElement {
-                    text: qsTr("HEVC 10-bit 4:2:0 — Apple VideoToolbox (Preview)")
-                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_420
-                }
-                ListElement {
-                    text: qsTr("HEVC 10-bit 4:4:4 — Apple VideoToolbox (Preview)")
-                    val: StreamingPreferences.PLANK_PROFILE_APPLE_HEVC_10BIT_444
-                }
-            }
-
-            ListModel {
-                id: editNativeEncodingProfileModel
-                ListElement {
-                    text: qsTr("H.264 10-bit 4:4:4 (identity GBR) — x264")
-                    val: StreamingPreferences.PLANK_PROFILE_H264_10BIT_444
-                }
-                ListElement {
-                    text: qsTr("H.265 10-bit 4:4:4 (identity GBR) — NVENC")
-                    val: StreamingPreferences.PLANK_PROFILE_NVENC_HEVC_10BIT_444
-                }
-            }
-
-            Label {
-                text: qsTr("Startup encoder target: %1 Mbps").arg(
-                          (editBitrateSlider.value / 1000.0).toFixed(1))
-                font.bold: true
-            }
-
-            Slider {
-                id: editBitrateSlider
-                Layout.fillWidth: true
-                from: StreamingPreferences.plankBitrateMinimumKbps()
-                to: StreamingPreferences.plankBitrateMaximumKbps()
-                stepSize: StreamingPreferences.plankBitrateStepKbps()
-                snapMode: Slider.SnapAlways
-                onMoved: editBookmarkDialog.rememberProfileBitrate()
-            }
-
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Saved independently for each encoding profile. Toolbar adjustments apply only to the active session.")
-                wrapMode: Text.Wrap
-                opacity: 0.72
-            }
-
-            Label {
+                Layout.topMargin: 10
                 text: qsTr("Host display layout")
                 font.bold: true
             }
             PlankComboBox {
                 id: editHostLayout
                 Layout.fillWidth: true
-                model: editCaptureSource.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
+                model: editVideoSettings.captureSource === 2 ? [qsTr("Match client display(s)"), qsTr("One Mac virtual display")] : [
                     qsTr("Match client displays"),
-                    qsTr("Physical displays"),
+                    qsTr("Match Host"),
                     qsTr("One virtual display"),
                     qsTr("Two virtual displays (horizontal)")
                 ]
@@ -672,21 +600,29 @@ CenteredGridView {
 
             Label {
                 Layout.fillWidth: true
-                visible: editCaptureSource.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
-                text: qsTr("This headless workstation does not provide physical displays.")
+                visible: editVideoSettings.captureSource !== 2 && editHostLayout.currentIndex === 0
+                text: visible ? ComputerManager.plankMatchClientSummary() : ""
                 wrapMode: Text.Wrap
                 opacity: 0.72
             }
 
             Label {
-                text: editCaptureSource.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
+                Layout.fillWidth: true
+                visible: editVideoSettings.captureSource !== 2 && editBookmarkDialog.hostDisplayPolicy === 0
+                text: qsTr("Match Host requires physical displays attached to the workstation.")
+                wrapMode: Text.Wrap
+                opacity: 0.72
+            }
+
+            Label {
+                text: editVideoSettings.captureSource === 2 ? qsTr("Mac desktop resolution") : qsTr("Virtual display 1 resolution")
                 font.bold: true
-                opacity: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2) ? 1.0 : 0.5
+                opacity: (editVideoSettings.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2) ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode1
                 Layout.fillWidth: true
-                enabled: (editCaptureSource.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2)
+                enabled: (editVideoSettings.captureSource === 2 ? editHostLayout.currentIndex === 1 : editHostLayout.currentIndex >= 2)
                 model: editBookmarkDialog.virtualModeChoices
                 delegate: ItemDelegate {
                     width: editVirtualMode1.width
@@ -697,14 +633,14 @@ CenteredGridView {
             }
 
             Label {
-                visible: editCaptureSource.captureSource !== 2
+                visible: editVideoSettings.captureSource !== 2
                 text: qsTr("Virtual display 2 resolution")
                 font.bold: true
                 opacity: editHostLayout.currentIndex === 3 ? 1.0 : 0.5
             }
             PlankComboBox {
                 id: editVirtualMode2
-                visible: editCaptureSource.captureSource !== 2
+                visible: editVideoSettings.captureSource !== 2
                 Layout.fillWidth: true
                 enabled: editHostLayout.currentIndex === 3
                 model: editBookmarkDialog.virtualModeChoices
@@ -717,6 +653,7 @@ CenteredGridView {
             }
 
             Label {
+                Layout.topMargin: 10
                 text: qsTr("Scaling")
                 font.bold: true
             }
@@ -742,6 +679,8 @@ CenteredGridView {
         property string pcName : ""
         text: qsTr("Are you sure you want to remove '%1'?").arg(pcName)
         standardButtons: Dialog.Yes | Dialog.No
+        acceptButtonText: qsTr("Remove")
+        rejectButtonText: qsTr("Cancel")
 
         onAccepted: {
             computerModel.deleteComputer(pcIndex)
@@ -750,7 +689,7 @@ CenteredGridView {
 
     NavigableDialog {
         id: renamePcDialog
-        property string label: qsTr("Enter the new name for this PC:")
+        property string label: qsTr("New name for this workstation:")
         property string originalName
         property int pcIndex : -1;
 

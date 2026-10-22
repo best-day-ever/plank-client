@@ -5,7 +5,9 @@
 #include <QUuid>
 
 namespace PlankHostRecovery {
-constexpr quint64 SilenceMs = 1000;
+// The host deliberately sends an idle desktop at about one frame per second.
+// Allow several missed idle intervals before probing/reporting a stalled worker.
+constexpr quint64 SilenceMs = 3000;
 constexpr quint64 ProbeIntervalMs = 1000;
 
 inline QString canonicalInstance(const QString& value)

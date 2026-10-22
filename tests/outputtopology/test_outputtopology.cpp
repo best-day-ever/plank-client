@@ -1,7 +1,17 @@
 #include <QtTest>
+#include <functional>
+#include <QJsonArray>
+#include <QJsonDocument>
 
 #include "outputtopology.h"
 #include "../../app/streaming/macdisplaygeometry.h"
+
+static NvClientDisplay clientWithPrimary(QRect bounds, QSize nativeSize, bool main)
+{
+    NvClientDisplay display {bounds, nativeSize};
+    display.main = main;
+    return display;
+}
 
 class TestOutputTopology : public QObject
 {
@@ -14,28 +24,49 @@ private slots:
     void rejectsDuplicateIdentity();
     void rejectsConfiguredModeMismatch();
     void acceptsTallCinemaModes();
+    void negotiatesNotchSafeLaptopMode();
     void enforcesHostDisplayPolicy();
     void validatesRequestedLayoutGeometry();
     void matchesOneClientDisplay();
+    void matchesPrimaryInDesktopOrder();
+    void primaryHintRequiresMatchingOutputCount();
+    void omitsAmbiguousPrimaryHints();
     void matchesTwoClientDisplaysLeftToRight();
     void rejectsUnsupportedClientLayouts();
     void parsesFixedCapture();
     void rejectsInvalidFixedCapture();
     void recognizesDescriptionCapabilities();
+    void launchCapabilitiesUseAuthenticatedTopology();
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
+    void matchesMultipleNativeFullscreenViewports();
     void buildsMacDisplayRequest();
+    void computesClientMatchTarget();
+    void bestFitsOddClientDisplays_data();
+    void bestFitsOddClientDisplays();
+    void bestFitsTwoClientDisplays();
+    void keepsHostTopologyParsingStrict();
+    void retriesOnlyAnEmptyModesetSnapshot();
+    void parsesDisplayArrangementVector();
+    void ignoresArrangementFieldsWithoutTheFeature();
+    void rejectsMalformedArrangementFields();
+    void matchesRequestedArrangement();
+    void parsesPackedCapture();
 };
 
 void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
 {
     const auto negotiated = NvOutputTopology::SupportedFeatureFlags &
                             NvOutputTopology::ClipboardSyncFeature;
+    const auto files = NvOutputTopology::SupportedFeatureFlags &
+                       NvOutputTopology::ClipboardFilesFeature;
 #ifdef Q_OS_MACOS
     QCOMPARE(negotiated, NvOutputTopology::ClipboardSyncFeature);
+    QCOMPARE(files, NvOutputTopology::ClipboardFilesFeature);
 #else
     QCOMPARE(negotiated, 0);
+    QCOMPARE(files, 0);
 #endif
     // A host without the feature cannot enable it on any client platform.
     QCOMPARE(NvOutputTopology::SupportedFeatureFlags &
@@ -60,6 +91,25 @@ void TestOutputTopology::matchesMacFullscreenViewport()
         const auto request = NvOutputTopology::macDisplayRequest(
             QStringLiteral("3420x%1").arg(pixelHeight), "hevc-10-444-videotoolbox", scale);
         QVERIFY(!request.isEmpty());
+    }
+}
+
+void TestOutputTopology::matchesMultipleNativeFullscreenViewports()
+{
+    for (int count : {-1, 0}) {
+        QVERIFY(!MacDisplayGeometry::useNativeFullscreen(count));
+    }
+
+    for (int count : {1, 2, 3}) {
+        QVERIFY(MacDisplayGeometry::useNativeFullscreen(count));
+        int height = 1329, pixels = 2658;
+        QVERIFY(MacDisplayGeometry::insetTop(2056, height, 4112, pixels, 38));
+        QCOMPARE(height, 1291);
+        QCOMPARE(pixels, height * 2);
+        height = 1440; pixels = 1440;
+        QVERIFY(MacDisplayGeometry::insetTop(2560, height, 2560, pixels, 0));
+        QCOMPARE(height, 1440);
+        QCOMPARE(pixels, height);
     }
 }
 
@@ -130,6 +180,31 @@ void TestOutputTopology::recognizesDescriptionCapabilities()
     QCOMPARE(NvOutputTopology::hostPlatform(version - 1, fixed), 0);
 }
 
+void TestOutputTopology::launchCapabilitiesUseAuthenticatedTopology()
+{
+    NvOutputTopology topology;
+    topology.schemaVersion = NvOutputTopology::ProtocolVersion;
+    const int publicFlags = 0x36c7ffff;
+    const int authenticatedFlags = 0x3fc7ffff;
+    topology.featureFlags = authenticatedFlags;
+    const int negotiated = topology.launchFeatureFlags(publicFlags);
+    QCOMPARE(negotiated, authenticatedFlags & NvOutputTopology::SupportedFeatureFlags);
+    QVERIFY(negotiated & NvOutputTopology::DisplayArrangementFeature);
+    QCOMPARE(bool(negotiated & NvOutputTopology::ClipboardFilesFeature),
+             bool(NvOutputTopology::PlatformClipboardFilesFeature));
+
+    // A newer discovery result cannot invent support absent from the
+    // authenticated worker, including after reconnecting to a replacement.
+    topology.featureFlags = publicFlags;
+    QCOMPARE(topology.launchFeatureFlags(authenticatedFlags),
+             publicFlags & NvOutputTopology::SupportedFeatureFlags);
+    topology.schemaVersion = 0;
+    QCOMPARE(topology.launchFeatureFlags(publicFlags),
+             publicFlags & NvOutputTopology::SupportedFeatureFlags);
+    QCOMPARE(topology.launchFeatureFlags(publicFlags | 0x40000000),
+             publicFlags & NvOutputTopology::SupportedFeatureFlags);
+}
+
 void TestOutputTopology::matchesMacClientCanvas()
 {
     // Pixel dimensions are independent of logical compositor scaling.
@@ -149,9 +224,15 @@ void TestOutputTopology::matchesMacClientCanvas()
         QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode(screens), mode);
         QCOMPARE(NvOutputTopology::macDisplayModeSize(mode), native);
         QVERIFY(!NvOutputTopology::virtualModeSize(mode).isValid());
+        // A Linux host has no such virtual mode: the closest qualified mode
+        // is used and flagged as fitted (letterboxed), never the raw size.
         QString layout;
         QStringList modes;
-        QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(screens, layout, modes));
+        bool fitted = false;
+        QVERIFY(NvOutputTopology::resolveClientDisplayLayout(screens, layout, modes, nullptr, &fitted));
+        QVERIFY(fitted);
+        QVERIFY(!modes.contains(mode));
+        QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(modes.value(0)));
     }
     for (const QString mode : {"0x2160", "3023x1964", "3024x1963", "8194x2160",
             "3840x8194", "-2x2", "03024x1964", "3024X1964", "3024x1964x2", "2x+2",
@@ -186,8 +267,10 @@ void TestOutputTopology::parsesFixedCapture()
     QCOMPARE(topology.outputs.size(), 1);
     QCOMPARE(topology.toJson(), fixture);
     QVERIFY(!(topology.featureFlags & NvOutputTopology::UnifiedAbsoluteInputFeature));
-    QVERIFY(!(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature));
+    QVERIFY(topology.featureFlags & NvOutputTopology::SessionTakeoverFeature);
     QVERIFY(!(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::FixedCaptureFeature));
+    // Linux-only launch features must never alias a Mac fixed-capture bit.
+    QVERIFY(!(NvOutputTopology::FixedCaptureFlags & NvOutputTopology::DesktopSignOutFeature));
     // Reuse is atomic, including failures; never retain stale logical bounds.
     QVERIFY(!NvOutputTopology::fromJson({}, topology));
     QCOMPARE(topology.toJson(), fixture);
@@ -226,7 +309,7 @@ void TestOutputTopology::rejectsInvalidFixedCapture()
         QVERIFY(!NvOutputTopology::fromJson(object, topology));
     }
     auto object = fixture;
-    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::SessionTakeoverFeature;
+    object["feature_flags"] = NvOutputTopology::FixedCaptureFlags | NvOutputTopology::DynamicHostLayoutFeature;
     QVERIFY(!NvOutputTopology::fromJson(object, topology));
     object = fixture; object["generation"] = "not-a-generation";
     QVERIFY(!NvOutputTopology::fromJson(object, topology));
@@ -334,9 +417,9 @@ void TestOutputTopology::rejectsConfiguredModeMismatch()
 void TestOutputTopology::acceptsTallCinemaModes()
 {
     const QStringList modes = NvOutputTopology::qualifiedVirtualModes();
-    QCOMPARE(modes.size(), 12);
+    QCOMPARE(modes.size(), 13);
     QCOMPARE(modes.at(6), QStringLiteral("2560x2160"));
-    QCOMPARE(modes.at(9), QStringLiteral("3840x2160"));
+    QCOMPARE(modes.at(10), QStringLiteral("3840x2160"));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("1024x2160")),
              QSize(1024, 2160));
     QCOMPARE(NvOutputTopology::virtualModeSize(QStringLiteral("4096x2160")),
@@ -367,6 +450,76 @@ void TestOutputTopology::acceptsTallCinemaModes()
     QVERIFY(!NvOutputTopology::virtualCanvasSize(
                  QStringLiteral("dual-horizontal"),
                  {QStringLiteral("3840x2160"), QStringLiteral("5120x2160")}).isValid());
+}
+
+void TestOutputTopology::negotiatesNotchSafeLaptopMode()
+{
+    // A 14-inch MacBook Pro in its default "Looks like 1512x982" scaling:
+    // native fullscreen stops below the camera housing (37 points).
+    int logicalHeight = 982;
+    int pixelHeight = 1964;
+    QVERIFY(MacDisplayGeometry::insetTop(1512, logicalHeight, 3024, pixelHeight, 37));
+    const QString viewport = QStringLiteral("3024x%1").arg(pixelHeight);
+    QCOMPARE(viewport, QStringLiteral("3024x1890"));
+    QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(viewport));
+    QCOMPARE(NvOutputTopology::virtualModeSize(viewport), QSize(3024, 1890));
+    // The panel itself is never presented 1:1, so it is not a mode.
+    QVERIFY(!NvOutputTopology::virtualModeSize(QStringLiteral("3024x1964")).isValid());
+
+    const int withoutFeature = NvOutputTopology::SupportedFeatureFlags &
+            ~NvOutputTopology::NotchSafeLaptopModesFeature;
+    QVERIFY(NvOutputTopology::hostAcceptsVirtualMode(viewport, NvOutputTopology::SupportedFeatureFlags));
+    QVERIFY(!NvOutputTopology::hostAcceptsVirtualMode(viewport, withoutFeature));
+    QVERIFY(NvOutputTopology::hostAcceptsVirtualMode(QStringLiteral("2560x1600"), withoutFeature));
+    QVERIFY(!NvOutputTopology::hostAcceptsVirtualMode(QStringLiteral("3024x1964"),
+                                                      NvOutputTopology::SupportedFeatureFlags));
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(
+                 QStringLiteral("dual-horizontal"), {viewport, QStringLiteral("5120x2160")}),
+             QSize(8144, 2160));
+
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) +
+               "/tests/protocol/output-topology-v13-notch-safe.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonObject document = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(document, topology, &error), qPrintable(error));
+    QVERIFY(topology.featureFlags & NvOutputTopology::NotchSafeLaptopModesFeature);
+    QCOMPARE(topology.virtualModes, QStringList({viewport}));
+    QVERIFY(topology.matchesRequestedHostLayout(QStringLiteral("single"), {viewport}));
+    NvOutputTopology restored;
+    QVERIFY(NvOutputTopology::fromJson(topology.toJson(), restored));
+    QCOMPARE(restored.toJson(), topology.toJson());
+
+    // A host that has not advertised the feature cannot report the mode.
+    document["feature_flags"] = document.value("feature_flags").toInt() &
+            ~NvOutputTopology::NotchSafeLaptopModesFeature;
+    QVERIFY(!NvOutputTopology::fromJson(document, topology));
+
+    // Match client: a 14" in its default scaling, as ClientDisplayProbe sees it.
+    QCOMPARE(NvOutputTopology::virtualModesForHost(NvOutputTopology::SupportedFeatureFlags),
+             NvOutputTopology::qualifiedVirtualModes());
+    QVERIFY(!NvOutputTopology::virtualModesForHost(withoutFeature).contains(viewport));
+    QCOMPARE(NvOutputTopology::virtualModesForHost(withoutFeature).size(),
+             NvOutputTopology::qualifiedVirtualModes().size() - 1);
+    const NvClientDisplay laptop {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964),
+                                  QSize(3024, 1890)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(laptop), QSize(3024, 1890));
+    QString layout;
+    QStringList modes;
+    bool fitted = true;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                {laptop}, layout, modes, &error, &fitted,
+                NvOutputTopology::virtualModesForHost(NvOutputTopology::SupportedFeatureFlags)));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(modes, QStringList({viewport}));
+    QVERIFY(!fitted);
+    // An older host: the closest mode it accepts, presented scaled to fit.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                {laptop}, layout, modes, &error, &fitted,
+                NvOutputTopology::virtualModesForHost(withoutFeature)));
+    QCOMPARE(modes, QStringList({QStringLiteral("2560x1600")}));
+    QVERIFY(fitted);
 }
 
 void TestOutputTopology::enforcesHostDisplayPolicy()
@@ -449,6 +602,92 @@ void TestOutputTopology::matchesOneClientDisplay()
     QCOMPARE(modes, QStringList({QStringLiteral("3840x2160")}));
 }
 
+void TestOutputTopology::matchesPrimaryInDesktopOrder()
+{
+    QFile fixture(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) +
+                  "/tests/protocol/output-topology-v13-virtual-primary.json");
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(QJsonDocument::fromJson(fixture.readAll()).object(), topology));
+    QVERIFY(topology.featureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature);
+    QVERIFY(topology.matchesRequestedHostLayout("dual-horizontal", {"1920x1200", "2560x1440"}));
+    QCOMPARE(topology.outputs[0].id, QStringLiteral("x11:DP-2"));
+    QCOMPARE(topology.outputs[1].id, QStringLiteral("x11:DP-0"));
+    QVERIFY(topology.outputs[1].primary);
+
+    const NvClientDisplay eizo = clientWithPrimary(QRect(1920, 0, 2560, 1440), QSize(2560, 1440), true);
+    const NvClientDisplay laptop = clientWithPrimary(QRect(0, 0, 1920, 1200), QSize(3456, 2234), false);
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({eizo, laptop}, 2), 1);
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({laptop, eizo}, 2), 1);
+    auto leftPrimary = laptop;
+    leftPrimary.main = true;
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({leftPrimary, eizo}, 2), -1);
+    auto noPrimary = eizo;
+    noPrimary.main = false;
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({laptop, noPrimary}, 2), -1);
+
+    // A qualified virtual pair retains its existing sizes and gains only the
+    // optional primary connector index for a Host that advertises the bit.
+    QString layout;
+    QStringList modes;
+    QString error;
+    int primary = -1;
+    const NvClientDisplay virtualLaptop = clientWithPrimary(QRect(0, 0, 1920, 1200), QSize(1920, 1200), false);
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 {eizo, virtualLaptop}, layout, modes, &error, nullptr,
+                 NvOutputTopology::qualifiedVirtualModes(), &primary), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("dual-horizontal"));
+    QCOMPARE(modes, QStringList({QStringLiteral("1920x1200"), QStringLiteral("2560x1440")}));
+    QCOMPARE(primary, 1);
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 {eizo}, layout, modes, &error, nullptr,
+                 NvOutputTopology::qualifiedVirtualModes(), &primary), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(primary, 0);
+    QVERIFY(NvOutputTopology::SupportedFeatureFlags &
+            NvOutputTopology::VirtualPrimaryConnectorFeature);
+    QVERIFY(!(NvOutputTopology::VirtualPrimaryConnectorFeature &
+              NvOutputTopology::ClipboardSyncFeature));
+}
+
+void TestOutputTopology::primaryHintRequiresMatchingOutputCount()
+{
+    // A manual two-output bookmark is valid even with one or three client
+    // monitors. In those cases there is no one-to-one connector hint, even
+    // when the local primary happens to have index 0 or 1.
+    for (int count = 0; count <= 4; ++count) {
+        for (int primary = 0; primary < qMax(1, count); ++primary) {
+            QVector<NvClientDisplay> displays;
+            for (int index = 0; index < count; ++index) {
+                // Reverse enumeration and a negative desktop origin must not
+                // change the primary's index in left-to-right output order.
+                displays.prepend(clientWithPrimary(QRect((index - 1) * 1920, 0, 1920, 1080),
+                                                   QSize(1920, 1080), index == primary));
+            }
+            for (int requested = -1; requested <= 4; ++requested) {
+                const int expected = count == requested && count >= 1 && count <= 2
+                    ? primary : -1;
+                QCOMPARE(NvOutputTopology::clientPrimaryIndex(displays, requested), expected);
+            }
+        }
+    }
+}
+
+void TestOutputTopology::omitsAmbiguousPrimaryHints()
+{
+    const NvClientDisplay primary = clientWithPrimary(QRect(0, 0, 1920, 1080), QSize(1920, 1080), true);
+    for (const QRect& bounds : {QRect(0, 1080, 1920, 1080), // stacked
+                               QRect(0, 0, 1920, 1080),    // mirrored
+                               QRect(960, 0, 1920, 1080),  // overlapping
+                               QRect(1920, 1080, 1920, 1080), // diagonal
+                               QRect()}) {
+        const NvClientDisplay other = clientWithPrimary(bounds, QSize(1920, 1080), false);
+        QCOMPARE(NvOutputTopology::clientPrimaryIndex({primary, other}, 2), -1);
+    }
+    const NvClientDisplay right = clientWithPrimary(QRect(1920, 200, 2560, 1440), QSize(5120, 2880), false);
+    QCOMPARE(NvOutputTopology::clientPrimaryIndex({right, primary}, 2), 0);
+}
+
 void TestOutputTopology::matchesTwoClientDisplaysLeftToRight()
 {
     QString layout;
@@ -487,12 +726,581 @@ void TestOutputTopology::rejectsUnsupportedClientLayouts()
                 verticalDisplays, layout, modes, &error));
     QVERIFY(error.contains(QStringLiteral("left to right")));
 
-    const QVector<NvClientDisplay> unsupportedDisplay {
+    // An odd monitor is no longer refused: 5:4 gets the closest aspect.
+    const QVector<NvClientDisplay> oddDisplay {
         {QRect(0, 0, 1280, 1024), QSize(1280, 1024)},
     };
+    bool fitted = false;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout(
+                oddDisplay, layout, modes, &error, &fitted));
+    QVERIFY(fitted);
+    QCOMPARE(modes, QStringList({QStringLiteral("1920x1200")}));
+
+    const QVector<NvClientDisplay> undetected {
+        {QRect(0, 0, 1280, 1024), QSize()},
+    };
     QVERIFY(!NvOutputTopology::resolveClientDisplayLayout(
-                unsupportedDisplay, layout, modes, &error));
-    QVERIFY(error.contains(QStringLiteral("not a qualified")));
+                undetected, layout, modes, &error, &fitted));
+    QVERIFY(error.contains(QStringLiteral("could not be detected")));
+    QVERIFY(modes.isEmpty());
+    QVERIFY(layout.isEmpty());
+}
+
+void TestOutputTopology::computesClientMatchTarget()
+{
+    // Desktop backing below the panel (macOS 1x "1920x1200" on a 14" panel).
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(1920, 1200), QSize(3024, 1964)), QSize(1920, 1200));
+    // Default Retina "looks like 1512x982": backing equals the panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(3024, 1964), QSize(3024, 1964)), QSize(3024, 1964));
+    // "More Space" renders 3600x2338 and scales it down onto the panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(3600, 2338), QSize(3024, 1964)), QSize(3024, 1964));
+    // 16" "More Space" 2056x1329@2x on a 3456x2234 panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(4112, 2658), QSize(3456, 2234)), QSize(3456, 2234));
+    // Unknown backing (not macOS) or unknown panel.
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(), QSize(2560, 1440)), QSize(2560, 1440));
+    QCOMPARE(NvOutputTopology::clientMatchTarget(QSize(2560, 1440), QSize()), QSize(2560, 1440));
+    QVERIFY(!NvOutputTopology::clientMatchTarget(QSize(), QSize()).isValid());
+    const NvClientDisplay display {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(display), QSize(3024, 1964));
+    // Notched 14" in the default "looks like 1512x982": native fullscreen is 1512x945 pt below the camera
+    // housing, so the target is the 16:10 viewport, which is itself a qualified mode (1:1).
+    const NvClientDisplay notched {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964), QSize(3024, 1890)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(notched), QSize(3024, 1890));
+    QString layout;
+    QStringList modes;
+    bool fitted = true;
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({notched}, layout, modes, nullptr, &fitted));
+    QCOMPARE(modes, QStringList {QStringLiteral("3024x1890")});
+    QVERIFY(!fitted);
+    // "More Space" 1800x1169 pt: the viewport 3600x2260 is capped to the panel.
+    const NvClientDisplay moreSpace {QRect(0, 0, 1800, 1169), QSize(3024, 1964), QSize(3600, 2338), QSize(3600, 2260)};
+    QCOMPARE(NvOutputTopology::clientMatchTarget(moreSpace), QSize(3024, 1898));
+}
+
+void TestOutputTopology::bestFitsOddClientDisplays_data()
+{
+    QTest::addColumn<QSize>("target");
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<bool>("fitted");
+    QTest::newRow("MacBook Pro 14") << QSize(3024, 1964) << "3024x1890" << true;
+    QTest::newRow("MacBook Pro 16") << QSize(3456, 2234) << "3024x1890" << true;
+    QTest::newRow("MacBook Air 13") << QSize(2560, 1664) << "2560x1600" << true;
+    QTest::newRow("MacBook Air 15") << QSize(2940, 1912) << "2560x1600" << true;
+    QTest::newRow("1x 16:10 desktop") << QSize(1920, 1200) << "1920x1200" << false;
+    QTest::newRow("4K") << QSize(3840, 2160) << "3840x2160" << false;
+    QTest::newRow("QHD") << QSize(2560, 1440) << "2560x1440" << false;
+    // 5K 16:9: the same shape wins over the wider 5120x2160.
+    QTest::newRow("5K") << QSize(5120, 2880) << "3840x2160" << true;
+    QTest::newRow("Ultrawide 3440") << QSize(3440, 1440) << "3440x1440" << false;
+    QTest::newRow("Ultrawide 3840x1600 fits") << QSize(3840, 1600) << "3840x1600" << false;
+    QTest::newRow("5120x1440 super-wide") << QSize(5120, 1440) << "3440x1440" << true;
+    // Smaller than every qualified mode (a Retina desktop at 1x points):
+    // the closest aspect that enlarges least; presentation scales it down.
+    QTest::newRow("1512x982 nothing fits") << QSize(1512, 982) << "1920x1200" << true;
+    QTest::newRow("1366x768 nothing fits") << QSize(1366, 768) << "1920x1080" << true;
+    // Portrait monitors get the tall modes.
+    QTest::newRow("portrait 4K") << QSize(2160, 3840) << "1280x2160" << true;
+    QTest::newRow("portrait exact") << QSize(1280, 2160) << "1280x2160" << false;
+}
+
+void TestOutputTopology::bestFitsOddClientDisplays()
+{
+    QFETCH(QSize, target);
+    QFETCH(QString, mode);
+    QFETCH(bool, fitted);
+    QCOMPARE(NvOutputTopology::rankedVirtualModes(target).value(0), mode);
+
+    QString layout;
+    QStringList modes;
+    QString error;
+    bool wasFitted = !fitted;
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout(
+                 {{QRect(QPoint(0, 0), target), target}}, layout, modes, &error, &wasFitted),
+             qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("single"));
+    QCOMPARE(modes, QStringList({mode}));
+    QCOMPARE(wasFitted, fitted);
+    // A fitting mode never exceeds the client (no upscale) unless none fits.
+    const QSize size = NvOutputTopology::virtualModeSize(mode);
+    if (target.width() >= 1920 && target.height() >= 1080 && target.width() >= target.height()) {
+        QVERIFY(size.width() <= target.width() && size.height() <= target.height());
+    }
+    // Every ranked mode is qualified; each appears once.
+    const QStringList ranked = NvOutputTopology::rankedVirtualModes(target);
+    for (const QString& candidate : ranked) {
+        QVERIFY(NvOutputTopology::qualifiedVirtualModes().contains(candidate));
+        QCOMPARE(ranked.count(candidate), 1);
+    }
+    QVERIFY(NvOutputTopology::rankedVirtualModes(QSize()).isEmpty());
+}
+
+void TestOutputTopology::bestFitsTwoClientDisplays()
+{
+    QString layout;
+    QStringList modes;
+    QString error;
+    bool fitted = false;
+    // MacBook Pro 14 (default Retina) left of a 4K monitor.
+    QVERIFY2(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(1512, 0, 3840, 2160), QSize(3840, 2160)},
+        {QRect(0, 0, 1512, 982), QSize(3024, 1964), QSize(3024, 1964)}},
+        layout, modes, &error, &fitted), qPrintable(error));
+    QCOMPARE(layout, QStringLiteral("dual-horizontal"));
+    QCOMPARE(modes, QStringList({QStringLiteral("3024x1890"), QStringLiteral("3840x2160")}));
+    QVERIFY(fitted);
+    QCOMPARE(NvOutputTopology::virtualCanvasSize(layout, modes), QSize(6864, 2160));
+
+    // Two exact qualified monitors stay exact.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(0, 0, 2560, 1440), QSize(2560, 1440)},
+        {QRect(2560, 0, 1920, 1080), QSize(1920, 1080)}},
+        layout, modes, &error, &fitted));
+    QCOMPARE(modes, QStringList({QStringLiteral("2560x1440"), QStringLiteral("1920x1080")}));
+    QVERIFY(!fitted);
+
+    // Canvas guard: two 5120x2160 would be 10240 wide; each steps down its
+    // own ranking (closest aspect first: 3440x1440) until the pair fits the
+    // 8192 canvas.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(0, 0, 5120, 2160), QSize(5120, 2160)},
+        {QRect(5120, 0, 5120, 2160), QSize(5120, 2160)}},
+        layout, modes, &error, &fitted));
+    QVERIFY(fitted);
+    QCOMPARE(modes, QStringList({QStringLiteral("3440x1440"), QStringLiteral("3440x1440")}));
+    const QSize canvas = NvOutputTopology::virtualCanvasSize(layout, modes);
+    QVERIFY(canvas.isValid());
+    QVERIFY(canvas.width() <= NvOutputTopology::MaximumVirtualCanvasWidth);
+    QVERIFY(canvas.height() <= 2160);
+
+    // 5K + 4K: the wider one steps down first.
+    QVERIFY(NvOutputTopology::resolveClientDisplayLayout({
+        {QRect(0, 0, 5120, 2160), QSize(5120, 2160)},
+        {QRect(5120, 0, 3840, 2160), QSize(3840, 2160)}},
+        layout, modes, &error, &fitted));
+    QCOMPARE(modes, QStringList({QStringLiteral("3440x1440"), QStringLiteral("3840x2160")}));
+    QVERIFY(NvOutputTopology::virtualCanvasSize(layout, modes).width() <= 8192);
+}
+
+void TestOutputTopology::keepsHostTopologyParsingStrict()
+{
+    // Best fit happens on the client only: a host that reports a mode off
+    // the allowlist is still rejected, whatever the client asked for.
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/output-topology-v13.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QJsonObject vector = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(vector, topology));
+    for (const QString& odd : {QStringLiteral("3024x1964"), QStringLiteral("2560x1664"),
+                               QStringLiteral("1512x982")}) {
+        QJsonObject object = vector;
+        QJsonObject layout = object["layout"].toObject();
+        layout["virtual_modes"] = QJsonArray {odd, QStringLiteral("1280x2160")};
+        object["layout"] = layout;
+        QVERIFY2(!NvOutputTopology::fromJson(object, topology), qPrintable(odd));
+        QVERIFY(!NvOutputTopology::virtualModeSize(odd).isValid());
+    }
+}
+
+void TestOutputTopology::retriesOnlyAnEmptyModesetSnapshot()
+{
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/output-topology-v13.json");
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
+    NvOutputTopology topology;
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+
+    QJsonObject layout = object.value("layout").toObject();
+    layout["output_count"] = 0;
+    object["layout"] = layout;
+    object["outputs"] = QJsonArray();
+    QVERIFY(NvOutputTopology::temporarilyEmpty(object));
+    QVERIFY(!NvOutputTopology::fromJson(object, topology));
+
+    // During an NVIDIA modeset, RandR may expose a connected output while
+    // the server still reports a zero-sized desktop.
+    QJsonObject partiallyReady = object;
+    partiallyReady["outputs"] = QJsonArray {QJsonObject {{"id", "x11:DP-0"}}};
+    layout["output_count"] = 1;
+    partiallyReady["layout"] = layout;
+    QJsonObject desktop = partiallyReady.value("desktop").toObject();
+    desktop["width"] = 0;
+    partiallyReady["desktop"] = desktop;
+    QVERIFY(NvOutputTopology::temporarilyEmpty(partiallyReady));
+
+    object["outputs"] = QJsonArray {QJsonObject {{"id", "x11:broken"}}};
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+    object["outputs"] = QJsonArray();
+    layout["output_count"] = 1;
+    object["layout"] = layout;
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+    layout["output_count"] = 0;
+    object["layout"] = layout;
+    object["schema_version"] = NvOutputTopology::ProtocolVersion + 1;
+    QVERIFY(!NvOutputTopology::temporarilyEmpty(object));
+}
+
+
+namespace {
+
+QJsonObject arrangementVector()
+{
+    QFile file(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/output-topology-v13-arrangement.json");
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+}
+
+void TestOutputTopology::parsesDisplayArrangementVector()
+{
+    const QJsonObject vector = arrangementVector();
+    QVERIFY2(!vector.isEmpty(), "PLANK_REPO_ROOT must identify the repository root");
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(vector, topology, &error), qPrintable(error));
+    QVERIFY(topology.featureFlags & NvOutputTopology::DisplayArrangementFeature);
+    QVERIFY(NvOutputTopology::SupportedFeatureFlags & NvOutputTopology::DisplayArrangementFeature);
+    QVERIFY(topology.displayArrangementPublished());
+    QCOMPARE(topology.startupPolicy, QStringLiteral("hybrid"));
+    QCOMPARE(topology.arrangementRequest, QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:auto"));
+    QCOMPARE(topology.arrangementState, QStringLiteral("applied"));
+    QVERIFY(topology.arrangementReason.isEmpty());
+    // The legacy view of the same document: physical, no virtual modes.
+    QCOMPARE(topology.layoutKind, QStringLiteral("physical"));
+    QVERIFY(!topology.virtualLayout);
+    QVERIFY(topology.virtualModes.isEmpty());
+    QCOMPARE(topology.outputs.size(), 2);
+    QCOMPARE(topology.outputs.at(0).backing, QStringLiteral("virtual"));
+    QCOMPARE(topology.outputs.at(0).arrangementIndex, 0);
+    QCOMPARE(topology.outputs.at(1).backing, QStringLiteral("physical"));
+    QCOMPARE(topology.outputs.at(1).arrangementIndex, 1);
+    QCOMPARE(topology.outputs.at(0).sourceY, 270);
+    QCOMPARE(topology.displayCapabilities.maxOutputs, 4);
+    QCOMPARE(topology.displayCapabilities.physicalOutputs.first().id, QStringLiteral("x11:HDMI-0"));
+    // The lease's capture is the desktop (not packed), and each output's
+    // capture_rect its source_rect. Older copies of the vector predate
+    // capture_size and capture_rect; then only their absence is checked.
+    QCOMPARE(topology.captureSize(), QSize(6864, 2160));
+    QCOMPARE(topology.capturePublished, vector.contains("capture_size"));
+    if (vector.contains("capture_size")) {
+        QCOMPARE(vector.value("capture_size").toObject(), (QJsonObject {{"width", 6864}, {"height", 2160}}));
+    }
+    for (int index = 0; index < topology.outputs.size(); ++index) {
+        const NvOutput& output = topology.outputs.at(index);
+        const QJsonObject entry = vector.value("outputs").toArray().at(index).toObject();
+        QCOMPARE(entry.contains("capture_rect"), vector.contains("capture_size"));
+        QCOMPARE(output.captureRect(), QRect(output.sourceX, output.sourceY, output.sourceWidth, output.sourceHeight));
+    }
+    // Round trip: the document serialises back to itself.
+    QCOMPARE(topology.toJson(), vector);
+    NvOutputTopology again;
+    QVERIFY(NvOutputTopology::fromJson(topology.toJson(), again));
+    QCOMPARE(again.toJson(), vector);
+}
+
+void TestOutputTopology::ignoresArrangementFieldsWithoutTheFeature()
+{
+    // A 1.0.129 client (and this one when the host lacks the bit): the same
+    // document parses, and none of the new fields is read or kept.
+    QJsonObject vector = arrangementVector();
+    vector["feature_flags"] = vector.value("feature_flags").toInt() & ~NvOutputTopology::DisplayArrangementFeature;
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(vector, topology, &error), qPrintable(error));
+    QVERIFY(!topology.displayArrangementPublished());
+    QVERIFY(!topology.displayCapabilities.valid);
+    QVERIFY(topology.startupPolicy.isEmpty());
+    QVERIFY(topology.arrangementRequest.isEmpty());
+    for (const NvOutput& output : topology.outputs) {
+        QVERIFY(output.backing.isEmpty());
+        QCOMPARE(output.arrangementIndex, -1);
+    }
+    QVERIFY(!topology.toJson().contains("display_capabilities"));
+    QVERIFY(!topology.toJson().value("layout").toObject().contains("arrangement"));
+    QVERIFY(!topology.toJson().contains("capture_size"));
+    QVERIFY(!topology.capturePublished);
+    // Garbage in the additive fields is ignored without the bit, as before.
+    vector["display_capabilities"] = QStringLiteral("garbage");
+    QJsonObject layout = vector["layout"].toObject();
+    layout["arrangement"] = 7;
+    vector["layout"] = layout;
+    QVERIFY(NvOutputTopology::fromJson(vector, topology));
+    QVERIFY(!topology.matchesRequestedArrangement(QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:auto")));
+    // The legacy strict checks still apply to the legacy fields.
+    layout = vector["layout"].toObject();
+    layout["virtual"] = true;
+    vector["layout"] = layout;
+    QVERIFY(!NvOutputTopology::fromJson(vector, topology));
+}
+
+void TestOutputTopology::rejectsMalformedArrangementFields()
+{
+    const QJsonObject vector = arrangementVector();
+    NvOutputTopology topology;
+    const auto rejects = [&vector, &topology](const std::function<void(QJsonObject&)>& edit) {
+        QJsonObject object = vector;
+        edit(object);
+        return !NvOutputTopology::fromJson(object, topology);
+    };
+    QVERIFY(rejects([](QJsonObject& o) { o.remove("display_capabilities"); }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject caps = o["display_capabilities"].toObject();
+        caps["max_outputs"] = 9;
+        o["display_capabilities"] = caps;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        layout["startup_policy"] = "dongle";
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        layout.remove("arrangement");
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        QJsonObject arrangement = layout["arrangement"].toObject();
+        arrangement["request"] = "1:3024x1890+0+270";
+        layout["arrangement"] = arrangement;
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        QJsonObject arrangement = layout["arrangement"].toObject();
+        arrangement["transition"] = QJsonObject {{"state", "done"}, {"reason", ""}};
+        layout["arrangement"] = arrangement;
+        o["layout"] = layout;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[0].toObject();
+        output["backing"] = "dongle";
+        outputs[0] = output;
+        o["outputs"] = outputs;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[0].toObject();
+        output.remove("arrangement_index");
+        outputs[0] = output;
+        o["outputs"] = outputs;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[1].toObject();
+        output["arrangement_index"] = 0;
+        outputs[1] = output;
+        o["outputs"] = outputs;
+    }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        QJsonArray outputs = o["outputs"].toArray();
+        QJsonObject output = outputs[1].toObject();
+        output["arrangement_index"] = 4;
+        outputs[1] = output;
+        o["outputs"] = outputs;
+    }));
+    // Outside an arrangement: an empty request, idle, every index -1.
+    QVERIFY(!rejects([](QJsonObject& o) {
+        QJsonObject layout = o["layout"].toObject();
+        layout["arrangement"] = QJsonObject {{"request", ""}, {"transition", QJsonObject {{"state", "idle"}, {"reason", ""}}}};
+        o["layout"] = layout;
+        QJsonArray outputs = o["outputs"].toArray();
+        for (int index = 0; index < outputs.size(); ++index) {
+            QJsonObject output = outputs[index].toObject();
+            output["arrangement_index"] = -1;
+            outputs[index] = output;
+        }
+        o["outputs"] = outputs;
+    }));
+}
+
+void TestOutputTopology::matchesRequestedArrangement()
+{
+    const QJsonObject vector = arrangementVector();
+    const QString request = QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:auto");
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(vector, topology));
+    QVERIFY(topology.matchesRequestedArrangement(request));
+    // Another request, another preference, or none: not (yet) applied.
+    QVERIFY(!topology.matchesRequestedArrangement(QStringLiteral("1:3024x1890+0+270:auto,3840x2160+3024+0:virtual")));
+    QVERIFY(!topology.matchesRequestedArrangement(QStringLiteral("1:3840x2160+0+0:auto")));
+    QVERIFY(!topology.matchesRequestedArrangement(QString()));
+    NvOutputTopology pending = topology;
+    pending.arrangementState = QStringLiteral("pending");
+    QVERIFY(!pending.matchesRequestedArrangement(request));
+    // The outputs must really be where the request put them.
+    NvOutputTopology moved = topology;
+    moved.outputs[0].y = 0;
+    QVERIFY(!moved.matchesRequestedArrangement(request));
+    NvOutputTopology missing = topology;
+    missing.outputs.removeLast();
+    QVERIFY(!missing.matchesRequestedArrangement(request));
+    NvOutputTopology swapped = topology;
+    std::swap(swapped.outputs[0].arrangementIndex, swapped.outputs[1].arrangementIndex);
+    QVERIFY(!swapped.matchesRequestedArrangement(request));
+    // A desktop that does not start at 0,0 is compared relative to its origin.
+    NvOutputTopology shifted = topology;
+    shifted.desktopX = 100;
+    for (NvOutput& output : shifted.outputs) output.x += 100;
+    QVERIFY(shifted.matchesRequestedArrangement(request));
+}
+
+namespace {
+
+// A hybrid host presenting three UHD monitors side by side (11520x2160),
+// its capture packed into rows for the encoder (7680x4320). source_rect
+// keeps its schema-13 meaning (desktop); capture_rect is the packed slot.
+QJsonObject packedThreeUhd()
+{
+    QJsonObject object = arrangementVector();
+    object["generation"] = "x11:packed-three-uhd";
+    QJsonObject layout = object["layout"].toObject();
+    layout["output_count"] = 3;
+    layout["arrangement"] = QJsonObject {
+        {"request", "1:3840x2160+0+0:auto,3840x2160+3840+0:auto,3840x2160+7680+0:auto"},
+        {"transition", QJsonObject {{"state", "applied"}, {"reason", ""}}}};
+    object["layout"] = layout;
+    object["desktop"] = QJsonObject {{"x", 0}, {"y", 0}, {"width", 11520}, {"height", 2160}};
+    QJsonObject caps = object["display_capabilities"].toObject();
+    caps["packed_capture"] = true;
+    caps["max_canvas"] = QJsonObject {{"width", 16384}, {"height", 8192}};
+    object["display_capabilities"] = caps;
+    const QJsonObject first = object["outputs"].toArray().at(1).toObject();
+    QJsonArray outputs;
+    const int packedSlot[3][2] = {{0, 0}, {3840, 0}, {0, 2160}};
+    for (int index = 0; index < 3; ++index) {
+        QJsonObject output = first;
+        output["id"] = QStringLiteral("x11:DP-%1").arg(index);
+        output["name"] = QStringLiteral("DP-%1").arg(index);
+        output["x"] = 3840 * index;
+        output["y"] = 0;
+        output["primary"] = index == 0;
+        output["backing"] = index == 0 ? "physical" : "virtual";
+        output["arrangement_index"] = index;
+        output["source_rect"] = QJsonObject {{"x", 3840 * index}, {"y", 0}, {"width", 3840}, {"height", 2160}};
+        output["capture_rect"] = QJsonObject {{"x", packedSlot[index][0]}, {"y", packedSlot[index][1]},
+                                              {"width", 3840}, {"height", 2160}};
+        outputs.append(output);
+    }
+    object["outputs"] = outputs;
+    object["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4320}};
+    return object;
+}
+
+// The same document without the lease's capture fields.
+QJsonObject withoutCapture(QJsonObject object)
+{
+    object.remove("capture_size");
+    QJsonArray outputs = object["outputs"].toArray();
+    for (int index = 0; index < outputs.size(); ++index) {
+        QJsonObject output = outputs[index].toObject();
+        output.remove("capture_rect");
+        outputs[index] = output;
+    }
+    object["outputs"] = outputs;
+    return object;
+}
+
+QJsonObject withFlags(QJsonObject object, bool arrangementBit)
+{
+    const int flags = object.value("feature_flags").toInt();
+    object["feature_flags"] = arrangementBit ? (flags | NvOutputTopology::DisplayArrangementFeature) :
+                                               (flags & ~NvOutputTopology::DisplayArrangementFeature);
+    return object;
+}
+
+}
+
+void TestOutputTopology::parsesPackedCapture()
+{
+    const QJsonObject packed = packedThreeUhd();
+    NvOutputTopology topology;
+    QString error;
+    QVERIFY2(NvOutputTopology::fromJson(packed, topology, &error), qPrintable(error));
+    QVERIFY(topology.capturePublished);
+    QCOMPARE(topology.captureSize(), QSize(7680, 4320));
+    QCOMPARE(QSize(topology.desktopWidth, topology.desktopHeight), QSize(11520, 2160));
+    // The third screen: at x 7680 on the desktop, on the second row of the capture.
+    QCOMPARE(topology.outputs.at(2).x, 7680);
+    QCOMPARE(topology.outputs.at(2).sourceX, 7680);
+    QCOMPARE(topology.outputs.at(2).sourceY, 0);
+    QCOMPARE(topology.outputs.at(2).captureRect(), QRect(0, 2160, 3840, 2160));
+    QCOMPARE(topology.outputs.at(1).captureRect(), QRect(3840, 0, 3840, 2160));
+    QVERIFY(topology.displayCapabilities.packedCapture);
+    QVERIFY(topology.matchesRequestedArrangement(
+                QStringLiteral("1:3840x2160+0+0:auto,3840x2160+3840+0:auto,3840x2160+7680+0:auto")));
+    QCOMPARE(topology.toJson(), packed);
+
+    // The 1.0.129 view (no bit): the document parses, capture_size and
+    // capture_rect mean nothing, and presentation falls back to source_rect.
+    QVERIFY2(NvOutputTopology::fromJson(withFlags(packed, false), topology, &error), qPrintable(error));
+    QVERIFY(!topology.capturePublished);
+    QCOMPARE(topology.captureSize(), QSize(11520, 2160));
+    QCOMPARE(topology.outputs.at(2).captureRect(), QRect(7680, 0, 3840, 2160));
+    QVERIFY(!topology.toJson().contains("capture_size"));
+    QVERIFY(!topology.toJson()["outputs"].toArray().at(0).toObject().contains("capture_rect"));
+    // With the bit and no lease fields: the capture is the desktop.
+    QVERIFY(NvOutputTopology::fromJson(withoutCapture(packed), topology));
+    QVERIFY(!topology.capturePublished);
+    QCOMPARE(topology.captureSize(), QSize(11520, 2160));
+    QCOMPARE(topology.outputs.at(2).captureRect(), QRect(7680, 0, 3840, 2160));
+    QVERIFY(NvOutputTopology::fromJson(withoutCapture(arrangementVector()), topology));
+    QCOMPARE(topology.captureSize(), QSize(6864, 2160));
+    // "capture" is a macOS fixed capture, as it always was: a Linux document
+    // carrying it is refused, with or without the bit.
+    for (const bool withBit : {true, false}) {
+        QJsonObject withCaptureKey = withFlags(packed, withBit);
+        withCaptureKey["capture"] = QJsonObject {{"width", 7680}, {"height", 4320}};
+        QVERIFY(!NvOutputTopology::fromJson(withCaptureKey, topology, &error));
+        QVERIFY(error.contains(QStringLiteral("fixed capture")));
+    }
+    QFile fixed(QString::fromUtf8(qgetenv("PLANK_REPO_ROOT")) + "/tests/protocol/fixed-capture-v13.json");
+    QVERIFY(fixed.open(QIODevice::ReadOnly));
+    QVERIFY(NvOutputTopology::fromJson(QJsonDocument::fromJson(fixed.readAll()).object(), topology));
+    QCOMPARE(topology.layoutKind, QStringLiteral("fixed"));
+
+    const auto rejects = [&packed, &topology](const std::function<void(QJsonObject&)>& edit) {
+        QJsonObject object = packed;
+        edit(object);
+        return !NvOutputTopology::fromJson(object, topology);
+    };
+    const auto editOutput = [](QJsonObject& object, int index, const char* key, const QJsonValue& value) {
+        QJsonArray outputs = object["outputs"].toArray();
+        QJsonObject output = outputs[index].toObject();
+        if (value.isUndefined()) output.remove(QLatin1String(key)); else output[QLatin1String(key)] = value;
+        outputs[index] = output;
+        object["outputs"] = outputs;
+    };
+    // capture_size is strict and bounds every capture_rect.
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4000}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 7680}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4320.5}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = QJsonObject {{"width", 32768}, {"height", 4320}}; }));
+    QVERIFY(rejects([](QJsonObject& o) { o["capture_size"] = "7680x4320"; }));
+    QVERIFY(rejects([](QJsonObject& o) {
+        o["capture_size"] = QJsonObject {{"width", 7680}, {"height", 4320}, {"packed", true}};
+    }));
+    // capture_rect comes with capture_size, on every output, inside it.
+    QVERIFY(rejects([](QJsonObject& o) { o.remove("capture_size"); }));
+    QVERIFY(rejects([&editOutput](QJsonObject& o) { editOutput(o, 1, "capture_rect", QJsonValue::Undefined); }));
+    QVERIFY(rejects([&editOutput](QJsonObject& o) {
+        editOutput(o, 2, "capture_rect", QJsonObject {{"x", 3840}, {"y", 2160}, {"width", 3840}, {"height", 2161}});
+    }));
+    QVERIFY(rejects([&editOutput](QJsonObject& o) {
+        editOutput(o, 2, "capture_rect", QJsonObject {{"x", -2}, {"y", 2160}, {"width", 3840}, {"height", 2160}});
+    }));
+    QVERIFY(rejects([&editOutput](QJsonObject& o) {
+        editOutput(o, 2, "capture_rect", QJsonObject {{"x", 0}, {"y", 2160}, {"width", 3840}});
+    }));
+    QVERIFY(rejects([&editOutput](QJsonObject& o) { editOutput(o, 2, "capture_rect", "0,2160"); }));
+    // source_rect stays in the desktop, as in schema 13.
+    QVERIFY(rejects([&editOutput](QJsonObject& o) {
+        editOutput(o, 2, "source_rect", QJsonObject {{"x", 9600}, {"y", 0}, {"width", 3840}, {"height", 2160}});
+    }));
+    QVERIFY(rejects([&editOutput](QJsonObject& o) {
+        editOutput(o, 2, "source_rect", QJsonObject {{"x", 0}, {"y", 2160}, {"width", 3840}, {"height", 2160}});
+    }));
 }
 
 QTEST_APPLESS_MAIN(TestOutputTopology)

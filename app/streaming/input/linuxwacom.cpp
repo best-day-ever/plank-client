@@ -1,4 +1,5 @@
 #include "linuxwacom.h"
+#include "pentiltencoding.h"
 
 #include <Limelight.h>
 #include <SDL3/SDL.h>
@@ -29,23 +30,6 @@ bool propertyIsSet(udev_device* device, const char* name)
 {
     const char* value = udev_device_get_property_value(device, name);
     return value != nullptr && std::strcmp(value, "1") == 0;
-}
-
-void encodeTilt(double tiltX, double tiltY, unsigned short& rotation,
-                unsigned char& tilt)
-{
-    const double pi = std::acos(-1.0);
-    const double x = std::tan(tiltX * pi / 180.0);
-    const double y = std::tan(tiltY * pi / 180.0);
-    const double magnitude = std::atan(std::hypot(x, y)) * 180.0 / pi;
-    double direction = -std::atan2(x, y) * 180.0 / pi;
-    if (direction < 0.0) {
-        direction += 360.0;
-    }
-
-    tilt = static_cast<unsigned char>(std::lround(
-        std::max(0.0, std::min(90.0, magnitude))));
-    rotation = static_cast<unsigned short>(std::lround(direction)) % 360;
 }
 
 unsigned char toolType(libinput_tablet_tool* tool)
@@ -99,8 +83,29 @@ void LinuxWacomInput::setActive(bool active)
 
     std::lock_guard<std::mutex> lock(m_DeviceMutex);
     for (int fd : m_PenFds) {
-        updateGrab(fd, active);
+        updateGrab(fd, active && !m_Reconnecting.load());
     }
+}
+
+void LinuxWacomInput::beginReconnect()
+{
+    m_Reconnecting.store(true);
+    {
+        // Wait for any in-flight pen event, then release the old Host before
+        // its transport is stopped. No event may enter the replacement stream
+        // until finishReconnect(), even if this window remains focused.
+        std::lock_guard<std::mutex> lock(m_StateMutex);
+        cancelRemotePen();
+    }
+    std::lock_guard<std::mutex> lock(m_DeviceMutex);
+    for (int fd : m_PenFds) updateGrab(fd, false);
+}
+
+void LinuxWacomInput::finishReconnect()
+{
+    std::lock_guard<std::mutex> lock(m_DeviceMutex);
+    m_Reconnecting.store(false);
+    for (int fd : m_PenFds) updateGrab(fd, m_Active.load());
 }
 
 int LinuxWacomInput::openRestricted(const char* path, int flags, void* userData)
@@ -114,7 +119,7 @@ int LinuxWacomInput::openRestricted(const char* path, int flags, void* userData)
     if (self->isWacomPenNode(fd)) {
         std::lock_guard<std::mutex> lock(self->m_DeviceMutex);
         self->m_PenFds.push_back(fd);
-        self->updateGrab(fd, self->m_Active.load());
+        self->updateGrab(fd, self->m_Active.load() && !self->m_Reconnecting.load());
     }
     return fd;
 }
@@ -269,9 +274,9 @@ void LinuxWacomInput::handleTabletEvent(libinput_event_tablet_tool* event,
     }
     if (libinput_event_tablet_tool_tilt_x_has_changed(event) ||
             libinput_event_tablet_tool_tilt_y_has_changed(event)) {
-        encodeTilt(libinput_event_tablet_tool_get_tilt_x(event),
-                   libinput_event_tablet_tool_get_tilt_y(event),
-                   m_Rotation, m_Tilt);
+        plankEncodePenTilt(libinput_event_tablet_tool_get_tilt_x(event),
+                            libinput_event_tablet_tool_get_tilt_y(event),
+                            m_Rotation, m_Tilt);
     }
 
     unsigned char eventType = m_TipDown ? LI_TOUCH_EVENT_MOVE : LI_TOUCH_EVENT_HOVER;
@@ -314,7 +319,7 @@ void LinuxWacomInput::handleTabletEvent(libinput_event_tablet_tool* event,
         eventType = LI_TOUCH_EVENT_BUTTON_ONLY;
     }
 
-    if (m_Active.load()) {
+    if (m_Active.load() && !m_Reconnecting.load()) {
         const float pressureOrDistance = m_TipDown ? m_Pressure : m_Distance;
         LiSendPenEvent(eventType, m_ToolType, m_Buttons,
                        std::max(0.0f, std::min(1.0f, m_X)),

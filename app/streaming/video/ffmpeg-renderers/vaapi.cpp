@@ -107,7 +107,7 @@ VAAPIRenderer::openDisplay(SDL_Window* window)
         }
 #else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "PLANK Client not compiled with VAAPI X11 support!");
+                     "BDE fernweh not compiled with VAAPI X11 support!");
         return nullptr;
 #endif
     }
@@ -123,7 +123,7 @@ VAAPIRenderer::openDisplay(SDL_Window* window)
         }
 #else
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "PLANK Client not compiled with VAAPI Wayland support!");
+                     "BDE fernweh not compiled with VAAPI Wayland support!");
         return nullptr;
 #endif
     }
@@ -716,10 +716,10 @@ void VAAPIRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
         SDL_Rect overlayRect;
 
-        if (type == Overlay::OverlayStatusUpdate) {
+        if (type == Overlay::OverlayStatusUpdate || type == Overlay::OverlayCollaboration) {
             // Bottom Left
             overlayRect.x = 0;
-            overlayRect.y = -newSurface->h;
+            overlayRect.y = -newSurface->h - (type == Overlay::OverlayCollaboration ? 48 : 0);
         }
         else if (type == Overlay::OverlayDebug) {
             // Top left

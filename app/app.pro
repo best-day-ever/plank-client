@@ -26,7 +26,14 @@ unix:contains(CONFIG, plank-transport) {
 
     PLANK_CARGO = $$(CARGO)
     isEmpty(PLANK_CARGO): PLANK_CARGO = cargo
-    PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+    macx {
+        # Share Cargo objects across Mac worktrees and never let qmake clean
+        # the machine-wide target used by other builds.
+        PLANK_TRANSPORT_CARGO_TARGET_DIR = $$(HOME)/.cargo/shared-target
+    } else {
+        PLANK_TRANSPORT_CARGO_TARGET_DIR = $$OUT_PWD/plank-transport-cargo
+        QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
+    }
     PLANK_TRANSPORT_LIBRARY = $$PLANK_TRANSPORT_CARGO_TARGET_DIR/release/libplank_transport.a
 
     plank_transport.target = $$PLANK_TRANSPORT_LIBRARY
@@ -37,7 +44,6 @@ unix:contains(CONFIG, plank-transport) {
         --manifest-path $$shell_quote($$PLANK_TRANSPORT_DIR/Cargo.toml)
     QMAKE_EXTRA_TARGETS += plank_transport
     PRE_TARGETDEPS += $$PLANK_TRANSPORT_LIBRARY
-    QMAKE_CLEAN += $$PLANK_TRANSPORT_CARGO_TARGET_DIR
 
     INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
     LIBS += $$PLANK_TRANSPORT_LIBRARY -ldl -lpthread -lm
@@ -46,9 +52,40 @@ unix:contains(CONFIG, plank-transport) {
     DEFINES += PLANK_TRANSPORT=1
 }
 
+# The Windows build script creates the MSVC static library before qmake runs.
+# Keep Cargo outside nmake: the POSIX environment assignment above does not
+# work in cmd.exe, and a missing native transport must fail the build.
+win32:contains(CONFIG, plank-transport) {
+    isEmpty(PLANK_TRANSPORT_DIR): PLANK_TRANSPORT_DIR = $$(PLANK_TRANSPORT_DIR)
+    isEmpty(PLANK_TRANSPORT_DIR) {
+        PLANK_TRANSPORT_DIR = $$clean_path($$PWD/../../../protocol/plank-transport)
+    }
+    !exists($$PLANK_TRANSPORT_DIR/include/plank_transport.h) {
+        error("PLANK native transport header is missing: $$PLANK_TRANSPORT_DIR")
+    }
+    isEmpty(PLANK_TRANSPORT_LIBRARY): PLANK_TRANSPORT_LIBRARY = $$(PLANK_TRANSPORT_LIBRARY)
+    isEmpty(PLANK_TRANSPORT_LIBRARY) {
+        error("PLANK_TRANSPORT_LIBRARY must name the built MSVC plank_transport.lib")
+    }
+    !exists($$PLANK_TRANSPORT_LIBRARY) {
+        error("PLANK native transport library is missing: $$PLANK_TRANSPORT_LIBRARY")
+    }
+
+    INCLUDEPATH += $$PLANK_TRANSPORT_DIR/include
+    PRE_TARGETDEPS += $$PLANK_TRANSPORT_LIBRARY
+    LIBS += $$quote($$PLANK_TRANSPORT_LIBRARY) advapi32.lib bcrypt.lib crypt32.lib ntdll.lib secur32.lib userenv.lib
+    DEFINES += PLANK_TRANSPORT=1
+}
+
 TARGET = plank-client
 
 include(../globaldefs.pri)
+
+win32:contains(CONFIG, plank-transport) {
+    # Rust's MSVC static library contains unwind metadata without EHCONT
+    # targets, so LINK cannot generate an EH continuation table for the EXE.
+    QMAKE_LFLAGS -= -guard:ehcont
+}
 
 # Precompile QML files to avoid writing qmlcache on portable versions.
 # Since this binds the app against the Qt runtime version, we will only
@@ -77,6 +114,7 @@ contains(CONFIG, plank-frame-flow-trace): DEFINES += PLANK_FRAME_FLOW_TRACE
 DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 win32 {
+    DEFINES += NOMINMAX WIN32_LEAN_AND_MEAN
     !exists($$PWD/../libs/windows) {
         error("Missing dependencies. Please run 'powershell .\setup-deps.ps1' to fetch prebuilt libraries.")
     }
@@ -190,6 +228,12 @@ unix:if(!macx|disable-prebuilts) {
     }
 }
 
+linux {
+    PKGCONFIG += libpipewire-0.3
+    SOURCES += streaming/audio/linuxmicrophone.cpp
+    HEADERS += streaming/audio/linuxmicrophone.h streaming/audio/microphonecapturequeue.h streaming/audio/microphonecaptureclock.h
+}
+
 linux:packagesExist(libinput):packagesExist(libudev) {
     DEFINES += HAVE_LIBINPUT_TABLET
     PKGCONFIG += libinput libudev
@@ -214,13 +258,25 @@ macx {
 SOURCES += \
     backend/nvaddress.cpp \
     backend/outputtopology.cpp \
+    backend/clientdisplayprobe.cpp \
+    backend/displayarrangement.cpp \
+    backend/displaymonitor.cpp \
+    backend/displayplanner.cpp \
     backend/nvapp.cpp \
     main.cpp \
     backend/computerseeker.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
+    backend/hosttruststore.cpp \
+    backend/hosttlsguard.cpp \
+    backend/brokersessionstore.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
+    backend/plankbrokerclient.cpp \
+    backend/fernwehupdater.cpp \
+    backend/plankenrollment.cpp \
+    backend/plankpasskey.cpp \
+    backend/qrencoder.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
     settings/plankclientpolicy.cpp \
@@ -229,6 +285,8 @@ SOURCES += \
     streaming/input/keyboard.cpp \
     streaming/input/mouse.cpp \
     streaming/session.cpp \
+    streaming/audio/microphone.cpp \
+    streaming/camera/camera.cpp \
     streaming/avsynccontroller.cpp \
     streaming/plankdisplaymode.cpp \
     streaming/plankpresentation.cpp \
@@ -238,6 +296,9 @@ SOURCES += \
     streaming/audio/audio.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     gui/computermodel.cpp \
+    gui/remotebroker.cpp \
+    gui/onboardingcontroller.cpp \
+    gui/displaysetupcontroller.cpp \
     streaming/bandwidth.cpp \
     streaming/streamutils.cpp \
     path.cpp \
@@ -248,19 +309,40 @@ SOURCES += \
 macx: HEADERS += macapplication.h
 
 HEADERS += \
+    backend/authenticationtakeover.h \
+    backend/collaboration.h \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \
+    backend/clientdisplayprobe.h \
+    backend/displayarrangement.h \
+    backend/displaymonitor.h \
+    backend/displayplanner.h \
+    backend/displayprofile.h \
     backend/nvapp.h \
     utils.h \
     backend/computerseeker.h \
     backend/nvcomputer.h \
     backend/planknetwork.h \
     backend/nvhttp.h \
+    backend/hosttruststore.h \
+    backend/hosttlsguard.h \
+    backend/plankhttp.h \
+    backend/brokersessionstore.h \
+    backend/remotedisplaysetup.h \
+    backend/remotestreamsetup.h \
     backend/desktopstage.h \
     backend/hostrecovery.h \
     backend/computermanager.h \
     backend/relaywakeclient.h \
+    backend/plankbroker.h \
+    backend/plankbrokerclient.h \
+    backend/fernwehupdater.h \
+    backend/fernwehupdatepolicy.h \
+    backend/plankenrollment.h \
+    backend/plankpasskey.h \
+    backend/qrencoder.h \
+    backend/onboardingstate.h \
     cli/commandlineparser.h \
     cli/startstream.h \
     settings/streamingpreferences.h \
@@ -268,15 +350,22 @@ HEADERS += \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/plankpointerlogic.h \
+    streaming/input/plankmousemotion.h \
     streaming/session.h \
+    streaming/planksessionevents.h \
+    streaming/planksessionhotkeys.h \
     streaming/plankdisplaymode.h \
     streaming/plankpresentation.h \
     streaming/planktoolbar.h \
     streaming/planktoolbarlogic.h \
+    streaming/planktoolbarstats.h \
     streaming/plankreconnectpolicy.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
+    gui/remotebroker.h \
+    gui/onboardingcontroller.h \
+    gui/displaysetupcontroller.h \
     streaming/video/decoder.h \
     streaming/bandwidth.h \
     streaming/streamutils.h \
@@ -291,7 +380,30 @@ contains(DEFINES, HAVE_LIBINPUT_TABLET) {
     HEADERS += streaming/input/linuxrawwacom.h
 }
 
+HEADERS += streaming/input/pentiltencoding.h
+
+win32 {
+    SOURCES += streaming/input/windowsrawwacom.cpp
+    HEADERS += streaming/input/windowsrawwacom.h streaming/input/windowswacomlogic.h \
+        streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h \
+        streaming/input/linuxwacomreportworker.h
+    LIBS += -lCfgmgr32
+}
+
+macx|win32 {
+    # Normalized-pen forwarding via SDL3's pen events (SDL_EVENT_PEN_*),
+    # from AppKit on macOS and Windows Ink on Windows. Header-only;
+    # see streaming/input/macpen.h.
+    HEADERS += streaming/input/macpen.h
+}
+
 # Platform-specific renderers and decoders
+linux:contains(CONFIG, plank-transport) {
+    SOURCES += streaming/camera/linuxnativecamera.cpp
+    HEADERS += streaming/camera/linuxnativecamera.h \
+        streaming/camera/nativecameraframe.h streaming/camera/uvch264control.h
+}
+
 ffmpeg {
     message(FFmpeg decoder selected)
 
@@ -455,21 +567,42 @@ win32:!winrt {
 macx {
     message(VideoToolbox renderer selected)
 
+    DEFINES += HAVE_MAC_RAW_WACOM
+    SOURCES += streaming/input/macrawwacom.cpp
+    HEADERS += streaming/input/macrawwacom.h streaming/input/macrawwacomlogic.h streaming/input/macrawwacomasync.h
+    HEADERS += streaming/input/macrawwacomfocus.h
+    LIBS += -framework IOKit -framework CoreFoundation -framework ApplicationServices -framework Carbon
+
     SOURCES += \
         streaming/macquitshortcut.mm \
+        streaming/mackeyboardcapture.mm \
+        streaming/macdisplayinfo.mm \
         streaming/macwindow.mm \
         streaming/video/ffmpeg-renderers/vt_base.mm \
-        streaming/video/ffmpeg-renderers/vt_metal.mm
+        streaming/video/ffmpeg-renderers/vt_metal.mm \
+        streaming/video/decodercaps.mm
 
     HEADERS += \
         streaming/macquitshortcut.h \
+        streaming/mackeyboardcapture.h \
+        streaming/macdisplayinfo.h \
         streaming/macwindow.h \
+        streaming/video/decodercaps.h \
+        streaming/video/decodercaps-test-frames.h \
         streaming/macdisplaygeometry.h \
+        streaming/macdisplaymode.h \
         streaming/video/ffmpeg-renderers/vt.h \
         streaming/macclipboardsync.h \
         streaming/clipboardpolltimer.h \
         streaming/plankclipboard.h
     OBJECTIVE_SOURCES += streaming/macclipboardsync.mm
+    OBJECTIVE_SOURCES += streaming/audio/macmicrophonepermission.mm
+    contains(CONFIG, plank-transport) {
+        HEADERS += streaming/macfileclipboard.h
+        OBJECTIVE_SOURCES += streaming/macfileclipboard.mm
+    }
+    OBJECTIVE_SOURCES += backend/macpermissions.mm
+    HEADERS += backend/macpermissions.h
 }
 embedded {
     message(Embedded build)
@@ -498,6 +631,7 @@ wayland {
     SOURCES += streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.cpp
     HEADERS += \
         streaming/plankwaylandcursor.h \
+        streaming/plankcallbacktarget.h \
         streaming/plankembeddedcursor.h \
         streaming/plankwaylandtoolbar.h \
         streaming/video/ffmpeg-renderers/pacer/waylandvsyncsource.h
@@ -605,17 +739,21 @@ unix:!macx: {
     INSTALLS += target desktop icons appstream
 }
 win32 {
-    RC_ICONS = moonlight.ico
-    QMAKE_TARGET_COMPANY = Instinctual
-    QMAKE_TARGET_DESCRIPTION = PLANK Client
-    QMAKE_TARGET_PRODUCT = PLANK
+    RC_ICONS = bde-fernweh.ico
+    QMAKE_TARGET_COMPANY = "Best Day Ever"
+    QMAKE_TARGET_DESCRIPTION = BDE fernweh
+    QMAKE_TARGET_PRODUCT = BDE fernweh
 
     CONFIG -= embed_manifest_exe
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest
 }
 macx {
-    QMAKE_MACOSX_DEPLOYMENT_TARGET = 27.0
+    # Oldest supported macOS (Qt 6.10 floor: 13); the build scripts pass the same value.
+    isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 13.0
+    QMAKE_MACOSX_DEPLOYMENT_TARGET = $$PLANK_MACOS_DEPLOYMENT_TARGET
     QMAKE_APPLE_DEVICE_ARCHS = arm64
+    QMAKE_CFLAGS += -Werror=unguarded-availability-new
+    QMAKE_CXXFLAGS += -Werror=unguarded-availability-new
     QMAKE_INFO_PLIST = $$PWD/Info.plist
 
     APP_BUNDLE_RESOURCES.files = moonlight.icns
@@ -631,6 +769,26 @@ macx {
 
         QMAKE_RPATHDIR += @executable_path/../Frameworks
     }
+
+    # Touch ID sign-in helper (bde-linux docs/plank-broker.md 13.4), built
+    # with the app's deployment target and architecture into
+    # Contents/MacOS/plank-passkey so it is signed together with the app.
+    # It uses only system frameworks (CryptoKit Secure Enclave keys whose
+    # wrapped blob is stored in a file) and needs no entitlement.
+    PLANK_PASSKEY_SOURCE = $$PWD/passkey/plank-passkey.swift
+    PLANK_PASSKEY_BINARY = $$OUT_PWD/$${TARGET}.app/Contents/MacOS/plank-passkey
+    plank_passkey.target = $$PLANK_PASSKEY_BINARY
+    plank_passkey.depends = $$PLANK_PASSKEY_SOURCE
+    plank_passkey.commands = \
+        mkdir -p $$shell_quote($$OUT_PWD/$${TARGET}.app/Contents/MacOS) && \
+        xcrun --sdk macosx swiftc -O -whole-module-optimization \
+            -target $$first(QMAKE_APPLE_DEVICE_ARCHS)-apple-macos$$PLANK_MACOS_DEPLOYMENT_TARGET \
+            -file-prefix-map $$shell_quote($$PWD)=/build/plank/source/apps/client/app \
+            -module-cache-path $$shell_quote($$OUT_PWD/plank-passkey-module-cache) \
+            -o $$shell_quote($$PLANK_PASSKEY_BINARY) $$shell_quote($$PLANK_PASSKEY_SOURCE)
+    QMAKE_EXTRA_TARGETS += plank_passkey
+    PRE_TARGETDEPS += $$PLANK_PASSKEY_BINARY
+    QMAKE_CLEAN += $$PLANK_PASSKEY_BINARY
 }
 
 isEmpty(PLANK_VERSION) {
@@ -638,3 +796,17 @@ isEmpty(PLANK_VERSION) {
 }
 VERSION = "$$section(PLANK_VERSION, -, 0, 0)"
 DEFINES += PLANK_VERSION_STR=\\\"$$PLANK_VERSION\\\"
+
+# Shared clipboard protocol state; only native clipboard access varies by OS.
+macx|win32 {
+    SOURCES += streaming/clipboardsync.cpp
+    HEADERS += streaming/clipboardsync.h streaming/clipboardplatform.h streaming/clipboardpolltimer.h streaming/plankclipboard.h
+}
+win32 {
+    SOURCES += streaming/windowsclipboard.cpp
+    contains(CONFIG, plank-transport) {
+        SOURCES += streaming/windowsfileclipboard.cpp
+        HEADERS += streaming/windowsfileclipboard.h streaming/windowsfileclipboardpaths.h
+        LIBS += -ladvapi32 -lshell32 -luser32
+    }
+}

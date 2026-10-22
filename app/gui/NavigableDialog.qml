@@ -1,5 +1,6 @@
-import QtQuick 2.0
-import QtQuick.Controls 2.2
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 
 Dialog {
     id: control
@@ -22,15 +23,50 @@ Dialog {
         border.color: theme.border
     }
 
-    // The Material footer uses a separately rounded background. Against our
-    // custom dialog surface, its lower corners look like resize handles.
-    // Keep the footer flush with the dialog instead.
+    // The Material header and footer draw their own, separately rounded
+    // backgrounds in a different shade: a visible band across the title and
+    // corners that look like resize handles. Keep both flush with the dialog.
+    header: Label {
+        visible: control.title !== ""
+        text: control.title
+        textFormat: Text.PlainText
+        color: theme.textPrimary
+        font.pointSize: 15
+        font.weight: Font.DemiBold
+        elide: Label.ElideRight
+        topPadding: control.padding
+        leftPadding: control.padding
+        rightPadding: control.padding
+        bottomPadding: 0
+    }
+
     footer: DialogButtonBox {
         visible: count > 0
+        leftPadding: control.padding - 6
+        rightPadding: control.padding - 6
+        topPadding: 4
+        bottomPadding: 10
 
-        background: Rectangle {
-            color: theme.surfaceRaised
+        // Material paints every footer button as accent-coloured text, so
+        // Cancel and OK look alike. As on the pages, the action that accepts
+        // is the one filled button and the others are plain text.
+        Material.foreground: theme.textPrimary
+        delegate: Button {
+            highlighted: DialogButtonBox.buttonRole === DialogButtonBox.AcceptRole ||
+                         DialogButtonBox.buttonRole === DialogButtonBox.YesRole
+            flat: !highlighted
         }
+
+        background: Item {}
+    }
+
+    // The Material dim is a light wash that bleaches the dark launcher; a
+    // dark scrim (black 50%, the BDE styleguide's) lets it step back instead.
+    Overlay.modal: Rectangle {
+        color: Qt.rgba(0, 0, 0, 0.5)
+    }
+    Overlay.modeless: Rectangle {
+        color: Qt.rgba(0, 0, 0, 0.3)
     }
 
     onAboutToHide: {

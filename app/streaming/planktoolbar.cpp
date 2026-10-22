@@ -1,4 +1,5 @@
 #include "planktoolbar.h"
+#include "planktoolbarstats.h"
 #include "plankwaylandtoolbar.h"
 #include "videopacketlosswindow.h"
 
@@ -14,10 +15,6 @@
 #include <QPainterPath>
 #include <QtMath>
 
-#ifdef Q_OS_DARWIN
-#include "macwindow.h"
-#endif
-
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -27,8 +24,13 @@
 #endif
 
 namespace {
-constexpr int ToolbarPreferredWidth = 539;
 constexpr int ToolbarHeight = 39;
+constexpr int MicrophoneWidth = 34;
+// The "screens changed" strip below the toolbar row.
+constexpr int ScreensPromptHeight = 36;
+constexpr int CameraWidth = 34;
+constexpr int FilesWidth = 55;
+constexpr int FileStatusHeight = 28;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
 constexpr Uint32 AutoHideDelayMs = 5000;
@@ -107,7 +109,10 @@ PlankToolbar::PlankToolbar(
       m_WindowPixelWidth(0),
       m_WindowPixelHeight(0),
       m_PixelDensity(1.0f),
-      m_Width(ToolbarPreferredWidth),
+      m_EncoderTargetWidth(PlankToolbarStats::encoderTargetWidth(
+              BitrateMinimumKbps, BitrateMaximumKbps, BitrateStepKbps)),
+      m_Width(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+              PlankToolbarStats::WindowControlsWidth),
       m_ToolbarLeft(-1),
       m_ToolbarDragOffsetX(0),
       m_PointerX(0),
@@ -122,9 +127,11 @@ PlankToolbar::PlankToolbar(
       m_RenderedFps(0.0f),
       m_VideoMbps(0.0f),
       m_PacketLossPercent(-1.0f),
+      m_NetworkRttMs(0),
       m_LastDrawnFps(-1.0f),
       m_LastDrawnVideoMbps(-1.0f),
       m_LastDrawnPacketLossPercent(-2.0f),
+      m_LastDrawnNetworkRttMs(0),
       m_HideDeadline(0),
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
@@ -203,12 +210,14 @@ PlankToolbar::~PlankToolbar()
 }
 
 void PlankToolbar::setRenderedStats(
-        float fps, float videoMbps, float packetLossPercent)
+        float fps, float videoMbps, float packetLossPercent,
+        std::uint32_t networkRttMs)
 {
     m_RenderedFps = std::max(0.0f, fps);
     m_VideoMbps = std::max(0.0f, videoMbps);
     m_PacketLossPercent = packetLossPercent < 0.0f ?
                 -1.0f : qBound(0.0f, packetLossPercent, 100.0f);
+    m_NetworkRttMs = networkRttMs;
 }
 
 void PlankToolbar::setAppliedBitrate(
@@ -249,22 +258,20 @@ PlankToolbar::Action PlankToolbar::update(
         show(now);
     }
 
-    if (m_Visible && !m_ButtonRouter.hasLocalButtons() &&
-            !m_DraggingSlider && !m_PointerInside &&
+    // A stationary pointer over the toolbar is idle too. Only an active
+    // button sequence, drag, or unanswered screen prompt keeps it open.
+    if (m_Visible && !m_Pinned && !m_ButtonRouter.hasLocalButtons() &&
+            !m_DraggingToolbar && !m_DraggingSlider && !m_ScreensPromptVisible &&
             m_HideDeadline != 0 && now >= m_HideDeadline) {
-        if (m_Pinned) {
-            endLocalPointerInteraction();
-            m_HideDeadline = 0;
-        } else {
-            hide();
-        }
+        hide();
     }
 
     if (m_Visible && now >= m_LastRedrawTime + RedrawIntervalMs &&
             (std::fabs(m_RenderedFps - m_LastDrawnFps) >= 0.05f ||
              std::fabs(m_VideoMbps - m_LastDrawnVideoMbps) >= 0.05f ||
              std::fabs(m_PacketLossPercent -
-                       m_LastDrawnPacketLossPercent) >= 0.05f)) {
+                       m_LastDrawnPacketLossPercent) >= 0.05f ||
+             m_NetworkRttMs != m_LastDrawnNetworkRttMs)) {
         redraw();
     }
 
@@ -325,6 +332,27 @@ void PlankToolbar::hideReconnectPrompt()
     }
 }
 
+void PlankToolbar::showScreensPrompt(const QString& text)
+{
+    m_ScreensPromptText = text;
+    m_ScreensPromptVisible = true;
+    show(SDL_GetTicks());
+    m_HideDeadline = 0;
+}
+
+void PlankToolbar::hideScreensPrompt()
+{
+    if (!m_ScreensPromptVisible) {
+        return;
+    }
+    m_ScreensPromptVisible = false;
+    m_ScreensPromptText.clear();
+    if (m_Visible) {
+        restartAutoHideTimer(SDL_GetTicks());
+        redraw();
+    }
+}
+
 void PlankToolbar::notifyWindowChanged()
 {
     if (m_WaylandToolbar && !m_WaylandToolbar->isAttachedTo(m_Window)) {
@@ -356,16 +384,18 @@ void PlankToolbar::notifyWindowChanged()
                 SDL_GetWindowPixelDensity(m_Window),
                 m_WindowWidth, m_WindowHeight,
                 m_WindowPixelWidth, m_WindowPixelHeight);
-    m_Width = std::min(ToolbarPreferredWidth, std::max(m_WindowWidth, 1));
+    m_Width = std::min(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+                      (m_MicrophoneSupported ? MicrophoneWidth : 0) +
+                      (m_CameraSupported ? CameraWidth : 0) +
+                      (m_FilesSupported ? FilesWidth : 0) +
+                      PlankToolbarStats::WindowControlsWidth,
+                      std::max(m_WindowWidth, 1));
     if (m_ToolbarLeft < 0) {
         m_ToolbarLeft = std::max(0, (m_WindowWidth - m_Width) / 2);
     } else {
         m_ToolbarLeft = PlankToolbarLogic::logicalLeftFromPosition(
                     oldHorizontalPosition, m_WindowWidth, m_Width);
     }
-#ifdef Q_OS_DARWIN
-    m_ToolbarLeft = MacWindow::unobscuredToolbarLeft(m_Window, m_ToolbarLeft, m_Width);
-#endif
     if (!m_PointerInitialized) {
         m_PointerX = m_WindowWidth / 2;
         m_PointerY = m_WindowHeight / 2;
@@ -376,7 +406,7 @@ void PlankToolbar::notifyWindowChanged()
     }
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
-                                    m_Width, ToolbarHeight);
+                                    m_Width, toolbarHeight());
     }
     if (m_WaylandReconnectPrompt) {
         m_WaylandReconnectPrompt->setLayoutAt(
@@ -423,6 +453,9 @@ void PlankToolbar::notifyFocusLost()
     m_DraggingToolbar = false;
     m_DraggingSlider = false;
     endLocalPointerInteraction();
+    if (m_Visible) {
+        restartAutoHideTimer(SDL_GetTicks());
+    }
 }
 
 bool PlankToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event)
@@ -481,11 +514,7 @@ bool PlankToolbar::observeMouseMotion(const SDL_MouseMotionEvent& event)
     }
 
     m_PointerInside = contains(m_PointerX, m_PointerY);
-    if (m_PointerInside || m_ButtonRouter.hasLocalButtons()) {
-        m_HideDeadline = 0;
-    } else {
-        m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
-    }
+    restartAutoHideTimer(now);
 
     const auto owner = m_ButtonRouter.routeMotion(
                 pointerEnteredVisibleToolbar);
@@ -567,7 +596,11 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
     }
 
     m_PointerInside = pointerInside;
-    m_HideDeadline = 0;
+    if (event.down) {
+        m_HideDeadline = 0;
+    } else {
+        restartAutoHideTimer(now);
+    }
 
     if (event.button != SDL_BUTTON_LEFT) {
         return Action::Consumed;
@@ -607,10 +640,20 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
             m_Pinned = !m_Pinned;
             m_Preferences.plankToolbarPinned = m_Pinned;
             m_Preferences.save();
+            restartAutoHideTimer(now);
             redraw();
             break;
         case Control::Fullscreen:
             action = Action::ToggleFullscreen;
+            break;
+        case Control::Files:
+            action = Action::SendFiles;
+            break;
+        case Control::Camera:
+            action = Action::ToggleCamera;
+            break;
+        case Control::Microphone:
+            action = Action::ToggleMicrophone;
             break;
         case Control::Minimize:
             action = Action::Minimize;
@@ -618,13 +661,22 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
         case Control::Disconnect:
             action = Action::Disconnect;
             break;
+        case Control::ScreensApply:
+            action = Action::ApplyScreens;
+            break;
+        case Control::ScreensKeep:
+            action = Action::KeepScreens;
+            break;
+        case Control::ScreensSetUp:
+            action = Action::SetUpScreens;
+            break;
         default:
             break;
         }
     }
 
     if (!m_ButtonRouter.hasLocalButtons() && !pointerInside) {
-        m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+        restartAutoHideTimer(now);
         endLocalPointerInteraction();
     }
     return action;
@@ -653,6 +705,7 @@ bool PlankToolbar::handlePointerWheel(const SDL_MouseWheelEvent& event)
         endLocalPointerInteraction();
         return false;
     }
+    restartAutoHideTimer(SDL_GetTicks());
     if (!m_LocalPointerInteraction) {
         beginLocalPointerInteraction();
     }
@@ -680,13 +733,30 @@ void PlankToolbar::show(Uint64 now)
 {
     m_Visible = true;
     m_EdgeHoverStartTime = 0;
-    m_HideDeadline = m_Pinned ? 0 : now + AutoHideDelayMs;
+    restartAutoHideTimer(now);
     redraw();
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setVisible(true);
     } else {
         m_OverlayManager.setOverlayState(Overlay::OverlayToolbar, true);
     }
+}
+
+void PlankToolbar::toggleFromShortcut(Uint64 now)
+{
+    if (m_Visible) {
+        hide();
+    } else {
+        show(now);
+    }
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK toolbar %s by shortcut",
+                m_Visible ? "shown" : "hidden");
+}
+
+void PlankToolbar::restartAutoHideTimer(Uint64 now)
+{
+    m_HideDeadline = m_Pinned || m_ScreensPromptVisible ?
+                0 : now + AutoHideDelayMs;
 }
 
 void PlankToolbar::hide()
@@ -715,7 +785,7 @@ void PlankToolbar::beginLocalPointerInteraction()
 
     m_LocalPointerInteraction = true;
     m_PointerInside = true;
-    m_HideDeadline = 0;
+    restartAutoHideTimer(SDL_GetTicks());
     redraw();
     SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
                  "PLANK toolbar routed pointer to local controls");
@@ -745,8 +815,8 @@ void PlankToolbar::redraw()
 {
     const int surfaceWidth = m_WaylandToolbar ? m_Width :
             PlankToolbarLogic::physicalExtent(m_Width, m_PixelDensity);
-    const int surfaceHeight = m_WaylandToolbar ? ToolbarHeight :
-            PlankToolbarLogic::physicalExtent(ToolbarHeight,
+    const int surfaceHeight = m_WaylandToolbar ? toolbarHeight() :
+            PlankToolbarLogic::physicalExtent(toolbarHeight(),
                                                        m_PixelDensity);
     SDL_Surface* surface = SDL_CreateSurface(
                 surfaceWidth, surfaceHeight, SDL_PIXELFORMAT_ARGB8888);
@@ -856,12 +926,25 @@ void PlankToolbar::redraw()
                          QString("%1%").arg(m_PacketLossPercent, 0, 'f',
                                              VideoPacketLossDisplayDecimalPlaces));
 
-    QFont targetFont = labelFont;
-    targetFont.setPixelSize(12);
-    painter.setFont(targetFont);
+    painter.setFont(labelFont);
+    painter.setPen(QColor(151, 161, 174));
+    painter.drawText(QRect(PlankToolbarStats::RttLeft, 5,
+                          PlankToolbarStats::RttWidth, 12),
+                     Qt::AlignLeft | Qt::AlignVCenter, "RTT");
+    painter.setFont(lossFont);
+    painter.setPen(QColor(246, 248, 250));
+    painter.drawText(QRect(PlankToolbarStats::RttLeft, 16,
+                          PlankToolbarStats::RttWidth, 17),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     PlankToolbarStats::networkRttText(m_NetworkRttMs));
+
+    const int targetLeft = sliderLeft() - toolbarLeft();
+    const int targetWidth = sliderRight() - sliderLeft();
+    painter.setFont(PlankToolbarStats::encoderTargetFont());
     painter.setPen(m_BitrateSupported ? QColor(235, 239, 244) : QColor(135, 143, 153));
-    painter.drawText(QRect(229, 3, 190, 17), Qt::AlignLeft | Qt::AlignVCenter,
-                     QString("Encoder target  %1 Mbps").arg(m_BitrateKbps / 1000.0, 0, 'f', 1));
+    painter.drawText(QRect(targetLeft, 3, targetWidth, 17),
+                     Qt::AlignLeft | Qt::AlignVCenter,
+                     PlankToolbarStats::encoderTargetText(m_BitrateKbps));
 
     const int trackLeft = sliderLeft() - toolbarLeft();
     const int trackRight = sliderRight() - toolbarLeft();
@@ -881,6 +964,77 @@ void PlankToolbar::redraw()
     painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
 
     const QPointF fullscreenCenter(m_Width - 88.0, 19.0);
+    if (m_MicrophoneSupported) {
+        const qreal x = m_Width - 121.0;
+        const bool hovered = m_LocalPointerInteraction && microphoneContains(m_PointerX, m_PointerY);
+        if (hovered) {
+            // Keep the hint in the existing toolbar surface. A separate popup
+            // would introduce another focus/pointer boundary during capture.
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(35, 43, 53));
+            painter.drawRoundedRect(QRectF(targetLeft - 3, 1, targetWidth + 6, 36), 3, 3);
+            painter.setPen(QColor(235, 239, 244));
+            QFont hintFont = labelFont; hintFont.setPixelSize(11); painter.setFont(hintFont);
+            QString hint;
+            switch (m_MicrophoneState) {
+            case PlankMicrophone::State::Active: hint = QStringLiteral("Microphone on\nClick to mute"); break;
+            case PlankMicrophone::State::Off: hint = QStringLiteral("Microphone off\nClick to enable"); break;
+            case PlankMicrophone::State::Pending: hint = QStringLiteral("Starting microphone\nClick to cancel"); break;
+            case PlankMicrophone::State::Unavailable: hint = QStringLiteral("Microphone unavailable\nCheck permission/input"); break;
+            }
+            painter.drawText(QRectF(targetLeft, 1, targetWidth, 36), Qt::AlignCenter, hint);
+        }
+        const QColor color = m_MicrophoneState == PlankMicrophone::State::Active ? QColor(52, 199, 110) :
+            m_MicrophoneState == PlankMicrophone::State::Pending ? QColor(240, 186, 70) :
+            m_MicrophoneState == PlankMicrophone::State::Unavailable ? QColor(239, 88, 88) : QColor(180, 189, 202);
+        painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(QRectF(x-3, 5, 6, 11), 3, 3);
+        painter.drawArc(QRectF(x-6, 8, 12, 13), 180*16, 180*16);
+        painter.drawLine(QPointF(x, 21), QPointF(x, 23));
+        if (m_MicrophoneState == PlankMicrophone::State::Off || m_MicrophoneState == PlankMicrophone::State::Unavailable)
+            painter.drawLine(QPointF(x-8, 4), QPointF(x+8, 21));
+        QFont font = painter.font(); font.setPixelSize(9); painter.setFont(font);
+        const QString label = m_MicrophoneState == PlankMicrophone::State::Active ? QStringLiteral("On") :
+            m_MicrophoneState == PlankMicrophone::State::Pending ? QStringLiteral("Wait") :
+            m_MicrophoneState == PlankMicrophone::State::Unavailable ? QStringLiteral("N/A") : QStringLiteral("Off");
+        painter.drawText(QRectF(x-16, 24, 32, 12), Qt::AlignCenter, label);
+    }
+    if (m_CameraSupported) {
+        const qreal x = m_Width - 121.0 - (m_MicrophoneSupported ? MicrophoneWidth : 0);
+        const bool hovered = m_LocalPointerInteraction && cameraContains(m_PointerX, m_PointerY);
+        if (hovered) {
+            // Keep the hint in the existing toolbar surface. A separate popup
+            // would introduce another focus/pointer boundary during capture.
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(35, 43, 53));
+            painter.drawRoundedRect(QRectF(targetLeft - 3, 1, targetWidth + 6, 36), 3, 3);
+            painter.setPen(QColor(235, 239, 244));
+            QFont hintFont = labelFont; hintFont.setPixelSize(11); painter.setFont(hintFont);
+            QString hint;
+            switch (m_CameraState) {
+            case PlankCamera::State::Active: hint = QStringLiteral("Camera on\nClick to turn off"); break;
+            case PlankCamera::State::Off: hint = QStringLiteral("Camera off\nClick to enable"); break;
+            case PlankCamera::State::Pending: hint = QStringLiteral("Starting camera\nClick to cancel"); break;
+            case PlankCamera::State::Unavailable: hint = QStringLiteral("Camera unavailable\nCheck device/host setup"); break;
+            }
+            painter.drawText(QRectF(targetLeft, 1, targetWidth, 36), Qt::AlignCenter, hint);
+        }
+        const QColor color = m_CameraState == PlankCamera::State::Active ? QColor(52, 199, 110) :
+            m_CameraState == PlankCamera::State::Pending ? QColor(240, 186, 70) :
+            m_CameraState == PlankCamera::State::Unavailable ? QColor(239, 88, 88) : QColor(180, 189, 202);
+        painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(QRectF(x-8, 7, 16, 12), 2, 2);
+        painter.drawEllipse(QPointF(x, 13), 4, 4);
+        if (m_CameraState == PlankCamera::State::Off || m_CameraState == PlankCamera::State::Unavailable)
+            painter.drawLine(QPointF(x-8, 4), QPointF(x+8, 21));
+        QFont font = painter.font(); font.setPixelSize(9); painter.setFont(font);
+        const QString label = m_CameraState == PlankCamera::State::Active ? QStringLiteral("On") :
+            m_CameraState == PlankCamera::State::Pending ? QStringLiteral("Wait") :
+            m_CameraState == PlankCamera::State::Unavailable ? QStringLiteral("N/A") : QStringLiteral("Off");
+        painter.drawText(QRectF(x-16, 24, 32, 12), Qt::AlignCenter, label);
+    }
     const QRectF fullscreenRect(fullscreenCenter.x() - WindowButtonSize / 2.0,
                                 fullscreenCenter.y() - WindowButtonSize / 2.0,
                                 WindowButtonSize,
@@ -966,19 +1120,64 @@ void PlankToolbar::redraw()
         hintFont.setPixelSize(10);
         painter.setFont(hintFont);
         painter.setPen(QColor(183, 151, 92));
-        painter.fillRect(QRect(225, 21, 198, 17), QColor(22, 27, 34));
-        painter.drawText(QRect(229, 22, 190, 15), Qt::AlignLeft | Qt::AlignVCenter,
-                         "Live bitrate control unavailable");
+        painter.fillRect(QRect(targetLeft - 4, 21, targetWidth + 8, 17), QColor(22, 27, 34));
+        painter.drawText(QRect(targetLeft, 22, targetWidth, 15), Qt::AlignLeft | Qt::AlignVCenter,
+                         "Bitrate control unavailable");
     }
 
+    if (m_ScreensPromptVisible) {
+        painter.fillRect(QRect(0, ToolbarHeight, m_Width, ScreensPromptHeight), QColor(34, 41, 50));
+        painter.setPen(QPen(QColor(255, 255, 255, 42), 1));
+        painter.drawLine(QPointF(0, ToolbarHeight + 0.5), QPointF(m_Width, ToolbarHeight + 0.5));
+        QFont promptFont = labelFont;
+        promptFont.setPixelSize(12);
+        painter.setFont(promptFont);
+        painter.setPen(QColor(235, 239, 244));
+        const int textRight = screensButtonRect(2).left() - 8;
+        painter.drawText(QRect(12, ToolbarHeight, std::max(0, textRight - 12), ScreensPromptHeight),
+                         Qt::AlignLeft | Qt::AlignVCenter,
+                         painter.fontMetrics().elidedText(m_ScreensPromptText, Qt::ElideRight,
+                                                          std::max(0, textRight - 12)));
+        static const char* labels[] = {"Apply layout", "Keep", "Set up\u2026"};
+        for (int index = 0; index < 3; ++index) {
+            const QRect rect = screensButtonRect(index);
+            const bool hovered = m_LocalPointerInteraction &&
+                    rect.contains(m_PointerX - toolbarLeft(), m_PointerY);
+            painter.setPen(QPen(index == 0 ? QColor(52, 132, 228) : QColor(104, 116, 131), 1));
+            painter.setBrush(index == 0 ? (hovered ? QColor(62, 146, 240) : QColor(52, 132, 228)) :
+                                          (hovered ? QColor(68, 78, 90, 230) : QColor(48, 57, 68, 210)));
+            painter.drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5),
+                                    WindowButtonRadius, WindowButtonRadius);
+            painter.setPen(QColor(246, 248, 250));
+            painter.drawText(rect, Qt::AlignCenter, QString::fromUtf8(labels[index]));
+        }
+    }
+
+    if (m_FilesSupported) {
+        const qreal right = m_Width - 105 - (m_MicrophoneSupported ? MicrophoneWidth : 0) -
+                (m_CameraSupported ? CameraWidth : 0);
+        painter.setPen(QPen(QColor(104, 116, 131), 1));
+        painter.setBrush(filesContains(m_PointerX, m_PointerY) ? QColor(68, 78, 90) : QColor(48, 57, 68));
+        painter.drawRoundedRect(QRectF(right - FilesWidth + 3, 6, FilesWidth - 6, 27), 4, 4);
+        painter.setFont(labelFont);
+        painter.setPen(QColor(246, 248, 250));
+        painter.drawText(QRectF(right - FilesWidth, 6, FilesWidth, 27), Qt::AlignCenter, "Files…");
+    }
+    if (!m_FileTransferStatus.isEmpty()) {
+        painter.setFont(labelFont);
+        painter.setPen(QColor(235, 239, 244));
+        painter.drawText(QRect(10, toolbarHeight() - FileStatusHeight, m_Width - 20, FileStatusHeight),
+                         Qt::AlignLeft | Qt::AlignVCenter, m_FileTransferStatus);
+    }
     painter.end();
     m_LastDrawnFps = m_RenderedFps;
     m_LastDrawnVideoMbps = m_VideoMbps;
     m_LastDrawnPacketLossPercent = m_PacketLossPercent;
+    m_LastDrawnNetworkRttMs = m_NetworkRttMs;
     m_LastRedrawTime = SDL_GetTicks();
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setLayout(m_WindowWidth, toolbarLeft(),
-                                    m_Width, ToolbarHeight);
+                                    m_Width, toolbarHeight());
         m_WaylandToolbar->present(image.copy());
         SDL_DestroySurface(surface);
     } else {
@@ -1178,7 +1377,7 @@ void PlankToolbar::nativePointerEnter(int parentX, int parentY)
     m_PointerX = parentX;
     m_PointerY = parentY;
     m_PointerInside = true;
-    m_HideDeadline = 0;
+    restartAutoHideTimer(SDL_GetTicks());
     beginLocalPointerInteraction();
     redraw();
 }
@@ -1188,7 +1387,7 @@ void PlankToolbar::nativePointerLeave()
     m_PointerInside = false;
     if (!m_ButtonRouter.hasLocalButtons()) {
         endLocalPointerInteraction();
-        m_HideDeadline = m_Pinned ? 0 : SDL_GetTicks() + AutoHideDelayMs;
+        restartAutoHideTimer(SDL_GetTicks());
     }
     redraw();
 }
@@ -1199,7 +1398,7 @@ void PlankToolbar::nativePointerMotion(int parentX, int parentY)
     m_PointerX = parentX;
     m_PointerY = parentY;
     m_PointerInside = true;
-    m_HideDeadline = 0;
+    restartAutoHideTimer(now);
 
     if (m_DraggingToolbar) {
         const int newLeft = qBound(0, m_PointerX - m_ToolbarDragOffsetX,
@@ -1207,7 +1406,7 @@ void PlankToolbar::nativePointerMotion(int parentX, int parentY)
         if (newLeft != m_ToolbarLeft) {
             m_ToolbarLeft = newLeft;
             m_WaylandToolbar->setLayout(m_WindowWidth, m_ToolbarLeft,
-                                        m_Width, ToolbarHeight);
+                                        m_Width, toolbarHeight());
             if (now >= m_LastToolbarMoveDrawTime + ToolbarMoveRedrawIntervalMs) {
                 redraw();
                 m_LastToolbarMoveDrawTime = now;
@@ -1309,7 +1508,23 @@ void PlankToolbar::queueBitrateRequest(Uint64 now, bool forceSend)
 bool PlankToolbar::contains(int x, int y) const
 {
     return x >= toolbarLeft() && x < toolbarLeft() + m_Width &&
-           y >= 0 && y < ToolbarHeight;
+           y >= 0 && y < toolbarHeight();
+}
+
+int PlankToolbar::toolbarHeight() const
+{
+    return ToolbarHeight + (m_ScreensPromptVisible ? ScreensPromptHeight : 0) +
+            (m_FileTransferStatus.isEmpty() ? 0 : FileStatusHeight);
+}
+
+// Toolbar-local rectangles of the prompt's buttons, right to left:
+// 0 Apply layout, 1 Keep, 2 Set up…
+QRect PlankToolbar::screensButtonRect(int index) const
+{
+    static const int widths[] = {98, 52, 66};
+    int right = m_Width - 8;
+    for (int button = 0; button < index; ++button) right -= widths[button] + 6;
+    return QRect(right - widths[index], ToolbarHeight + 5, widths[index], ScreensPromptHeight - 10);
 }
 
 bool PlankToolbar::sliderContains(int x, int y) const
@@ -1322,6 +1537,54 @@ bool PlankToolbar::pinContains(int x, int y) const
 {
     return x >= toolbarLeft() + 23 && x <= toolbarLeft() + 51 &&
            y >= 5 && y <= 33;
+}
+
+void PlankToolbar::setMicrophoneState(bool supported, PlankMicrophone::State state)
+{
+    if (supported == m_MicrophoneSupported && state == m_MicrophoneState) return;
+    const bool geometryChanged = supported != m_MicrophoneSupported;
+    m_MicrophoneSupported = supported; m_MicrophoneState = state;
+    if (geometryChanged) notifyWindowChanged();
+    redraw();
+}
+
+bool PlankToolbar::microphoneContains(int x, int y) const
+{
+    return m_MicrophoneSupported && x >= toolbarLeft() + m_Width - 136 &&
+        x <= toolbarLeft() + m_Width - 106 && y >= 2 && y <= 37;
+}
+
+void PlankToolbar::setCameraState(bool supported, PlankCamera::State state)
+{
+    if (supported == m_CameraSupported && state == m_CameraState) return;
+    const bool geometryChanged = supported != m_CameraSupported;
+    m_CameraSupported = supported; m_CameraState = state;
+    if (geometryChanged) notifyWindowChanged();
+    redraw();
+}
+
+void PlankToolbar::setFileTransferState(bool supported, const QString& status)
+{
+    if (supported == m_FilesSupported && status == m_FileTransferStatus) return;
+    m_FilesSupported = supported;
+    const bool statusChanged = status != m_FileTransferStatus;
+    m_FileTransferStatus = status;
+    notifyWindowChanged();
+    if (statusChanged && !status.isEmpty()) show(SDL_GetTicks());
+    redraw();
+}
+
+bool PlankToolbar::filesContains(int x, int y) const
+{
+    const int right = toolbarLeft() + m_Width - 105 -
+            (m_MicrophoneSupported ? MicrophoneWidth : 0) - (m_CameraSupported ? CameraWidth : 0);
+    return m_FilesSupported && x >= right - FilesWidth && x < right && y >= 2 && y <= 37;
+}
+
+bool PlankToolbar::cameraContains(int x, int y) const
+{
+    return m_CameraSupported && x >= toolbarLeft() + m_Width - 136 - (m_MicrophoneSupported ? MicrophoneWidth : 0) &&
+        x <= toolbarLeft() + m_Width - 106 - (m_MicrophoneSupported ? MicrophoneWidth : 0) && y >= 2 && y <= 37;
 }
 
 bool PlankToolbar::handleContains(int x, int y) const
@@ -1353,6 +1616,13 @@ PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
     if (!contains(x, y)) {
         return Control::None;
     }
+    if (m_ScreensPromptVisible && y >= ToolbarHeight) {
+        const QPoint local(x - toolbarLeft(), y);
+        if (screensButtonRect(0).contains(local)) return Control::ScreensApply;
+        if (screensButtonRect(1).contains(local)) return Control::ScreensKeep;
+        if (screensButtonRect(2).contains(local)) return Control::ScreensSetUp;
+        return Control::None;
+    }
     if (handleContains(x, y)) {
         return Control::Handle;
     }
@@ -1362,6 +1632,9 @@ PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
     if (fullscreenContains(x, y)) {
         return Control::Fullscreen;
     }
+    if (filesContains(x, y)) return Control::Files;
+    if (cameraContains(x, y)) return Control::Camera;
+    if (microphoneContains(x, y)) return Control::Microphone;
     if (minimizeContains(x, y)) {
         return Control::Minimize;
     }
@@ -1381,10 +1654,14 @@ int PlankToolbar::toolbarLeft() const
 
 int PlankToolbar::sliderLeft() const
 {
-    return toolbarLeft() + 229;
+    return toolbarLeft() + PlankToolbarStats::EncoderTargetLeft;
 }
 
 int PlankToolbar::sliderRight() const
 {
-    return toolbarLeft() + std::max(191, m_Width - 113);
+    return toolbarLeft() + std::max(PlankToolbarStats::EncoderTargetLeft,
+                                   m_Width - PlankToolbarStats::WindowControlsWidth -
+                                   (m_MicrophoneSupported ? MicrophoneWidth : 0) -
+                                   (m_CameraSupported ? CameraWidth : 0) -
+                                   (m_FilesSupported ? FilesWidth : 0));
 }

@@ -8,26 +8,37 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
+#include "plankcallbacktarget.h"
 #include <thread>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
+#include "backend/nvhttp.h"
+#include "backend/displayplanner.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
+#include "audio/microphone.h"
+#include "camera/camera.h"
 #include "video/overlaymanager.h"
 #include "videopacketlosswindow.h"
 #include "plankreconnectpolicy.h"
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
 #include "clipboardpolltimer.h"
 #endif
 
 class ComputerManager;
 class PlankToolbar;
-class MacClipboardSync;
+class ClipboardSync;
+class WindowsFileClipboard;
+#if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
+class MacFileClipboard;
+#endif
 #ifdef PLANK_TRANSPORT
 struct PlankTransportNativeEndpoint;
 #endif
@@ -137,9 +148,29 @@ public:
 
     Q_INVOKABLE void exec(QWindow* qtWindow);
 
+    // Remote (broker) mode: obtains a fresh one-use host admission from the
+    // broker (a new POST /v1/hosts/{id}/connect), updates this computer's
+    // leased address and pin, and returns the username + GSSAPI token for
+    // /plank/auth/start. Throws GfeHttpResponseException/QtNetworkReplyException.
+    // Replaces password re-authentication for reconnects and display
+    // transitions; tokens are one-use, so every re-auth goes back to the broker.
+    using PlankBrokerAdmission = std::function<void(QString& username, QString& gssapiToken)>;
+    void setPlankBrokerAdmission(PlankBrokerAdmission admission);
+    // A signed host admission that explicitly named the greeter permits a
+    // bounded handoff retry even if the stream ends before its notice arrives.
+    void setAuthenticatedGreeter(bool confirmed);
+
     Q_INVOKABLE void cancelConnectionStart();
 
     Q_INVOKABLE void respondToActiveSessionTakeover(bool takeOver);
+
+    Q_INVOKABLE void respondToDesktopSignOut(bool signOut);
+    Q_INVOKABLE void respondToDesktopCollaboration(int choice);
+    bool isCollaborator() const { return m_CollaborationPermission.load() != 0; }
+
+    // Apply the saved display layout for the current screens during the
+    // stream (in-session reconnect). Thread-safe; ignored while reconnecting.
+    Q_INVOKABLE void applyDisplayLayout();
 
     static
     void getDecoderInfo(SDL_Window* window,
@@ -159,6 +190,10 @@ public:
     void flushWindowEvents();
 
     static void postTabletCursorActivationEvent();
+
+    // Called by the decoder thread when the size of the decoded frames
+    // changes; input is re-pointed at that size on the main thread.
+    static void notifyDecodedFrameSize(int width, int height);
 
     void updateRenderedStats(float fps, float videoMbps)
     {
@@ -188,7 +223,13 @@ signals:
 
     void activeSessionTakeoverRequested(QString text);
 
+    void desktopSignOutRequested(QString text);
+    void desktopCollaborationRequested(QString text, bool signOutAvailable);
+
     void displayLaunchError(QString text);
+
+    // "Set up…" in the screens-changed prompt: open the display setup.
+    void displaySetupRequested();
 
     void displayLaunchWarning(QString text);
 
@@ -228,6 +269,22 @@ private:
                                        const PlankReconnectState& state);
 
     void clearPlankReconnectCredentials();
+    bool isPlankBrokered() const;
+    bool hasPlankCredentials() const;
+    QString authenticatePlank(NvHTTP& http, bool* greeterConfirmed);
+    bool waitForPlankDecision();
+    int waitForPlankDecisionChoice();
+    bool joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner);
+    bool createCollaborationWindows();
+    void rebuildCollaborationPresentation();
+    void updateCollaborationIndicator();
+    void applyCollaborationPermission();
+    bool resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
+                                     const std::function<void()>& startApp,
+                                     PlankDesktopSignOut conflict,
+                                     const GfeHttpResponseException& refusal,
+                                     bool reconnecting,
+                                     QString& signOutOwner);
 
     bool startPlankTransportDataPlane(quint16 port,
                                  const QString& certificateSha256,
@@ -250,13 +307,18 @@ private:
                                           const unsigned char* payload,
                                           size_t payloadLength);
 #endif
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     void startClipboardSync();
     void stopClipboardSync();
     void startClipboardPollTimer();
     void stopClipboardPollTimer();
     void queueClipboardPollEvent();
     bool clipboardSyncEnabled() const;
+#ifdef PLANK_TRANSPORT
+    bool beginFileClipboardPasteOnMainThread();
+    bool deferTextClipboardPasteOnMainThread();
+    void injectRemoteFilePasteOnMainThread();
+#endif
 #endif
 
     bool validateLaunch(SDL_Window* testWindow);
@@ -295,11 +357,40 @@ private:
 
     bool configurePlankHostLayout();
 
+    // One window per workstation display (display arrangement on macOS and
+    // Wayland): which displays the plan shows and where the stream opens.
+    void applyArrangementPresentation();
+    bool createSecondaryWindows(Uint32 windowFlags, const std::string& windowName);
+    void destroySecondaryWindows();
+    // Client monitors changed during the stream: back to one window and ask.
+    void handleClientDisplaysChanged();
+    void collapseToSingleWindow();
+    bool requestDisplayLayoutApply();
+    void applyPendingPresentation();
+
+    // Display arrangement (0x8000000) for Match client: plans the client's
+    // monitors with the display profile and the host's capabilities.
+    bool planDisplayArrangement(const QVector<NvClientDisplay>& displays, int hostFeatureFlags,
+                                const NvOutputTopology& topology, bool& matchedExactly);
+    // The display profile for these monitors on this workstation (legacy:
+    // the workstation keeps its pre-profile layout, so no arrangement).
+    DisplayProfile::Resolved displayProfileFor(const QVector<NvClientDisplay>& displays) const;
+    // The host shows what this launch asked for (arrangement or legacy layout).
+    bool topologyMatchesRequest(const NvOutputTopology& topology) const;
+    // The largest stream this client and the host's encoder carry for the
+    // arrangement; invalid for no limit.
+    QSize arrangementStreamLimit() const;
+    // The frame the host encodes for the arrangement (packed capture).
+    QSize arrangementCaptureSize() const;
+
     QSize configurePlankDisplayMode();
 
-    bool configurePlankLaunchGeometry();
+    bool configurePlankLaunchGeometry(bool resolveProfile = true);
 
     void toggleFullscreen();
+
+    // Ctrl+Alt+Shift+T: show or hide the PLANK stream toolbar.
+    void togglePlankToolbar();
 
     void updateOptimalWindowDisplayMode();
 
@@ -370,7 +461,7 @@ private:
     void arCleanup();
 
     static
-    void arDecodeAndPlaySample(char* sampleData, int sampleLength);
+    void arDecodeAndPlaySample(char* sampleData, int sampleLength, int64_t presentationTimeUs);
 
     static
     int drSetup(int videoFormat, int width, int height, int frameRate, void*, int);
@@ -385,6 +476,24 @@ private:
     bool m_IsFullScreen;
     SupportedVideoFormatList m_SupportedVideoFormats; // Sorted in order of descending priority
     STREAM_CONFIGURATION m_StreamConfig;
+    bool m_MacClipboardNegotiated = false;
+    bool m_SessionClipboardEntitled = true;
+    int m_EffectiveFeatureFlags = 0;
+    int m_PlankLaunchFeatureFlags = 0;
+    std::atomic<int> m_CollaborationPermission {0};
+    QVector<NvOutput> m_CollaborationOutputs;
+    QString m_CollaborationOwner;
+    QString m_CollaborationOutputId;
+    bool m_CameraNegotiated = false;
+    std::atomic<bool> m_CameraRequested {false};
+    std::mutex m_CameraMutex;
+    std::unique_ptr<PlankCamera> m_Camera;
+    bool m_MicrophoneNegotiated = false;
+    unsigned m_MicrophoneSchema = 2;
+    std::atomic<bool> m_MicrophoneRequested {false};
+    std::mutex m_MicrophoneMutex;
+    std::unique_ptr<PlankMicrophone> m_Microphone;
+    QString m_FileClipboardMode {QStringLiteral("off")};
     DECODER_RENDERER_CALLBACKS m_VideoCallbacks;
     AUDIO_RENDERER_CALLBACKS m_AudioCallbacks;
     NvComputer* m_Computer;
@@ -411,6 +520,8 @@ private:
     bool m_UnexpectedTermination;
     std::atomic_bool m_ReconnectRequested;
     std::atomic<Uint64> m_DesktopHandoffNoticeDeadline {0};
+    std::atomic<Uint64> m_DesktopHandoffRetryDeadline {0};
+    std::atomic_bool m_AuthenticatedGreeter {false};
     std::atomic_bool m_ReconnectGreeterConfirmed {false};
     std::atomic<Uint64> m_LastPlankVideoReceived {0};
     QString m_PlankWorkerInstance;
@@ -425,26 +536,56 @@ private:
     std::atomic_int m_ActiveSessionTakeoverDecision {0};
     QString m_PlankUsername;
     QString m_PlankPassword;
+    PlankBrokerAdmission m_PlankBrokerAdmission;
     QString m_ResolvedScalingMode;
     QString m_ResolvedHostLayout;
     QStringList m_ResolvedVirtualModes;
+    int m_ResolvedPrimaryOutput = -1;
+    // Display arrangement: the canonical request (m_ResolvedHostLayout is
+    // then "arrangement") and the plan behind it.
+    QString m_ResolvedArrangement;
+    DisplayPlanner::Plan m_DisplayPlan;
 
     struct ClientDisplaySnapshot {
         SDL_DisplayID displayId = 0;
         SDL_Rect logicalBounds = {};
         QSize nativeSize;
+        // ClientDisplayProbe::forSessionDisplay view of the same display:
+        // logical bounds, physical panel (nativeSize) and current desktop
+        // backing pixels (backingSize, macOS). Match client resolves with it,
+        // and matchTarget (NvOutputTopology::clientMatchTarget) sizes the stream.
+        NvClientDisplay probeView;
+        QSize matchTarget;
         QSize macBackingSize;
         QRect macMatchedBounds;
         QRect canvasRect;
+        // Display arrangement: this display's entry in m_DisplayPlan.outputs
+        // when the workstation shows it, else -1.
+        int planIndex = -1;
+        bool primary = false;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
+    // The plan's primary display: the stream window opens there.
+    SDL_DisplayID m_PlannedPrimaryDisplay = 0;
+    // Planned while the windows already exist (in-session reconnect): the
+    // SDL thread applies it when the reconnect finishes.
+    std::atomic_bool m_PresentationChangePending {false};
+    bool m_PendingMultiDisplayPresentation = false;
+    // "Screens changed": settle, collapse, ask, and apply on request.
+    Uint64 m_ClientDisplayChangeDeadline = 0;
+    QString m_PresentedDisplayFingerprint;
+    QString m_PresentedDisplaySignature;
+    std::atomic_bool m_DisplayReconfigureRequested {false};
     SDL_DisplayID m_TargetDisplayId = 0;
+    bool m_MultiDisplayPresentationAvailable = false;
     bool m_UseMultiDisplayPresentation = false;
     bool m_PresentationFullscreen = false;
     bool m_HasWindowedPresentationGeometry = false;
     QVector<SDL_Window*> m_SecondaryWindows;
     PlankPresentationLayout m_PresentationLayout;
     SdlInputHandler* m_InputHandler;
+    PlankCallbackTarget<SdlInputHandler> m_InputCallbacks;
+    void destroyInputHandler();
     int m_FlushingWindowEventsRef;
 
     bool m_AsyncConnectionSuccess;
@@ -465,9 +606,18 @@ private:
 
     Overlay::OverlayManager m_OverlayManager;
     std::unique_ptr<PlankToolbar> m_PlankToolbar;
-#ifdef Q_OS_MACOS
-    std::unique_ptr<MacClipboardSync> m_ClipboardSync;
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    std::unique_ptr<ClipboardSync> m_ClipboardSync;
     ClipboardPollTimer m_ClipboardPollTimer;
+    std::atomic_bool m_TextClipboardPastePending {false};
+    std::atomic<std::uintptr_t> m_ClipboardEventGeneration {0};
+#ifdef PLANK_TRANSPORT
+#ifdef Q_OS_WIN
+    std::unique_ptr<WindowsFileClipboard> m_FileClipboard;
+#else
+    std::unique_ptr<MacFileClipboard> m_FileClipboard;
+#endif
+#endif
 #endif
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
@@ -479,6 +629,7 @@ private:
     std::atomic<int> m_ConfirmedBitrateRequestKbps {0};
     std::atomic<int> m_ConfirmedBitrateAppliedKbps {0};
     std::atomic<int> m_ConfirmedBitratePeakKbps {0};
+    std::atomic<std::uint64_t> m_DecodedFrameSize {0};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;

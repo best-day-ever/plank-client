@@ -2,7 +2,10 @@
 #include "ffmpeg.h"
 #include "applevideoprofile.h"
 #include "applevideo-test-frame.h"
+#include "nvenc420profile.h"
+#include "nvenc420-test-frame.h"
 #include "streaming/session.h"
+#include "streaming/planktoolbarstats.h"
 
 #include <h264_stream.h>
 
@@ -11,7 +14,6 @@ extern "C" {
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/pixdesc.h>
 }
-
 
 #include "ffmpeg-renderers/sdlvid.h"
 #include "ffmpeg-renderers/genhwaccel.h"
@@ -85,6 +87,13 @@ static const QMap<QString, int> k_NonHwaccelCodecInfo = {
     // AV1
 };
 
+// The Linux host's NVENC 4:2:0 modes are the only 4:2:0 NVENC tuples.
+static bool isPlankNvenc420Format(DecoderEncoderBackend backend, int videoFormat)
+{
+    return backend == DecoderEncoderBackend::NvencDirect &&
+           (videoFormat == VIDEO_FORMAT_H264 || videoFormat == VIDEO_FORMAT_H265_MAIN10);
+}
+
 static const AVPixelFormat* getSupportedPixelFormats(const AVCodec* decoder)
 {
 #if LIBAVCODEC_VERSION_MAJOR >= 61
@@ -126,6 +135,12 @@ bool FFmpegVideoDecoder::notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO info)
     return m_FrontendRenderer->notifyWindowChanged(info);
 }
 
+bool FFmpegVideoDecoder::letterboxesAgainstLiveDrawable()
+{
+    return m_FrontendRenderer != nullptr &&
+            m_FrontendRenderer->letterboxesAgainstLiveDrawable();
+}
+
 bool FFmpegVideoDecoder::suspendForReconnect()
 {
     if (m_TestOnly || m_DecoderThread == nullptr || m_VideoDecoderCtx == nullptr) {
@@ -160,6 +175,10 @@ bool FFmpegVideoDecoder::resumeAfterReconnect()
         return false;
     }
 
+    // The reconnect re-applied the negotiated size to input
+    // (Session::configurePlankLaunchGeometry); report the decoded size again
+    // on the first resumed frame even if it did not change.
+    m_DecodedFrameSizeTracker.reset();
     m_DecoderThread = SDL_CreateThread(FFmpegVideoDecoder::decoderThreadProcThunk,
                                        "FFDecoder", this);
     if (m_DecoderThread == nullptr) {
@@ -610,8 +629,14 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     if (testFrame) {
         switch (params->videoFormat) {
         case VIDEO_FORMAT_H264:
-            m_Pkt->data = (uint8_t*)k_H264TestFrame;
-            m_Pkt->size = sizeof(k_H264TestFrame);
+            if (isPlankNvenc420Format(params->encoderBackend, params->videoFormat)) {
+                m_Pkt->data = (uint8_t*)k_Nvenc420H264High8TestFrame;
+                m_Pkt->size = k_Nvenc420H264High8TestFrameSize;
+            }
+            else {
+                m_Pkt->data = (uint8_t*)k_H264TestFrame;
+                m_Pkt->size = sizeof(k_H264TestFrame);
+            }
             break;
         case VIDEO_FORMAT_H264_HIGH8_422:
             m_Pkt->data = (uint8_t*)k_H264High8_422TestFrame;
@@ -629,6 +654,10 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
             if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit) {
                 m_Pkt->data = (uint8_t*)k_AppleHEVCMain10TestFrame;
                 m_Pkt->size = k_AppleHEVCMain10TestFrameSize;
+            }
+            else if (isPlankNvenc420Format(params->encoderBackend, params->videoFormat)) {
+                m_Pkt->data = (uint8_t*)k_Nvenc420HEVCMain10TestFrame;
+                m_Pkt->size = k_Nvenc420HEVCMain10TestFrameSize;
             }
             else {
                 m_Pkt->data = (uint8_t*)k_HEVCMain10TestFrame;
@@ -791,6 +820,17 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
 bool FFmpegVideoDecoder::validateDecodedProfileFrame(const AVFrame* frame,
                                                       PDECODER_PARAMETERS params)
 {
+    if (isPlankNvenc420Format(params->encoderBackend, params->videoFormat) &&
+            (params->enableIdentityGbr ||
+             !plankNvenc420FrameMatches(frame, m_VideoDecoderCtx->profile,
+                                        params->videoFormat == VIDEO_FORMAT_H265_MAIN10))) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Exact NVENC 4:2:0 validation failed: requires %s 4:2:0, limited-range "
+                    "BT.709 matrix/primaries and sRGB transfer (profile=%d range=%d matrix=%d trc=%d)",
+                    params->videoFormat == VIDEO_FORMAT_H265_MAIN10 ? "HEVC Main10" : "H.264 High 8-bit",
+                    m_VideoDecoderCtx->profile, frame->color_range, frame->colorspace, frame->color_trc);
+        return false;
+    }
     if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit &&
             (params->encoderBackend != DecoderEncoderBackend::VideoToolbox ||
              (params->videoFormat != VIDEO_FORMAT_H265_MAIN10 && params->videoFormat != VIDEO_FORMAT_H265_REXT10_444) ||
@@ -939,7 +979,8 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
     switch (m_VideoFormat)
     {
     case VIDEO_FORMAT_H264:
-        codecString = "H.264";
+        codecString = isPlankNvenc420Format(m_EncoderBackend, m_VideoFormat) ?
+                    "H.264 8-bit 4:2:0" : "H.264";
         break;
 
     case VIDEO_FORMAT_H264_HIGH8_422:
@@ -1002,6 +1043,8 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
             const char* encoderBackend =
                     m_EncoderBackend == DecoderEncoderBackend::VideoToolbox ?
                         "Apple VideoToolbox, full-range BT.709/sRGB" :
+                    isPlankNvenc420Format(m_EncoderBackend, m_VideoFormat) ?
+                        "NVENC, limited-range BT.709" :
                     m_EncoderBackend == DecoderEncoderBackend::NvencDirect ?
                         "NVENC" : "x264";
             ret = snprintf(&output[offset],
@@ -1025,7 +1068,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
                        length - offset,
                        "Capture source: %s\n",
                        m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit ?
-                           "ScreenCaptureKit (Experimental)" :
+                           "ScreenCaptureKit" :
                        m_CaptureSource == DecoderCaptureSource::NativeX11_10Bit ?
                            "Native X11/XShm (10-bit)" :
                            "NvFBC (8-bit)");
@@ -1119,24 +1162,17 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS& stats, char* output, i
     }
 
     if (stats.renderedFrames != 0) {
-        char rttString[32];
-
-        if (stats.lastRtt != 0) {
-            snprintf(rttString, sizeof(rttString), "%u ms", stats.lastRtt);
-        }
-        else {
-            snprintf(rttString, sizeof(rttString), "N/A");
-        }
+        const auto rttString = PlankToolbarStats::networkRttText(stats.lastRtt).toUtf8();
 
         ret = snprintf(&output[offset],
                        length - offset,
                        "Client frame queue drops (%%/render/overflow): %.2f%%/%u/%u\n"
-                       "Average network latency: %s\n"
+                       "Network RTT: %s\n"
                        "Frame time (decode/queue/render incl. V-sync): %.2f/%.2f/%.2f ms\n",
                        (float)stats.pacerDroppedFrames / stats.decodedFrames * 100,
                        stats.renderQueueDroppedFrames,
                        stats.queueOverflowDroppedFrames,
-                       rttString,
+                       rttString.constData(),
                        (float)stats.totalDecodeTime / stats.decodedFrames,
                        (float)stats.totalPacerTime / stats.renderedFrames,
                        (float)stats.totalRenderTime / stats.renderedFrames);
@@ -1918,10 +1954,12 @@ void FFmpegVideoDecoder::decoderThreadProc()
             do {
                 err = avcodec_receive_frame(m_VideoDecoderCtx, frame);
                 if (err == 0) {
-                    if (m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit &&
-                            !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile, m_VideoFormat == VIDEO_FORMAT_H265_REXT10_444)) {
+                    if ((m_CaptureSource == DecoderCaptureSource::ScreenCaptureKit &&
+                            !plankAppleVideoFrameMatches(frame, m_VideoDecoderCtx->profile, m_VideoFormat == VIDEO_FORMAT_H265_REXT10_444)) ||
+                            (isPlankNvenc420Format(m_EncoderBackend, m_VideoFormat) &&
+                             !plankNvenc420FrameMatches(frame, m_VideoDecoderCtx->profile, m_VideoFormat == VIDEO_FORMAT_H265_MAIN10))) {
                         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                                     "Mac stream changed its negotiated profile/chroma/color format; disconnecting");
+                                     "Stream changed its negotiated profile/chroma/color format; disconnecting");
                         SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
                         SDL_Event event{};
                         event.type = SDL_EVENT_QUIT;
@@ -1931,6 +1969,18 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     }
                     SDL_assert(m_FrameInfoQueue.size() == m_FramesIn - m_FramesOut);
                     m_FramesOut++;
+
+                    // Renderers that fit the decoded frame size letterbox
+                    // these frames, so input must map against the same size
+                    // (the negotiated size can differ). Renderers that fit
+                    // the negotiated size keep input on it.
+                    if (!m_TestOnly &&
+                            m_DecodedFrameSizeTracker.shouldReport(
+                                frame->width, frame->height,
+                                m_FrontendRenderer->letterboxesDecodedFrameSize())) {
+                        Session::notifyDecodedFrameSize(frame->width,
+                                                        frame->height);
+                    }
 
                     // Attach HDR metadata to the frame if it's not already present. We will defer to
                     // any metadata contained in the bitstream itself since that is guaranteed to be

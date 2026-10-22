@@ -12,10 +12,11 @@ public:
     void allowUntil(uint64_t deadline) { m_Deadline.store(deadline); }
     bool allowsRequest(uint64_t now) const { return now < m_Deadline.load(); }
 
-    static bool terminalStatus(int status, bool authenticating)
+    static bool terminalStatus(int status, bool authenticating,
+                               bool openingDesktop = false)
     {
         return status == 403 || status == 423 ||
-                (authenticating && status == 401) ||
+                (authenticating && status == 401 && !openingDesktop) ||
                 (status >= 400 && status < 500 && status != 401 &&
                  status != 409 && status != 425 && status != 429);
     }

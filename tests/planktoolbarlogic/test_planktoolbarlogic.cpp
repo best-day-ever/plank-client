@@ -1,6 +1,7 @@
 #include <QtTest>
 
 #include "planktoolbarlogic.h"
+#include "planktoolbarstats.h"
 #include "input/plankpointerlogic.h"
 #include "videopacketlosswindow.h"
 
@@ -11,7 +12,7 @@ class TestPlankToolbarLogic : public QObject
     Q_OBJECT
 
 private slots:
-    void avoidsCameraHousingWithoutChangingSafePositions();
+    void preservesCenteredAndDraggedPositions();
     void resolvesReportedAndDerivedDensity();
     void alignsLogicalHitRectWithPhysicalSurface_data();
     void alignsLogicalHitRectWithPhysicalSurface();
@@ -28,18 +29,27 @@ private slots:
     void rejectsInconsistentFecCounters();
     void retainsTenSecondPeakForBothStatsViews();
     void sharesPacketLossDisplayPrecision();
+    void formatsSharedNetworkRtt();
+    void sizesEncoderSegmentWithoutMovingSlider();
 };
 
-void TestPlankToolbarLogic::avoidsCameraHousingWithoutChangingSafePositions()
+void TestPlankToolbarLogic::preservesCenteredAndDraggedPositions()
 {
-    using PlankToolbarLogic::unobscuredToolbarLeft;
-    QCOMPARE(unobscuredToolbarLeft(585, 539, 1710, 770, 940), 115);
-    QCOMPARE(unobscuredToolbarLeft(70, 539, 1710, 770, 940), 70);
-    QCOMPARE(unobscuredToolbarLeft(1000, 539, 1710, 770, 940), 1000);
-    QCOMPARE(unobscuredToolbarLeft(200, 300, 1000, 250, 430), 565);
-    QCOMPARE(unobscuredToolbarLeft(100, 539, 900, 400, 500), 0);
-    QCOMPARE(unobscuredToolbarLeft(300, 539, 1200, 1200, 1200), 300);
-    QCOMPARE(unobscuredToolbarLeft(150, 270, 855, 385, 470), 57);
+    using namespace PlankToolbarLogic;
+    for (int windowWidth : {400, 855, 1710, 2560, 3840}) {
+        const int toolbarWidth = std::min(windowWidth, 539);
+        const int available = windowWidth - toolbarWidth;
+        // Centered reveal, either edge, and an operator-chosen position all
+        // survive a layout refresh. There is no camera exclusion horizontally.
+        for (int left : {0, available / 2, available * 3 / 4, available}) {
+            const float position = horizontalPosition(left, windowWidth, toolbarWidth);
+            QCOMPARE(logicalLeftFromPosition(position, windowWidth, toolbarWidth), left);
+        }
+        QVERIFY(std::abs(logicalLeftFromPosition(0.5f, windowWidth, toolbarWidth) -
+                         available / 2) <= 1);
+        QCOMPARE(logicalLeftFromPosition(-1.0f, windowWidth, toolbarWidth), 0);
+        QCOMPARE(logicalLeftFromPosition(2.0f, windowWidth, toolbarWidth), available);
+    }
 }
 
 void TestPlankToolbarLogic::resolvesReportedAndDerivedDensity()
@@ -247,6 +257,36 @@ void TestPlankToolbarLogic::sharesPacketLossDisplayPrecision()
     QCOMPARE(VideoPacketLossDisplayDecimalPlaces, 2);
 }
 
-QTEST_APPLESS_MAIN(TestPlankToolbarLogic)
+void TestPlankToolbarLogic::formatsSharedNetworkRtt()
+{
+    QCOMPARE(PlankToolbarStats::networkRttText(0), QStringLiteral("—"));
+    QCOMPARE(PlankToolbarStats::networkRttText(1), QStringLiteral("1 ms"));
+    QCOMPARE(PlankToolbarStats::networkRttText(12), QStringLiteral("12 ms"));
+    QCOMPARE(PlankToolbarStats::networkRttText(150), QStringLiteral("150 ms"));
+    QCOMPARE(PlankToolbarStats::networkRttText(1234), QStringLiteral("1234 ms"));
+}
+
+void TestPlankToolbarLogic::sizesEncoderSegmentWithoutMovingSlider()
+{
+    using namespace PlankToolbarStats;
+    const int width = encoderTargetWidth(10000, 150000, 500);
+    const QFontMetrics metrics(encoderTargetFont());
+    int widest = 0;
+    for (int target = 10000; target <= 150000; target += 500) {
+        const int textWidth = metrics.horizontalAdvance(encoderTargetText(target));
+        QVERIFY(textWidth <= width);
+        widest = std::max(widest, textWidth);
+    }
+    QCOMPARE(width, widest);
+    QCOMPARE(encoderTargetText(42500), QStringLiteral("Encoder target  42.5 Mbps"));
+    QVERIFY(EncoderTargetLeft > RttLeft + RttWidth);
+    const int toolbarWidth = EncoderTargetLeft + width + WindowControlsWidth;
+    const int sliderRight = toolbarWidth - WindowControlsWidth;
+    QCOMPARE(sliderRight - EncoderTargetLeft, width);
+    // The knob's seven-point hit extension must stop before Fullscreen.
+    QVERIFY(sliderRight + 7 < toolbarWidth - 102);
+}
+
+QTEST_MAIN(TestPlankToolbarLogic)
 
 #include "test_planktoolbarlogic.moc"

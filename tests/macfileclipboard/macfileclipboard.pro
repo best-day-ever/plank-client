@@ -1,0 +1,9 @@
+QT += core gui testlib
+CONFIG += console testcase c++17 link_pkgconfig
+CONFIG -= app_bundle
+TEMPLATE = app
+DEFINES += PLANK_CLIPBOARD_TEST_PASTEBOARD
+PKGCONFIG += sdl3
+LIBS += -framework AppKit -framework Security
+INCLUDEPATH += ../../../../protocol/plank-transport/include ../../app/streaming
+OBJECTIVE_SOURCES += test_macfileclipboard.mm

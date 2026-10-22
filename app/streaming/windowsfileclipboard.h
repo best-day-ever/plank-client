@@ -1,0 +1,84 @@
+#pragma once
+
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+struct PlankTransportNativeEndpoint;
+
+/**
+ * Session-scoped bidirectional Windows file clipboard.
+ * Win32 clipboard access remains on the main thread; enumeration and file IO
+ * run on the private worker.
+ */
+class WindowsFileClipboard {
+public:
+    using ReadyCallback = std::function<void()>;
+    using PublishCallback = std::function<bool()>;
+    using FocusPredicate = std::function<bool()>;
+
+    WindowsFileClipboard(PlankTransportNativeEndpoint* endpoint,
+                     std::string mode,
+                     ReadyCallback readyCallback,
+                     PublishCallback publishCallback,
+                     FocusPredicate focusPredicate = [] { return true; });
+    ~WindowsFileClipboard();
+
+    void start();
+    void stop();
+    void pollLocalClipboardOnMainThread();
+
+    /**
+     * Consume a remote paste gesture when stable local file paths are present.
+     * The withheld paste is released through ReadyCallback only after the Host
+     * has staged and published the files.
+     */
+    bool beginPasteOnMainThread();
+    /** Publish a completed Host transfer to the Windows clipboard. */
+    bool publishPendingHostFilesOnMainThread();
+    void cancelPendingPasteOnMainThread();
+    bool takeReadyPasteOnMainThread();
+
+private:
+    struct PasteboardSnapshot {
+        std::int64_t changeCount = -1;
+        std::uint64_t pasteEpoch = 0;
+        std::vector<std::string> paths;
+    };
+
+    void workerLoop();
+    enum class SourceResult { Failed, Ready, Yielded };
+    SourceResult transferSnapshot(const PasteboardSnapshot& snapshot,
+                                  std::vector<std::uint8_t>& yieldedOffer);
+    bool receiveHostOffer(std::vector<std::uint8_t> firstRecord);
+    bool clientToHostAllowed() const;
+    bool hostToClientAllowed() const;
+
+    std::atomic<std::uint32_t> m_PublishedSequence {0};
+    std::string m_StagingRoot;
+    PlankTransportNativeEndpoint* m_Endpoint;
+    std::string m_Mode;
+    ReadyCallback m_ReadyCallback;
+    PublishCallback m_PublishCallback;
+    FocusPredicate m_FocusPredicate;
+    std::uint32_t m_HostClipboardSequence = 0;
+    std::mutex m_Mutex;
+    std::condition_variable m_Changed;
+    std::thread m_Worker;
+    std::atomic_bool m_Stop {false};
+    bool m_Running = false;
+    bool m_PasteRequested = false;
+    std::uint64_t m_PasteEpoch = 1;
+    bool m_ReadyPaste = false;
+    PasteboardSnapshot m_Current;
+    PasteboardSnapshot m_Requested;
+    std::vector<std::string> m_PendingHostPaths;
+    bool m_HostPublishPending = false;
+    bool m_HostPublishComplete = false;
+    bool m_HostPublishSuccess = false;
+};

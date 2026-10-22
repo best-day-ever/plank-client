@@ -34,6 +34,8 @@ public:
     virtual bool isPixelFormatSupported(int videoFormat, enum AVPixelFormat pixelFormat) override;
     virtual AVPixelFormat getPreferredPixelFormat(int videoFormat) override;
     virtual RendererType getRendererType() override;
+    // renderFrame() slices the mapped frame crop.
+    virtual bool letterboxesDecodedFrameSize() override { return true; }
 
 private:
     enum class SoftwareFrameAllocator {
@@ -80,6 +82,9 @@ private:
         SDL_Window* window = nullptr;
         QRect canvasRect;
         bool primary = false;
+        // Valid: the stream rectangle this window shows, fitted into it
+        // (PlankPresentationOutput::sourceRect).
+        QRectF sourceRect;
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         pl_swapchain swapchain = nullptr;
         pl_swapchain_frame swapchainFrame = {};
