@@ -3518,10 +3518,10 @@ QSize Session::configurePlankDisplayMode()
     return selectedResolution;
 }
 
-bool Session::configurePlankLaunchGeometry()
+bool Session::configurePlankLaunchGeometry(bool resolveProfile)
 {
     if (isCollaborator()) return true;
-    if (m_Computer->plankAuthentication &&
+    if (resolveProfile && m_Computer->plankAuthentication &&
             !configurePlankHostLayout()) {
         return false;
     }
@@ -4071,7 +4071,11 @@ bool Session::startConnectionAsync(bool reconnecting,
                         if (m_ComputerManager != nullptr) {
                             m_ComputerManager->clientSideAttributeUpdated(m_Computer);
                         }
-                        if (!configurePlankLaunchGeometry()) {
+                        // Poll the request already submitted. Re-reading a
+                        // changed saved profile here would wait forever for
+                        // a different arrangement the host never received.
+                        // Refresh capture dimensions from the new topology.
+                        if (!configurePlankLaunchGeometry(false)) {
                             m_WaitingForSessionCleanup.store(false);
                             emit sessionCleanupWaitChanged(false, QString());
                             return false;

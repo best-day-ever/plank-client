@@ -1,3 +1,7 @@
+## 1.1.045 — Display transition recovery
+
+- Keep the requested display layout stable while the workstation applies it, even if saved screen settings change during recovery.
+
 ## 1.1.044 — Mac displays and desktop recovery
 
 - Keep one window per selected Mac screen, including when the laptop display is excluded. Both windows remain available after leaving fullscreen.
