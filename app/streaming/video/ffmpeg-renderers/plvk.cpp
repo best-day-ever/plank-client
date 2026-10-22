@@ -1218,9 +1218,9 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
         if (m_Overlays[i].hasOverlay && hasPrimaryTargetFrame) {
             // Position the overlay
             overlayParts[i].src = { 0, 0, (float)m_Overlays[i].overlay.tex->params.w, (float)m_Overlays[i].overlay.tex->params.h };
-            if (i == Overlay::OverlayStatusUpdate) {
+            if (i == Overlay::OverlayStatusUpdate || i == Overlay::OverlayCollaboration) {
                 // Bottom Left
-                overlayParts[i].dst.x0 = 0;
+                overlayParts[i].dst.x0 = i == Overlay::OverlayCollaboration ? SDL_max(0.0f, primaryTargetFrame.crop.x1 - overlayParts[i].src.x1) : 0;
                 overlayParts[i].dst.y0 = SDL_max(
                     0, primaryTargetFrame.crop.y1 - overlayParts[i].src.y1);
             }

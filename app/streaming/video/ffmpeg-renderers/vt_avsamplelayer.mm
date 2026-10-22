@@ -497,6 +497,7 @@ public:
             case Overlay::OverlayDebug:
                 [m_OverlayTextFields[type] setAlignment:NSTextAlignmentLeft];
                 break;
+            case Overlay::OverlayCollaboration:
             case Overlay::OverlayStatusUpdate:
                 [m_OverlayTextFields[type] setAlignment:NSTextAlignmentRight];
                 break;

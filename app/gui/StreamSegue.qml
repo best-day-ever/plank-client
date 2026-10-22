@@ -60,6 +60,13 @@ Item {
         desktopSignOutDialog.open()
     }
 
+    function desktopCollaborationRequested(text, signOutAvailable)
+    {
+        desktopCollaborationDialog.text = text
+        desktopCollaborationDialog.signOutAvailable = signOutAvailable
+        desktopCollaborationDialog.open()
+    }
+
     function displayLaunchError(text)
     {
         // Display the error dialog after Session::exec() returns
@@ -93,6 +100,7 @@ Item {
     {
         activeSessionTakeoverDialog.close()
         desktopSignOutDialog.close()
+        desktopCollaborationDialog.close()
         if (quitAfter) {
             if (streamSegueErrorDialog.text) {
                 // Quit when the error dialog is acknowledged
@@ -144,6 +152,7 @@ Item {
         session.sessionCleanupWaitChanged.connect(sessionCleanupWaitChanged)
         session.activeSessionTakeoverRequested.connect(activeSessionTakeoverRequested)
         session.desktopSignOutRequested.connect(desktopSignOutRequested)
+        session.desktopCollaborationRequested.connect(desktopCollaborationRequested)
         session.displayLaunchError.connect(displayLaunchError)
         session.displayLaunchWarning.connect(displayLaunchWarning)
         session.displaySetupRequested.connect(displaySetupRequested)
@@ -164,6 +173,11 @@ Item {
 
         onAccepted: session.respondToActiveSessionTakeover(true)
         onRejected: session.respondToActiveSessionTakeover(false)
+    }
+
+    CollaborationDialog {
+        id: desktopCollaborationDialog
+        onChosen: function(choice) { session.respondToDesktopCollaboration(choice) }
     }
 
     NavigableMessageDialog {

@@ -4,6 +4,7 @@
 #include "plankbroker.h"
 #include "plankhttp.h"
 #include "authenticationtakeover.h"
+#include "collaboration.h"
 #include <QCryptographicHash>
 #include <QScopedPointer>
 #include <Limelight.h>
@@ -283,18 +284,19 @@ NvHTTP::startApp(QString verb,
                  int primaryOutput)
 {
     QString plankOutputArguments;
+    const bool collaboration = !m_CollaborationGrant.isEmpty();
     if (!captureDisplayMode.isEmpty()) {
         plankOutputArguments =
                 "&plankProtocolVersion=" + QString::number(plankProtocolVersion) +
                 "&plankFeatureFlags=" + QString::number(plankFeatureFlags) +
                 "&plankDisplayMode=" + QString::fromLatin1(QUrl::toPercentEncoding(captureDisplayMode));
-        if (takeOverActiveSession &&
+        if (!collaboration && takeOverActiveSession &&
                 (plankFeatureFlags & NvOutputTopology::SessionTakeoverFeature) != 0) {
             plankOutputArguments += "&plankTakeover=1";
         }
         // The owner must match the host's offer exactly; the host re-checks
         // that nobody is streaming that desktop before it signs it out.
-        if (!desktopSignOutOwner.isEmpty() &&
+        if (!collaboration && !desktopSignOutOwner.isEmpty() &&
                 (plankFeatureFlags & NvOutputTopology::DesktopSignOutFeature) != 0) {
             plankOutputArguments +=
                     "&plankSignOutDesktop=1&plankSignOutOwner=" +
@@ -315,7 +317,7 @@ NvHTTP::startApp(QString verb,
                     "&plankQuicUdpPayloadMtu=" +
                     QString::number(quicUdpPayloadMtu);
         }
-        if ((plankFeatureFlags & NvOutputTopology::DisplayArrangementFeature) != 0 &&
+        if (!collaboration && (plankFeatureFlags & NvOutputTopology::DisplayArrangementFeature) != 0 &&
                 !displayArrangement.isEmpty()) {
             // Replaces the host layout and virtual modes; the host refuses
             // a launch that carries both.
@@ -323,7 +325,7 @@ NvHTTP::startApp(QString verb,
                     "&plankDisplayArrangement=" +
                     QString::fromLatin1(QUrl::toPercentEncoding(displayArrangement));
         }
-        else if ((plankFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
+        else if (!collaboration && (plankFeatureFlags & NvOutputTopology::HostLayoutBindingFeature) != 0 &&
                 !hostLayout.isEmpty()) {
             plankOutputArguments +=
                     "&plankHostLayout=" +
@@ -354,6 +356,9 @@ NvHTTP::startApp(QString verb,
         }
     }
 
+    if (collaboration) {
+        plankOutputArguments += "&plankCollaboration=" + QString::fromLatin1(QUrl::toPercentEncoding(m_CollaborationGrant));
+    }
     QString response =
             openConnectionToString(m_BaseUrlHttps,
                                    verb,
@@ -371,7 +376,7 @@ NvHTTP::startApp(QString verb,
                                    "&gcmap="+QString::number(gamepadMask)+
                                    "&gcpersist="+QString::number(persistGameControllersOnDisconnect ? 1 : 0)+
                                    plankOutputArguments,
-                                   LAUNCH_TIMEOUT_MS);
+                                   LAUNCH_TIMEOUT_MS, collaboration ? NVLL_NONE : NVLL_VERBOSE);
 
     qInfo() << "PLANK launch response received";
 
@@ -398,6 +403,26 @@ NvHTTP::startApp(QString verb,
     // Throws if the request failed
     verifyResponseStatus(response);
 
+    m_CollaborationPermission = getXmlString(response, "PlankCollaborationPermission");
+    if (collaboration && m_CollaborationPermission != QStringLiteral("view") &&
+            m_CollaborationPermission != QStringLiteral("control")) {
+        throw GfeHttpResponseException(400, "Host did not confirm collaboration permission");
+    }
+    if (!collaboration && !m_CollaborationPermission.isEmpty()) {
+        throw GfeHttpResponseException(400, "Host returned an unexpected collaboration session");
+    }
+    const QString effective = getXmlString(response, "PlankEffectiveFeatureFlags");
+    bool validEffective = false;
+    m_EffectiveFeatureFlags = effective.isEmpty() && !collaboration ? plankFeatureFlags :
+        effective.toInt(&validEffective);
+    if ((collaboration && (!validEffective ||
+            (m_EffectiveFeatureFlags & ~plankFeatureFlags) != 0)) ||
+            (collaboration && (m_EffectiveFeatureFlags & (NvOutputTopology::ClipboardSyncFeature |
+                NvOutputTopology::ClipboardFilesFeature)) != 0)) {
+        throw GfeHttpResponseException(400, "Host returned invalid collaboration feature permissions");
+    }
+    m_CollaborationGrant.fill(QChar('\0'));
+    m_CollaborationGrant.clear();
     m_WorkerInstance = PlankHostRecovery::canonicalInstance(getXmlString(response, "PlankWorkerInstance"));
     if ((plankFeatureFlags & NvOutputTopology::WorkerInstanceFeature) && m_WorkerInstance.isEmpty()) {
         throw GfeHttpResponseException(400, "Host returned an invalid media-worker identity");
@@ -461,6 +486,9 @@ NvHTTP::startApp(QString verb,
             acceptedFileClipboardMode != QStringLiteral("bidirectional")) {
         throw GfeHttpResponseException(
                     400, "Host returned an invalid file clipboard policy");
+    }
+    if (collaboration && (acceptedClipboardSync || acceptedFileClipboardMode != QStringLiteral("off"))) {
+        throw GfeHttpResponseException(400, "Host enabled clipboard sharing for a collaborator");
     }
     const bool filesNegotiated =
             (plankFeatureFlags & (NvOutputTopology::ClipboardSyncFeature |
@@ -727,17 +755,39 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
     return ret;
 }
 
-QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body)
+QJsonObject NvHTTP::requestCollaboration()
+{
+    return postPlankJson(QStringLiteral("request"), {}, true);
+}
+
+QJsonObject NvHTTP::collaborationStatus(const QString& requestId)
+{
+    const QString reply = openConnectionToString(m_BaseUrlHttps,
+        QStringLiteral("plank/collaboration/status"),
+        QStringLiteral("request_id=") + QString::fromLatin1(QUrl::toPercentEncoding(requestId)),
+        REQUEST_TIMEOUT_MS, NVLL_NONE);
+    const QJsonDocument document = QJsonDocument::fromJson(reply.toUtf8());
+    if (!document.isObject()) throw GfeHttpResponseException(400, "Invalid collaboration response");
+    return document.object();
+}
+
+void NvHTTP::cancelCollaboration(const QString& requestId)
+{
+    postPlankJson(QStringLiteral("cancel"), {{QStringLiteral("request_id"), requestId}}, true);
+}
+
+QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body, bool authenticated)
 {
     waitForRequestPermission(true);
-    if (!m_SessionToken.isEmpty()) {
+    if (authenticated ? (m_SessionToken.isEmpty() || m_IdentityKey.size() != 32) : !m_SessionToken.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK authentication state");
     }
 
     QUrl url(m_BaseUrlHttps);
-    url.setPath("/plank/auth/" + command);
+    url.setPath(authenticated ? "/plank/collaboration/" + command : "/plank/auth/" + command);
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    if (authenticated) request.setRawHeader("Authorization", "Bearer " + m_SessionToken.toUtf8());
     request.setSslConfiguration(plankSslConfiguration());
     PlankHttp::prepareOneShotRequest(request);
     // Never reuse a socket for credentials: the previous response's connection
@@ -1164,6 +1214,9 @@ NvHTTP::openConnection(QUrl baseUrl,
     // Only operation parameters belong in the query. PLANK authorization is
     // carried separately; discovery and topology need no client ID/cache nonce.
     url.setQuery(arguments);
+    const QUrl diagnosticUrl = PlankCollaboration::diagnosticUrl(url);
+    const bool privateCollaborationRequest = diagnosticUrl != url ||
+        command.startsWith(QStringLiteral("plank/collaboration/"));
 
     QNetworkRequest request(url);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
@@ -1200,7 +1253,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
     }
     if (logLevel >= NvLogLevel::NVLL_VERBOSE) {
-        qInfo() << "Executing request:" << url.toString();
+        qInfo() << "Executing request:" << diagnosticUrl.toString();
     }
     if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
 
@@ -1208,7 +1261,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (!reply->isFinished())
     {
         if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << "Aborting timed out request for" << url.toString();
+            qWarning() << "Aborting timed out request for" << diagnosticUrl.toString();
         }
         reply->abort();
     }
@@ -1233,7 +1286,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     {
         if (logLevel >= NvLogLevel::NVLL_ERROR) {
             qWarning() << command << "request failed with error:" << reply->error()
-                       << reply->errorString();
+                       << (privateCollaborationRequest ? QStringLiteral("Collaboration request failed") : reply->errorString());
         }
 
         if (reply->error() == QNetworkReply::SslHandshakeFailedError ||
@@ -1251,7 +1304,8 @@ NvHTTP::openConnection(QUrl baseUrl,
                                  command == QLatin1String("applist"))) {
                 throw GfeHttpResponseException(status, "PLANK desktop readiness request rejected");
             }
-            QtNetworkReplyException exception(reply->error(), reply->errorString());
+            QtNetworkReplyException exception(reply->error(), privateCollaborationRequest ?
+                QStringLiteral("Collaboration request failed") : reply->errorString());
             throw exception;
         }
     }

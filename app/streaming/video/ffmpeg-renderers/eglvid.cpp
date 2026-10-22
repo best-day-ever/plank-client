@@ -254,9 +254,9 @@ void EGLRenderer::renderOverlay(Overlay::OverlayType type, int viewportWidth, in
 
         // These overlay positions differ from the other renderers because OpenGL
         // places the origin in the lower-left corner instead of the upper-left.
-        if (type == Overlay::OverlayStatusUpdate) {
+        if (type == Overlay::OverlayStatusUpdate || type == Overlay::OverlayCollaboration) {
             // Bottom Left
-            overlayRect.x = 0;
+            overlayRect.x = type == Overlay::OverlayCollaboration ? SDL_max(0, viewportWidth - newSurface->w) : 0;
             overlayRect.y = 0;
         }
         else if (type == Overlay::OverlayDebug) {

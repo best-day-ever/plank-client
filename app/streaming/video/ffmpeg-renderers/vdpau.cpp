@@ -436,9 +436,9 @@ void VDPAURenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
         VdpRect overlayRect;
 
-        if (type == Overlay::OverlayStatusUpdate) {
+        if (type == Overlay::OverlayStatusUpdate || type == Overlay::OverlayCollaboration) {
             // Bottom Left
-            overlayRect.x0 = 0;
+            overlayRect.x0 = type == Overlay::OverlayCollaboration ? SDL_max(0, static_cast<int>(m_DisplayWidth) - newSurface->w) : 0;
             overlayRect.y0 = m_DisplayHeight - newSurface->h;
         }
         else if (type == Overlay::OverlayDebug) {

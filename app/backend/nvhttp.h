@@ -210,6 +210,12 @@ public:
     // (400 or 409 with the display arrangement extension), else empty.
     QString displayArrangementError() const { return m_DisplayArrangementError; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
+    QJsonObject requestCollaboration();
+    QJsonObject collaborationStatus(const QString& requestId);
+    void cancelCollaboration(const QString& requestId);
+    void setCollaborationGrant(QString grant) { m_CollaborationGrant = std::move(grant); }
+    QString collaborationPermission() const { return m_CollaborationPermission; }
+    int effectiveFeatureFlags() const { return m_EffectiveFeatureFlags; }
     NvOutputTopology prepareMacDisplay(const QString& mode, const QString& encodingMode, int scale = 1,
                                       const QString& takeoverSessionId = QString());
     MacPreviewLaunch::Reply startMacPreview(const NvOutputTopology& topology,
@@ -278,7 +284,7 @@ private:
                    int timeoutMs,
                    NvLogLevel logLevel, HostTlsGuard::Mode trustMode = HostTlsGuard::Mode::Observe);
 
-    QJsonObject postPlankJson(QString command, const QJsonObject& body);
+    QJsonObject postPlankJson(QString command, const QJsonObject& body, bool authenticated = false);
     MacMediaFeatures::Agreement negotiateMacMedia(const QString& encodingMode, const QString& certificateSha256);
     QJsonObject requestPinnedMacJson(const QString& path, const QJsonObject& body,
                                  const QString& certificateSha256);
@@ -292,6 +298,9 @@ private:
     QString m_PinnedCertificateSha256;
     QString m_SessionToken;
     QString m_WorkerInstance;
+    QString m_CollaborationGrant;
+    QString m_CollaborationPermission;
+    int m_EffectiveFeatureFlags = 0;
     PlankDesktopSignOut m_DesktopSignOut;
     QString m_DisplayArrangementError;
     MacMediaFeatures::Agreement m_MacMediaAgreement;

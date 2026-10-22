@@ -516,9 +516,9 @@ public:
 
                     if (overlayTexture) {
                         SDL_FRect renderRect = {};
-                        if (i == Overlay::OverlayStatusUpdate) {
+                        if (i == Overlay::OverlayStatusUpdate || i == Overlay::OverlayCollaboration) {
                             // Bottom Left
-                            renderRect.x = 0;
+                            renderRect.x = i == Overlay::OverlayCollaboration ? std::max(0, drawableWidth - (int)overlayTexture.width) : 0;
                             renderRect.y = 0;
                         }
                         else if (i == Overlay::OverlayDebug) {

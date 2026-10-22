@@ -1,4 +1,6 @@
 #include "session.h"
+#include "backend/collaboration.h"
+#include <QDeadlineTimer>
 #include "streaming/clientframeflowtrace.h"
 #include "backend/hostrecovery.h"
 #include "backend/planknetwork.h"
@@ -81,6 +83,7 @@ using PlatformFileClipboard = MacFileClipboard;
 #define SDL_CODE_PLANK_FILE_CLIPBOARD_PUBLISH 114
 #define SDL_CODE_PLANK_DECODED_FRAME_SIZE 115
 #define SDL_CODE_PLANK_APPLY_SCREENS 116
+#define SDL_CODE_PLANK_COLLABORATION_PERMISSION 117
 
 #include <QtEndian>
 #include <QCoreApplication>
@@ -1075,8 +1078,10 @@ bool Session::negotiatePlankTransportSession(quint16 sessionPort, QString& error
     const int coupledStreams = audio.value(QStringLiteral("coupled_streams")).toInt();
     const int responsePacketDuration = audio.value(
                 QStringLiteral("packet_duration_ms")).toInt();
-    const int hostFeatureFlags = response.value(
-                QStringLiteral("host_feature_flags")).toInt();
+    int hostFeatureFlags = response.value(QStringLiteral("host_feature_flags")).toInt();
+    if (isCollaborator()) {
+        hostFeatureFlags &= ~(LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND | LI_FF_PEN_TOUCH_EVENTS);
+    }
     const int referenceFrameInvalidation = response.value(
                 QStringLiteral("reference_frame_invalidation")).toInt(-1);
     const QString fileClipboardMode = response.value(
@@ -1414,6 +1419,29 @@ void Session::plankTransportDataReceiveLoop()
                 return;
             }
             switch (control.type) {
+            case PLANK_TRANSPORT_CONTROL_COLLABORATION_PERMISSION: {
+                const int permission = PlankCollaboration::wirePermission(control.payload, control.payload_size);
+                if (!isCollaborator() || permission < 0) {
+                    LiNotifyPlankHostTermination(-1);
+                    return;
+                }
+                if (permission == PLANK_TRANSPORT_COLLABORATION_REVOKED) {
+                    m_CollaborationPermission.store(PlankCollaboration::View);
+                    m_CanReconnect.store(false);
+                    LiNotifyPlankHostTermination(PLANK_TRANSPORT_TERMINATION_GRACEFUL);
+                    return;
+                }
+                if (m_CollaborationPermission.exchange(permission) != permission) {
+                    // The transport sender observes a downgrade immediately;
+                    // SDL input capture and all presentation UI follow on the
+                    // main event thread, including already queued input.
+                    SDL_Event event {};
+                    event.type = SDL_EVENT_USER;
+                    event.user.code = SDL_CODE_PLANK_COLLABORATION_PERMISSION;
+                    SDL_PushEvent(&event);
+                }
+                break;
+            }
             case PLANK_TRANSPORT_CONTROL_CAMERA_APPLIED:
             case PLANK_TRANSPORT_CONTROL_CAMERA_KEYFRAME: {
                 std::uint64_t generation = 0; std::uint32_t value = 0;
@@ -1607,6 +1635,10 @@ int Session::plankTransportNativeInputSender(void* context, uint8_t type,
     if (context == nullptr || payload == nullptr || payloadLength == 0) {
         return PLANK_TRANSPORT_ERROR_INVALID_ARGUMENT;
     }
+    if (s_ActiveSession != nullptr && !PlankCollaboration::allowsInput(
+                static_cast<PlankCollaboration::Permission>(s_ActiveSession->m_CollaborationPermission.load()), type)) {
+        return PLANK_TRANSPORT_OK;
+    }
     return plank_transport_native_input_send(
                 static_cast<PlankTransportNativeEndpoint*>(context), type,
                 payload, payloadLength);
@@ -1617,9 +1649,9 @@ int Session::plankTransportNativeInputSender(void* context, uint8_t type,
 bool Session::clipboardSyncEnabled() const
 {
     return m_Computer != nullptr &&
-            m_SessionClipboardEntitled &&
+            !isCollaborator() && m_SessionClipboardEntitled &&
             (!(m_Computer->plankFeatureFlags & NvOutputTopology::FixedCaptureFeature) || m_MacClipboardNegotiated) &&
-            (m_Computer->plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0;
+            (m_EffectiveFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0;
 }
 
 void Session::startClipboardSync()
@@ -2363,6 +2395,10 @@ bool Session::snapshotClientDisplays()
 
 void Session::rebuildPresentationLayout()
 {
+    if (isCollaborator()) {
+        rebuildCollaborationPresentation();
+        return;
+    }
     m_PresentationLayout = {};
     if (m_Window == nullptr) {
         return;
@@ -2501,6 +2537,116 @@ void Session::rebuildPresentationLayout()
                 m_PresentationFullscreen ? "yes" : "no");
 }
 
+void Session::updateCollaborationIndicator()
+{
+    if (!isCollaborator()) return;
+    const bool viewOnly = m_CollaborationPermission.load() == PlankCollaboration::View;
+    const QByteArray text = (viewOnly ? tr("Sharing %1’s desktop · View only") :
+        tr("Sharing %1’s desktop · Keyboard and mouse control")).arg(m_CollaborationOwner).toUtf8();
+    m_OverlayManager.updateOverlayText(Overlay::OverlayCollaboration, text.constData());
+    m_OverlayManager.setOverlayState(Overlay::OverlayCollaboration, true);
+    for (int index = 0; index < m_CollaborationOutputs.size(); ++index) {
+        SDL_Window* window = index == 0 ? m_Window : m_SecondaryWindows.value(index - 1, nullptr);
+        if (window == nullptr) continue;
+        const QByteArray title = tr("%1 · Shared display %2 (%3)").arg(m_Computer->name).arg(index + 1)
+            .arg(viewOnly ? tr("View only") : tr("Control")).toUtf8();
+        SDL_SetWindowTitle(window, title.constData());
+    }
+}
+
+void Session::applyCollaborationPermission()
+{
+    if (!isCollaborator()) return;
+    m_InputHandler->raiseAllKeys();
+    const bool viewOnly = m_CollaborationPermission.load() == PlankCollaboration::View;
+    m_InputHandler->setViewOnly(viewOnly);
+    m_InputHandler->setCaptureActive(!viewOnly && anyPresentationWindowFocused());
+    updateCollaborationIndicator();
+}
+
+bool Session::createCollaborationWindows()
+{
+    NvOutputTopology topology;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        topology = m_Computer->outputTopology;
+    }
+    m_CollaborationOutputs = topology.outputs;
+    if (!m_CollaborationOutputId.isEmpty()) {
+        m_CollaborationOutputs.erase(std::remove_if(m_CollaborationOutputs.begin(), m_CollaborationOutputs.end(),
+            [this](const NvOutput& output) { return output.id != m_CollaborationOutputId; }), m_CollaborationOutputs.end());
+    }
+    if (m_CollaborationOutputs.isEmpty()) {
+        emit displayLaunchError(tr("The owner's captured display is no longer available. Request to join again."));
+        return false;
+    }
+    std::stable_sort(m_CollaborationOutputs.begin(), m_CollaborationOutputs.end(),
+        [](const NvOutput& left, const NvOutput& right) { return left.primary && !right.primary; });
+    SDL_Rect usable {};
+    if (!SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(m_Window), &usable)) return false;
+    QVector<QRect> desktopOutputs;
+    for (const auto& output : m_CollaborationOutputs)
+        desktopOutputs.append(QRect(output.x, output.y, output.width, output.height));
+    const QVector<QRect> placement = PlankCollaboration::windowPlacement(
+        desktopOutputs, QRect(usable.x, usable.y, usable.w, usable.h));
+    if (placement.size() != m_CollaborationOutputs.size()) return false;
+    m_IsFullScreen = false;
+    m_PresentationFullscreen = false;
+    m_UseMultiDisplayPresentation = false;
+    m_HasWindowedPresentationGeometry = true;
+    for (int index = 0; index < placement.size(); ++index) {
+        const NvOutput& output = m_CollaborationOutputs[index];
+        const QRect bounds = placement[index];
+        const QByteArray title = tr("%1 · Shared display %2 (%3)")
+            .arg(m_Computer->name).arg(index + 1)
+            .arg(m_CollaborationPermission.load() == PlankCollaboration::View ? tr("View only") : tr("Control")).toUtf8();
+        SDL_Window* window = m_Window;
+        if (index == 0) {
+            SDL_SetWindowFullscreen(window, false);
+            SDL_SetWindowTitle(window, title.constData());
+            SDL_SetWindowSize(window, bounds.width(), bounds.height());
+        } else {
+            window = SDL_CreateWindow(title.constData(), bounds.width(), bounds.height(),
+                SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE | StreamUtils::getPlatformWindowFlags());
+            if (window == nullptr) { destroySecondaryWindows(); return false; }
+            m_SecondaryWindows.append(window);
+        }
+        SDL_SetWindowPosition(window, bounds.x(), bounds.y());
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Collaboration output %d: desktop=%dx%d%+d%+d local=%dx%d%+d%+d",
+            index, output.width, output.height, output.x, output.y,
+            bounds.width(), bounds.height(), bounds.x(), bounds.y());
+    }
+    return true;
+}
+
+void Session::rebuildCollaborationPresentation()
+{
+    m_PresentationLayout = {};
+    if (m_Window == nullptr || m_CollaborationOutputs.isEmpty()) return;
+    NvOutputTopology topology;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        topology = m_Computer->outputTopology;
+    }
+    m_PresentationLayout.desktopSize = QSize(topology.desktopWidth, topology.desktopHeight);
+    m_PresentationLayout.canvasSize = m_PresentationLayout.desktopSize;
+    for (int index = 0; index < m_CollaborationOutputs.size(); ++index) {
+        SDL_Window* window = index == 0 ? m_Window : m_SecondaryWindows.value(index - 1, nullptr);
+        if (window == nullptr) continue;
+        const NvOutput& output = m_CollaborationOutputs[index];
+        const QRect rectangle(output.x - topology.desktopX, output.y - topology.desktopY,
+                              output.width, output.height);
+        PlankPresentationOutput view {window, rectangle, index == 0};
+        view.desktopRect = rectangle;
+        view.sourceRect = m_CollaborationOutputId.isEmpty() ?
+            PlankPresentation::sourceRectInStream(output.captureRect(), topology.captureSize(),
+                QSize(m_StreamConfig.width, m_StreamConfig.height)) :
+            QRectF(0, 0, m_StreamConfig.width, m_StreamConfig.height);
+        m_PresentationLayout.outputs.append(view);
+    }
+    if (m_InputHandler != nullptr) m_InputHandler->setPresentationLayout(m_PresentationLayout);
+}
+
 bool Session::createSecondaryWindows(Uint32 defaultWindowFlags, const std::string& windowName)
 {
     const bool cocoa = strcmp(SDL_GetCurrentVideoDriver(), "cocoa") == 0;
@@ -2621,6 +2767,7 @@ QString presentedDisplaySignature(const QVector<NvClientDisplay>& displays)
 
 void Session::handleClientDisplaysChanged()
 {
+    if (isCollaborator()) return;
     const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
     const QString fingerprint = ClientDisplayProbe::fingerprint(probed);
     const QString signature = presentedDisplaySignature(probed);
@@ -2658,6 +2805,7 @@ void Session::handleClientDisplaysChanged()
 
 bool Session::requestDisplayLayoutApply()
 {
+    if (isCollaborator()) return false;
     if (m_Reconnecting.load() || m_ReconnectRequested.exchange(true) || !m_CanReconnect.load() ||
             !hasPlankCredentials()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "PLANK cannot apply the display layout now");
@@ -2680,6 +2828,7 @@ bool Session::requestDisplayLayoutApply()
 
 void Session::applyDisplayLayout()
 {
+    if (isCollaborator()) return;
     SDL_Event event = {};
     event.type = SDL_EVENT_USER;
     event.user.code = SDL_CODE_PLANK_APPLY_SCREENS;
@@ -2807,6 +2956,15 @@ bool Session::anyPresentationWindowFocused() const
 
 void Session::setPresentationWindowsFullscreen(bool fullscreen)
 {
+    if (isCollaborator()) {
+        // Each window continues to show its owner's output. Local fullscreen
+        // never plans a different host arrangement or hides another output.
+        m_PresentationFullscreen = fullscreen;
+        SDL_SetWindowFullscreen(m_Window, fullscreen ? m_FullScreenFlag : 0);
+        for (SDL_Window* window : m_SecondaryWindows) SDL_ShowWindow(window);
+        rebuildPresentationLayout();
+        return;
+    }
     m_PresentationFullscreen = fullscreen;
     if (!SDL_SetWindowFullscreen(m_Window,
                                  fullscreen ? m_FullScreenFlag : 0)) {
@@ -3324,6 +3482,7 @@ QSize Session::configurePlankDisplayMode()
 
 bool Session::configurePlankLaunchGeometry()
 {
+    if (isCollaborator()) return true;
     if (m_Computer->plankAuthentication &&
             !configurePlankHostLayout()) {
         return false;
@@ -4058,6 +4217,17 @@ bool Session::startConnectionAsync(bool reconnecting,
             }
         }
 
+        m_EffectiveFeatureFlags = macCapture ? m_Computer->plankFeatureFlags : http->effectiveFeatureFlags();
+        if (isCollaborator()) {
+            const QString permission = http->collaborationPermission();
+            m_CollaborationPermission.store(permission == QStringLiteral("control") ?
+                                                PlankCollaboration::Control : PlankCollaboration::View);
+            // Rejoining always requires another explicit owner decision.
+            m_CanReconnect.store(false);
+            m_MicrophoneNegotiated = false;
+            m_CameraNegotiated = false;
+        }
+
         // Record the successful launch immediately. If low-level transport
         // setup fails afterward, the next bounded attempt must resume this
         // app instead of issuing a second launch request.
@@ -4208,6 +4378,7 @@ bool Session::startConnectionAsync(bool reconnecting,
         return false;
     }
 
+    updateCollaborationIndicator();
     emit connectionStarted();
     return true;
 }
@@ -4240,7 +4411,19 @@ void Session::respondToDesktopSignOut(bool signOut)
     }
 }
 
+void Session::respondToDesktopCollaboration(int choice)
+{
+    if (choice != -1 && choice != 1 && choice != 2) return;
+    int expected = 0;
+    m_ActiveSessionTakeoverDecision.compare_exchange_strong(expected, choice);
+}
+
 bool Session::waitForPlankDecision()
+{
+    return waitForPlankDecisionChoice() == 1;
+}
+
+int Session::waitForPlankDecisionChoice()
 {
     constexpr int DecisionPollMs = 50;
     while (m_ActiveSessionTakeoverDecision.load() == 0 &&
@@ -4248,8 +4431,90 @@ bool Session::waitForPlankDecision()
         SDL_Delay(DecisionPollMs);
     }
     m_WaitingForActiveSessionTakeoverDecision.store(false);
-    return m_ActiveSessionTakeoverDecision.exchange(0) == 1 &&
-            !m_ConnectionStartCancelled.load();
+    const int decision = m_ActiveSessionTakeoverDecision.exchange(0);
+    return m_ConnectionStartCancelled.load() ? -1 : decision;
+}
+
+bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner)
+{
+    const PlankCollaboration request = PlankCollaboration::parse(http.requestCollaboration());
+    if (request.state != PlankCollaboration::Pending) {
+        throw GfeHttpResponseException(400, "Host did not accept the collaboration request");
+    }
+    m_WaitingForSessionCleanup.store(true);
+    emit sessionCleanupWaitChanged(true, tr("Waiting for %1 to allow collaboration…").arg(owner));
+    const auto finish = [this]() {
+        m_WaitingForSessionCleanup.store(false);
+        emit sessionCleanupWaitChanged(false, QString());
+    };
+    const auto cancel = [&]() {
+        try { http.cancelCollaboration(request.requestId); } catch (...) {}
+    };
+    try {
+        const QDeadlineTimer deadline(120000);
+        while (!deadline.hasExpired()) {
+            for (int delay = 0; delay < 1000 && !m_ConnectionStartCancelled.load(); delay += 50) SDL_Delay(50);
+            if (m_ConnectionStartCancelled.load()) { cancel(); finish(); return false; }
+            // Status retains this authentication; only a successful launch
+            // consumes it. Never replay a broker's one-use GSSAPI admission.
+            const PlankCollaboration reply = PlankCollaboration::parse(
+                http.collaborationStatus(request.requestId), request.requestId);
+            if (reply.state == PlankCollaboration::Pending) continue;
+            if (reply.state != PlankCollaboration::Approved) {
+                finish();
+                emit displayLaunchError(reply.state == PlankCollaboration::Denied ?
+                    tr("The desktop owner declined your collaboration request.") :
+                    tr("The collaboration request expired or was cancelled. Connect again to request access."));
+                return false;
+            }
+            NvOutputTopology topology;
+            QString error;
+            if (!NvOutputTopology::fromJson(reply.topology, topology, &error))
+                throw GfeHttpResponseException(400, "Host returned invalid owner display layout");
+            const QString source = m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_X11_NATIVE10 ?
+                QStringLiteral("x11-native10") : QStringLiteral("nvfbc");
+            const QString backend = StreamingPreferences::isPlankNvencProfile(m_PlankVideoProfile) ?
+                QStringLiteral("nvenc-direct") : QStringLiteral("software-cuda");
+            if (reply.capture.value(QStringLiteral("backend_locked")).toBool(true) &&
+                    (reply.capture.value(QStringLiteral("capture_source")).toString() != source ||
+                     reply.capture.value(QStringLiteral("encoder_backend")).toString() != backend)) {
+                cancel(); finish();
+                emit displayLaunchError(tr("The shared desktop uses capture %1 with %2. Select matching capture and encoder settings, then request to join again.")
+                    .arg(reply.capture.value(QStringLiteral("capture_source")).toString(),
+                         reply.capture.value(QStringLiteral("encoder_backend")).toString()));
+                return false;
+            }
+            {
+                QWriteLocker lock(&m_Computer->lock);
+                m_Computer->outputTopology = topology;
+            }
+            m_CollaborationPermission.store(reply.permission);
+            m_CollaborationOwner = owner;
+            m_CollaborationOutputId = reply.capture.value(QStringLiteral("output_id")).toString();
+            m_ResolvedArrangement.clear();
+            m_ResolvedHostLayout.clear();
+            m_ResolvedVirtualModes.clear();
+            m_ResolvedPrimaryOutput = -1;
+            m_DisplayPlan = {};
+            m_UseMultiDisplayPresentation = false;
+            m_IsFullScreen = false;
+            m_ResolvedScalingMode = NvOutputTopology::NativeScalingMode;
+            m_StreamConfig.width = reply.size.width();
+            m_StreamConfig.height = reply.size.height();
+            m_StreamConfig.fps = reply.fps;
+            m_StreamConfig.clientRefreshRateX100 = reply.fps * 100;
+            http.setCollaborationGrant(reply.grant);
+            startApp();
+            finish();
+            return true;
+        }
+        cancel(); finish();
+        emit displayLaunchError(tr("The desktop owner did not respond. Connect again to request collaboration."));
+        return false;
+    } catch (...) {
+        cancel(); finish();
+        throw;
+    }
 }
 
 // Single-user desktop policy: another account owns the workstation desktop.
@@ -4283,6 +4548,28 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
     QString requestedOwner;
     int lastStatus = refusal.getStatusCode();
     QString lastMessage = QString::fromUtf8(refusal.getStatusMessage());
+
+    if (!reconnecting && hasPlankCredentials() &&
+            (m_Computer->plankFeatureFlags & NvOutputTopology::CollaborationFeature) &&
+            (conflict.state == PlankDesktopSignOut::State::Available ||
+             conflict.state == PlankDesktopSignOut::State::Connected)) {
+        m_ActiveSessionTakeoverDecision.store(0);
+        m_WaitingForActiveSessionTakeoverDecision.store(true);
+        emit desktopCollaborationRequested(
+            tr("%1 is using %2. Request permission to join their desktop for remote support? They can allow viewing or interaction. Their display layout stays unchanged.")
+                .arg(conflict.owner, hostName), conflict.state == PlankDesktopSignOut::State::Available);
+        const int choice = waitForPlankDecisionChoice();
+        if (choice == 2) {
+            const bool joined = joinPlankDesktop(*http, startApp, conflict.owner);
+            if (!joined) clearSessionToken();
+            return joined;
+        }
+        if (choice != 1 || conflict.state != PlankDesktopSignOut::State::Available) {
+            clearSessionToken();
+            return false;
+        }
+        // The destructive alternative remains explicitly confirmed below.
+    }
 
     for (;;) {
         switch (PlankDesktopSignOut::nextStep(conflict, reconnecting,
@@ -5131,8 +5418,9 @@ void Session::execInternal()
 
     SDL_SetWindowPosition(m_Window, x, y);
 
-    if (m_UseMultiDisplayPresentation &&
-            !createSecondaryWindows(defaultWindowFlags, windowName)) {
+    if ((isCollaborator() && !createCollaborationWindows()) ||
+            (!isCollaborator() && m_UseMultiDisplayPresentation &&
+             !createSecondaryWindows(defaultWindowFlags, windowName))) {
         SDL_DestroyWindow(m_Window);
         m_Window = nullptr;
         destroyInputHandler();
@@ -5185,6 +5473,8 @@ void Session::execInternal()
     }
 #endif
 
+    m_InputHandler->setViewOnly(m_CollaborationPermission.load() == PlankCollaboration::View);
+    m_InputHandler->setStreamDimensions(m_StreamConfig.width, m_StreamConfig.height);
     m_InputHandler->setWindow(m_Window);
     rebuildPresentationLayout();
     // The monitor set this stream presents, to tell a rearrangement from new screens.
@@ -5686,6 +5976,9 @@ void Session::execInternal()
                 break;
             }
             switch (event.user.code) {
+            case SDL_CODE_PLANK_COLLABORATION_PERMISSION:
+                applyCollaborationPermission();
+                break;
             case SDL_CODE_PLANK_RECONNECT:
                 if (reconnectThread != nullptr ||
                         !beginPlankReconnect(reconnectState)) {

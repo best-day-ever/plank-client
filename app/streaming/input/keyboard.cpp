@@ -236,6 +236,8 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         }
     }
 
+    if (m_ViewOnly) return;
+
     // Set modifier flags
     modifiers = 0;
     if (event->mod & SDL_KMOD_CTRL) {

@@ -18,6 +18,7 @@
         <file>gui/MacPermissionSetup.qml</file>
         <file>gui/MacPermissionsPane.qml</file>
         <file>gui/StreamSegue.qml</file>
+        <file>gui/CollaborationDialog.qml</file>
         <file>gui/SessionTakeoverDialog.qml</file>
         <file>gui/HostTrustDialog.qml</file>
         <file>gui/NavigableToolButton.qml</file>
