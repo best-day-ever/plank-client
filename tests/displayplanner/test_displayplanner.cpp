@@ -97,6 +97,7 @@ private slots:
     void sessionSnapshotCancellationWakesWaiter();
     void guiDispatchProcessesSetupAndApply();
     void guiDispatchDefersDeletionUntilJoined();
+    void guiDispatchWaitsForAsyncCleanupAfterJoin();
     void guiDispatchKeepsEarlyReadySessionAliveAcrossGc();
     void guiDispatchQuitCancelsOnce();
     void monitorKeysPreferTheUuid();
@@ -982,6 +983,8 @@ void TestDisplayPlanner::guiDispatchProcessesSetupAndApply()
     for (int iteration = 0; iteration < 5 && !applied; ++iteration) SessionGuiDispatch::dispatch();
     QVERIFY(setupOpen);
     QCOMPARE(applied, 1);
+    guard.workerJoined();
+    guard.readyForDeletion();
 }
 
 void TestDisplayPlanner::guiDispatchDefersDeletionUntilJoined()
@@ -998,6 +1001,7 @@ void TestDisplayPlanner::guiDispatchDefersDeletionUntilJoined()
         QVERIFY(session);
         QCOMPARE(cancelled, 1);
         guard.readyForDeletion();
+        guard.workerJoined();
         // Scope exit represents the joined worker, after all dispatch stops.
     }
     QVERIFY(session);
@@ -1020,6 +1024,7 @@ void TestDisplayPlanner::guiDispatchKeepsEarlyReadySessionAliveAcrossGc()
         engine.collectGarbage();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QVERIFY(session);
+        guard.workerJoined();
     }
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QVERIFY(session.isNull());
@@ -1028,18 +1033,65 @@ void TestDisplayPlanner::guiDispatchKeepsEarlyReadySessionAliveAcrossGc()
 void TestDisplayPlanner::guiDispatchQuitCancelsOnce()
 {
     QObject session, application;
+    std::unique_ptr<QThread> worker(QThread::create([] {
+        // No SDL queue or event loop exists here: interruption alone must
+        // stop an otherwise healthy worker when a queued Quit is unavailable.
+        while (!QThread::currentThread()->isInterruptionRequested()) QThread::msleep(1);
+    }));
+    worker->start();
+    const auto stopWorker = qScopeGuard([&] { worker->requestInterruption(); worker->wait(); });
     GuiDisplaySnapshot snapshot;
     auto waiting = std::async(std::launch::async, [&] { return snapshot.request(); });
     const auto cancelWait = qScopeGuard([&] { snapshot.cancel(); });
     QTRY_VERIFY_WITH_TIMEOUT(snapshot.requested(), 1000);
     int cancelled = 0;
-    SessionGuiDispatch guard(&session, &application, [&] { ++cancelled; snapshot.cancel(); });
+    SessionGuiDispatch guard(&session, &application, [&] {
+        ++cancelled;
+        worker->requestInterruption();
+        snapshot.cancel();
+    });
     QEvent first(QEvent::Quit), second(QEvent::Quit);
     QCoreApplication::sendEvent(&application, &first);
     QCoreApplication::sendEvent(&application, &second);
     QCOMPARE(cancelled, 1);
     QVERIFY(waiting.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
     QVERIFY(waiting.get().isEmpty());
+    QVERIFY(worker->wait(1000));
+    guard.workerJoined();
+    guard.readyForDeletion();
+}
+
+void TestDisplayPlanner::guiDispatchWaitsForAsyncCleanupAfterJoin()
+{
+    QObject application;
+    QPointer<QObject> session = new QObject;
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::JavaScriptOwnership);
+    {
+        SessionGuiDispatch guard(session, &application, [] {});
+        session->deleteLater();
+        QCoreApplication::sendPostedEvents(session, QEvent::DeferredDelete);
+        guard.workerJoined();
+        // The SDL thread returned, but DeferredSessionCleanupTask is still
+        // dereferencing Session. Joining must not replay the parked deletion.
+        QVERIFY(!guard.complete());
+        SessionGuiDispatch::dispatch();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+        QVERIFY(session);
+        QCOMPARE(QQmlEngine::objectOwnership(session), QQmlEngine::CppOwnership);
+        bool cleanupUsedSession = false;
+        QTimer::singleShot(0, &application, [&] {
+            if (session) {
+                session->setObjectName("cleanup completed");
+                cleanupUsedSession = true;
+            }
+            guard.readyForDeletion();
+        });
+        while (!guard.complete()) SessionGuiDispatch::dispatch();
+        QVERIFY(cleanupUsedSession);
+        QVERIFY(session);
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    QVERIFY(session.isNull());
 }
 
 void TestDisplayPlanner::sessionSnapshotPreservesProfilesAndRefreshes()

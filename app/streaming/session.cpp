@@ -4897,6 +4897,11 @@ bool Session::beginPlankReconnect(
     m_InputHandler->resetRemoteCursorPositionEpoch();
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
+    if (QThread::currentThread()->isInterruptionRequested()) {
+        m_ReconnectCancelled.store(true);
+        m_ConnectionStartCancelled.store(true);
+        return false;
+    }
     return true;
 }
 
@@ -5331,13 +5336,22 @@ void Session::exec(QWindow* qtWindow)
         QCoreApplication::sendPostedEvents();
 
         // The screen-setup dialog and Apply live on Qt's GUI thread. Keep it
-        // interactive while SDL runs, but retain Session until the join.
+        // interactive while SDL runs, but retain Session through async cleanup.
         while (!execThread.wait(10)) {
             SessionGuiDispatch::dispatch();
             if (m_GuiDisplaySnapshot.requested()) {
                 if (QCoreApplication::closingDown()) m_GuiDisplaySnapshot.cancel();
                 else m_GuiDisplaySnapshot.publish(ClientDisplayProbe::probe());
             }
+        }
+        guiDispatch.workerJoined();
+        // execInternal hands transport teardown to DeferredSessionCleanupTask.
+        // That task still owns a raw Session pointer after the SDL worker exits.
+        // Keep Qt responsive and retain ownership until its real ready signal,
+        // including when Quit or an explicit delete request canceled the stream.
+        while (!guiDispatch.complete()) {
+            SessionGuiDispatch::dispatch();
+            if (!guiDispatch.complete()) QThread::msleep(10);
         }
         m_GuiDisplaySnapshot.cancel();
     }
@@ -5806,6 +5820,9 @@ void Session::execInternal()
     }
     SDL_Event event;
     for (;;) {
+        // Qt's cancel/quit must survive a full SDL queue. The queued quit
+        // event is just a wakeup; interruption is the durable exit request.
+        if (QThread::currentThread()->isInterruptionRequested()) goto DispatchDeferredCleanup;
         const auto localHotkey = m_InputHandler->takeSessionHotkey();
         if (localHotkey == PlankSessionHotkeys::Disconnect) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved local disconnect hotkey");
@@ -5948,6 +5965,7 @@ void Session::execInternal()
         int eventWaitTimeout = m_Reconnecting.load() ? 50 :
                     (m_PlankToolbar ?
                          m_PlankToolbar->eventWaitTimeout() : 1000);
+        if (m_ThreadedExec) eventWaitTimeout = std::min(eventWaitTimeout, 50);
 #ifdef Q_OS_MACOS
         // Native Quit and reserved hotkeys change explicit session state,
         // independent of SDL queue capacity. Bound the wait for a silent Host.
@@ -5972,6 +5990,7 @@ void Session::execInternal()
             goto DispatchDeferredCleanup;
         }
 #endif
+        if (QThread::currentThread()->isInterruptionRequested()) goto DispatchDeferredCleanup;
         const auto nativeHotkey = m_InputHandler->takeSessionHotkey();
         if (nativeHotkey == PlankSessionHotkeys::Disconnect) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved native disconnect hotkey");

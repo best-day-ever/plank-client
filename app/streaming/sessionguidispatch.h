@@ -11,7 +11,8 @@
 
 // The GUI keeps servicing the screen setup dialog while SDL owns its worker.
 // QML may drop its Session reference during cleanup, but ownership and posted
-// deletion stay parked until the caller has joined that worker.
+// deletion stay parked until the worker is joined AND asynchronous transport
+// cleanup has emitted readyForDeletion. Joining SDL alone is insufficient.
 class SessionGuiDispatch : public QObject
 {
 public:
@@ -26,6 +27,7 @@ public:
 
     ~SessionGuiDispatch() override
     {
+        Q_ASSERT(complete());
         m_Application->removeEventFilter(this);
         m_Session->removeEventFilter(this);
         QQmlEngine::setObjectOwnership(m_Session, m_Ownership);
@@ -39,6 +41,8 @@ public:
     }
 
     void readyForDeletion() { m_Ready = true; }
+    void workerJoined() { m_WorkerJoined = true; }
+    bool complete() const { return m_WorkerJoined && m_Ready; }
 
     static void dispatch()
     {
@@ -69,6 +73,7 @@ private:
     std::function<void()> m_Cancel;
     QQmlEngine::ObjectOwnership m_Ownership;
     bool m_Ready = false;
+    bool m_WorkerJoined = false;
     bool m_DeletePending = false;
     bool m_Cancelled = false;
 };
