@@ -3863,7 +3863,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                 acceptedClipboardSync = macLaunch.clipboard;
                 return;
             }
-            http->startApp(m_Computer->currentGameId != 0 ? "resume" : "launch",
+            http->startApp(PlankCollaboration::launchVerb(isCollaborator(), m_Computer->currentGameId != 0),
                           m_App.id, &m_StreamConfig,
                           m_Preferences->playAudioOnHost,
                           0,

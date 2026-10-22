@@ -64,6 +64,11 @@ struct PlankCollaboration
         return reply;
     }
 
+    static QString launchVerb(bool collaborator, bool desktopRunning)
+    {
+        return !collaborator && desktopRunning ? QStringLiteral("resume") : QStringLiteral("launch");
+    }
+
     static int wirePermission(const unsigned char* bytes, std::size_t size)
     {
         if (bytes == nullptr || size != 4 || bytes[0] || bytes[1] || bytes[2] || bytes[3] > 2) return -1;

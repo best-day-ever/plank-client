@@ -19,6 +19,12 @@ class CollaborationTest : public QObject
     }
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+    void joiningRunningDesktopIsFreshLaunch() {
+        QCOMPARE(PlankCollaboration::launchVerb(true, true), QString("launch"));
+        QCOMPARE(PlankCollaboration::launchVerb(true, false), QString("launch"));
+        QCOMPARE(PlankCollaboration::launchVerb(false, true), QString("resume"));
+        QCOMPARE(PlankCollaboration::launchVerb(false, false), QString("launch"));
+    }
     void grantsStayOutOfDiagnostics() {
         const QUrl launch("https://host.example:47984/launch?appid=1&plankCollaboration=" + id);
         const auto safe = PlankCollaboration::diagnosticUrl(launch);
