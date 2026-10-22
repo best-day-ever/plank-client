@@ -9,6 +9,7 @@ class TestPlankPresentation : public QObject
     Q_OBJECT
 
 private slots:
+    void selectedPrimaryMovesTheOnlyRemainingWindow();
     void windowedOutputFitsItsOwnMonitor();
     void capturedDragCrossesBetweenDisplays();
     void capturedDragHonoursLogicalBoundsAndGaps();
@@ -51,6 +52,22 @@ private:
                                             const QSize& drawableSize,
                                             bool liveDrawable = true);
 };
+
+void TestPlankPresentation::selectedPrimaryMovesTheOnlyRemainingWindow()
+{
+    quint32 live = 7;
+    QVector<quint32> placements;
+    const auto place = [&](quint32 selected) { placements.append(selected); return true; };
+    // A two-window session excludes its old primary, leaving one on display9.
+    QVERIFY(PlankPresentation::placePrimaryDisplay(live, 9, place));
+    QCOMPARE(live, quint32(9));
+    QCOMPARE(placements, QVector<quint32>{9});
+    QVERIFY(PlankPresentation::placePrimaryDisplay(live, 9, place));
+    QVERIFY(PlankPresentation::placePrimaryDisplay(live, 0, place));
+    QCOMPARE(placements.size(), 1);
+    QVERIFY(!PlankPresentation::placePrimaryDisplay(live, 11, [](quint32) { return false; }));
+    QCOMPARE(live, quint32(9));
+}
 
 void TestPlankPresentation::windowedOutputFitsItsOwnMonitor()
 {

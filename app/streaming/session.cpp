@@ -2860,17 +2860,16 @@ void Session::applyPendingPresentation()
     collapseToSingleWindow();
     m_UseMultiDisplayPresentation = m_PendingMultiDisplayPresentation;
     m_TargetDisplayId = SDL_GetDisplayForWindow(m_Window);
-    if (m_UseMultiDisplayPresentation && m_PlannedPrimaryDisplay != 0 &&
-            m_TargetDisplayId != m_PlannedPrimaryDisplay) {
+    if (!PlankPresentation::placePrimaryDisplay(m_TargetDisplayId, m_PlannedPrimaryDisplay,
+            [this](quint32 selected) {
         // Applying a layout may exclude the screen where the old main window
         // lives (for example the laptop panel). Move it to the selected primary
         // before creating the other windows; do not discard the new selection.
-        SDL_SetWindowFullscreen(m_Window, false);
-        SDL_SyncWindow(m_Window);
-        m_TargetDisplayId = m_PlannedPrimaryDisplay;
-        SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED_DISPLAY(m_TargetDisplayId),
-                              SDL_WINDOWPOS_CENTERED_DISPLAY(m_TargetDisplayId));
-        SDL_SyncWindow(m_Window);
+        return SDL_SetWindowFullscreen(m_Window, false) && SDL_SyncWindow(m_Window) &&
+                SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED_DISPLAY(selected),
+                                      SDL_WINDOWPOS_CENTERED_DISPLAY(selected)) && SDL_SyncWindow(m_Window);
+    })) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not move the presentation to its selected primary: %s", SDL_GetError());
     }
     if (m_UseMultiDisplayPresentation) {
         bool primaryShown = false;
