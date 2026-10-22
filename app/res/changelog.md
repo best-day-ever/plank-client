@@ -1,4 +1,4 @@
-## 1.1.043 — Mac displays and desktop recovery
+## 1.1.044 — Mac displays and desktop recovery
 
 - Keep one window per selected Mac screen, including when the laptop display is excluded. Both windows remain available after leaving fullscreen.
 - Preserve the selected primary monitor when applying a different display layout or reconnecting.
