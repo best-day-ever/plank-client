@@ -1,3 +1,7 @@
+## 1.1.042 — Collaboration candidate
+
+- Request to join another user’s desktop with their approval for viewing or keyboard and mouse control. Collaboration preserves the owner’s display layout; clipboard, files and devices remain private.
+
 ## 1.1.037 — Client session recovery candidate
 
 ### Client

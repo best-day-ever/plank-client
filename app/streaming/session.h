@@ -165,6 +165,8 @@ public:
     Q_INVOKABLE void respondToActiveSessionTakeover(bool takeOver);
 
     Q_INVOKABLE void respondToDesktopSignOut(bool signOut);
+    Q_INVOKABLE void respondToDesktopCollaboration(int choice);
+    bool isCollaborator() const { return m_CollaborationPermission.load() != 0; }
 
     // Apply the saved display layout for the current screens during the
     // stream (in-session reconnect). Thread-safe; ignored while reconnecting.
@@ -222,6 +224,7 @@ signals:
     void activeSessionTakeoverRequested(QString text);
 
     void desktopSignOutRequested(QString text);
+    void desktopCollaborationRequested(QString text, bool signOutAvailable);
 
     void displayLaunchError(QString text);
 
@@ -270,6 +273,12 @@ private:
     bool hasPlankCredentials() const;
     QString authenticatePlank(NvHTTP& http, bool* greeterConfirmed);
     bool waitForPlankDecision();
+    int waitForPlankDecisionChoice();
+    bool joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner);
+    bool createCollaborationWindows();
+    void rebuildCollaborationPresentation();
+    void updateCollaborationIndicator();
+    void applyCollaborationPermission();
     bool resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
                                      const std::function<void()>& startApp,
                                      PlankDesktopSignOut conflict,
@@ -469,6 +478,11 @@ private:
     STREAM_CONFIGURATION m_StreamConfig;
     bool m_MacClipboardNegotiated = false;
     bool m_SessionClipboardEntitled = true;
+    int m_EffectiveFeatureFlags = 0;
+    std::atomic<int> m_CollaborationPermission {0};
+    QVector<NvOutput> m_CollaborationOutputs;
+    QString m_CollaborationOwner;
+    QString m_CollaborationOutputId;
     bool m_CameraNegotiated = false;
     std::atomic<bool> m_CameraRequested {false};
     std::mutex m_CameraMutex;

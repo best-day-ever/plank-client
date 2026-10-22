@@ -1019,6 +1019,7 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 
 void SdlInputHandler::setCaptureActive(bool active)
 {
+    active = active && !m_ViewOnly;
     if (active) {
         setCursorVisible(m_LocalCursorSupported ?
                              (!m_MouseWasInVideoRegion || m_RemoteCursorVisible) :

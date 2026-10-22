@@ -960,9 +960,9 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
     SDL_FRect renderRect = {};
 
-    if (type == Overlay::OverlayStatusUpdate) {
+    if (type == Overlay::OverlayStatusUpdate || type == Overlay::OverlayCollaboration) {
         // Bottom Left
-        renderRect.x = 0;
+        renderRect.x = type == Overlay::OverlayCollaboration ? SDL_max(0, m_DisplayWidth - newSurface->w) : 0;
         renderRect.y = 0;
     }
     else if (type == Overlay::OverlayDebug) {

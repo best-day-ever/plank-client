@@ -310,6 +310,7 @@ macx: HEADERS += macapplication.h
 
 HEADERS += \
     backend/authenticationtakeover.h \
+    backend/collaboration.h \
     streaming/video/packedbt709.h \
     backend/nvaddress.h \
     backend/outputtopology.h \

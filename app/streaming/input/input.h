@@ -45,6 +45,7 @@ public:
     ~SdlInputHandler();
 
     void setWindow(SDL_Window* window);
+    void setViewOnly(bool viewOnly) { m_ViewOnly = viewOnly; }
 
     void setStreamDimensions(int streamWidth, int streamHeight);
 
@@ -153,6 +154,7 @@ private:
 
     void performSpecialKeyCombo(KeyCombo combo);
 
+    bool m_ViewOnly = false;
     SDL_Window* m_Window;
     PlankPresentationLayout m_PresentationLayout;
     bool m_NeedsManualCaptureOnLeave;

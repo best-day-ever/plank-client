@@ -716,10 +716,10 @@ void VAAPIRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 
         SDL_Rect overlayRect;
 
-        if (type == Overlay::OverlayStatusUpdate) {
+        if (type == Overlay::OverlayStatusUpdate || type == Overlay::OverlayCollaboration) {
             // Bottom Left
             overlayRect.x = 0;
-            overlayRect.y = -newSurface->h;
+            overlayRect.y = -newSurface->h - (type == Overlay::OverlayCollaboration ? 48 : 0);
         }
         else if (type == Overlay::OverlayDebug) {
             // Top left

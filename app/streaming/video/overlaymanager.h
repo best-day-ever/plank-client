@@ -13,6 +13,7 @@ enum OverlayType {
     OverlayDebug,
     OverlayStatusUpdate,
     OverlayToolbar,
+    OverlayCollaboration,
     OverlayMax
 };
 
