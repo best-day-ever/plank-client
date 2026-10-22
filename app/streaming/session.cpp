@@ -1,4 +1,5 @@
 #include "session.h"
+#include "sessionguidispatch.h"
 #include "backend/collaboration.h"
 #include <QDeadlineTimer>
 #include "streaming/clientframeflowtrace.h"
@@ -1849,6 +1850,11 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
 
 bool Session::initialize()
 {
+    {
+        QReadLocker lock(&m_Computer->lock);
+        m_PlankLaunchFeatureFlags = m_Computer->outputTopology.launchFeatureFlags(
+                    m_Computer->plankFeatureFlags);
+    }
 #ifdef Q_OS_DARWIN
     // SDL 3.4.2 caches allow_spaces in Cocoa_VideoInit, so use CoreGraphics
     // before SDL video initialization. Setting the hint before window creation
@@ -2208,9 +2214,8 @@ int Session::getTargetDisplayIndex() const
     // was being displayed on.
     else {
         if (m_QtWindow != nullptr) {
-            QScreen* screen = m_QtWindow->screen();
-            if (screen != nullptr) {
-                QRect displayRect = screen->geometry();
+            if (m_QtTargetDisplayBounds.isValid()) {
+                const QRect displayRect = m_QtTargetDisplayBounds;
 
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Qt UI screen is at (%d,%d)",
@@ -2245,6 +2250,11 @@ int Session::getTargetDisplayIndex() const
     return displayIndex;
 }
 
+QVector<NvClientDisplay> Session::probeClientDisplays()
+{
+    return m_ThreadedExec ? m_GuiDisplaySnapshot.request() : ClientDisplayProbe::probe();
+}
+
 bool Session::snapshotClientDisplays()
 {
     m_ClientDisplays.clear();
@@ -2257,8 +2267,9 @@ bool Session::snapshotClientDisplays()
 #if defined(Q_OS_DARWIN) || defined(Q_OS_WIN32)
     const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
 #else
-    // Linux may run this session on a worker thread, where QScreen is unsafe.
-    const QVector<NvClientDisplay> probed;
+    // Captured on the GUI thread before SDL starts, refreshed by explicit
+    // value handoffs after hotplug or Apply. QScreen stays on its owner thread.
+    const QVector<NvClientDisplay> probed = m_ClientDisplayProbe;
 #endif
     for (int index = 0; index < displayCount; ++index) {
         ClientDisplaySnapshot snapshot;
@@ -2306,10 +2317,10 @@ bool Session::snapshotClientDisplays()
                     QRect(snapshot.logicalBounds.x, snapshot.logicalBounds.y,
                           snapshot.logicalBounds.w, snapshot.logicalBounds.h),
                     snapshot.nativeSize, probed);
-#ifdef Q_OS_WIN32
+#ifndef Q_OS_DARWIN
         if (snapshot.probeView.key.isEmpty()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Could not match SDL output %u to a Windows display setup monitor",
+                         "Could not match SDL output %u to a display setup monitor",
                          snapshot.displayId);
             emit displayLaunchError(tr("Your displays changed during setup. Check the connected displays and try again."));
             return false;
@@ -2778,7 +2789,8 @@ QString presentedDisplaySignature(const QVector<NvClientDisplay>& displays)
 void Session::handleClientDisplaysChanged()
 {
     if (isCollaborator()) return;
-    const QVector<NvClientDisplay> probed = ClientDisplayProbe::probe();
+    const QVector<NvClientDisplay> probed = probeClientDisplays();
+    m_ClientDisplayProbe = probed;
     const QString fingerprint = ClientDisplayProbe::fingerprint(probed);
     const QString signature = presentedDisplaySignature(probed);
     if (signature == m_PresentedDisplaySignature) {
@@ -2826,8 +2838,12 @@ bool Session::requestDisplayLayoutApply()
     }
     // The saved layout for the monitors connected now; the reconnect plans
     // and launches it (425 wait included) while the desktop keeps running.
+    m_ClientDisplayProbe = probeClientDisplays();
+    if (m_ClientDisplayProbe.isEmpty() || !snapshotClientDisplays()) {
+        m_ReconnectRequested.store(false);
+        return false;
+    }
     collapseToSingleWindow();
-    snapshotClientDisplays();
     m_DisplayReconfigureRequested.store(true);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK applying the display layout for the current screens");
     SDL_Event event = {};
@@ -2855,17 +2871,16 @@ void Session::applyPendingPresentation()
     collapseToSingleWindow();
     m_UseMultiDisplayPresentation = m_PendingMultiDisplayPresentation;
     m_TargetDisplayId = SDL_GetDisplayForWindow(m_Window);
-    if (m_UseMultiDisplayPresentation && m_PlannedPrimaryDisplay != 0 &&
-            m_TargetDisplayId != m_PlannedPrimaryDisplay) {
+    if (!PlankPresentation::placePrimaryDisplay(m_TargetDisplayId, m_PlannedPrimaryDisplay,
+            [this](quint32 selected) {
         // Applying a layout may exclude the screen where the old main window
         // lives (for example the laptop panel). Move it to the selected primary
         // before creating the other windows; do not discard the new selection.
-        SDL_SetWindowFullscreen(m_Window, false);
-        SDL_SyncWindow(m_Window);
-        m_TargetDisplayId = m_PlannedPrimaryDisplay;
-        SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED_DISPLAY(m_TargetDisplayId),
-                              SDL_WINDOWPOS_CENTERED_DISPLAY(m_TargetDisplayId));
-        SDL_SyncWindow(m_Window);
+        return SDL_SetWindowFullscreen(m_Window, false) && SDL_SyncWindow(m_Window) &&
+                SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED_DISPLAY(selected),
+                                      SDL_WINDOWPOS_CENTERED_DISPLAY(selected)) && SDL_SyncWindow(m_Window);
+    })) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not move the presentation to its selected primary: %s", SDL_GetError());
     }
     if (m_UseMultiDisplayPresentation) {
         bool primaryShown = false;
@@ -2882,7 +2897,7 @@ void Session::applyPendingPresentation()
         }
     }
     setPresentationWindowsFullscreen(m_PresentationFullscreen);
-    const QVector<NvClientDisplay> presented = ClientDisplayProbe::probe();
+    const QVector<NvClientDisplay> presented = m_ClientDisplayProbe;
     m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
     m_PresentedDisplaySignature = presentedDisplaySignature(presented);
     SDL_Event resetEvent = {};
@@ -3107,9 +3122,14 @@ bool Session::configurePlankHostLayout()
         QReadLocker lock(&m_Computer->lock);
         hostFeatureFlags = m_Computer->outputTopology.featureFlags;
         topologySnapshot = m_Computer->outputTopology;
+        m_PlankLaunchFeatureFlags = topologySnapshot.launchFeatureFlags(m_Computer->plankFeatureFlags);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK launch capabilities: topology=0x%x discovery=0x%x negotiated=0x%x schema=%d",
+                    topologySnapshot.featureFlags, m_Computer->plankFeatureFlags,
+                    m_PlankLaunchFeatureFlags, topologySnapshot.schemaVersion);
         // Only when this launch negotiates it too.
         arrangementPublished = topologySnapshot.displayArrangementPublished() &&
-                (m_Computer->plankFeatureFlags & NvOutputTopology::SupportedFeatureFlags &
+                (m_PlankLaunchFeatureFlags &
                  NvOutputTopology::DisplayArrangementFeature) != 0;
         layoutPolicy = m_Computer->plankHostLayout;
         scalingMode = m_Computer->plankScalingMode;
@@ -3325,6 +3345,9 @@ bool Session::planDisplayArrangement(const QVector<NvClientDisplay>& displays, i
         // No extension: today's layout request for the planned displays.
         m_ResolvedHostLayout = m_DisplayPlan.legacyHostLayout;
         m_ResolvedVirtualModes = m_DisplayPlan.legacyModes;
+        m_ResolvedPrimaryOutput = DisplayPlanner::legacyPrimaryOutput(m_DisplayPlan,
+                    topology.startupLayoutKind == NvOutputTopology::SingleHostLayout &&
+                    (hostFeatureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature) != 0);
         matchedExactly = !m_DisplayPlan.legacyFitted;
         if (m_DisplayPlan.legacyFitted && m_ResolvedScalingMode != NvOutputTopology::ScaledSpanMode) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
@@ -3926,8 +3949,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                           NvOutputTopology::ScaledSpanMode,
                           m_Computer->outputTopology.generation,
                           m_Computer->plankTopologyVersion,
-                          m_Computer->plankFeatureFlags &
-                              NvOutputTopology::SupportedFeatureFlags,
+                          m_PlankLaunchFeatureFlags,
                           takeOverActiveSession,
                           desktopSignOutOwner,
                           m_ResolvedHostLayout,
@@ -4875,6 +4897,11 @@ bool Session::beginPlankReconnect(
     m_InputHandler->resetRemoteCursorPositionEpoch();
     m_ReconnectCancelled.store(false);
     m_ConnectionStartCancelled.store(false);
+    if (QThread::currentThread()->isInterruptionRequested()) {
+        m_ReconnectCancelled.store(true);
+        m_ConnectionStartCancelled.store(true);
+        return false;
+    }
     return true;
 }
 
@@ -4973,6 +5000,8 @@ bool Session::runPlankReconnect()
                     m_Computer->outputTopology = topology;
                 }
                 m_Computer->updateAppList(apps);
+                m_PlankLaunchFeatureFlags = m_Computer->outputTopology.launchFeatureFlags(
+                            m_Computer->plankFeatureFlags);
             }
 
             if (m_DisplayReconfigureRequested.load() && !macDesktop && !configurePlankLaunchGeometry()) {
@@ -5258,6 +5287,9 @@ void Session::exec(QWindow* qtWindow)
     }, Qt::QueuedConnection);
 #endif
     m_QtWindow = qtWindow;
+    m_QtTargetDisplayBounds = qtWindow && qtWindow->screen() ? qtWindow->screen()->geometry() : QRect();
+    m_ClientDisplayProbe = ClientDisplayProbe::probe();
+    m_GuiDisplaySnapshot.publish(m_ClientDisplayProbe);
 
     // Use a separate thread for the streaming session on X11 or Wayland
     // to ensure we don't stomp on Qt's GL context. This breaks when using
@@ -5267,6 +5299,18 @@ void Session::exec(QWindow* qtWindow)
     if (m_ThreadedExec) {
         // Run the streaming session on a separate thread for Linux/BSD
         ExecThread execThread(this);
+        SessionGuiDispatch guiDispatch(this, QCoreApplication::instance(), [this, &execThread] {
+            execThread.requestInterruption();
+            cancelConnectionStart();
+            m_ReconnectCancelled.store(true);
+            m_CanReconnect.store(false);
+            m_GuiDisplaySnapshot.cancel();
+            SDL_Event quit = {};
+            quit.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&quit);
+        });
+        connect(this, &Session::readyForDeletion, &guiDispatch,
+                [&guiDispatch] { guiDispatch.readyForDeletion(); });
         execThread.start();
 
         // Until the SDL streaming window is created, we should continue
@@ -5291,9 +5335,25 @@ void Session::exec(QWindow* qtWindow)
                         QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
 
-        // SDL is in charge now. Wait until the streaming thread exits
-        // to further update the Qt window.
-        execThread.wait();
+        // The screen-setup dialog and Apply live on Qt's GUI thread. Keep it
+        // interactive while SDL runs, but retain Session through async cleanup.
+        while (!execThread.wait(10)) {
+            SessionGuiDispatch::dispatch();
+            if (m_GuiDisplaySnapshot.requested()) {
+                if (QCoreApplication::closingDown()) m_GuiDisplaySnapshot.cancel();
+                else m_GuiDisplaySnapshot.publish(ClientDisplayProbe::probe());
+            }
+        }
+        guiDispatch.workerJoined();
+        // execInternal hands transport teardown to DeferredSessionCleanupTask.
+        // That task still owns a raw Session pointer after the SDL worker exits.
+        // Keep Qt responsive and retain ownership until its real ready signal,
+        // including when Quit or an explicit delete request canceled the stream.
+        while (!guiDispatch.complete()) {
+            SessionGuiDispatch::dispatch();
+            if (!guiDispatch.complete()) QThread::msleep(10);
+        }
+        m_GuiDisplaySnapshot.cancel();
     }
     else {
         // Run the streaming session on the main thread for Windows and macOS
@@ -5310,15 +5370,15 @@ void Session::execInternal()
     // NB: This initializes the SDL video subsystem, so it must be
     // called on the main thread.
     const bool initialized = initialize();
-    if (!initialized
+    if (!initialized || QThread::currentThread()->isInterruptionRequested()
 #ifdef Q_OS_MACOS
             || m_ApplicationExitRequested.load()
 #endif
             ) {
-#ifdef Q_OS_MACOS
         if (initialized) {
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
         }
+#ifdef Q_OS_MACOS
         if (!m_ApplicationExitRequested.load())
 #endif
         emit sessionFinished();
@@ -5341,7 +5401,7 @@ void Session::execInternal()
                                          m_StreamConfig.height);
     m_InputCallbacks.publish(m_InputHandler);
 
-    m_ConnectionStartCancelled.store(false);
+    m_ConnectionStartCancelled.store(QThread::currentThread()->isInterruptionRequested());
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {
         // Kick off the async connection thread while we sit here and pump the event loop
@@ -5538,7 +5598,7 @@ void Session::execInternal()
     rebuildPresentationLayout();
     // The monitor set this stream presents, to tell a rearrangement from new screens.
     {
-        const QVector<NvClientDisplay> presented = ClientDisplayProbe::probe();
+        const QVector<NvClientDisplay> presented = m_ClientDisplayProbe;
         m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
         m_PresentedDisplaySignature = presentedDisplaySignature(presented);
     }
@@ -5760,6 +5820,9 @@ void Session::execInternal()
     }
     SDL_Event event;
     for (;;) {
+        // Qt's cancel/quit must survive a full SDL queue. The queued quit
+        // event is just a wakeup; interruption is the durable exit request.
+        if (QThread::currentThread()->isInterruptionRequested()) goto DispatchDeferredCleanup;
         const auto localHotkey = m_InputHandler->takeSessionHotkey();
         if (localHotkey == PlankSessionHotkeys::Disconnect) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved local disconnect hotkey");
@@ -5902,6 +5965,7 @@ void Session::execInternal()
         int eventWaitTimeout = m_Reconnecting.load() ? 50 :
                     (m_PlankToolbar ?
                          m_PlankToolbar->eventWaitTimeout() : 1000);
+        if (m_ThreadedExec) eventWaitTimeout = std::min(eventWaitTimeout, 50);
 #ifdef Q_OS_MACOS
         // Native Quit and reserved hotkeys change explicit session state,
         // independent of SDL queue capacity. Bound the wait for a silent Host.
@@ -5926,6 +5990,7 @@ void Session::execInternal()
             goto DispatchDeferredCleanup;
         }
 #endif
+        if (QThread::currentThread()->isInterruptionRequested()) goto DispatchDeferredCleanup;
         const auto nativeHotkey = m_InputHandler->takeSessionHotkey();
         if (nativeHotkey == PlankSessionHotkeys::Disconnect) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved native disconnect hotkey");

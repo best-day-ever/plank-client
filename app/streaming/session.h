@@ -20,6 +20,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/nvhttp.h"
 #include "backend/displayplanner.h"
+#include "backend/guidisplaysnapshot.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
@@ -341,6 +342,7 @@ private:
     int getTargetDisplayIndex() const;
 
     bool snapshotClientDisplays();
+    QVector<NvClientDisplay> probeClientDisplays();
 
     void rebuildPresentationLayout();
 
@@ -479,6 +481,7 @@ private:
     bool m_MacClipboardNegotiated = false;
     bool m_SessionClipboardEntitled = true;
     int m_EffectiveFeatureFlags = 0;
+    int m_PlankLaunchFeatureFlags = 0;
     std::atomic<int> m_CollaborationPermission {0};
     QVector<NvOutput> m_CollaborationOutputs;
     QString m_CollaborationOwner;
@@ -564,6 +567,9 @@ private:
         bool primary = false;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
+    GuiDisplaySnapshot m_GuiDisplaySnapshot;
+    QVector<NvClientDisplay> m_ClientDisplayProbe;
+    QRect m_QtTargetDisplayBounds;
     // The plan's primary display: the stream window opens there.
     SDL_DisplayID m_PlannedPrimaryDisplay = 0;
     // Planned while the windows already exist (in-session reconnect): the

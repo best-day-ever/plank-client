@@ -1,3 +1,7 @@
+## 1.1.046 — Authenticated display capabilities
+
+- Preserve the workstation's authenticated display capabilities across background discovery and reconnect, keeping the selected screens on the current display protocol.
+
 ## 1.1.045 — Display transition recovery
 
 - Keep the requested display layout stable while the workstation applies it, even if saved screen settings change during recovery.
