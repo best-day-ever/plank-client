@@ -4,8 +4,8 @@
 #include <functional>
 #include <memory>
 
-// Main-thread, session-scoped keyboard capture. The tap only queues events;
-// normal session dispatch performs PLANK hotkeys and remote input delivery.
+// Main-thread, session-scoped keyboard capture. Reserved local controls run
+// before the remote queue; ordinary input is delivered by session dispatch.
 class MacKeyboardCapture
 {
 public:
@@ -16,6 +16,7 @@ public:
                        std::function<void()> releaseKeys);
     ~MacKeyboardCapture();
     void refresh();
+    void setSessionHotkeyHandler(std::function<bool(const SDL_KeyboardEvent&)> handler);
     bool dispatch(const SDL_Event& event,
                   const std::function<void(SDL_KeyboardEvent*)>& deliver);
     bool suppressSdlKeyEvent() const;

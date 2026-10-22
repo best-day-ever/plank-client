@@ -4,6 +4,7 @@
 #include "backend/computermanager.h"
 #include "streaming/plankpresentation.h"
 #include "streaming/plankembeddedcursor.h"
+#include "streaming/planksessionhotkeys.h"
 #ifdef Q_OS_MACOS
 #include "macrawwacomfocus.h"
 #endif
@@ -68,6 +69,7 @@ public:
     void refreshWaylandTabletCursorParents();
 
     void handleKeyEvent(SDL_KeyboardEvent* event);
+    PlankSessionHotkeys::Action takeSessionHotkey() { return m_SessionHotkeys.take(); }
 #ifdef Q_OS_MACOS
     bool handleCapturedMacKeyEvent(const SDL_Event& event);
 #endif
@@ -140,7 +142,6 @@ private:
     bool hasMacStreamKeyboardFocus() const;
 #endif
     enum KeyCombo {
-        KeyComboQuit,
         KeyComboUngrabInput,
         KeyComboToggleFullScreen,
         KeyComboToggleStatsOverlay,
@@ -148,11 +149,11 @@ private:
         KeyComboPasteText,
         KeyComboTogglePointerRegionLock,
         KeyComboToggleKeyboardGrab,
-        KeyComboToggleToolbar,
         KeyComboMax
     };
 
     void performSpecialKeyCombo(KeyCombo combo);
+    PlankSessionHotkeys m_SessionHotkeys;
 
     bool m_ViewOnly = false;
     SDL_Window* m_Window;

@@ -54,6 +54,7 @@ struct MacKeyboardCapture::State
 {
     std::function<bool()> ownsKeyboard;
     std::function<void()> releaseKeys;
+    std::function<bool(const SDL_KeyboardEvent&)> sessionHotkey;
     std::function<bool()> isTrusted = [] { return AXIsProcessTrusted(); };
     CFMachPortRef tap = nullptr;
     CFRunLoopSourceRef source = nullptr;
@@ -195,6 +196,31 @@ struct MacKeyboardCapture::State
             if (!isTrusted()) return event;
             activate();
         }
+        // An emergency control must not wait behind (or fail because of) a
+        // full native/SDL remote-input queue. Only latch local session state;
+        // teardown and toolbar rendering stay in the normal session loop.
+        auto code = raw;
+        if (isoKeyboard && (code == 10 || code == 50)) code = 60 - code;
+        if (sessionHotkey && type != kCGEventFlagsChanged && code >= 0 &&
+                static_cast<uint64_t>(code) < SDL_arraysize(darwin_scancode_table)) {
+            SDL_KeyboardEvent key {};
+            key.type = type == kCGEventKeyDown ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+            key.down = type == kCGEventKeyDown;
+            key.scancode = darwin_scancode_table[code];
+            key.mod = sdlModifiersFromFlags(flags);
+            key.key = SDL_GetKeyFromScancode(key.scancode, key.mod, true);
+            key.repeat = key.down && CGEventGetIntegerValueField(event, kCGKeyboardEventAutorepeat);
+            if (sessionHotkey(key)) {
+                if (key.down && !key.repeat) {
+                    pending.clear();
+                    wakeQueued = false;
+                    if (eventType) SDL_FlushEvent(eventType);
+                    lastModifiers = SDL_KMOD_NONE;
+                    releaseKeys();
+                }
+                return nullptr;
+            }
+        }
         if (!queueKey(type, event)) {
             deactivate();
             SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "Unable to queue macOS shortcut; capture released");
@@ -298,6 +324,13 @@ void MacKeyboardCapture::refresh()
 {
     NSCAssert(NSThread.isMainThread, @"Keyboard capture is main-thread only");
     m_State->refresh();
+}
+
+void MacKeyboardCapture::setSessionHotkeyHandler(
+        std::function<bool(const SDL_KeyboardEvent&)> handler)
+{
+    NSCAssert(NSThread.isMainThread, @"Keyboard capture is main-thread only");
+    m_State->sessionHotkey = std::move(handler);
 }
 
 bool MacKeyboardCapture::dispatch(const SDL_Event& event,
