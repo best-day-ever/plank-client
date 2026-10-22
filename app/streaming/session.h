@@ -479,6 +479,7 @@ private:
     bool m_MacClipboardNegotiated = false;
     bool m_SessionClipboardEntitled = true;
     int m_EffectiveFeatureFlags = 0;
+    int m_PlankLaunchFeatureFlags = 0;
     std::atomic<int> m_CollaborationPermission {0};
     QVector<NvOutput> m_CollaborationOutputs;
     QString m_CollaborationOwner;

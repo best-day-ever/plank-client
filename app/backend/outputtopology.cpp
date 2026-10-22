@@ -23,6 +23,12 @@ bool NvOutputTopology::supportsDescription(int version, int featureFlags)
     return (featureFlags & linuxDescription) == linuxDescription;
 }
 
+int NvOutputTopology::launchFeatureFlags(int discoveryFlags) const
+{
+    return (supportsDescription(schemaVersion, featureFlags) ? featureFlags : discoveryFlags) &
+            SupportedFeatureFlags;
+}
+
 namespace {
 QJsonObject applePreviewProfile(const QString& mode)
 {

@@ -1849,6 +1849,11 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
 
 bool Session::initialize()
 {
+    {
+        QReadLocker lock(&m_Computer->lock);
+        m_PlankLaunchFeatureFlags = m_Computer->outputTopology.launchFeatureFlags(
+                    m_Computer->plankFeatureFlags);
+    }
 #ifdef Q_OS_DARWIN
     // SDL 3.4.2 caches allow_spaces in Cocoa_VideoInit, so use CoreGraphics
     // before SDL video initialization. Setting the hint before window creation
@@ -3107,9 +3112,14 @@ bool Session::configurePlankHostLayout()
         QReadLocker lock(&m_Computer->lock);
         hostFeatureFlags = m_Computer->outputTopology.featureFlags;
         topologySnapshot = m_Computer->outputTopology;
+        m_PlankLaunchFeatureFlags = topologySnapshot.launchFeatureFlags(m_Computer->plankFeatureFlags);
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "PLANK launch capabilities: topology=0x%x discovery=0x%x negotiated=0x%x schema=%d",
+                    topologySnapshot.featureFlags, m_Computer->plankFeatureFlags,
+                    m_PlankLaunchFeatureFlags, topologySnapshot.schemaVersion);
         // Only when this launch negotiates it too.
         arrangementPublished = topologySnapshot.displayArrangementPublished() &&
-                (m_Computer->plankFeatureFlags & NvOutputTopology::SupportedFeatureFlags &
+                (m_PlankLaunchFeatureFlags &
                  NvOutputTopology::DisplayArrangementFeature) != 0;
         layoutPolicy = m_Computer->plankHostLayout;
         scalingMode = m_Computer->plankScalingMode;
@@ -3926,8 +3936,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                           NvOutputTopology::ScaledSpanMode,
                           m_Computer->outputTopology.generation,
                           m_Computer->plankTopologyVersion,
-                          m_Computer->plankFeatureFlags &
-                              NvOutputTopology::SupportedFeatureFlags,
+                          m_PlankLaunchFeatureFlags,
                           takeOverActiveSession,
                           desktopSignOutOwner,
                           m_ResolvedHostLayout,
@@ -4973,6 +4982,8 @@ bool Session::runPlankReconnect()
                     m_Computer->outputTopology = topology;
                 }
                 m_Computer->updateAppList(apps);
+                m_PlankLaunchFeatureFlags = m_Computer->outputTopology.launchFeatureFlags(
+                            m_Computer->plankFeatureFlags);
             }
 
             if (m_DisplayReconfigureRequested.load() && !macDesktop && !configurePlankLaunchGeometry()) {

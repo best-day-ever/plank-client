@@ -158,6 +158,9 @@ struct NvOutputTopology
     // Discovery decides whether to fetch topology; the authenticated JSON
     // parser still validates the complete platform-specific contract.
     static bool supportsDescription(int version, int featureFlags);
+    // Authenticated topology is authoritative for this launch. Public
+    // discovery polls omit optional capabilities and may finish after login.
+    int launchFeatureFlags(int discoveryFlags) const;
     // UI hint only: unknown=0, Linux=1, macOS=2. Never authorization.
     static int hostPlatform(int version, int featureFlags);
     static bool fromJson(const QJsonObject& object, NvOutputTopology& topology,

@@ -36,6 +36,7 @@ private slots:
     void parsesFixedCapture();
     void rejectsInvalidFixedCapture();
     void recognizesDescriptionCapabilities();
+    void launchCapabilitiesUseAuthenticatedTopology();
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
@@ -177,6 +178,31 @@ void TestOutputTopology::recognizesDescriptionCapabilities()
     QCOMPARE(NvOutputTopology::hostPlatform(version, linuxFlags), 1);
     QCOMPARE(NvOutputTopology::hostPlatform(version, 0), 0);
     QCOMPARE(NvOutputTopology::hostPlatform(version - 1, fixed), 0);
+}
+
+void TestOutputTopology::launchCapabilitiesUseAuthenticatedTopology()
+{
+    NvOutputTopology topology;
+    topology.schemaVersion = NvOutputTopology::ProtocolVersion;
+    const int publicFlags = 0x36c7ffff;
+    const int authenticatedFlags = 0x3fc7ffff;
+    topology.featureFlags = authenticatedFlags;
+    const int negotiated = topology.launchFeatureFlags(publicFlags);
+    QCOMPARE(negotiated, authenticatedFlags & NvOutputTopology::SupportedFeatureFlags);
+    QVERIFY(negotiated & NvOutputTopology::DisplayArrangementFeature);
+    QCOMPARE(bool(negotiated & NvOutputTopology::ClipboardFilesFeature),
+             bool(NvOutputTopology::PlatformClipboardFilesFeature));
+
+    // A newer discovery result cannot invent support absent from the
+    // authenticated worker, including after reconnecting to a replacement.
+    topology.featureFlags = publicFlags;
+    QCOMPARE(topology.launchFeatureFlags(authenticatedFlags),
+             publicFlags & NvOutputTopology::SupportedFeatureFlags);
+    topology.schemaVersion = 0;
+    QCOMPARE(topology.launchFeatureFlags(publicFlags),
+             publicFlags & NvOutputTopology::SupportedFeatureFlags);
+    QCOMPARE(topology.launchFeatureFlags(publicFlags | 0x40000000),
+             publicFlags & NvOutputTopology::SupportedFeatureFlags);
 }
 
 void TestOutputTopology::matchesMacClientCanvas()
