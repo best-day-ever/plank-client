@@ -5699,6 +5699,12 @@ void Session::execInternal()
     }
     SDL_Event event;
     for (;;) {
+        const auto localHotkey = m_InputHandler->takeSessionHotkey();
+        if (localHotkey == PlankSessionHotkeys::Disconnect) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved local disconnect hotkey");
+            goto DispatchDeferredCleanup;
+        }
+        if (localHotkey == PlankSessionHotkeys::ToggleToolbar) togglePlankToolbar();
 #ifdef Q_OS_MACOS
         if (m_ApplicationExitRequested.load()) {
             goto DispatchDeferredCleanup;
@@ -5836,8 +5842,8 @@ void Session::execInternal()
                     (m_PlankToolbar ?
                          m_PlankToolbar->eventWaitTimeout() : 1000);
 #ifdef Q_OS_MACOS
-        // Native Quit changes explicit session state, not the SDL event queue.
-        // Bound the wait even when a stalled Host produces no events.
+        // Native Quit and reserved hotkeys change explicit session state,
+        // independent of SDL queue capacity. Bound the wait for a silent Host.
         eventWaitTimeout = std::min(eventWaitTimeout, 50);
         // Reconcile AppKit focus even when SDL omits a Spaces focus event.
         m_InputHandler->refreshTabletFocus();
@@ -5859,6 +5865,12 @@ void Session::execInternal()
             goto DispatchDeferredCleanup;
         }
 #endif
+        const auto nativeHotkey = m_InputHandler->takeSessionHotkey();
+        if (nativeHotkey == PlankSessionHotkeys::Disconnect) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved native disconnect hotkey");
+            goto DispatchDeferredCleanup;
+        }
+        if (nativeHotkey == PlankSessionHotkeys::ToggleToolbar) togglePlankToolbar();
         // Handle Close before reconnect's presentation-only event drain. SDL
         // does not synthesize Quit while another stream window is visible.
         if (PlankSessionEvents::closeRequestsDisconnect(event,
@@ -6508,20 +6520,20 @@ void Session::execInternal()
     }
 
 DispatchDeferredCleanup:
+    // Give the local desktop back before waiting for any network worker.
+    // In particular, emergency disconnect must release immersive capture
+    // even while a reconnect is still unwinding.
+    m_InputHandler->setCaptureActive(false);
+    m_InputHandler->raiseAllKeys();
+    SDL_HideWindow(m_Window);
+    for (SDL_Window* window : std::as_const(m_SecondaryWindows)) SDL_HideWindow(window);
     if (workerProbe != nullptr) {
         // The probe has a one-second HTTP deadline and owns no Session state.
-        SDL_HideWindow(m_Window);
         workerProbe->wait();
         delete workerProbe;
         workerProbe = nullptr;
     }
-    // Uncapture the mouse and hide the window immediately,
-    // so we can return to the Qt GUI ASAP.
     if (reconnectThread != nullptr) {
-        SDL_HideWindow(m_Window);
-        for (SDL_Window* window : std::as_const(m_SecondaryWindows)) {
-            SDL_HideWindow(window);
-        }
         m_ReconnectCancelled.store(true);
         m_ConnectionStartCancelled.store(true);
         reconnectThread->wait();
@@ -6530,15 +6542,11 @@ DispatchDeferredCleanup:
         m_Reconnecting.store(false);
         m_ReconnectRequested.store(false);
     }
-    m_InputHandler->setCaptureActive(false);
     SDL_EnableScreenSaver();
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "0");
     if (QGuiApplication::platformName() == "eglfs") {
         QGuiApplication::restoreOverrideCursor();
     }
-
-    // Raise any keys that are still down
-    m_InputHandler->raiseAllKeys();
 
     // The toolbar owns a reference to the input handler, so destroy it before
     // releasing the handler itself.

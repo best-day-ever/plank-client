@@ -1,6 +1,7 @@
 // Exercise the production tap callback/queue with synthetic CGEvents. These
 // tests never install a system tap, request permission or post OS input.
 #include "../../app/streaming/mackeyboardcapture.mm"
+#include "../../app/streaming/planksessionhotkeys.h"
 #include <QtTest>
 #include <vector>
 
@@ -41,6 +42,54 @@ class TestMacKeyboardCapture : public QObject
     }
 
 private slots:
+    void reservedControlsBypassFullNativeQueue_data()
+    {
+        QTest::addColumn<unsigned>("raw"); QTest::addColumn<unsigned>("action");
+        QTest::newRow("disconnect") << unsigned(kVK_ANSI_Q) << unsigned(PlankSessionHotkeys::Disconnect);
+        QTest::newRow("toolbar") << unsigned(kVK_ANSI_T) << unsigned(PlankSessionHotkeys::ToggleToolbar);
+    }
+    void reservedControlsBypassFullNativeQueue()
+    {
+        QFETCH(unsigned, raw); QFETCH(unsigned, action);
+        PlankSessionHotkeys controls;
+        m_Capture->setSessionHotkeyHandler([&](const SDL_KeyboardEvent& event) { return controls.handle(event); });
+        for (unsigned i = 0; i < state().QueueLimit; ++i) QVERIFY(capture(kVK_ANSI_A));
+        QCOMPARE(state().pending.size(), size_t(state().QueueLimit));
+        const auto flags = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskShift;
+        QVERIFY(capture(raw, kCGEventKeyDown, flags));
+        QCOMPARE(unsigned(controls.take()), action);
+        QVERIFY(state().pending.empty());
+        QVERIFY(drain().empty());
+        QCOMPARE(m_Releases, 1);
+        QVERIFY(capture(raw, kCGEventKeyUp));
+        QVERIFY(drain().empty());
+        QCOMPARE(controls.take(), PlankSessionHotkeys::None);
+        m_Capture->setSessionHotkeyHandler({});
+    }
+    void reservedControlSurvivesSdlWakeRejection()
+    {
+        PlankSessionHotkeys controls;
+        m_Capture->setSessionHotkeyHandler([&](const SDL_KeyboardEvent& event) { return controls.handle(event); });
+        const auto savedType = state().eventType;
+        SDL_SetEventEnabled(savedType, false);
+        const auto flags = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskShift;
+        QVERIFY(capture(kVK_ANSI_Q, kCGEventKeyDown, flags));
+        QCOMPARE(controls.take(), PlankSessionHotkeys::Disconnect);
+        QVERIFY(state().pending.empty());
+        SDL_SetEventEnabled(savedType, true);
+        m_Capture->setSessionHotkeyHandler({});
+    }
+    void backgroundReservedChordsRemainLocalToOtherApps()
+    {
+        PlankSessionHotkeys controls;
+        m_Capture->setSessionHotkeyHandler([&](const SDL_KeyboardEvent& event) { return controls.handle(event); });
+        m_Focus = false;
+        const auto flags = kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskShift;
+        QVERIFY(!capture(kVK_ANSI_Q, kCGEventKeyDown, flags));
+        QVERIFY(!capture(kVK_ANSI_T, kCGEventKeyDown, flags));
+        QCOMPARE(controls.take(), PlankSessionHotkeys::None);
+        m_Capture->setSessionHotkeyHandler({});
+    }
     void initTestCase() { QVERIFY(SDL_Init(SDL_INIT_EVENTS)); }
     void cleanupTestCase() { SDL_Quit(); }
     void init()

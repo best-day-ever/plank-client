@@ -84,11 +84,6 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
 
     // Populate special key combo configuration
-    m_SpecialKeyCombos[KeyComboQuit].keyCombo = KeyComboQuit;
-    m_SpecialKeyCombos[KeyComboQuit].keyCode = SDLK_Q;
-    m_SpecialKeyCombos[KeyComboQuit].scanCode = SDL_SCANCODE_Q;
-    m_SpecialKeyCombos[KeyComboQuit].enabled = true;
-
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCombo = KeyComboUngrabInput;
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCode = SDLK_Z;
     m_SpecialKeyCombos[KeyComboUngrabInput].scanCode = SDL_SCANCODE_Z;
@@ -125,16 +120,14 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs,
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled =
             WMUtils::isRunningDesktopEnvironment();
 
-    // Show or hide the PLANK stream toolbar without finding the reveal edge.
-    m_SpecialKeyCombos[KeyComboToggleToolbar].keyCombo = KeyComboToggleToolbar;
-    m_SpecialKeyCombos[KeyComboToggleToolbar].keyCode = SDLK_T;
-    m_SpecialKeyCombos[KeyComboToggleToolbar].scanCode = SDL_SCANCODE_T;
-    m_SpecialKeyCombos[KeyComboToggleToolbar].enabled = true;
 #ifdef Q_OS_MACOS
     auto ownsKeyboard = [this] { return isSystemKeyCaptureActive(); };
     m_MacQuitShortcut = std::make_unique<MacQuitShortcut>(ownsKeyboard);
     m_MacKeyboardCapture = std::make_unique<MacKeyboardCapture>(
         ownsKeyboard, [this] { raiseAllKeys(); });
+    m_MacKeyboardCapture->setSessionHotkeyHandler([this](const SDL_KeyboardEvent& key) {
+        return m_SessionHotkeys.handle(key);
+    });
 #endif
 }
 
@@ -754,6 +747,7 @@ void SdlInputHandler::notifyMouseLeave()
 
 void SdlInputHandler::notifyFocusLost()
 {
+    m_SessionHotkeys.releaseKeys();
 #ifdef Q_OS_MACOS
     m_MacKeyboardCapture->refresh();
     m_MacQuitShortcut->refresh();
