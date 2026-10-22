@@ -190,11 +190,11 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         return;
     }
     if (event->scancode == SDL_SCANCODE_V && event->down &&
-            !m_ImmersiveKeyboardMode &&
-            (event->mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0 &&
+            ((event->mod & SDL_KMOD_CTRL) != 0 ||
+             (!m_ImmersiveKeyboardMode && (event->mod & SDL_KMOD_GUI) != 0)) &&
             (event->mod & SDL_KMOD_ALT) == 0 && Session::get() != nullptr &&
             (Session::get()->beginFileClipboardPasteOnMainThread() ||
-             Session::get()->deferTextClipboardPasteOnMainThread())) {
+             (!m_ImmersiveKeyboardMode && Session::get()->deferTextClipboardPasteOnMainThread()))) {
         raiseAllKeys();
         m_FilePasteKeyUpConsumed = true;
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

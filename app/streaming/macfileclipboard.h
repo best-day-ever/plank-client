@@ -12,7 +12,7 @@
 struct PlankTransportNativeEndpoint;
 
 /**
- * Session-scoped macOS file clipboard source for Client-to-Host transfers.
+ * Session-scoped bidirectional macOS file clipboard and explicit file picker.
  * AppKit pasteboard access remains on the main thread; enumeration and file IO
  * run on the private worker.
  */
@@ -20,13 +20,20 @@ class MacFileClipboard {
 public:
     using ReadyCallback = std::function<void()>;
     using PublishCallback = std::function<bool()>;
+    using FocusPredicate = std::function<bool()>;
 
     MacFileClipboard(PlankTransportNativeEndpoint* endpoint,
                      std::string mode,
                      ReadyCallback readyCallback,
-                     PublishCallback publishCallback);
+                     PublishCallback publishCallback,
+                     FocusPredicate focusPredicate = [] { return true; });
     ~MacFileClipboard();
 
+    void chooseFilesOnMainThread();
+    bool sendFilesOnMainThread(const std::vector<std::string>& paths);
+    std::string status();
+    void cancelPendingPasteOnMainThread();
+    bool takeReadyPasteOnMainThread();
     void start();
     void stop();
     void pollLocalClipboardOnMainThread();
@@ -43,11 +50,16 @@ public:
 private:
     struct PasteboardSnapshot {
         std::int64_t changeCount = -1;
+        std::uint64_t pasteEpoch = 0;
+        bool pasteWhenReady = true;
         std::vector<std::string> paths;
     };
 
+    void setStatus(std::string value);
     void workerLoop();
-    bool transferSnapshot(const PasteboardSnapshot& snapshot);
+    enum class SourceResult { Failed, Ready, Yielded };
+    SourceResult transferSnapshot(const PasteboardSnapshot& snapshot,
+                                  std::vector<std::uint8_t>& yieldedOffer);
     bool receiveHostOffer(std::vector<std::uint8_t> firstRecord);
     bool clientToHostAllowed() const;
     bool hostToClientAllowed() const;
@@ -56,6 +68,13 @@ private:
     std::string m_Mode;
     ReadyCallback m_ReadyCallback;
     PublishCallback m_PublishCallback;
+    FocusPredicate m_FocusPredicate;
+    std::atomic<std::int64_t> m_PublishedChangeCount = -1;
+    std::atomic<std::int64_t> m_StagedChangeCount = -1;
+    std::atomic<std::int64_t> m_HostClipboardChangeCount = -1;
+    std::uint64_t m_PasteEpoch = 0;
+    bool m_ReadyPaste = false;
+    std::string m_Status;
     std::mutex m_Mutex;
     std::condition_variable m_Changed;
     std::thread m_Worker;

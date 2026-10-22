@@ -34,6 +34,7 @@ public:
         SetUpScreens,
         ToggleMicrophone,
         ToggleCamera,
+        SendFiles,
     };
 
     PlankToolbar(SDL_Window* window,
@@ -43,6 +44,7 @@ public:
                           int initialBitrateKbps);
     ~PlankToolbar();
 
+    void setFileTransferState(bool supported, const QString& status);
     void setRenderedStats(float fps, float videoMbps, float packetLossPercent,
                           std::uint32_t networkRttMs);
     void setAppliedBitrate(int requestedKbps, int appliedKbps, int peakKbps);
@@ -78,6 +80,7 @@ private:
         Pin,
         Microphone,
         Camera,
+        Files,
         Fullscreen,
         Minimize,
         Disconnect,
@@ -116,6 +119,7 @@ private:
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
     bool pinContains(int x, int y) const;
+    bool filesContains(int x, int y) const;
     bool cameraContains(int x, int y) const;
     bool microphoneContains(int x, int y) const;
     bool fullscreenContains(int x, int y) const;
@@ -143,6 +147,8 @@ private:
     bool m_PointerInitialized;
     bool m_LocalPointerInteraction;
     bool m_BitrateSupported;
+    bool m_FilesSupported = false;
+    QString m_FileTransferStatus;
     bool m_CameraSupported = false;
     PlankCamera::State m_CameraState = PlankCamera::State::Off;
     bool m_MicrophoneSupported = false;
