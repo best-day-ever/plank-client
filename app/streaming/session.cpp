@@ -5842,14 +5842,12 @@ void Session::execInternal()
                     (m_PlankToolbar ?
                          m_PlankToolbar->eventWaitTimeout() : 1000);
 #ifdef Q_OS_MACOS
-        // Native Quit changes explicit session state, not the SDL event queue.
-        // Bound the wait even when a stalled Host produces no events.
+        // Native Quit and reserved hotkeys change explicit session state,
+        // independent of SDL queue capacity. Bound the wait for a silent Host.
         eventWaitTimeout = std::min(eventWaitTimeout, 50);
         // Reconcile AppKit focus even when SDL omits a Spaces focus event.
         m_InputHandler->refreshTabletFocus();
 #endif
-        // Local controls are explicit state, independent of SDL queue capacity.
-        eventWaitTimeout = std::min(eventWaitTimeout, 50);
         if (!SDL_WaitEventTimeout(&event, eventWaitTimeout)) {
             if (reconnectThread != nullptr &&
                     reconnectThread->isFinished() &&
