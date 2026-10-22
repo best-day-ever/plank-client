@@ -1,3 +1,10 @@
+## 1.1.043 — Mac displays and desktop recovery
+
+- Keep one window per selected Mac screen, including when the laptop display is excluded. Both windows remain available after leaving fullscreen.
+- Preserve the selected primary monitor when applying a different display layout or reconnecting.
+- Retry temporary connection failures while the workstation switches from sign-in to the user's desktop, without weakening certificate checks.
+- Avoid repeated waiting warnings on a healthy idle desktop.
+
 ## 1.1.042 — Collaboration candidate
 
 - Request to join another user’s desktop with their approval for viewing or keyboard and mouse control. Collaboration preserves the owner’s display layout; clipboard, files and devices remain private.

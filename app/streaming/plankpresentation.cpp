@@ -4,6 +4,16 @@
 
 #include <cmath>
 
+QRect PlankPresentation::windowedOutputRect(const QRect& usableBounds, const QSize& sourceSize)
+{
+    const QSize available(qMax(2, int(usableBounds.width() * 0.8) & ~1),
+                          qMax(2, int(usableBounds.height() * 0.8) & ~1));
+    QRect fitted = aspectFitRect(sourceSize, QRect(QPoint(0, 0), available));
+    fitted.setSize(QSize(qMax(2, fitted.width() & ~1), qMax(2, fitted.height() & ~1)));
+    fitted.moveCenter(usableBounds.center());
+    return fitted;
+}
+
 int PlankPresentation::capturedPointerTarget(const QPointF& point, const QPoint& origin,
                                              const QVector<QRect>& windows, QPointF& localPoint)
 {

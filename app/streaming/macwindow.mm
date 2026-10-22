@@ -84,6 +84,13 @@ int MacWindow::activeDisplayCount()
                 static_cast<int>(count) : 0;
 }
 
+bool MacWindow::setPresentationFullscreen(SDL_Window* window, bool fullscreen)
+{
+    // Keep every selected output visible after leaving native fullscreen.
+    // Synchronize AppKit's transition before changing the next window.
+    return SDL_ShowWindow(window) && SDL_SetWindowFullscreen(window, fullscreen) && SDL_SyncWindow(window);
+}
+
 bool MacWindow::hasKeyboardFocus(SDL_Window* window)
 {
     NSWindow* nativeWindow = (__bridge NSWindow*)SDL_GetPointerProperty(

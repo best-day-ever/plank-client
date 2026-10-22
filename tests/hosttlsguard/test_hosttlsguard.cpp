@@ -41,6 +41,7 @@ class HostTlsGuardTest : public QObject
 {
     Q_OBJECT
     QTemporaryDir files;
+    QNetworkReply::NetworkError lastCompletionError = QNetworkReply::NoError;
     bool crypto(QStringList args)
     {
         QProcess process;
@@ -80,9 +81,65 @@ class HostTlsGuardTest : public QObject
         connect(reply.get(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
         timer.start(5000);
         if (!reply->isFinished()) loop.exec();
+        lastCompletionError = guard.completionError(reply->error());
         return guard.checked() && reply->error() == QNetworkReply::NoError && reply->readAll() == "ok";
     }
 private slots:
+    void failuresBeforeTlsRemainTransportErrors_data()
+    {
+        QTest::addColumn<int>("kind");
+        QTest::addColumn<int>("expected");
+        QTest::newRow("worker-not-listening") << 0 << int(QNetworkReply::ConnectionRefusedError);
+        QTest::newRow("worker-closes-during-startup") << 1 << int(QNetworkReply::RemoteHostClosedError);
+        QTest::newRow("worker-handshake-times-out") << 2 << int(QNetworkReply::OperationCanceledError);
+    }
+    void failuresBeforeTlsRemainTransportErrors()
+    {
+        QFETCH(int, kind);
+        QFETCH(int, expected);
+        QTemporaryDir state;
+        HostTrustStore store(state.filePath("trust"));
+        QNetworkAccessManager manager;
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const auto port = server.serverPort();
+        QByteArray received;
+        connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto* socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, &server, [&, socket] { received += socket->readAll(); });
+            if (kind == 1) socket->disconnectFromHost();
+        });
+        if (kind == 0) server.close();
+        const QUrl url(QString("https://127.0.0.1:%1/login").arg(port));
+        HostTlsGuard guard(manager, store, HostTrustStore::endpoint(url), HostTlsGuard::Mode::RequireKnown);
+        std::unique_ptr<QNetworkReply> reply(manager.post(QNetworkRequest(url), "synthetic-credential"));
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        connect(&timer, &QTimer::timeout, reply.get(), &QNetworkReply::abort);
+        connect(reply.get(), &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        timer.start(kind == 2 ? 200 : 3000);
+        if (!reply->isFinished()) loop.exec();
+        QVERIFY(!guard.checked());
+        if (kind == 0) {
+            // Qt's macOS/OpenSSL backend may report an immediate refusal as
+            // UnknownNetworkError. Preserve either transport classification.
+            QVERIFY(reply->error() == QNetworkReply::ConnectionRefusedError ||
+                    reply->error() == QNetworkReply::UnknownNetworkError);
+        } else {
+            QCOMPARE(int(reply->error()), expected);
+        }
+        QCOMPARE(guard.completionError(reply->error()), reply->error());
+        QVERIFY(!received.contains("synthetic-credential"));
+    }
+    void successfulReplyRequiresValidation()
+    {
+        QTemporaryDir state;
+        HostTrustStore store(state.filePath("trust"));
+        QNetworkAccessManager manager;
+        HostTlsGuard guard(manager, store, "https://plank-host:28989", HostTlsGuard::Mode::Observe);
+        QCOMPARE(guard.completionError(QNetworkReply::NoError), QNetworkReply::SslHandshakeFailedError);
+    }
     void initTestCase()
     {
         // Match app/main.cpp: Apple's legacy SecureTransport backend cannot
@@ -129,6 +186,7 @@ private slots:
         QVERIFY(server.listen(QHostAddress::LocalHost));
         const auto endpoint = HostTrustStore::endpoint(QUrl(QString("https://127.0.0.1:%1").arg(server.serverPort())));
         QVERIFY(!request(manager, server, store, HostTlsGuard::Mode::RequireKnown));
+        QCOMPARE(lastCompletionError, QNetworkReply::SslHandshakeFailedError);
         QCOMPARE(server.received, QByteArray());
         QVERIFY(request(manager, server, store, HostTlsGuard::Mode::Enroll));
         QVERIFY(server.received.contains("synthetic-credential"));
@@ -142,11 +200,13 @@ private slots:
         server.received.clear();
         server.chain = {cert("stranger")}; server.key = key("stranger");
         QVERIFY(!request(manager, server, store, HostTlsGuard::Mode::RequireKnown));
+        QCOMPARE(lastCompletionError, QNetworkReply::SslHandshakeFailedError);
         QCOMPARE(server.received, QByteArray());
         // Consent to a replacement cannot send an old conversation's password.
         auto replacement = HostTlsGuard::identityKey({cert("stranger")});
         QCOMPARE(store.replace(endpoint, identity, replacement).status, HostTrustStore::Status::Trusted);
         QVERIFY(!request(manager, server, store, HostTlsGuard::Mode::RequireKnown, identity));
+        QCOMPARE(lastCompletionError, QNetworkReply::SslHandshakeFailedError);
         QCOMPARE(server.received, QByteArray());
         QVERIFY(request(manager, server, store, HostTlsGuard::Mode::RequireKnown, replacement));
     }
@@ -159,6 +219,7 @@ private slots:
         server.chain = {cert("worker"), cert("stranger")}; server.key = key("worker");
         QVERIFY(server.listen(QHostAddress::LocalHost));
         QVERIFY(!request(manager, server, store, HostTlsGuard::Mode::Enroll));
+        QCOMPARE(lastCompletionError, QNetworkReply::SslHandshakeFailedError);
         QCOMPARE(server.received, QByteArray());
         server.chain = {cert("machine")}; server.key = key("machine");
         QVERIFY(request(manager, server, store, HostTlsGuard::Mode::Enroll));
@@ -167,7 +228,20 @@ private slots:
         damaged.write("broken"); damaged.close();
         server.received.clear();
         QVERIFY(!request(manager, server, store, HostTlsGuard::Mode::Enroll));
+        QCOMPARE(lastCompletionError, QNetworkReply::SslHandshakeFailedError);
         QCOMPARE(server.received, QByteArray());
+    }
+    void observeValidatedTlsWithoutEnrolling()
+    {
+        QTemporaryDir state;
+        HostTrustStore store(state.filePath("trust"));
+        QNetworkAccessManager manager;
+        Server server;
+        server.chain = {cert("machine")}; server.key = key("machine");
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        QVERIFY(request(manager, server, store, HostTlsGuard::Mode::Observe));
+        QCOMPARE(lastCompletionError, QNetworkReply::NoError);
+        QVERIFY(!QFile::exists(state.filePath("trust/identities.json")));
     }
 };
 QTEST_GUILESS_MAIN(HostTlsGuardTest)

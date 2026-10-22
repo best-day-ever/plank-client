@@ -112,6 +112,19 @@ HostTlsGuard::~HostTlsGuard()
     disconnect(m_Encrypted);
 }
 
+QNetworkReply::NetworkError HostTlsGuard::completionError(QNetworkReply::NetworkError replyError) const
+{
+    // Before encrypted() runs, a restarting worker can refuse/close the socket
+    // or time out. That is a transport failure, not an identity rejection.
+    // An actual rejection still wins over the OperationCanceledError from abort().
+    if (!m_Result.error.isEmpty() || m_Result.status == HostTrustStore::Status::Changed ||
+            (m_Mode != Mode::Observe && m_Result.status == HostTrustStore::Status::Unknown) ||
+            (!m_Checked && replyError == QNetworkReply::NoError)) {
+        return QNetworkReply::SslHandshakeFailedError;
+    }
+    return replyError;
+}
+
 bool HostTlsGuard::validate(QNetworkReply* reply, bool completedHandshake)
 {
     const auto ssl = negotiated(reply);

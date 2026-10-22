@@ -9,6 +9,7 @@ class TestPlankPresentation : public QObject
     Q_OBJECT
 
 private slots:
+    void windowedOutputFitsItsOwnMonitor();
     void capturedDragCrossesBetweenDisplays();
     void capturedDragHonoursLogicalBoundsAndGaps();
     void exactDualOutputSlices();
@@ -50,6 +51,22 @@ private:
                                             const QSize& drawableSize,
                                             bool liveDrawable = true);
 };
+
+void TestPlankPresentation::windowedOutputFitsItsOwnMonitor()
+{
+    for (const QRect usable : {QRect(-3840, 25, 3840, 2135), QRect(0, 25, 3840, 2135)}) {
+        const QRect window = PlankPresentation::windowedOutputRect(usable, QSize(3840, 2160));
+        QVERIFY(usable.contains(window));
+        QVERIFY((window.center() - usable.center()).manhattanLength() <= 1);
+        QVERIFY(window.width() <= usable.width() * 0.8);
+        QVERIFY(window.height() <= usable.height() * 0.8);
+        QCOMPARE(window.width() % 2, 0);
+        QCOMPARE(window.height() % 2, 0);
+        QVERIFY(qAbs(double(window.width()) / window.height() - 16.0 / 9.0) < 0.002);
+    }
+    const QRect portrait = PlankPresentation::windowedOutputRect(QRect(0, 0, 1440, 2560), QSize(1080, 1920));
+    QVERIFY(qAbs(double(portrait.width()) / portrait.height() - 9.0 / 16.0) < 0.002);
+}
 
 PlankOutputGeometry TestPlankPresentation::singleOutput(
         const QSize& snapshotCanvas, const QSize& windowSize,
