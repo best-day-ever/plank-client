@@ -1,3 +1,14 @@
+## 1.2.05 — Display choices and macOS input
+
+### Client
+- Choose one monitor or span both for Ubuntu fullscreen sessions, including separate sessions on separate monitors.
+- Switch fullscreen displays from the toolbar without changing the Host's desktop resolution.
+- Default new bookmarks to Native (1:1 pixels), while preserving existing scaling preferences.
+
+### Host
+- Improve first-click application switching on macOS by keeping mouse press, drag and release events paired.
+- Provide one Apple Silicon Host package for macOS 26.7 and newer, retaining newer macOS capabilities.
+
 ## 1.2.04 — Ubuntu fullscreen displays
 
 ### Client
