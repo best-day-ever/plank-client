@@ -1,4 +1,4 @@
-## 1.2.03 — Ubuntu fullscreen displays
+## 1.2.04 — Ubuntu fullscreen displays
 
 ### Client
 - Choose a Client monitor per bookmark, or span one session across both monitors.

@@ -247,6 +247,11 @@ private slots:
         auto* menu = window.rootObject()->findChild<QObject*>("displayMenu");
         QVERIFY(menu);
         QTRY_VERIFY(menu->property("opened").toBool());
+        for (const auto* name : {"fullscreenThisMonitor", "fullscreenBothMonitors"}) {
+            auto* item = window.rootObject()->findChild<QQuickItem*>(name);
+            QVERIFY(item);
+            QVERIFY2(item->width() >= item->implicitWidth(), "Fullscreen menu must fit each complete label");
+        }
         // While the in-scene popup owns keyboard focus, no key goes to the Host.
         QKeyEvent down(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, 38, 0, 0);
         QCoreApplication::sendEvent(&window, &down);

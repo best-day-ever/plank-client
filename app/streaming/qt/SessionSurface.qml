@@ -268,10 +268,12 @@ Item {
                         id: displayMenu
                         objectName: "displayMenu"
                         y: displayMenuButton.height
+                        width: Math.max(singleDisplayItem.implicitWidth, spanDisplayItem.implicitWidth) + leftPadding + rightPadding
                         popupType: Popup.Item
                         onAboutToShow: sessionWindow.displayMenuOpen = true
                         onClosed: sessionWindow.displayMenuOpen = false
                         MenuItem {
+                            id: singleDisplayItem
                             objectName: "fullscreenThisMonitor"
                             text: qsTr("Fullscreen on this monitor")
                             checkable: true
@@ -279,6 +281,7 @@ Item {
                             onTriggered: Qt.callLater(function() { sessionWindow.fullscreenDisplays(false) })
                         }
                         MenuItem {
+                            id: spanDisplayItem
                             objectName: "fullscreenBothMonitors"
                             text: qsTr("Span both monitors")
                             checkable: true
