@@ -463,7 +463,7 @@ CenteredGridView {
         property int pcIndex: -1
         property string originalAddress: ""
         property string originalNickname: ""
-        property int scalingIndex: 1
+        property int scalingIndex: 0
         property int hostLayoutIndex: 0
         property int hostDisplayPolicy: -1
         property int virtualMode1Index: 9

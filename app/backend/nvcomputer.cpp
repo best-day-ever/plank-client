@@ -73,7 +73,7 @@ NvComputer::NvComputer(NvAddress address, QString nickname, int videoProfile,
     this->plankVideoProfile = videoProfile;
     this->plankCaptureSource = captureSource;
     this->plankProfileBitratesKbps = profileBitratesKbps;
-    this->plankScalingMode = NvOutputTopology::ScaledSpanMode;
+    this->plankScalingMode = NvOutputTopology::NativeScalingMode;
     this->plankHostLayout = NvOutputTopology::MatchClientHostLayout;
     this->plankVirtualMode1 = QStringLiteral("3840x2160");
     this->plankVirtualMode2 = QStringLiteral("1280x2160");
@@ -167,10 +167,10 @@ NvComputer::NvComputer(QSettings& settings, const PlankClientPolicy& policy)
     // New bookmarks use the member initializer (current monitor).
     plankClientDisplays = ClientDisplays::load(settings);
     this->plankScalingMode = settings.value(
-                SER_PLANK_SCALING_MODE, NvOutputTopology::ScaledSpanMode).toString();
+                SER_PLANK_SCALING_MODE, NvOutputTopology::NativeScalingMode).toString();
     if (this->plankScalingMode != NvOutputTopology::NativeScalingMode &&
             this->plankScalingMode != NvOutputTopology::ScaledSpanMode) {
-        this->plankScalingMode = NvOutputTopology::ScaledSpanMode;
+        this->plankScalingMode = NvOutputTopology::NativeScalingMode;
     }
     this->plankHostLayout =
             settings.value(SER_HOSTLAYOUT,
@@ -389,7 +389,7 @@ void NvComputer::sortAppList()
 NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
 {
     this->manualBookmark = false;
-    this->plankScalingMode = NvOutputTopology::ScaledSpanMode;
+    this->plankScalingMode = NvOutputTopology::NativeScalingMode;
 
     this->hasCustomName = false;
     this->name = NvHTTP::getXmlString(serverInfo, "hostname");

@@ -450,7 +450,7 @@ ApplicationWindow {
             addHostLayout.currentIndex = 0
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
-            addScalingChoice.currentIndex = 1
+            addScalingChoice.currentIndex = 0
             addClientDisplays.selection = "current"
             addCaptureSource.selectCaptureSource(0)
             addEncodingProfile.currentIndex = 6
@@ -708,7 +708,7 @@ ApplicationWindow {
             PlankComboBox {
                 id: addScalingChoice
                 Layout.fillWidth: true
-                currentIndex: 1
+                currentIndex: 0
                 model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
             }
 
