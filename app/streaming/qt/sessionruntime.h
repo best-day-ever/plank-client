@@ -47,6 +47,8 @@ private:
     void setInputEnabled(bool enabled);
     void handleShortcut(int key);
     void toggleFullscreen();
+    void selectFullscreenDisplays(bool span, QtSessionShell* source);
+    void showPresentationWindows();
     void minimize();
 
     Session* const m_Session;
@@ -79,5 +81,9 @@ private:
     bool m_InputGrabbed = true;
     int m_CapturePolicy = 0;
     bool m_Fullscreen = true;
+    bool m_SpanDisplays = false;
+    bool m_ChangingPresentation = false;
+    QString m_DisplayNotice;
+    quint64 m_DisplayNoticeDeadline = 0;
     bool m_ConfinePointer = true;
 };

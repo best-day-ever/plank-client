@@ -312,6 +312,7 @@ HEADERS += \
     path.h \
     streaming/video/overlaymanager.h \
     backend/systemproperties.h
+HEADERS += backend/clientdisplays.h
 
 contains(CONFIG, plank-qt-session) {
     SOURCES -= streaming/audio/renderers/sdlaud.cpp

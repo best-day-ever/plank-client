@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QRect>
+#include <QVariantList>
 
 class SystemProperties : public QObject
 {
@@ -26,13 +27,25 @@ public:
     Q_PROPERTY(QString plankChangelog READ plankChangelog CONSTANT)
     Q_PROPERTY(bool usesMaterial3Theme MEMBER usesMaterial3Theme CONSTANT)
     Q_PROPERTY(bool automaticSessionRecovery READ automaticSessionRecovery CONSTANT)
+    Q_PROPERTY(bool clientDisplaySelectionAvailable READ clientDisplaySelectionAvailable CONSTANT)
 
     Q_INVOKABLE void refreshDisplays();
     Q_INVOKABLE QRect getNativeResolution(int displayIndex);
     Q_INVOKABLE QRect getSafeAreaResolution(int displayIndex);
     Q_INVOKABLE int getRefreshRate(int displayIndex);
+    Q_INVOKABLE QVariantList clientDisplayChoices(const QString& saved = QString()) const;
+
+signals:
+    void clientDisplaysChanged();
 
 private:
+    bool clientDisplaySelectionAvailable() const {
+#ifdef PLANK_QT_SESSION
+        return true;
+#else
+        return false;
+#endif
+    }
     bool automaticSessionRecovery() const {
 #ifdef PLANK_QT_SESSION
         return true;

@@ -201,6 +201,83 @@ private slots:
         }
     }
 
+    void independentFullscreenSessions()
+    {
+        const auto screens = QGuiApplication::screens();
+        if (screens.size() != 2) QSKIP("Requires the two-output hosted compositor");
+        QtSessionShell first, second;
+        first.setScreen(screens[0]);
+        second.setScreen(screens[1]);
+        first.prepareForSession(screens[0]->geometry().size(), true);
+        second.prepareForSession(screens[1]->geometry().size(), true);
+        first.showSession(true);
+        second.showSession(true);
+        QTRY_VERIFY(first.surface().isExposed());
+        QTRY_VERIFY(second.surface().isExposed());
+        for (int round = 0; round < 2; ++round) {
+            QCOMPARE(first.screen(), screens[0]);
+            QCOMPARE(second.screen(), screens[1]);
+            QTRY_COMPARE(first.size(), screens[0]->geometry().size());
+            QTRY_COMPARE(second.size(), screens[1]->geometry().size());
+            QCOMPARE(first.surface().size(), first.size());
+            QCOMPARE(second.surface().size(), second.size());
+            second.showSession(false);
+            QTRY_VERIFY(second.windowState() != Qt::WindowFullScreen);
+            QCOMPARE(first.windowState(), Qt::WindowFullScreen);
+            QCOMPARE(first.size(), screens[0]->geometry().size());
+            second.showSession(true);
+            QTRY_COMPARE(second.windowState(), Qt::WindowFullScreen);
+        }
+    }
+
+    void fullscreenDisplayMenuConsumesLocalInput()
+    {
+        QtSessionWindow window;
+        prepare(window);
+        window.setDisplayMode(true, false);
+        window.setPinned(true);
+        QSignalSpy buttons(&window, &QtSessionWindow::remoteButton);
+        QSignalSpy keys(&window, &QtSessionWindow::remoteKey);
+        QSignalSpy selection(&window, &QtSessionWindow::fullscreenDisplaysRequested);
+        QVERIFY(!window.grabWindow().isNull());
+        const auto menuButton = controlCenter(window, "displayMenuButton");
+        mouse(window, QEvent::MouseButtonPress, menuButton, Qt::LeftButton, Qt::LeftButton);
+        mouse(window, QEvent::MouseButtonRelease, menuButton, Qt::LeftButton);
+        QTRY_VERIFY(window.displayMenuOpen());
+        auto* menu = window.rootObject()->findChild<QObject*>("displayMenu");
+        QVERIFY(menu);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        // While the in-scene popup owns keyboard focus, no key goes to the Host.
+        QKeyEvent down(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, 38, 0, 0);
+        QCoreApplication::sendEvent(&window, &down);
+        QKeyEvent up(QEvent::KeyRelease, Qt::Key_A, Qt::NoModifier, 38, 0, 0);
+        QCoreApplication::sendEvent(&window, &up);
+        QVERIFY(keys.isEmpty());
+        QVERIFY(saveUiSnapshot(window, QStringLiteral("fullscreen-displays-menu")));
+        const auto span = controlCenter(window, "fullscreenBothMonitors");
+        mouse(window, QEvent::MouseButtonPress, span, Qt::LeftButton, Qt::LeftButton);
+        mouse(window, QEvent::MouseButtonRelease, span, Qt::LeftButton);
+        QTRY_COMPARE(selection.count(), 1);
+        QCOMPARE(selection.at(0).at(0).toBool(), true);
+        QTRY_VERIFY(!window.displayMenuOpen());
+        QVERIFY(buttons.isEmpty());
+        window.setDisplayMode(true, true);
+        mouse(window, QEvent::MouseButtonPress, menuButton, Qt::LeftButton, Qt::LeftButton);
+        mouse(window, QEvent::MouseButtonRelease, menuButton, Qt::LeftButton);
+        QTRY_VERIFY(menu->property("opened").toBool());
+        const auto single = controlCenter(window, "fullscreenThisMonitor");
+        mouse(window, QEvent::MouseButtonPress, single, Qt::LeftButton, Qt::LeftButton);
+        mouse(window, QEvent::MouseButtonRelease, single, Qt::LeftButton);
+        QTRY_COMPARE(selection.count(), 2);
+        QCOMPARE(selection.at(1).at(0).toBool(), false);
+        QTRY_VERIFY(!window.displayMenuOpen());
+        QVERIFY(buttons.isEmpty());
+        // Closing the menu restores ordinary remote input.
+        mouse(window, QEvent::MouseButtonPress, {200, 400}, Qt::LeftButton, Qt::LeftButton);
+        mouse(window, QEvent::MouseButtonRelease, {200, 400}, Qt::LeftButton);
+        QCOMPARE(buttons.count(), 2);
+    }
+
     void coordinateScale_data()
     {
         QTest::addColumn<qreal>("scale");

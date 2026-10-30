@@ -57,7 +57,8 @@ public:
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
                          int videoProfile, int captureSource,
-                         const QVector<int>& profileBitratesKbps);
+                         const QVector<int>& profileBitratesKbps,
+                         const QString& clientDisplays = QStringLiteral("current"));
 
     bool
     update(const NvComputer& that, NvAddress expectedAddress = NvAddress());
@@ -134,6 +135,11 @@ public:
     int plankTopologyVersion = 0;
     int plankFeatureFlags = 0;
     NvOutputTopology outputTopology;
+    // GUI-thread snapshot taken before authentication/display preparation.
+    // Kept separate from discovery and from session-only presentation overrides.
+    QStringList plankSessionClientDisplays;
+    QString plankSessionTargetDisplay;
+    QString plankSessionDisplayNotice;
 
     // Persisted traits
     NvAddress localAddress;
@@ -145,6 +151,7 @@ public:
     QString uuid;
     QVector<NvApp> appList;
     QString plankScalingMode;
+    QString plankClientDisplays = QStringLiteral("current");
     QString plankHostLayout;
     QString plankVirtualMode1;
     QString plankVirtualMode2;

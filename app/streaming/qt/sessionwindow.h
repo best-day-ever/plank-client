@@ -18,6 +18,9 @@ class QtSessionWindow : public QQuickView
     Q_OBJECT
     Q_PROPERTY(bool toolbarVisible READ toolbarVisible NOTIFY toolbarChanged)
     Q_PROPERTY(bool fullscreen READ fullscreen NOTIFY fullscreenChanged)
+    Q_PROPERTY(bool canSpanDisplays READ canSpanDisplays NOTIFY displayModeChanged)
+    Q_PROPERTY(bool spanningDisplays READ spanningDisplays NOTIFY displayModeChanged)
+    Q_PROPERTY(bool displayMenuOpen READ displayMenuOpen WRITE setDisplayMenuOpen NOTIFY displayMenuChanged)
     Q_PROPERTY(bool pinned READ pinned WRITE setPinned NOTIFY toolbarChanged)
     Q_PROPERTY(qreal toolbarPosition READ toolbarPosition NOTIFY toolbarChanged)
     Q_PROPERTY(bool waiting READ waiting WRITE setWaiting NOTIFY waitingChanged)
@@ -37,6 +40,11 @@ public:
 
     bool toolbarVisible() const { return m_ToolbarVisible; }
     bool fullscreen() const { return m_Fullscreen; }
+    bool canSpanDisplays() const { return m_CanSpanDisplays; }
+    bool spanningDisplays() const { return m_SpanningDisplays; }
+    bool displayMenuOpen() const { return m_DisplayMenuOpen; }
+    void setDisplayMode(bool canSpan, bool spanning);
+    void setDisplayMenuOpen(bool open);
     bool pinned() const { return m_Pinned; }
     qreal toolbarPosition() const { return m_ToolbarPosition; }
     bool waiting() const { return m_Waiting; }
@@ -73,6 +81,7 @@ public:
     void cancelInput();
     Q_INVOKABLE void moveToolbar(qreal logicalLeft);
     Q_INVOKABLE void toggleFullscreen();
+    Q_INVOKABLE void fullscreenDisplays(bool span) { cancelInput(); emit fullscreenDisplaysRequested(span); }
     Q_INVOKABLE void minimize();
     Q_INVOKABLE void disconnectSession();
     Q_INVOKABLE void toggleMicrophone() { emit microphoneRequested(); }
@@ -87,6 +96,9 @@ signals:
     void inputRecaptureRequested();
     void fullscreenRequested();
     void fullscreenChanged();
+    void displayModeChanged();
+    void displayMenuChanged();
+    void fullscreenDisplaysRequested(bool span);
     void minimizeRequested();
     void microphoneRequested();
     void cameraRequested();
@@ -132,6 +144,9 @@ private:
     bool mapPointer(QPointF logical, QPointF& stream, bool drag) const;
 
     QtSessionGeometry m_Geometry;
+    bool m_CanSpanDisplays = false;
+    bool m_SpanningDisplays = false;
+    bool m_DisplayMenuOpen = false;
     std::function<bool(QPointF, QPointF&)> m_DragMapper;
     QPointer<QQuickItem> m_Toolbar;
     QTimer m_RevealTimer;

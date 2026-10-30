@@ -256,6 +256,38 @@ Item {
                     onClicked: sessionWindow.toggleFullscreen()
                 }
                 ToolButton {
+                    id: displayMenuButton
+                    objectName: "displayMenuButton"
+                    iconName: "displayMenuIcon"
+                    iconSource: "icons/display-menu.svg"
+                    implicitWidth: 20
+                    visible: sessionWindow.canSpanDisplays
+                    ToolTip.text: "Fullscreen displays"
+                    onClicked: displayMenu.open()
+                    Menu {
+                        id: displayMenu
+                        objectName: "displayMenu"
+                        y: displayMenuButton.height
+                        popupType: Popup.Item
+                        onAboutToShow: sessionWindow.displayMenuOpen = true
+                        onClosed: sessionWindow.displayMenuOpen = false
+                        MenuItem {
+                            objectName: "fullscreenThisMonitor"
+                            text: qsTr("Fullscreen on this monitor")
+                            checkable: true
+                            checked: sessionWindow.fullscreen && !sessionWindow.spanningDisplays
+                            onTriggered: Qt.callLater(function() { sessionWindow.fullscreenDisplays(false) })
+                        }
+                        MenuItem {
+                            objectName: "fullscreenBothMonitors"
+                            text: qsTr("Span both monitors")
+                            checkable: true
+                            checked: sessionWindow.fullscreen && sessionWindow.spanningDisplays
+                            onTriggered: Qt.callLater(function() { sessionWindow.fullscreenDisplays(true) })
+                        }
+                    }
+                }
+                ToolButton {
                     objectName: "minimizeButton"
                     iconName: "minimizeIcon"
                     iconSource: "icons/minimize.svg"

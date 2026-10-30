@@ -1,3 +1,11 @@
+## 1.2.03 — Ubuntu fullscreen displays
+
+### Client
+- Choose a Client monitor per bookmark, or span one session across both monitors.
+- Match the Host desktop to the selected Client displays when using Match Client.
+- Switch between one-monitor fullscreen and spanning from the toolbar without resizing the Host.
+- Move between independent fullscreen sessions on different monitors.
+
 ## 1.2.02 — Idle desktop status
 
 ### Client

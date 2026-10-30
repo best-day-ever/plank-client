@@ -451,6 +451,7 @@ ApplicationWindow {
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
             addScalingChoice.currentIndex = 1
+            addClientDisplays.selection = "current"
             addCaptureSource.selectCaptureSource(0)
             addEncodingProfile.currentIndex = 6
             profileBitratesKbps = []
@@ -467,7 +468,8 @@ ApplicationWindow {
                                                    addEncodingProfile.model.get(
                                                        addEncodingProfile.currentIndex).val,
                                                    addCaptureSource.captureSource,
-                                                   profileBitratesKbps)
+                                                   profileBitratesKbps,
+                                                   addClientDisplays.selection)
             }
         }
 
@@ -691,6 +693,11 @@ ApplicationWindow {
                     enabled: addPcDialog.virtualModeSupported(modelData)
                     highlighted: addVirtualMode2.highlightedIndex === index
                 }
+            }
+
+            PlankClientDisplayBox {
+                id: addClientDisplays
+                Layout.fillWidth: true
             }
 
             Label {

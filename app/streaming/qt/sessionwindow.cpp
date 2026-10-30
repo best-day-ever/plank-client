@@ -59,7 +59,7 @@ QtSessionWindow::QtSessionWindow(QWindow* parent) : QQuickView(parent),
         }
     });
     connect(&m_HideTimer, &QTimer::timeout, this, [this] {
-        if (!m_Pinned && !m_LocalButtons &&
+        if (!m_Pinned && !m_DisplayMenuOpen && !m_LocalButtons &&
                 (!m_PointerPresent || !overToolbar(m_Pointer))) {
             setToolbarVisible(false);
         }
@@ -134,7 +134,7 @@ void QtSessionWindow::updateTabletCursor()
 {
     if (!m_TabletCursor) return;
     QPointF point;
-    const bool visible = m_RemoteInputEnabled && !m_Waiting && m_TabletActive && !m_EmbeddedCursor &&
+    const bool visible = m_RemoteInputEnabled && !m_Waiting && !m_DisplayMenuOpen && m_TabletActive && !m_EmbeddedCursor &&
         m_HostCursorVisible && m_HostPositionValid && !m_CursorImage.isNull() &&
         m_Geometry.fromStream(m_HostCursorPosition, point);
     m_TabletCursor->setVisible(visible);
@@ -207,6 +207,24 @@ void QtSessionWindow::minimize()
     controlWindow()->showMinimized();
 }
 
+void QtSessionWindow::setDisplayMode(bool canSpan, bool spanning)
+{
+    if (m_CanSpanDisplays == canSpan && m_SpanningDisplays == spanning) return;
+    m_CanSpanDisplays = canSpan;
+    m_SpanningDisplays = spanning;
+    emit displayModeChanged();
+}
+
+void QtSessionWindow::setDisplayMenuOpen(bool open)
+{
+    if (m_DisplayMenuOpen == open) return;
+    m_DisplayMenuOpen = open;
+    if (open) cancelInput();
+    scheduleHide();
+    updateCursor();
+    emit displayMenuChanged();
+}
+
 QWindow* QtSessionWindow::controlWindow()
 {
     QWindow* window = this;
@@ -228,7 +246,7 @@ bool QtSessionWindow::overToolbar(const QPointF& position) const
 
 bool QtSessionWindow::localPointer(const QPointF& position) const
 {
-    return m_LocalButtons || (!m_RemoteButtons && overToolbar(position));
+    return m_DisplayMenuOpen || m_LocalButtons || (!m_RemoteButtons && overToolbar(position));
 }
 
 void QtSessionWindow::setToolbarVisible(bool visible)
@@ -241,7 +259,7 @@ void QtSessionWindow::setToolbarVisible(bool visible)
 
 void QtSessionWindow::scheduleHide()
 {
-    if (m_Pinned || m_LocalButtons || (m_PointerPresent && overToolbar(m_Pointer))) {
+    if (m_Pinned || m_DisplayMenuOpen || m_LocalButtons || (m_PointerPresent && overToolbar(m_Pointer))) {
         m_HideTimer.stop();
     } else if (m_ToolbarVisible && !m_HideTimer.isActive()) {
         m_HideTimer.start();
@@ -270,7 +288,7 @@ void QtSessionWindow::observePointer(const QPointF& position)
 void QtSessionWindow::updateCursor()
 {
     QPointF ignored;
-    const bool local = !m_RemoteInputEnabled || m_Waiting ||
+    const bool local = !m_RemoteInputEnabled || m_Waiting || m_DisplayMenuOpen ||
         (!m_TabletActive && (localPointer(m_Pointer) || !m_Geometry.toStream(m_Pointer, ignored)));
     setCursor(local ? QCursor(Qt::ArrowCursor) :
         (m_TabletActive || m_EmbeddedCursor || !m_HostCursorVisible) ? QCursor(Qt::BlankCursor) : m_RemoteCursor);
@@ -395,7 +413,7 @@ void QtSessionWindow::wheelEvent(QWheelEvent* event)
 bool QtSessionWindow::remoteKeyboard() const
 {
     // Toolbar controls explicitly use NoFocus. Recovery dialog keys remain local.
-    return m_RemoteInputEnabled && !m_Waiting;
+    return m_RemoteInputEnabled && !m_Waiting && !m_DisplayMenuOpen;
 }
 
 quint64 QtSessionWindow::keyIdentity(const QKeyEvent* event)

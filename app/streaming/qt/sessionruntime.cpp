@@ -1,6 +1,7 @@
 #include "sessionruntime.h"
 #include "../session.h"
 #include "../../backend/hostrecovery.h"
+#include "../../backend/clientdisplays.h"
 #include "../../backend/nvhttp.h"
 #include "../audio/microphone.h"
 #include "../camera/camera.h"
@@ -8,6 +9,7 @@
 #include <QEvent>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QScopedValueRollback>
 #include <algorithm>
 #include <tuple>
 
@@ -21,10 +23,14 @@ QtSessionRuntime::QtSessionRuntime(Session* session) : QObject(session), m_Sessi
     m_RecoveryBitrate.store(m_TargetBitrate);
     connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, [this] { updateFocus(); });
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this](QScreen* removed) {
-        if (m_Screens.contains(removed)) {
+        bool inUse = false;
+        for (int i = 0; i < m_Screens.size(); ++i)
+            inUse |= m_Screens[i] == removed && (i == 0 || (m_Fullscreen && m_SpanDisplays));
+        if (inUse) {
             emit m_Session->displayLaunchError(tr("A session display was disconnected. Reconnect using the current Client display layout."));
             stop(); return;
         }
+        for (auto& shell : m_Windows) shell->surface().setDisplayMode(false, false);
     });
     connect(m_Input.get(), &QtSessionInput::shortcutRequested, this, &QtSessionRuntime::handleShortcut);
     connect(session, &Session::qtStatisticsUpdated, this, [this](const QString& text) {
@@ -38,10 +44,8 @@ QtSessionRuntime::QtSessionRuntime(Session* session) : QObject(session), m_Sessi
     });
     connect(session, &Session::connectionStarted, this, [this] {
         if (m_Stop.load()) return;
-        for (size_t i = 0; i < m_Windows.size(); ++i) {
-            if (m_Fullscreen) m_Windows[i]->showSession(true);
-            else if (!i) m_Windows[i]->show();
-        }
+        showPresentationWindows();
+        updateGeometry();
     });
     connect(session, &Session::qtQuitRequested, this, &QtSessionRuntime::stop, Qt::QueuedConnection);
     connect(session, &Session::qtDecoderResetRequested, this, [this] { request(Command::ResetDecoder); }, Qt::QueuedConnection);
@@ -71,9 +75,23 @@ bool QtSessionRuntime::snapshotDisplays()
     const auto screens = QGuiApplication::screens();
     auto& session = *m_Session;
     session.m_ClientDisplays.clear();
-    auto* target = m_Launcher ? m_Launcher->screen() : QGuiApplication::primaryScreen();
+    session.m_TargetDisplayId = 0;
+    ClientDisplays::Selection selection;
+    {
+        QReadLocker lock(&session.m_Computer->lock);
+        selection.names = session.m_Computer->plankSessionClientDisplays;
+        selection.target = session.m_Computer->plankSessionTargetDisplay;
+        selection.notice = session.m_Computer->plankSessionDisplayNotice;
+        if (selection.names.isEmpty()) {
+            auto* target = m_Launcher ? m_Launcher->screen() : QGuiApplication::primaryScreen();
+            selection = ClientDisplays::resolve(session.m_Computer->plankClientDisplays,
+                ClientDisplays::snapshot(), target ? target->name() : QString());
+        }
+    }
+    m_DisplayNotice = selection.notice;
     for (int index = 0; index < screens.size(); ++index) {
         auto* screen = screens[index];
+        if (!selection.names.contains(screen->name())) continue;
         const auto bounds = screen->geometry();
         const auto pixels = QSize(qRound(bounds.width() * screen->devicePixelRatio()),
                                   qRound(bounds.height() * screen->devicePixelRatio()));
@@ -83,12 +101,12 @@ bool QtSessionRuntime::snapshotDisplays()
         display.displayId = index + 1;
         display.logicalBounds = {bounds.x(), bounds.y(), bounds.width(), bounds.height()};
         display.nativeSize = pixels;
-        display.primary = screen == QGuiApplication::primaryScreen();
-        if (screen == target) session.m_TargetDisplayId = display.displayId;
+        display.primary = screen->name() == selection.target;
+        if (display.primary) session.m_TargetDisplayId = display.displayId;
         session.m_ClientDisplays.append(display);
     }
     auto& displays = session.m_ClientDisplays;
-    if (displays.isEmpty()) return false;
+    if (displays.isEmpty() || displays.size() != selection.names.size()) return false;
     std::sort(displays.begin(), displays.end(), [](const auto& a, const auto& b) {
         return std::tie(a.logicalBounds.x, a.logicalBounds.y) < std::tie(b.logicalBounds.x, b.logicalBounds.y);
     });
@@ -99,6 +117,7 @@ bool QtSessionRuntime::snapshotDisplays()
         const auto& b = displays[1].logicalBounds;
         session.m_MultiDisplayPresentationAvailable = a.x + a.w <= b.x && a.y < b.y + b.h && b.y < a.y + a.h;
     }
+    m_SpanDisplays = session.m_MultiDisplayPresentationAvailable;
     int x = 0;
     for (auto& display : displays) {
         display.canvasRect = QRect(QPoint(x, 0), display.nativeSize);
@@ -126,32 +145,35 @@ void QtSessionRuntime::start(QWindow* launcher)
     const auto screens = QGuiApplication::screens();
     // Primary first: device creation and the A/V presentation clock use this
     // same output. Canvas coordinates retain physical left-to-right order.
-    auto displays = m_Session->m_ClientDisplays;
+    auto presentationScreens = screens;
+    auto* target = screens[int(m_Session->m_TargetDisplayId) - 1];
+    const bool canSpan = ClientDisplays::canSpan(ClientDisplays::snapshot());
+    if (!canSpan) presentationScreens = {target};
     QSize desktop;
     {
         QReadLocker lock(&m_Session->m_Computer->lock);
         desktop = QSize(m_Session->m_Computer->outputTopology.desktopWidth,
                         m_Session->m_Computer->outputTopology.desktopHeight);
     }
-    std::stable_sort(displays.begin(), displays.end(), [this](const auto& a, const auto& b) {
-        return (a.displayId == m_Session->m_TargetDisplayId) > (b.displayId == m_Session->m_TargetDisplayId);
+    std::stable_sort(presentationScreens.begin(), presentationScreens.end(), [target](const auto* a, const auto* b) {
+        return (a == target) > (b == target);
     });
-    for (const auto& display : displays) {
-        const bool primary = display.displayId == m_Session->m_TargetDisplayId;
-        if (!primary && !m_Session->m_MultiDisplayPresentationAvailable) continue;
+    for (auto* screen : presentationScreens) {
+        const bool primary = screen == target;
         auto shell = std::make_unique<QtSessionShell>();
-        shell->setScreen(screens[int(display.displayId) - 1]);
+        shell->setScreen(screen);
         m_Screens.append(shell->screen());
         shell->setTitle(m_Session->m_Computer->name + QStringLiteral(" — PLANK Client"));
-        shell->prepareForSession(desktop, m_Fullscreen);
+        shell->prepareForSession(desktop, m_Fullscreen && (primary || m_SpanDisplays));
         auto& surface = shell->surface();
+        surface.setDisplayMode(canSpan, m_SpanDisplays);
         surface.setLiveSession(true);
         surface.setStatusText(tr("Connecting to workstation…"));
         surface.setBitrateKbps(m_Session->m_PlankBitrateKbps);
         surface.setPinned(m_Session->m_Preferences->plankToolbarPinned);
         surface.setStatisticsVisible(m_Session->m_Preferences->showPerformanceOverlay);
         surface.setDragMapper([this, &surface](QPointF logical, QPointF& stream) {
-            if (!m_Fullscreen || m_Windows.size() < 2 || !surface.screen())
+            if (!m_Fullscreen || !m_SpanDisplays || m_Windows.size() < 2 || !surface.screen())
                 return surface.presentation().toStream(logical, stream, true);
             QVector<QtSessionOutputGeometry> outputs;
             for (const auto& window : m_Windows) {
@@ -190,6 +212,10 @@ void QtSessionRuntime::start(QWindow* launcher)
         });
         connect(&surface, &QtSessionWindow::disconnectRequested, this, &QtSessionRuntime::stop);
         connect(&surface, &QtSessionWindow::fullscreenRequested, this, &QtSessionRuntime::toggleFullscreen);
+        connect(&surface, &QtSessionWindow::fullscreenDisplaysRequested, this, [this, owner = shell.get()](bool span) {
+            selectFullscreenDisplays(span, owner);
+        });
+        connect(&surface, &QtSessionWindow::displayMenuChanged, this, &QtSessionRuntime::updateFocus);
         connect(&surface, &QtSessionWindow::minimizeRequested, this, &QtSessionRuntime::minimize);
         connect(&surface, &QtSessionWindow::inputRecaptureRequested, this, [this] {
             if (!m_Streaming || m_Stop.load() || m_ReconnectNoticeDeadline) return;
@@ -218,10 +244,7 @@ void QtSessionRuntime::start(QWindow* launcher)
     connect(m_Presenter.get(), &QtVideoPresenter::presentationFailed, this, [this](const QString& reason) {
         emit m_Session->displayLaunchError(reason); stop();
     });
-    for (size_t i = 0; i < m_Windows.size(); ++i) {
-        if (m_Fullscreen) m_Windows[i]->showSession(true);
-        else if (!i) m_Windows[i]->show();
-    }
+    showPresentationWindows();
     m_Tick.start();
     m_WindowGuard->setIdleWindow(&m_Windows.front()->surface());
     m_StartupDeadline.start();
@@ -414,6 +437,8 @@ void QtSessionRuntime::setStreaming(QSize size)
 {
     if (m_Stop.load()) return;
     m_StreamSize = size;
+    if (!m_DisplayNotice.isEmpty() && !m_DisplayNoticeDeadline)
+        m_DisplayNoticeDeadline = SDL_GetTicks() + 12000;
     m_Input->setStreamSize(size);
     m_Streaming = true;
     m_ReconnectNoticeDeadline = 0;
@@ -428,9 +453,10 @@ void QtSessionRuntime::setStreaming(QSize size)
 
 void QtSessionRuntime::updateGeometry()
 {
-    if (!m_Presenter || m_Windows.empty() || !m_StreamSize.isValid()) return;
+    if (m_ChangingPresentation || !m_Presenter || m_Windows.empty() || !m_StreamSize.isValid()) return;
+    QScopedValueRollback<bool> updating(m_ChangingPresentation, true);
     const bool fullscreen = m_Windows.front()->windowState() == Qt::WindowFullScreen;
-    const bool multi = fullscreen && m_Windows.size() > 1;
+    const bool multi = fullscreen && m_SpanDisplays && m_Windows.size() > 1;
     if (m_Windows.front()->windowState() == Qt::WindowMinimized) {
         for (size_t i = 1; i < m_Windows.size(); ++i) m_Windows[i]->hide();
         updateFocus();
@@ -474,7 +500,8 @@ void QtSessionRuntime::updateGeometry()
 
 void QtSessionRuntime::setStatus(const QString& text)
 {
-    for (auto& shell : m_Windows) shell->surface().setStatusText(text);
+    const auto visible = text.isEmpty() && SDL_GetTicks() < m_DisplayNoticeDeadline ? m_DisplayNotice : text;
+    for (auto& shell : m_Windows) shell->surface().setStatusText(visible);
 }
 
 void QtSessionRuntime::beginRecovery()
@@ -502,7 +529,8 @@ void QtSessionRuntime::updateFocus()
     auto* focused = QGuiApplication::focusWindow();
     bool active = false;
     for (const auto& shell : m_Windows)
-        active |= focused == shell.get() || focused == &shell->surface();
+        active |= !shell->surface().displayMenuOpen() &&
+                  (focused == shell.get() || focused == &shell->surface());
     m_Input->setFocused(active && !m_Stop.load());
     const auto policy = m_CapturePolicy;
     const bool fullscreen = !m_Windows.empty() && m_Windows.front()->windowState() == Qt::WindowFullScreen;
@@ -514,7 +542,7 @@ void QtSessionRuntime::updateFocus()
         if (focused == shell.get() || focused == &shell->surface()) focusedShell = shell.get();
     m_WindowGuard->setWindows(focusedShell, focusedShell ? &focusedShell->surface() : nullptr);
     m_WindowGuard->setPolicy(grab, active && m_Streaming && m_InputGrabbed && m_ConfinePointer &&
-        fullscreen && m_Windows.size() == 1);
+        fullscreen && QGuiApplication::screens().size() == 1);
     // The Wayland shortcut inhibitor is attached separately to Qt's surface.
     // XCB implements this public Qt API directly.
     if (QGuiApplication::platformName() != QStringLiteral("wayland"))
@@ -525,12 +553,49 @@ void QtSessionRuntime::toggleFullscreen()
 {
     if (m_Windows.empty()) return;
     m_Fullscreen = !m_Fullscreen;
+    showPresentationWindows();
+    updateGeometry();
+    updateFocus();
+}
+
+void QtSessionRuntime::showPresentationWindows()
+{
+    QScopedValueRollback<bool> changing(m_ChangingPresentation, true);
     for (size_t i = 0; i < m_Windows.size(); ++i) {
         m_Windows[i]->surface().cancelInput();
-        if (m_Fullscreen || !i) m_Windows[i]->showSession(m_Fullscreen);
+        if (!i || (m_Fullscreen && m_SpanDisplays)) m_Windows[i]->showSession(m_Fullscreen);
         else m_Windows[i]->hide();
     }
+}
+
+void QtSessionRuntime::selectFullscreenDisplays(bool span, QtSessionShell* source)
+{
+    if (m_Stop.load() || m_Windows.empty() || !source || !source->screen()) return;
+    const bool canSpan = m_Windows.size() == 2 && ClientDisplays::canSpan(ClientDisplays::snapshot());
+    if (span && !canSpan) return;
+    // Presentation-only override. Keep the authentication/Host-layout snapshot
+    // immutable while the network worker uses it for launch and reconnect.
+    auto* target = source->screen();
+    {
+        QScopedValueRollback<bool> changing(m_ChangingPresentation, true);
+        m_Input->setFocused(false);
+        for (auto& shell : m_Windows) { shell->surface().cancelInput(); shell->hide(); }
+        m_Windows.front()->setScreen(target);
+        m_Screens[0] = target;
+        if (canSpan) {
+            for (auto* other : QGuiApplication::screens()) if (other != target) {
+                m_Windows[1]->setScreen(other);
+                m_Screens[1] = other;
+            }
+        }
+        m_SpanDisplays = span;
+        m_Fullscreen = true;
+        for (auto& shell : m_Windows) shell->surface().setDisplayMode(canSpan, span);
+    }
+    showPresentationWindows();
     updateGeometry();
+    m_Windows.front()->requestActivate();
+    updateFocus();
 }
 
 void QtSessionRuntime::minimize()

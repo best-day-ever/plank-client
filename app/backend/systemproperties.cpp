@@ -1,5 +1,6 @@
 #include "systemproperties.h"
 #include "utils.h"
+#include "clientdisplays.h"
 
 #include <QGuiApplication>
 #include <QFile>
@@ -68,6 +69,14 @@ SystemProperties::SystemProperties()
     }
 
 #ifdef PLANK_QT_SESSION
+    const auto observe = [this](QScreen* screen) {
+        connect(screen, &QScreen::geometryChanged, this, &SystemProperties::clientDisplaysChanged);
+    };
+    for (auto* screen : QGuiApplication::screens()) observe(screen);
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this, observe](QScreen* screen) {
+        observe(screen); emit clientDisplaysChanged();
+    });
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, &SystemProperties::clientDisplaysChanged);
     // The exact-profile decoder is qualified on the actual Qt session surface.
     // A temporary SDL window would probe a different GPU/context and reintroduce
     // the independent SDL Wayland connection this frontend deliberately avoids.
@@ -90,6 +99,11 @@ QString SystemProperties::plankChangelog() const
     // Release notes travel with the installed Client; no network or Host lookup.
     QFile notes(QStringLiteral(":/res/changelog.md"));
     return notes.open(QIODevice::ReadOnly) ? QString::fromUtf8(notes.readAll()) : QString();
+}
+
+QVariantList SystemProperties::clientDisplayChoices(const QString& saved) const
+{
+    return ClientDisplays::choices(saved);
 }
 
 QRect SystemProperties::getNativeResolution(int displayIndex)

@@ -50,6 +50,7 @@ public:
     Q_INVOKABLE Session* createSessionForPlankDesktop(int computerIndex);
 
     Q_INVOKABLE int plankScalingChoice(int computerIndex) const;
+    Q_INVOKABLE QString plankClientDisplays(int computerIndex) const;
 
     Q_INVOKABLE int plankVideoProfile(int computerIndex) const;
 
@@ -73,7 +74,8 @@ public:
                                           int virtualMode1Choice,
                                           int virtualMode2Choice,
                                           int videoProfile, int captureSource,
-                                          const QVariantList& profileBitratesKbps);
+                                          const QVariantList& profileBitratesKbps,
+                                          const QString& clientDisplays = QStringLiteral("current"));
 
 signals:
     void authenticationCompleted(QVariant error, int computerIndex);

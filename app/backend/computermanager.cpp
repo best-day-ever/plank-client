@@ -1,4 +1,5 @@
 #include "computermanager.h"
+#include "clientdisplays.h"
 #include "nvhttp.h"
 #include "settings/plankclientpolicy.h"
 
@@ -870,6 +871,19 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
 {
     QString matchedMode;
     int matchedScale = 1;
+#ifdef PLANK_QT_SESSION
+    Q_ASSERT(QThread::currentThread() == qApp->thread());
+    const auto clientOutputs = ClientDisplays::snapshot();
+    ClientDisplays::Selection clientSelection;
+    {
+        QWriteLocker lock(&computer->lock);
+        clientSelection = ClientDisplays::resolve(computer->plankClientDisplays,
+                                                  clientOutputs, ClientDisplays::currentScreenName());
+        computer->plankSessionClientDisplays = clientSelection.names;
+        computer->plankSessionTargetDisplay = clientSelection.target;
+        computer->plankSessionDisplayNotice = clientSelection.notice;
+    }
+#endif
     bool matchMac;
     {
         QReadLocker lock(&computer->lock);
@@ -898,6 +912,11 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
                 displays.append({QRect(safeArea.x, safeArea.y, safeArea.w, safeArea.h),
                     QSize(mode.w, mode.h), QSize(mode.w, mode.h)});
             }
+        }
+#elif defined(PLANK_QT_SESSION)
+        for (const auto& output : clientOutputs) {
+            if (clientSelection.names.contains(output.name))
+                displays.append({output.bounds, output.pixels, {}, output.name == clientSelection.target});
         }
 #else
         for (QScreen* screen : QGuiApplication::screens()) {
@@ -1037,7 +1056,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          int virtualMode2Choice,
                                          int scalingChoice, int videoProfile,
                                          int captureSource,
-                                         QVariantList profileBitrates)
+                                         QVariantList profileBitrates,
+                                         QString clientDisplays)
 {
     NvAddress manualAddress;
     const QString hostLayout = captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayoutChoice != 0 ?
@@ -1046,7 +1066,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
     const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
     const QString scalingMode = scalingFromChoice(scalingChoice);
     QVector<int> profileBitratesKbps;
-    if (parseManualAddress(address, manualAddress) &&
+    if (ClientDisplays::validChoice(clientDisplays) && parseManualAddress(address, manualAddress) &&
             !hostLayout.isEmpty() && !virtualMode1.isEmpty() &&
             !virtualMode2.isEmpty() &&
             !scalingMode.isEmpty() &&
@@ -1076,6 +1096,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                           captureSource,
                                           profileBitratesKbps);
                 bookmark->plankScalingMode = scalingMode;
+                bookmark->plankClientDisplays = clientDisplays;
                 bookmark->plankHostLayout = hostLayout;
                 bookmark->plankVirtualMode1 = virtualMode1;
                 bookmark->plankVirtualMode2 = virtualMode2;
@@ -1087,6 +1108,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
         {
             QWriteLocker bookmarkLock(&bookmark->lock);
             bookmark->plankScalingMode = scalingMode;
+            bookmark->plankClientDisplays = clientDisplays;
             bookmark->plankHostLayout = hostLayout;
             bookmark->plankVirtualMode1 = virtualMode1;
             bookmark->plankVirtualMode2 = virtualMode2;
@@ -1123,7 +1145,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString hostLayout, QString virtualMode1,
                                          QString virtualMode2,
                                          int videoProfile, int captureSource,
-                                         const QVariantList& profileBitrates)
+                                         const QVariantList& profileBitrates,
+                                         const QString& clientDisplays)
 {
     NvAddress manualAddress;
     QVector<int> profileBitratesKbps;
@@ -1131,7 +1154,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     if (captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayout != NvOutputTopology::MatchClientHostLayout) {
         hostLayout = QStringLiteral("fixed");
     }
-    if (computer == nullptr || nickname.isEmpty() ||
+    if (computer == nullptr || nickname.isEmpty() || !ClientDisplays::validChoice(clientDisplays) ||
             !StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
             !parseProfileBitrates(profileBitrates, false,
@@ -1184,7 +1207,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                            hostLayout,
                                            virtualMode1, virtualMode2,
                                            videoProfile, captureSource,
-                                           profileBitratesKbps);
+                                           profileBitratesKbps, clientDisplays);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -1205,7 +1228,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                        hostLayout,
                                        virtualMode1, virtualMode2, videoProfile,
                                        captureSource,
-                                       profileBitratesKbps);
+                                       profileBitratesKbps, clientDisplays);
     }
 
     handleComputerStateChanged(computer);

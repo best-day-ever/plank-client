@@ -3,6 +3,7 @@
 #include "settings/plankclientpolicy.h"
 #include "settings/streamingpreferences.h"
 #include "planknetwork.h"
+#include "clientdisplays.h"
 
 #include <QCryptographicHash>
 #include <QJsonDocument>
@@ -90,7 +91,8 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
                                       QString hostLayout, QString virtualMode1,
                                       QString virtualMode2,
                                       int videoProfile, int captureSource,
-                                      const QVector<int>& profileBitratesKbps)
+                                      const QVector<int>& profileBitratesKbps,
+                                      const QString& clientDisplays)
 {
     QWriteLocker writeLocker(&lock);
     Q_ASSERT(manualBookmark);
@@ -127,6 +129,10 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
     name = nickname;
     hasCustomName = true;
     plankScalingMode = scalingMode;
+    plankClientDisplays = clientDisplays;
+    plankSessionClientDisplays.clear();
+    plankSessionTargetDisplay.clear();
+    plankSessionDisplayNotice.clear();
     plankHostLayout = hostLayout;
     plankVirtualMode1 = virtualMode1;
     plankVirtualMode2 = virtualMode2;
@@ -157,6 +163,9 @@ NvComputer::NvComputer(QSettings& settings, const PlankClientPolicy& policy)
                                   settings.value(SER_IPV6PORT, QVariant(defaultPort)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(defaultPort)).toUInt());
+    // Existing bookmarks keep their previous fullscreen spanning behavior.
+    // New bookmarks use the member initializer (current monitor).
+    plankClientDisplays = ClientDisplays::load(settings);
     this->plankScalingMode = settings.value(
                 SER_PLANK_SCALING_MODE, NvOutputTopology::ScaledSpanMode).toString();
     if (this->plankScalingMode != NvOutputTopology::NativeScalingMode &&
@@ -267,6 +276,7 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps,
     settings.setValue(SER_MANUALPORT, manualAddress.port());
     settings.remove("srvcert");
     settings.setValue(SER_PLANK_SCALING_MODE, plankScalingMode);
+    ClientDisplays::save(settings, plankClientDisplays);
     settings.setValue(SER_HOSTLAYOUT, plankHostLayout);
     settings.setValue(SER_VIRTUALMODE1, plankVirtualMode1);
     settings.setValue(SER_VIRTUALMODE2, plankVirtualMode2);
@@ -354,6 +364,7 @@ bool NvComputer::isEqualSerialized(const NvComputer &that) const
            this->ipv6Address == that.ipv6Address &&
            this->manualAddress == that.manualAddress &&
            this->plankScalingMode == that.plankScalingMode &&
+           this->plankClientDisplays == that.plankClientDisplays &&
            this->plankHostLayout == that.plankHostLayout &&
            this->plankVirtualMode1 == that.plankVirtualMode1 &&
            this->plankVirtualMode2 == that.plankVirtualMode2 &&

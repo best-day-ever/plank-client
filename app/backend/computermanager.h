@@ -234,14 +234,16 @@ public:
                                         int scaling = 1,
                                         int videoProfile = StreamingPreferences::PLANK_PROFILE_NVENC_HEVC_10BIT_444,
                                         int captureSource = 0,
-                                        QVariantList profileBitratesKbps = QVariantList());
+                                        QVariantList profileBitratesKbps = QVariantList(),
+                                        QString clientDisplays = QStringLiteral("current"));
 
     bool editManualBookmark(NvComputer* computer, QString address, QString nickname,
                             QString scalingMode,
                             QString hostLayout, QString virtualMode1,
                             QString virtualMode2,
                             int videoProfile, int captureSource,
-                            const QVariantList& profileBitratesKbps);
+                            const QVariantList& profileBitratesKbps,
+                            const QString& clientDisplays = QStringLiteral("current"));
 
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 
