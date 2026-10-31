@@ -15,15 +15,15 @@
 using Monitor = InternetConnectivity;
 using Settings = PlankClientPolicy::InternetCheck;
 
-static Monitor::PingCommand stub(int code, int delayMs = 0, const QString& error = {})
-{
-    return {QCoreApplication::applicationFilePath(),
-            {QStringLiteral("--ping-stub"), QString::number(code), QString::number(delayMs), error}, 1};
-}
-
 class ConnectivityTest : public QObject
 {
     Q_OBJECT
+private:
+    static Monitor::PingCommand stub(int code, int delayMs = 0, const QString& error = QString())
+    {
+        return {QCoreApplication::applicationFilePath(),
+                {QStringLiteral("--ping-stub"), QString::number(code), QString::number(delayMs), error}, 1};
+    }
 private slots:
     void policyDefaultsAndExplicitValues()
     {
