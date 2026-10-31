@@ -219,7 +219,8 @@ void InternetConnectivity::completeRound(State state, const QString& detail)
     setState(state, detail);
     // Start-to-start cadence, without concurrent rounds or accumulating work.
     const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_LastStartedMs;
-    m_Poll.start(static_cast<int>(qBound<qint64>(1000, m_Settings.intervalMs - elapsed, m_Settings.intervalMs)));
+    const qint64 interval = m_Settings.intervalMs;
+    m_Poll.start(static_cast<int>(qBound(qint64(1000), interval - elapsed, interval)));
 }
 
 void InternetConnectivity::setState(State state, const QString& detail)
