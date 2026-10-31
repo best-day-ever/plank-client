@@ -7,6 +7,9 @@ Control {
     id: control
     objectName: "internetStatus"
     required property var monitor
+    readonly property color statusColor: monitor.state === InternetConnectivity.Reachable ? theme.success :
+                                         monitor.state === InternetConnectivity.NoResponse ? theme.danger :
+                                         monitor.state === InternetConnectivity.Unavailable ? theme.warning : theme.textSecondary
     visible: monitor.state !== InternetConnectivity.Disabled
     hoverEnabled: true
     padding: 6
@@ -20,16 +23,16 @@ Control {
     contentItem: RowLayout {
         spacing: 6
         Rectangle {
-            implicitWidth: 7; implicitHeight: 7; radius: 3.5
-            color: control.monitor.state === InternetConnectivity.Reachable ? theme.success :
-                   control.monitor.state === InternetConnectivity.Checking ? theme.textSecondary : theme.warning
+            implicitWidth: 9; implicitHeight: 9; radius: 4.5
+            color: control.statusColor
         }
         Label {
             objectName: "internetStatusLabel"
             text: control.monitor.statusText
             textFormat: Text.PlainText
-            color: theme.textSecondary
-            font.pointSize: 9
+            color: control.statusColor
+            font.pointSize: 12
+            font.weight: Font.DemiBold
         }
     }
     ToolTip.visible: hovered

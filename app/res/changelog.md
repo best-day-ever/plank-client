@@ -1,3 +1,12 @@
+## 1.2.11 — Connection status and Mac displays
+
+### Client
+- Make the Internet status easier to read with larger text and clear status colors.
+
+### Host
+- Allow optional mirroring of physical Mac screens to the PLANK workspace.
+- Wait for macOS to finish creating a virtual display before preparing mirroring.
+
 ## 1.2.10 — Internet connectivity
 
 ### Client
