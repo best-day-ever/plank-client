@@ -4,5 +4,6 @@ TEMPLATE = app
 SOURCES += test_internetconnectivity.cpp \
     ../../app/backend/internetconnectivity.cpp \
     ../../app/settings/plankclientpolicy.cpp
-HEADERS += ../../app/backend/internetconnectivity.h
+HEADERS += test_internetconnectivity.h \
+    ../../app/backend/internetconnectivity.h
 RESOURCES += ../../app/qml.qrc
