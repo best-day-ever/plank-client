@@ -1,3 +1,9 @@
+## 1.2.10 — Internet connectivity
+
+### Client
+- Show Internet reachability in the main window, separately from each Host's status.
+- Check configurable addresses in order at startup and every 15 seconds, without blocking connections.
+
 ## 1.2.05 — Display choices and macOS input
 
 ### Client

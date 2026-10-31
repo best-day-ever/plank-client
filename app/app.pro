@@ -243,6 +243,7 @@ SOURCES += \
     backend/hosttlsguard.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
+    backend/internetconnectivity.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
     settings/plankclientpolicy.cpp \
@@ -292,6 +293,7 @@ HEADERS += \
     cli/startstream.h \
     settings/streamingpreferences.h \
     settings/plankclientpolicy.h \
+    backend/internetconnectivity.h \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/plankpointerlogic.h \

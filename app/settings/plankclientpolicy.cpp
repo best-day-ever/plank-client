@@ -65,6 +65,39 @@ quint16 PlankClientPolicy::relayWakePort() const
                           QStringLiteral("PLANK Relay wake"));
 }
 
+PlankClientPolicy::InternetCheck PlankClientPolicy::internetCheck() const
+{
+    InternetCheck result;
+    managedBoolean(QStringLiteral("network/internet_check_enabled"), &result.enabled);
+    if (!result.enabled) return result;
+
+    QSettings policy(m_ConfigPath, QSettings::IniFormat);
+    const QString hostsKey = QStringLiteral("network/internet_check_hosts");
+    if (policy.contains(hostsKey)) {
+        // QSettings parses unquoted comma-separated INI values as QStringList.
+        // Also accept a quoted list, without ever treating entries as commands.
+        result.hosts = policy.value(hostsKey).toStringList().join(',').split(',');
+        for (auto& host : result.hosts) host = host.trimmed();
+    }
+    bool intervalValid = false, timeoutValid = false;
+    const int interval = policy.value(QStringLiteral("network/internet_check_interval_seconds"), 15)
+            .toInt(&intervalValid);
+    const int timeout = policy.value(QStringLiteral("network/internet_check_timeout_ms"), 1000)
+            .toInt(&timeoutValid);
+    if (!intervalValid || interval < 5 || interval > 3600 ||
+            !timeoutValid || timeout < 100 || timeout > 10000) {
+        result.error = QStringLiteral("Internet-check interval must be 5–3600 seconds and timeout 100–10000 ms.");
+    }
+    else {
+        result.intervalMs = interval * 1000;
+        result.timeoutMs = timeout;
+    }
+    if (policy.status() != QSettings::NoError) {
+        result.error = QStringLiteral("Internet-check configuration could not be read.");
+    }
+    return result;
+}
+
 quint16 PlankClientPolicy::configuredPort(const QString& key, quint16 fallback,
                                           const QString& description) const
 {

@@ -12,6 +12,7 @@
 #include <QMutex>
 #include <QtDebug>
 #include <QNetworkProxyFactory>
+#include <QNetworkInformation>
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
@@ -23,6 +24,7 @@
 #include <QPointer>
 #include <QTimer>
 #include "clientidentity.h"
+#include "backend/internetconnectivity.h"
 
 #ifdef Q_OS_UNIX
 #include <sys/socket.h>
@@ -942,6 +944,8 @@ int main(int argc, char *argv[])
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
+    qmlRegisterUncreatableType<InternetConnectivity>("InternetConnectivity", 1, 0,
+        "InternetConnectivity", "The application owns the connectivity monitor");
     qmlRegisterUncreatableType<Session>("Session", 1, 0, "Session", "Session cannot be created from QML");
     qmlRegisterSingletonType<ComputerManager>("ComputerManager", 1, 0,
                                               "ComputerManager",
@@ -1013,6 +1017,27 @@ int main(int argc, char *argv[])
     }
 
     engine.rootContext()->setContextProperty("initialView", initialView);
+    auto* internetConnectivity = new InternetConnectivity(PlankClientPolicy().internetCheck(), &engine);
+    engine.rootContext()->setContextProperty("internetConnectivity", internetConnectivity);
+    // Do not probe during --version or the Installer's permissions-only setup.
+    if (!initialView.isEmpty()) {
+        QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                         internetConnectivity, &InternetConnectivity::stop);
+        QObject::connect(&app, &QGuiApplication::applicationStateChanged,
+                         internetConnectivity, [internetConnectivity](Qt::ApplicationState state) {
+            if (state == Qt::ApplicationActive) internetConnectivity->refreshIfStale();
+        });
+        if (internetConnectivity->state() != InternetConnectivity::Disabled) {
+            QNetworkInformation::loadDefaultBackend();
+            if (auto* network = QNetworkInformation::instance()) {
+                QObject::connect(network, &QNetworkInformation::reachabilityChanged,
+                                 internetConnectivity, &InternetConnectivity::networkChanged);
+                QObject::connect(network, &QNetworkInformation::transportMediumChanged,
+                                 internetConnectivity, &InternetConnectivity::networkChanged);
+            }
+        }
+        QTimer::singleShot(0, internetConnectivity, &InternetConnectivity::start);
+    }
     engine.rootContext()->setContextProperty(
                 "runConfigChecks",
                 commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);

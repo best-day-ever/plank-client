@@ -207,7 +207,9 @@ ApplicationWindow {
 
         Label {
             id: titleLabel
-            visible: toolBar.width > 700
+            // Center only when neither side's controls would overlap the title.
+            visible: toolBar.width > 2 * Math.max(titleRowLabel.x,
+                         toolBar.width - titleRowLabel.x - titleRowLabel.width) + implicitWidth + 24
             anchors.fill: parent
             text: stackView.currentItem ? stackView.currentItem.objectName : ""
             color: theme.textPrimary
@@ -256,6 +258,10 @@ ApplicationWindow {
                 // the remaining space in the RowLayout. To "hide" it, we
                 // just set the text to empty string.
                 text: !titleLabel.visible && stackView.currentItem ? stackView.currentItem.objectName : ""
+            }
+
+            PlankInternetStatus {
+                monitor: internetConnectivity
             }
 
             NavigableToolButton {
