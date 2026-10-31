@@ -17,10 +17,9 @@ InternetConnectivity::InternetConnectivity(const PlankClientPolicy::InternetChec
     }
     for (const auto& host : settings.hosts) {
         const QHostAddress address(host);
-        if (address.isNull() || address.isMulticast() || address == QHostAddress::Broadcast ||
-                address == QHostAddress::AnyIPv4 || address == QHostAddress::AnyIPv6 ||
-                !address.scopeId().isEmpty()) {
-            m_ConfigurationError = tr("Internet-check targets must be unicast IPv4 or IPv6 addresses.");
+        if (address.protocol() != QAbstractSocket::IPv4Protocol || address.isMulticast() ||
+                address == QHostAddress::Broadcast || address == QHostAddress::AnyIPv4) {
+            m_ConfigurationError = tr("Internet-check targets must be unicast IPv4 addresses.");
         }
     }
     if (!settings.enabled) m_State = Disabled;
@@ -67,14 +66,12 @@ InternetConnectivity::PingCommand InternetConnectivity::systemPingCommand(const 
     const QHostAddress address(host);
     const QString deadline = QString::number((timeoutMs + 999) / 1000);
 #ifdef Q_OS_MACOS
-    const bool ipv6 = address.protocol() == QAbstractSocket::IPv6Protocol;
-    return {ipv6 ?
-                QStringLiteral("/sbin/ping6") : QStringLiteral("/sbin/ping"),
+    return {QStringLiteral("/sbin/ping"),
             {QStringLiteral("-n"), QStringLiteral("-q"), QStringLiteral("-c"), QStringLiteral("1"),
-             ipv6 ? QStringLiteral("-X") : QStringLiteral("-t"), deadline, address.toString()}, 2};
+             QStringLiteral("-t"), deadline, address.toString()}, 2};
 #elif defined(Q_OS_LINUX)
     return {QStringLiteral("/usr/bin/ping"),
-            {QStringLiteral("-n"), QStringLiteral("-q"), QStringLiteral("-c"), QStringLiteral("1"),
+            {QStringLiteral("-4"), QStringLiteral("-n"), QStringLiteral("-q"), QStringLiteral("-c"), QStringLiteral("1"),
              QStringLiteral("-w"), deadline, address.toString()}, 1};
 #else
     Q_UNUSED(deadline)

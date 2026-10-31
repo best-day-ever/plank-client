@@ -19,7 +19,6 @@ private slots:
     void networkErrorIsNotUtilityFailure_data();
     void networkErrorIsNotUtilityFailure();
     void restartAndStopDiscardCancelledResults();
-    void systemPingLoopback_data();
     void systemPingLoopback();
     void statusUi();
 };

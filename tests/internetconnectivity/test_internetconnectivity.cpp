@@ -35,11 +35,11 @@ void ConnectivityTest::policyDefaultsAndExplicitValues()
     QVERIFY(config.error.isEmpty());
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
-    file.write("[network]\ninternet_check_hosts = 192.0.2.1, 2001:db8::1\n"
+    file.write("[network]\ninternet_check_hosts = 192.0.2.1, 198.51.100.1\n"
                "internet_check_interval_seconds = 30\ninternet_check_timeout_ms = 700\n");
     file.close();
     config = PlankClientPolicy(path).internetCheck();
-    QCOMPARE(config.hosts, QStringList({"192.0.2.1", "2001:db8::1"}));
+    QCOMPARE(config.hosts, QStringList({"192.0.2.1", "198.51.100.1"}));
     QCOMPARE(config.intervalMs, 30000);
     QCOMPARE(config.timeoutMs, 700);
     QVERIFY(config.error.isEmpty());
@@ -50,9 +50,11 @@ void ConnectivityTest::invalidPolicy_data()
     QTest::addColumn<QByteArray>("line");
     QTest::newRow("empty targets") << QByteArray("internet_check_hosts =");
     QTest::newRow("option injection") << QByteArray("internet_check_hosts = -f");
-    QTest::newRow("shell injection") << QByteArray("internet_check_hosts = 192.0.2.1;exit 0");
+    QTest::newRow("shell injection") << QByteArray("internet_check_hosts = \"192.0.2.1;exit 0\"");
     QTest::newRow("DNS name") << QByteArray("internet_check_hosts = example.com");
-    QTest::newRow("multicast") << QByteArray("internet_check_hosts = ff02::1");
+    QTest::newRow("multicast") << QByteArray("internet_check_hosts = 224.0.0.1");
+    QTest::newRow("IPv6") << QByteArray("internet_check_hosts = 2001:db8::1");
+    QTest::newRow("IPv4-mapped IPv6") << QByteArray("internet_check_hosts = ::ffff:192.0.2.1");
     QTest::newRow("unspecified") << QByteArray("internet_check_hosts = 0.0.0.0");
     QTest::newRow("broadcast") << QByteArray("internet_check_hosts = 255.255.255.255");
     QTest::newRow("scoped") << QByteArray("internet_check_hosts = fe80::1%eth0");
@@ -236,18 +238,10 @@ void ConnectivityTest::restartAndStopDiscardCancelledResults()
     QCOMPARE(stoppedUpdates.size(), 0);
 }
 
-void ConnectivityTest::systemPingLoopback_data()
-{
-    QTest::addColumn<QString>("address");
-    QTest::newRow("IPv4") << QStringLiteral("127.0.0.1");
-    QTest::newRow("IPv6") << QStringLiteral("::1");
-}
-
 void ConnectivityTest::systemPingLoopback()
 {
-    QFETCH(QString, address);
     Settings settings;
-    settings.hosts = {address};
+    settings.hosts = {"127.0.0.1"};
     settings.timeoutMs = 2000;
     // Use the actual OS utility as an ordinary runner account. No public
     // Internet dependency and no elevated process or new PLANK capability.
