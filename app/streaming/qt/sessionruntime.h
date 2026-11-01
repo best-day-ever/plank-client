@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtGlobal>
 #ifdef Q_OS_MACOS
 #include "metalsessionshell.h"
 using QtPlatformSessionShell = QtMetalSessionShell;
