@@ -8,6 +8,7 @@
 #include <QQuickWindow>
 #include <QSGSimpleRectNode>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
@@ -51,7 +52,7 @@ QtVideoFrame::Ptr frame(QSize size, bool hardware, int depth = 10, bool identity
         require(CVPixelBufferCreate(kCFAllocatorDefault, size.width(), size.height(),
             identity ? (depth == 10 ? kCVPixelFormatType_444YpCbCr10BiPlanarFullRange : kCVPixelFormatType_444YpCbCr8BiPlanarFullRange) :
                 (depth == 10 ? kCVPixelFormatType_420YpCbCr10BiPlanarFullRange : kCVPixelFormatType_420YpCbCr8BiPlanarFullRange),
-            (CFDictionaryRef)attributes, &buffer) == kCVReturnSuccess, "CV P410 surface");
+            (CFDictionaryRef)attributes, &buffer) == kCVReturnSuccess, "CV exact-format surface");
         AVBufferRef* device = nullptr;
         require(av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nullptr, nullptr, 0) == 0, "VT test device");
         source->hw_frames_ctx = av_hwframe_ctx_alloc(device);

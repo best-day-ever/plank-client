@@ -5,6 +5,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDynamicPropertyChangeEvent>
 #include <QQuickGraphicsDevice>
 #include <QQuickRenderControl>

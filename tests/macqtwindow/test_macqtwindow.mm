@@ -120,6 +120,16 @@ private slots:
             scene.update();
             QVERIFY(until([&] { return swaps.load()>previous || !errors.isEmpty(); }));
             QVERIFY(errors.isEmpty());
+            if (cycle == 0) {
+                const QSize normalSize = shell.size();
+                shell.showSession(true);
+                QVERIFY(until([&] { return (view.window.styleMask & NSWindowStyleMaskFullScreen) &&
+                    scene.size() == shell.size(); }));
+                shell.showSession(false);
+                QVERIFY(until([&] { return !(view.window.styleMask & NSWindowStyleMaskFullScreen) &&
+                    shell.size() == normalSize && scene.size() == normalSize; }));
+                QVERIFY(errors.isEmpty());
+            }
             shell.stopRendering();
             QVERIFY(until([&] { return shell.renderingStopped(); }));
             delete item;

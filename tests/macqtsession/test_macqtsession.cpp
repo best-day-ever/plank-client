@@ -2,6 +2,7 @@
 #include "metalsessionshell.h"
 #include "remotekeymap.h"
 #include "sessionshortcut.h"
+#include <QDir>
 #include <QQuickRenderControl>
 #include <QQuickRenderTarget>
 #include <QTabletEvent>
@@ -41,6 +42,14 @@ private slots:
         QCOMPARE(qtRemoteKey(59).vk, 0xa2);
         QCOMPARE(qtRemoteKey(76).vk, 0x0d);
         QCOMPARE(qtRemoteKey(52).vk, 0x0d); // Portable keyboard's Enter alias.
+        QCOMPARE(qtRemoteKey(102).vk, 0x1d); // JIS Eisu and Kana.
+        QCOMPARE(qtRemoteKey(104).vk, 0x1c);
+        // Retain the existing Mac keyboard protocol, including extended PC
+        // keys on external keyboards and the application/context-menu key.
+        QCOMPARE(qtRemoteKey(105).vk, 0x2c);
+        QCOMPARE(qtRemoteKey(107).vk, 0x91);
+        QCOMPARE(qtRemoteKey(113).vk, 0x13);
+        QCOMPARE(qtRemoteKey(110).vk, 0x5d);
         QCOMPARE(qtRemoteKey(1000).vk, 0);
         const auto mods = qtPhysicalModifiers(Qt::ControlModifier | Qt::ShiftModifier);
         QCOMPARE(mods, Qt::MetaModifier | Qt::ShiftModifier);
@@ -68,6 +77,11 @@ private slots:
         QImage image(host.size(), QImage::Format_ARGB32_Premultiplied);
         scene.setRenderTarget(QQuickRenderTarget::fromPaintDevice(&image));
         control.polishItems(); control.sync(); control.render();
+        const auto captures = qEnvironmentVariable("PLANK_QT_SESSION_CAPTURE_DIR");
+        if (!captures.isEmpty()) {
+            QVERIFY(QDir().mkpath(captures));
+            QVERIFY(image.save(captures + QStringLiteral("/macos-qt-toolbar.png")));
+        }
 
         QSignalSpy buttons(&scene, &QtSessionWindow::remoteButton);
         pointer(scene, QEvent::MouseButtonPress, {720, 450}, Qt::LeftButton);

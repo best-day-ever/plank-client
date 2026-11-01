@@ -1,3 +1,10 @@
+## 1.2.13 — macOS Qt session candidate
+
+### Client
+- Bring the Ubuntu toolbar, display controls and automatic connection recovery to the Mac streaming window.
+- Present video and controls together through Metal, preserving ten-bit color and smooth windowed scaling.
+- Keep native Mac fullscreen Spaces, keyboard shortcuts, clipboard and existing audio playback.
+
 ## 1.2.12 — Internet ping details
 
 ### Client
