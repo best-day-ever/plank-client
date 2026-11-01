@@ -3,7 +3,117 @@
 #include <QDateTime>
 #include <QHostAddress>
 #include <QProcessEnvironment>
+#include <QRegularExpression>
 #include <QtDebug>
+
+// One bounded asynchronous ping, shared by the ordered background check and
+// the on-demand concurrent summary. Cancellation reaps the child before reuse.
+struct InternetConnectivity::Probe : QObject
+{
+    using Completion = std::function<void(Probe*, State, double)>;
+
+    Probe(QObject* parent, PingCommand command, int timeoutMs, Completion completion)
+        : QObject(parent), command(std::move(command)), completion(std::move(completion)),
+          process(this)
+    {
+        deadline.setSingleShot(true);
+        deadline.setTimerType(Qt::PreciseTimer);
+        deadline.setInterval(timeoutMs);
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("LC_ALL"), QStringLiteral("C"));
+        process.setProcessEnvironment(environment);
+        process.setStandardInputFile(QProcess::nullDevice());
+        connect(&process, &QProcess::readyReadStandardOutput, this, [this] { drain(); });
+        connect(&process, &QProcess::readyReadStandardError, this, [this] { drain(); });
+        connect(&deadline, &QTimer::timeout, this, [this] {
+            timedOut = true;
+            process.kill();
+        });
+        connect(&process, &QProcess::started, this, [this] {
+            if (cancelled || timedOut) process.kill();
+        });
+        connect(&process, &QProcess::finished, this,
+                [this](int code, QProcess::ExitStatus status) { finish(code, status); });
+        connect(&process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) finish(-1, QProcess::CrashExit);
+            // Killed/crashed children also emit finished; consume them once.
+        });
+    }
+
+    ~Probe() override
+    {
+        // The parent monitor may already be in QObject destruction. Do not call
+        // its captured completion while QProcess reaps a child during shutdown.
+        process.disconnect(this);
+        process.kill();
+    }
+
+    void start()
+    {
+        if (cancelled) { finish(-1, QProcess::CrashExit); return; }
+        deadline.start();
+        process.start(command.program, command.arguments);
+    }
+
+    void cancel()
+    {
+        cancelled = true;
+        deadline.stop();
+        process.kill();
+    }
+
+    void drain()
+    {
+        if (!process.isOpen()) return;
+        output.append(process.readAllStandardOutput().left(4096 - output.size()));
+        error.append(process.readAllStandardError().left(1024 - error.size()));
+    }
+
+    double roundTripMs() const
+    {
+        // -q -c 1 emits this summary on both iputils and macOS ping. Parse the
+        // actual ICMP RTT, never process startup/exit time. Success without a
+        // recognized timing line remains reachable with no RTT available.
+        static const QRegularExpression summary(QStringLiteral(
+            R"((?:^|\n)(?:rtt|round-trip) min/avg/max/(?:mdev|stddev) = [0-9]+(?:\.[0-9]+)?/([0-9]+(?:\.[0-9]+)?)/[0-9]+(?:\.[0-9]+)?/[0-9]+(?:\.[0-9]+)? ms(?:\r?\n|$))"));
+        const auto match = summary.match(QString::fromLatin1(output));
+        if (!match.hasMatch()) return -1;
+        bool ok = false;
+        const double value = match.captured(1).toDouble(&ok);
+        return ok && qIsFinite(value) && value >= 0 ? value : -1;
+    }
+
+    void finish(int exitCode, QProcess::ExitStatus exitStatus)
+    {
+        if (finished) return;
+        finished = true;
+        deadline.stop();
+        drain();
+        State state = NoResponse;
+        if (!cancelled && !timedOut) {
+            const bool routeUnavailable = error.contains("Network is unreachable") ||
+                    error.contains("No route to host") || error.contains("Network is down") ||
+                    error.contains("Host is down") || error.contains("Host is unreachable");
+            if (exitStatus == QProcess::NormalExit && exitCode == 0) state = Reachable;
+            else if (exitStatus != QProcess::NormalExit ||
+                     (exitCode != command.noResponseExitCode && !routeUnavailable)) state = Unavailable;
+        }
+        const double rtt = state == Reachable ? roundTripMs() : -1;
+        const auto notify = completion;
+        deleteLater();
+        notify(this, state, rtt);
+    }
+
+    const PingCommand command;
+    const Completion completion;
+    QProcess process;
+    QTimer deadline;
+    QByteArray output;
+    QByteArray error;
+    bool cancelled = false;
+    bool timedOut = false;
+    bool finished = false;
+};
 
 InternetConnectivity::InternetConnectivity(const PlankClientPolicy::InternetCheck& settings,
                                            QObject* parent, CommandFactory commandFactory)
@@ -29,16 +139,8 @@ InternetConnectivity::InternetConnectivity(const PlankClientPolicy::InternetChec
     }
     else m_Detail = tr("Checking the configured Internet addresses. PLANK connections remain available.");
 
-    m_Deadline.setSingleShot(true);
-    m_Deadline.setTimerType(Qt::PreciseTimer);
     m_Poll.setSingleShot(true);
     m_NetworkChange.setSingleShot(true);
-    connect(&m_Deadline, &QTimer::timeout, this, [this] {
-        if (m_Process) {
-            m_TimedOut = true;
-            m_Process->kill();
-        }
-    });
     connect(&m_Poll, &QTimer::timeout, this, &InternetConnectivity::checkNow);
     connect(&m_NetworkChange, &QTimer::timeout, this, &InternetConnectivity::checkNow);
 }
@@ -46,7 +148,6 @@ InternetConnectivity::InternetConnectivity(const PlankClientPolicy::InternetChec
 InternetConnectivity::~InternetConnectivity()
 {
     stop();
-    if (m_Process) m_Process->disconnect(this);
 }
 
 QString InternetConnectivity::statusText() const
@@ -96,8 +197,8 @@ void InternetConnectivity::stop()
     m_RestartPending = false;
     m_Poll.stop();
     m_NetworkChange.stop();
-    m_Deadline.stop();
-    if (m_Process) m_Process->kill();
+    if (m_Probe) m_Probe->cancel();
+    cancelSummary();
 }
 
 void InternetConnectivity::networkChanged()
@@ -119,10 +220,9 @@ void InternetConnectivity::checkNow()
 {
     if (!m_Running) return;
     m_Poll.stop();
-    if (m_Process) {
+    if (m_Probe) {
         m_RestartPending = true;
-        m_Deadline.stop();
-        m_Process->kill();
+        m_Probe->cancel();
         return; // Reap this child before starting another; no overlapping rounds.
     }
     beginRound();
@@ -139,63 +239,29 @@ void InternetConnectivity::beginRound()
 
 void InternetConnectivity::startTarget()
 {
-    const auto command = m_CommandFactory(m_Settings.hosts.at(m_Target), m_Settings.timeoutMs);
-    auto* process = new QProcess(this);
-    m_Process = process;
-    m_NoResponseExitCode = command.noResponseExitCode;
-    m_TimedOut = false;
-    m_ProbeStderr.clear();
-    // Success comes from exit status. Keep only bounded diagnostics to distinguish
-    // no route/no network from a broken utility or denied ICMP permission. iputils
-    // uses the same error exit code for both cases. Normalize utility diagnostics.
-    auto environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("LC_ALL"), QStringLiteral("C"));
-    process->setProcessEnvironment(environment);
-    process->setStandardOutputFile(QProcess::nullDevice());
-    process->setStandardInputFile(QProcess::nullDevice());
-    connect(process, &QProcess::readyReadStandardError, this, [this, process] {
-        const auto output = process->readAllStandardError();
-        if (process == m_Process) m_ProbeStderr.append(output.left(1024 - m_ProbeStderr.size()));
+    m_Probe = new Probe(this, m_CommandFactory(m_Settings.hosts.at(m_Target), m_Settings.timeoutMs),
+                        m_Settings.timeoutMs, [this](Probe* probe, State state, double) {
+        targetFinished(probe, state);
     });
-    connect(process, &QProcess::started, this, [this, process] {
-        if (process == m_Process && (!m_Running || m_RestartPending || m_TimedOut)) process->kill();
-    });
-    connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
-        targetFinished(process, code, status);
-    });
-    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) targetFinished(process, -1, QProcess::CrashExit);
-        // A killed/crashed child also emits finished; consume it exactly once.
-    });
-    m_Deadline.start(m_Settings.timeoutMs);
-    process->start(command.program, command.arguments);
+    m_Probe->start();
 }
 
-void InternetConnectivity::targetFinished(QProcess* process, int exitCode, QProcess::ExitStatus exitStatus)
+void InternetConnectivity::targetFinished(Probe* probe, State state)
 {
-    if (process != m_Process) return;
-    m_Deadline.stop();
-    m_Process = nullptr;
-    process->deleteLater();
+    if (probe != m_Probe) return;
+    m_Probe = nullptr;
     if (!m_Running) return;
     if (m_RestartPending) {
         beginRound();
         return;
     }
-    if (!m_TimedOut && exitStatus == QProcess::NormalExit && exitCode == 0) {
+    if (state == Reachable) {
         completeRound(Reachable, tr("Reply received from %1. This checks access to a configured address, "
                                    "not DNS, VPN connectivity or a particular PLANK Host.")
                       .arg(m_Settings.hosts.at(m_Target)));
         return;
     }
-    if (process->isOpen())
-        m_ProbeStderr.append(process->readAllStandardError().left(1024 - m_ProbeStderr.size()));
-    const bool routeUnavailable = m_ProbeStderr.contains("Network is unreachable") ||
-            m_ProbeStderr.contains("No route to host") || m_ProbeStderr.contains("Network is down") ||
-            m_ProbeStderr.contains("Host is down") || m_ProbeStderr.contains("Host is unreachable");
-    if (!m_TimedOut && (exitStatus != QProcess::NormalExit ||
-                       (exitCode != m_NoResponseExitCode && !routeUnavailable)))
-        m_ProbeError = true;
+    if (state == Unavailable) m_ProbeError = true;
     if (++m_Target < m_Settings.hosts.size()) {
         startTarget();
         return;
@@ -209,6 +275,86 @@ void InternetConnectivity::targetFinished(QProcess* process, int exitCode, QProc
                                      "Your connection may be unavailable, or the network may block ping. "
                                      "PLANK connections remain available."));
     }
+}
+
+QVariantList InternetConnectivity::summaryResults() const
+{
+    QVariantList results;
+    for (const auto& row : m_SummaryRows) {
+        QString text;
+        switch (row.state) {
+        case Checking: text = tr("Checking"); break;
+        case Reachable: text = tr("Reachable"); break;
+        case NoResponse: text = tr("No response"); break;
+        case Unavailable: text = tr("Unavailable"); break;
+        case Disabled: text = tr("Disabled"); break;
+        }
+        results.append(QVariantMap{{QStringLiteral("address"), row.address},
+                                  {QStringLiteral("state"), int(row.state)},
+                                  {QStringLiteral("status"), text},
+                                  {QStringLiteral("roundTripMs"), row.roundTripMs}});
+    }
+    return results;
+}
+
+QString InternetConnectivity::summaryCheckedAt() const
+{
+    return m_SummaryCompletedAt.isValid() ?
+                m_SummaryCompletedAt.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) : QString();
+}
+
+void InternetConnectivity::refreshSummary()
+{
+    if (!m_Settings.enabled || !m_ConfigurationError.isEmpty()) {
+        m_SummaryError = !m_Settings.enabled ? tr("Internet checks are disabled in client.conf.") : m_ConfigurationError;
+        emit summaryChanged();
+        return;
+    }
+    if (!m_SummaryProbes.isEmpty()) {
+        m_SummaryRestartPending = true;
+        m_SummaryCancelled = true;
+        const auto probes = m_SummaryProbes;
+        for (auto* probe : probes) probe->cancel();
+        return; // Coalesce rapid reopen/refresh until every old child is reaped.
+    }
+    m_SummaryRestartPending = false;
+    m_SummaryCancelled = false;
+    m_SummaryCompletedAt = {};
+    m_SummaryRows.clear();
+    for (const auto& address : m_Settings.hosts) {
+        const int row = m_SummaryRows.size();
+        m_SummaryRows.append(SummaryResult{address, Checking, -1});
+        m_SummaryProbes.append(new Probe(this, m_CommandFactory(address, m_Settings.timeoutMs),
+                                        m_Settings.timeoutMs, [this, row](Probe* probe, State state, double rtt) {
+            summaryFinished(probe, row, state, rtt);
+        }));
+    }
+    emit summaryChanged();
+    // Copy the list because FailedToStart/finished may remove its own probe.
+    const auto probes = m_SummaryProbes;
+    for (auto* probe : probes) probe->start();
+}
+
+void InternetConnectivity::cancelSummary()
+{
+    m_SummaryRestartPending = false;
+    m_SummaryCancelled = true;
+    const auto probes = m_SummaryProbes;
+    for (auto* probe : probes) probe->cancel();
+}
+
+void InternetConnectivity::summaryFinished(Probe* probe, int row, State state, double roundTripMs)
+{
+    if (!m_SummaryProbes.removeOne(probe)) return;
+    if (!m_SummaryCancelled) {
+        m_SummaryRows[row].state = state;
+        m_SummaryRows[row].roundTripMs = roundTripMs;
+    }
+    if (m_SummaryProbes.isEmpty()) {
+        if (m_SummaryRestartPending) { refreshSummary(); return; }
+        if (!m_SummaryCancelled) m_SummaryCompletedAt = QDateTime::currentDateTime();
+    }
+    emit summaryChanged();
 }
 
 void InternetConnectivity::completeRound(State state, const QString& detail)

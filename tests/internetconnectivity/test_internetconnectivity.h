@@ -20,5 +20,10 @@ private slots:
     void networkErrorIsNotUtilityFailure();
     void restartAndStopDiscardCancelledResults();
     void systemPingLoopback();
+    void summaryChecksEveryTargetConcurrently();
+    void summaryRoundTripFormats_data();
+    void summaryRoundTripFormats();
+    void summaryFailuresAndDeadlines();
+    void summaryCancellationAndReopen();
     void statusUi();
 };

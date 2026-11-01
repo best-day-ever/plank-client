@@ -1,3 +1,9 @@
+## 1.2.12 — Internet ping details
+
+### Client
+- Click the Internet indicator to check every configured address and see its status and response time.
+- Refresh the results on demand, with the last check shown in local time.
+
 ## 1.2.11 — Connection status and Mac displays
 
 ### Client
