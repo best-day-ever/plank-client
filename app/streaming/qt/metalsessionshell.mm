@@ -308,6 +308,10 @@ void QtMetalSessionShell::requestRender()
 void QtMetalSessionShell::synchronizeFrame()
 {
     auto& r = *m_Rendering;
+    {
+        std::lock_guard<std::mutex> lock(r.mutex);
+        if (r.stop) return; // A queued sync may outlive the worker's retirement.
+    }
     if (!isVisible() || !isExposed() || size() * devicePixelRatio() != r.pixels) {
         std::lock_guard<std::mutex> lock(r.mutex);
         r.cancel = true; r.changed.notify_all(); return;

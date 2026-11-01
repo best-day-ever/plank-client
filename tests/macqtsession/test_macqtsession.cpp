@@ -39,6 +39,7 @@ private slots:
         QCOMPARE(qtRemoteKey(55).vk, 0x5b);
         QCOMPARE(qtRemoteKey(59).vk, 0xa2);
         QCOMPARE(qtRemoteKey(76).vk, 0x0d);
+        QCOMPARE(qtRemoteKey(52).vk, 0x0d); // Portable keyboard's Enter alias.
         QCOMPARE(qtRemoteKey(1000).vk, 0);
         const auto mods = qtPhysicalModifiers(Qt::ControlModifier | Qt::ShiftModifier);
         QCOMPARE(mods, Qt::MetaModifier | Qt::ShiftModifier);

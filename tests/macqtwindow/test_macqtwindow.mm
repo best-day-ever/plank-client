@@ -106,8 +106,8 @@ private slots:
                 QCOMPARE(item->status()->error.load(),QtVideoStatus::None);
                 QVERIFY(item->status()->livePresented);
                 auto expectedSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_709);
-                const bool layerMatches = CGColorSpaceEqualToColorSpace(layer.colorspace,expectedSpace);
-                const bool windowMatches = CGColorSpaceEqualToColorSpace(view.window.colorSpace.CGColorSpace,expectedSpace);
+                const bool layerMatches = layer.colorspace && CFEqual(layer.colorspace,expectedSpace);
+                const bool windowMatches = view.window.colorSpace.CGColorSpace && CFEqual(view.window.colorSpace.CGColorSpace,expectedSpace);
                 CGColorSpaceRelease(expectedSpace);
                 QVERIFY(layerMatches);
                 QVERIFY(windowMatches);
