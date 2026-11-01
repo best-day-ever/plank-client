@@ -1,4 +1,7 @@
 #include "decodedvideorenderer.h"
+#ifdef Q_OS_LINUX
+#include "vaapivideoframe.h"
+#endif
 #include "../avsynccontroller.h"
 
 #include <QDebug>
@@ -20,10 +23,15 @@ struct PresentationStats {
 class Renderer final : public IFFmpegRenderer
 {
 public:
+#ifdef Q_OS_MACOS
+    Renderer(bool hardware, QtDecodedVideoRendererFactory::OpenDelivery open)
+        : m_Hardware(hardware), m_Open(std::move(open)) {}
+#else
     Renderer(bool hardware, QtSoftwareVideoDevice::Ptr device, QString renderNode,
              QtDecodedVideoRendererFactory::OpenDelivery open)
         : m_Hardware(hardware), m_Device(std::move(device)),
           m_RenderNode(std::move(renderNode)), m_Open(std::move(open)) {}
+#endif
 
     ~Renderer() override
     {
@@ -33,34 +41,55 @@ public:
 
     bool initialize(PDECODER_PARAMETERS params) override
     {
-        if (!params || !m_Open || (!m_Hardware && !m_Device)) return false;
+        if (!params || !m_Open) return false;
+#ifdef Q_OS_LINUX
+        if (!m_Hardware && !m_Device) return false;
+#endif
         m_VideoFormat = params->videoFormat;
         m_Identity = params->enableIdentityGbr;
         m_Delivery = m_Open();
         if (!m_Delivery.submit || !m_Delivery.qualify || !m_Delivery.discard || !m_Delivery.fail) return false;
         if (m_Hardware) {
+#ifdef Q_OS_MACOS
+            // FFmpeg still decodes the profile-specific fixture with hardware
+            // required. A reported VideoToolbox device alone is not acceptance.
+            if (av_hwdevice_ctx_create(&m_HardwareDevice, AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+                                      nullptr, nullptr, 0) < 0) return false;
+#else
             // Derived from the Qt EGL device, never a guessed card index.
             if (m_RenderNode.isEmpty()) return false;
             const auto path = m_RenderNode.toUtf8();
             if (av_hwdevice_ctx_create(&m_HardwareDevice, AV_HWDEVICE_TYPE_VAAPI,
                                       path.constData(), nullptr, 0) < 0) return false;
+#endif
         }
         return true;
     }
 
     bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override
     {
-        if (!m_Hardware) return bool(m_Device);
+        if (!m_Hardware) return true;
         context->hw_device_ctx = av_buffer_ref(m_HardwareDevice);
         // Bounded exported-surface leases (one pending + three render slots).
         context->extra_hw_frames = std::max(context->extra_hw_frames, 8);
         return context->hw_device_ctx != nullptr;
     }
 
-    bool usesCustomDecodeBuffers() const override { return !m_Hardware; }
+    bool usesCustomDecodeBuffers() const override
+    {
+#ifdef Q_OS_LINUX
+        return !m_Hardware;
+#else
+        return false;
+#endif
+    }
     int getDecodeBuffer(AVCodecContext* context, AVFrame* frame, int flags) override
     {
+#ifdef Q_OS_LINUX
         return m_Device->getBuffer(context, frame, flags);
+#else
+        return avcodec_default_get_buffer2(context, frame, flags);
+#endif
     }
 
     bool needsTestFrame() override { return true; }
@@ -71,7 +100,13 @@ public:
 
     AVPixelFormat getPreferredPixelFormat(int format) override
     {
-        if (m_Hardware) return AV_PIX_FMT_VAAPI;
+        if (m_Hardware) {
+#ifdef Q_OS_MACOS
+            return AV_PIX_FMT_VIDEOTOOLBOX;
+#else
+            return AV_PIX_FMT_VAAPI;
+#endif
+        }
         if (m_Identity) return (format & VIDEO_FORMAT_MASK_10BIT) ? AV_PIX_FMT_GBRP10LE : AV_PIX_FMT_GBRP;
         if (format & VIDEO_FORMAT_MASK_YUV444)
             return (format & VIDEO_FORMAT_MASK_10BIT) ? AV_PIX_FMT_YUV444P10LE : AV_PIX_FMT_YUV444P;
@@ -168,18 +203,28 @@ private:
             return {};
         }
         if (m_Hardware) {
+#ifdef Q_OS_MACOS
+            const bool ten = m_VideoFormat & VIDEO_FORMAT_MASK_10BIT;
+            const auto format = (m_VideoFormat & VIDEO_FORMAT_MASK_YUV444) ? (ten ? AV_PIX_FMT_P410LE : AV_PIX_FMT_NV24) :
+                                (m_VideoFormat & VIDEO_FORMAT_MASK_YUV422) ? (ten ? AV_PIX_FMT_P210LE : AV_PIX_FMT_NV16) :
+                                (ten ? AV_PIX_FMT_P010LE : AV_PIX_FMT_NV12);
+            return QtVideoFrame::videoToolbox(frame, format, error, std::move(feedback), purpose);
+#else
             const bool allowP010 = !m_Identity && (m_VideoFormat & VIDEO_FORMAT_MASK_10BIT) &&
                 !(m_VideoFormat & (VIDEO_FORMAT_MASK_YUV444 | VIDEO_FORMAT_MASK_YUV422));
             auto surface = QtVaapiVideoFrame::create(frame, (m_VideoFormat & VIDEO_FORMAT_MASK_10BIT) ? 10 : 8, error, allowP010);
             return QtVideoFrame::hardware(std::move(surface), std::move(feedback), purpose);
+#endif
         }
         const auto format = getPreferredPixelFormat(m_VideoFormat);
         return QtVideoFrame::software(frame, format, error, std::move(feedback), purpose);
     }
 
     const bool m_Hardware;
+#ifdef Q_OS_LINUX
     QtSoftwareVideoDevice::Ptr m_Device;
     const QString m_RenderNode;
+#endif
     const QtDecodedVideoRendererFactory::OpenDelivery m_Open;
     QtDecodedVideoDelivery m_Delivery;
     AVBufferRef* m_HardwareDevice = nullptr;
@@ -190,14 +235,25 @@ private:
 };
 }
 
+#ifdef Q_OS_MACOS
+QtDecodedVideoRendererFactory::QtDecodedVideoRendererFactory(OpenDelivery openDelivery)
+    : m_OpenDelivery(std::move(openDelivery)) {}
+#else
 QtDecodedVideoRendererFactory::QtDecodedVideoRendererFactory(QtSoftwareVideoDevice::Ptr softwareDevice,
     QString vaapiRenderNode, OpenDelivery openDelivery)
     : m_SoftwareDevice(std::move(softwareDevice)), m_VaapiRenderNode(std::move(vaapiRenderNode)),
       m_OpenDelivery(std::move(openDelivery)) {}
+#endif
 
 IFFmpegRenderer* QtDecodedVideoRendererFactory::createRenderer(const AVCodecHWConfig* hardware)
 {
+#ifdef Q_OS_MACOS
+    if (hardware && (hardware->device_type != AV_HWDEVICE_TYPE_VIDEOTOOLBOX || hardware->pix_fmt != AV_PIX_FMT_VIDEOTOOLBOX))
+        return nullptr;
+    return new Renderer(hardware != nullptr, m_OpenDelivery);
+#else
     if (hardware && (hardware->device_type != AV_HWDEVICE_TYPE_VAAPI || hardware->pix_fmt != AV_PIX_FMT_VAAPI))
         return nullptr;
     return new Renderer(hardware != nullptr, m_SoftwareDevice, m_VaapiRenderNode, m_OpenDelivery);
+#endif
 }

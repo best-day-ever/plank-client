@@ -2,6 +2,7 @@
 
 #include "sessiongeometry.h"
 #include "videoframe.h"
+#include "vaapivideoframe.h"
 #include "softwarevideodevice.h"
 
 #include <QQuickItem>
