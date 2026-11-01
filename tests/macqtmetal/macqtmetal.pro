@@ -5,5 +5,5 @@ CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = macqtmetal
 OBJECTIVE_SOURCES += test_macqtmetal.mm
-QMAKE_OBJECTIVE_CXXFLAGS += -fobjc-arc
+QMAKE_CXXFLAGS += -fobjc-arc
 LIBS += -framework Metal -framework QuartzCore

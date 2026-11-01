@@ -55,7 +55,8 @@ void run(id<MTLDevice> device, id<MTLLibrary> library, bool planar, bool gray)
     QQuickRenderControl control;
     QQuickWindow window(&control);
     window.setColor(Qt::black);
-    window.setGraphicsDevice(QQuickGraphicsDevice::fromDeviceAndCommandQueue(device, queue));
+    window.setGraphicsDevice(QQuickGraphicsDevice::fromDeviceAndCommandQueue(
+        (MTLDevice*)device, (MTLCommandQueue*)queue));
     require(control.initialize(), "Qt Metal render control initialization");
     require(window.rendererInterface()->graphicsApi() == QSGRendererInterface::Metal, "Qt must use Metal");
     Overlay overlay(window.contentItem());
@@ -121,7 +122,7 @@ void run(id<MTLDevice> device, id<MTLLibrary> library, bool planar, bool gray)
         window.contentItem()->setSize(size);
         overlay.setPosition(QPointF(0, size.height() - 1));
         overlay.setSize(QSizeF(size.width(), 1));
-        window.setRenderTarget(QQuickRenderTarget::fromMetalTexture(target,
+        window.setRenderTarget(QQuickRenderTarget::fromMetalTexture((MTLTexture*)target,
             uint(MTLPixelFormatRGB10A2Unorm), size));
         const unsigned before = draws;
         control.polishItems();
