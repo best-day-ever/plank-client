@@ -316,7 +316,7 @@ HEADERS += \
     backend/systemproperties.h
 HEADERS += backend/clientdisplays.h
 
-contains(CONFIG, plank-qt-session) {
+linux:contains(CONFIG, plank-qt-session) {
     SOURCES -= streaming/audio/renderers/sdlaud.cpp
     HEADERS -= streaming/audio/renderers/sdl.h
     SOURCES += streaming/audio/renderers/pipewire.cpp

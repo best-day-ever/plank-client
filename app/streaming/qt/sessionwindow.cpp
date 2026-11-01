@@ -18,12 +18,13 @@ constexpr int FullscreenRevealHeight = 3;
 constexpr int WindowedRevealHeight = 12;
 }
 
-QtSessionWindow::QtSessionWindow(QWindow* parent) : QQuickView(parent),
+QtSessionWindow::QtSessionWindow(QWindow* parent, QQuickRenderControl* renderControl)
+    : QQuickWindow(renderControl), m_ControlWindow(parent), m_Redirected(renderControl != nullptr),
     m_BitrateKbps(StreamingPreferences::PlankBitrateMinimumKbps)
 {
     Q_ASSERT(thread() == QCoreApplication::instance()->thread());
+    if (!renderControl) setParent(parent);
     setTitle(QStringLiteral("PLANK Qt session qualification"));
-    setResizeMode(QQuickView::SizeRootObjectToView);
     setColor(Qt::black);
     // A request only. The GPU integration gate must verify the actual swapchain.
     QSurfaceFormat surface = format();
@@ -41,8 +42,20 @@ QtSessionWindow::QtSessionWindow(QWindow* parent) : QQuickView(parent),
         m_RevealTimer.stop();
         emit fullscreenChanged();
     });
-    rootContext()->setContextProperty(QStringLiteral("sessionWindow"), this);
-    setSource(QUrl(QStringLiteral("qrc:/qt-session/SessionSurface.qml")));
+    m_Engine.rootContext()->setContextProperty(QStringLiteral("sessionWindow"), this);
+    m_Component.loadUrl(QUrl(QStringLiteral("qrc:/qt-session/SessionSurface.qml")), QQmlComponent::PreferSynchronous);
+    if (m_Component.isReady()) {
+        auto* object = m_Component.create(m_Engine.rootContext());
+        m_Root = qobject_cast<QQuickItem*>(object);
+        if (!m_Root) delete object;
+        else {
+            QQmlEngine::setObjectOwnership(m_Root, QQmlEngine::CppOwnership);
+            m_Root->setParentItem(contentItem());
+            if (size().isEmpty()) resize(qRound(m_Root->width()), qRound(m_Root->height()));
+            m_Root->setSize(size());
+        }
+    }
+    if (m_Component.isError()) qWarning() << m_Component.errors();
     if (rootObject()) {
         m_Toolbar = rootObject()->findChild<QQuickItem*>(QStringLiteral("sessionToolbar"));
         m_TabletCursor = new QtTabletCursorItem(rootObject());
@@ -71,7 +84,8 @@ QtSessionWindow::~QtSessionWindow()
     releaseRemoteInput();
     // Retire QML while the derived object's properties and context still exist.
     m_TabletCursor = nullptr;
-    setSource(QUrl());
+    delete m_Root;
+    m_Root = nullptr;
 }
 
 QRectF QtSessionWindow::videoRect() const
@@ -227,7 +241,7 @@ void QtSessionWindow::setDisplayMenuOpen(bool open)
 
 QWindow* QtSessionWindow::controlWindow()
 {
-    QWindow* window = this;
+    QWindow* window = m_ControlWindow ? m_ControlWindow.data() : this;
     while (window->parent()) window = window->parent();
     return window;
 }
@@ -290,8 +304,10 @@ void QtSessionWindow::updateCursor()
     QPointF ignored;
     const bool local = !m_RemoteInputEnabled || m_Waiting || m_DisplayMenuOpen ||
         (!m_TabletActive && (localPointer(m_Pointer) || !m_Geometry.toStream(m_Pointer, ignored)));
-    setCursor(local ? QCursor(Qt::ArrowCursor) :
-        (m_TabletActive || m_EmbeddedCursor || !m_HostCursorVisible) ? QCursor(Qt::BlankCursor) : m_RemoteCursor);
+    const auto cursor = local ? QCursor(Qt::ArrowCursor) :
+        (m_TabletActive || m_EmbeddedCursor || !m_HostCursorVisible) ? QCursor(Qt::BlankCursor) : m_RemoteCursor;
+    setCursor(cursor);
+    if (m_Redirected) controlWindow()->setCursor(cursor);
     updateTabletCursor();
 }
 
@@ -312,7 +328,7 @@ bool QtSessionWindow::event(QEvent* event)
         emit presentationChanged();
         emit surfaceSizeChanged();
     }
-    return QQuickView::event(event);
+    return QQuickWindow::event(event);
 }
 
 void QtSessionWindow::mouseMoveEvent(QMouseEvent* event)
@@ -327,7 +343,7 @@ void QtSessionWindow::mouseMoveEvent(QMouseEvent* event)
         event->accept();
         return;
     }
-    QQuickView::mouseMoveEvent(event);
+    QQuickWindow::mouseMoveEvent(event);
 }
 
 void QtSessionWindow::mousePressEvent(QMouseEvent* event)
@@ -353,7 +369,7 @@ void QtSessionWindow::mousePressEvent(QMouseEvent* event)
     m_LocalButtons |= event->button();
     m_RevealTimer.stop();
     m_HideTimer.stop();
-    QQuickView::mousePressEvent(event);
+    QQuickWindow::mousePressEvent(event);
 }
 
 void QtSessionWindow::mouseDoubleClickEvent(QMouseEvent* event)
@@ -364,7 +380,7 @@ void QtSessionWindow::mouseDoubleClickEvent(QMouseEvent* event)
     if (!localPointer(event->position()) && m_RemoteInputEnabled && !m_Waiting) {
         mousePressEvent(event);
     } else {
-        QQuickView::mouseDoubleClickEvent(event);
+        QQuickWindow::mouseDoubleClickEvent(event);
     }
 }
 
@@ -384,7 +400,7 @@ void QtSessionWindow::mouseReleaseEvent(QMouseEvent* event)
     }
     if (m_LocalButtons.testFlag(event->button())) {
         m_LocalButtons &= ~event->button();
-        QQuickView::mouseReleaseEvent(event);
+        QQuickWindow::mouseReleaseEvent(event);
     } else {
         // A late release after focus/connection cancellation must not operate
         // a newly focused local control or create an unmatched remote up.
@@ -407,7 +423,7 @@ void QtSessionWindow::wheelEvent(QWheelEvent* event)
         event->accept();
         return;
     }
-    QQuickView::wheelEvent(event);
+    QQuickWindow::wheelEvent(event);
 }
 
 bool QtSessionWindow::remoteKeyboard() const
@@ -435,7 +451,7 @@ void QtSessionWindow::keyPressEvent(QKeyEvent* event)
             event->accept();
             return;
         }
-        QQuickView::keyPressEvent(event);
+        QQuickWindow::keyPressEvent(event);
         return;
     }
     const auto id = keyIdentity(event);
@@ -460,7 +476,7 @@ void QtSessionWindow::keyReleaseEvent(QKeyEvent* event)
         }
         event->accept();
     } else if (!remoteKeyboard()) {
-        QQuickView::keyReleaseEvent(event);
+        QQuickWindow::keyReleaseEvent(event);
     } else {
         event->accept();
     }
@@ -492,14 +508,15 @@ void QtSessionWindow::cancelInput()
 void QtSessionWindow::focusOutEvent(QFocusEvent* event)
 {
     cancelInput();
-    QQuickView::focusOutEvent(event);
+    QQuickWindow::focusOutEvent(event);
 }
 
 void QtSessionWindow::resizeEvent(QResizeEvent* event)
 {
     releaseRemoteInput();
     m_Geometry = {};
-    QQuickView::resizeEvent(event);
+    QQuickWindow::resizeEvent(event);
+    if (m_Root) m_Root->setSize(size());
     emit presentationChanged();
     emit surfaceSizeChanged();
 }
@@ -507,7 +524,7 @@ void QtSessionWindow::resizeEvent(QResizeEvent* event)
 void QtSessionWindow::closeEvent(QCloseEvent* event)
 {
     disconnectSession();
-    QQuickView::closeEvent(event);
+    QQuickWindow::closeEvent(event);
 }
 
 void QtSessionWindow::tabletEvent(QTabletEvent* event)

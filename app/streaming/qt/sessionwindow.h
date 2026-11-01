@@ -6,14 +6,17 @@
 #include <QCursor>
 #include <QMap>
 #include <QPointer>
-#include <QQuickView>
+#include <QQmlComponent>
+#include <QQmlEngine>
+#include <QQuickWindow>
 #include <QTimer>
 #include <QVariantMap>
 #include <functional>
 
-// Opt-in Ubuntu Qt frontend. No SDL window, native
-// Wayland proxy, network call or decoder is owned by this GUI-thread component.
-class QtSessionWindow : public QQuickView
+// Shared GUI-thread scene and input policy. An ordinary Qt window drives it on
+// Linux; a render control can drive the same scene into an exact Metal target.
+// No network call or decoder is owned by this component.
+class QtSessionWindow : public QQuickWindow
 {
     Q_OBJECT
     Q_PROPERTY(bool toolbarVisible READ toolbarVisible NOTIFY toolbarChanged)
@@ -35,8 +38,11 @@ class QtSessionWindow : public QQuickView
     Q_PROPERTY(QString statisticsText READ statisticsText WRITE setStatisticsText NOTIFY statisticsChanged)
     Q_PROPERTY(bool statisticsVisible READ statisticsVisible WRITE setStatisticsVisible NOTIFY statisticsChanged)
 public:
-    explicit QtSessionWindow(QWindow* parent = nullptr);
+    explicit QtSessionWindow(QWindow* parent = nullptr, QQuickRenderControl* renderControl = nullptr);
     ~QtSessionWindow() override;
+
+    QQuickItem* rootObject() const { return m_Root; }
+    QQmlComponent::Status status() const { return m_Component.status(); }
 
     bool toolbarVisible() const { return m_ToolbarVisible; }
     bool fullscreen() const { return m_Fullscreen; }
@@ -143,6 +149,11 @@ private:
     QWindow* controlWindow();
     bool mapPointer(QPointF logical, QPointF& stream, bool drag) const;
 
+    QQmlEngine m_Engine;
+    QQmlComponent m_Component{&m_Engine};
+    QQuickItem* m_Root = nullptr;
+    QPointer<QWindow> m_ControlWindow;
+    const bool m_Redirected;
     QtSessionGeometry m_Geometry;
     bool m_CanSpanDisplays = false;
     bool m_SpanningDisplays = false;

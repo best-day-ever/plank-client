@@ -382,7 +382,7 @@ private slots:
     void qmlLoads()
     {
         QtSessionWindow window;
-        QCOMPARE(window.status(), QQuickView::Ready);
+        QCOMPARE(window.status(), QQmlComponent::Ready);
         QVERIFY(window.rootObject());
         QVERIFY(window.rootObject()->findChild<QQuickItem*>("sessionToolbar"));
     }
@@ -390,7 +390,7 @@ private slots:
     void toolbarReadoutsAreStackedAndStable()
     {
         QtSessionWindow window;
-        QCOMPARE(window.status(), QQuickView::Ready);
+        QCOMPARE(window.status(), QQmlComponent::Ready);
         QVERIFY(window.rootObject());
         prepare(window);
         window.setPinned(true);
@@ -505,7 +505,7 @@ private slots:
     {
         QtSessionShell shell;
         auto& scene = shell.surface();
-        QCOMPARE(scene.status(), QQuickView::Ready);
+        QCOMPARE(scene.status(), QQmlComponent::Ready);
         QVERIFY(scene.rootObject());
         shell.resize(1280, 720);
         shell.show();
@@ -580,7 +580,7 @@ private slots:
     {
         QCOMPARE(QQuickStyle::name(), QStringLiteral("Material"));
         QtSessionWindow window;
-        QCOMPARE(window.status(), QQuickView::Ready);
+        QCOMPARE(window.status(), QQmlComponent::Ready);
         QVERIFY(window.rootObject());
         prepare(window);
         window.setPinned(true);
@@ -637,7 +637,7 @@ private slots:
     void toolbarButtonsKeepInvisibleHitTargets()
     {
         QtSessionWindow window;
-        QCOMPARE(window.status(), QQuickView::Ready);
+        QCOMPARE(window.status(), QQmlComponent::Ready);
         QVERIFY(window.rootObject());
         prepare(window);
         window.setLiveSession(true);
@@ -797,7 +797,7 @@ private slots:
     void recoveryDialogHasOnlyDisconnectAndClearsWithoutInteraction()
     {
         QtSessionWindow window;
-        QCOMPARE(window.status(), QQuickView::Ready);
+        QCOMPARE(window.status(), QQmlComponent::Ready);
         QVERIFY(window.rootObject());
         prepare(window);
         const auto overlay = window.rootObject()->findChild<QQuickItem*>("recoveryOverlay");
