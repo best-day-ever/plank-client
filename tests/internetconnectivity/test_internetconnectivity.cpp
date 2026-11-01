@@ -23,6 +23,15 @@ static Monitor::PingCommand stub(int code, int delayMs = 0, const QString& error
             {QStringLiteral("--ping-stub"), QString::number(code), QString::number(delayMs), error, output}, 1};
 }
 
+static QQuickItem* findVisualItem(QQuickItem* parent, const QString& name)
+{
+    // Repeater delegates have visual parents distinct from QObject ownership.
+    if (parent->objectName() == name) return parent;
+    for (auto* child : parent->childItems())
+        if (auto* found = findVisualItem(child, name)) return found;
+    return nullptr;
+}
+
 void ConnectivityTest::policyDefaultsAndExplicitValues()
 {
     QTemporaryDir dir;
@@ -463,10 +472,12 @@ void ConnectivityTest::statusUi()
     QVERIFY(!refresh->isEnabled());
     QTRY_VERIFY(!monitor.summaryRunning());
     QTRY_VERIFY(refresh->isEnabled());
-    auto* firstRtt = root->findChild<QQuickItem*>("internetSummaryRtt0");
-    auto* secondStatus = root->findChild<QQuickItem*>("internetSummaryStatus1");
-    auto* thirdStatus = root->findChild<QQuickItem*>("internetSummaryStatus2");
-    QVERIFY(firstRtt && secondStatus && thirdStatus);
+    QQuickItem* firstRtt = nullptr;
+    QQuickItem* secondStatus = nullptr;
+    QQuickItem* thirdStatus = nullptr;
+    QTRY_VERIFY((firstRtt = findVisualItem(window->contentItem(), "internetSummaryRtt0")));
+    QTRY_VERIFY((secondStatus = findVisualItem(window->contentItem(), "internetSummaryStatus1")));
+    QTRY_VERIFY((thirdStatus = findVisualItem(window->contentItem(), "internetSummaryStatus2")));
     QCOMPARE(firstRtt->property("text").toString(), QString("12 ms"));
     QCOMPARE(secondStatus->property("text").toString(), QString("No response"));
     QCOMPARE(thirdStatus->property("text").toString(), QString("Unavailable"));
@@ -500,8 +511,8 @@ void ConnectivityTest::statusUi()
     QTRY_VERIFY(!maximum.summaryRunning());
     QCOMPARE(maximum.summaryResults().size(), 8);
     QTest::qWait(50);
-    auto* lastRtt = root->findChild<QQuickItem*>("internetSummaryRtt7");
-    QVERIFY(lastRtt);
+    QQuickItem* lastRtt = nullptr;
+    QTRY_VERIFY((lastRtt = findVisualItem(window->contentItem(), "internetSummaryRtt7")));
     QCOMPARE(lastRtt->property("text").toString(), QString("<1 ms"));
     QVERIFY(dialog->property("height").toReal() <= window->height() - 32);
     QVERIFY(lastRtt->mapToScene(QPointF(0, lastRtt->height())).y() < close->mapToScene(QPointF()).y());
