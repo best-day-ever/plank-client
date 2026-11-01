@@ -38,6 +38,24 @@ struct Window {
         if (!until([this] { return shell.renderingStopped(); })) qFatal("Qt Metal shutdown did not finish");
     }
 };
+struct FullscreenCompletion {
+    bool entered = false, exited = false;
+    id enterObserver = nil, exitObserver = nil;
+    explicit FullscreenCompletion(NSWindow* window)
+    {
+        auto* state = this;
+        enterObserver = [[NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidEnterFullScreenNotification
+            object:window queue:nil usingBlock:^(NSNotification*) { state->entered = true; }] retain];
+        exitObserver = [[NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidExitFullScreenNotification
+            object:window queue:nil usingBlock:^(NSNotification*) { state->exited = true; }] retain];
+    }
+    ~FullscreenCompletion()
+    {
+        [NSNotificationCenter.defaultCenter removeObserver:enterObserver];
+        [NSNotificationCenter.defaultCenter removeObserver:exitObserver];
+        [enterObserver release]; [exitObserver release];
+    }
+};
 QtVideoFrame::Ptr sample()
 {
     AVFrame* raw = av_frame_alloc();
@@ -122,12 +140,18 @@ private slots:
             QVERIFY(errors.isEmpty());
             if (cycle == 0) {
                 const QSize normalSize = shell.size();
+                FullscreenCompletion completed(view.window);
                 shell.showSession(true);
-                QVERIFY(until([&] { return (view.window.styleMask & NSWindowStyleMaskFullScreen) &&
+                // Qt's requested state/style mask precedes Cocoa's completed
+                // transition. Observe the native completion, not a timer.
+                QVERIFY(until([&] { return completed.entered && (view.window.styleMask & NSWindowStyleMaskFullScreen) &&
                     scene.size() == shell.size(); }));
                 shell.showSession(false);
-                QVERIFY(until([&] { return !(view.window.styleMask & NSWindowStyleMaskFullScreen) &&
-                    shell.size() == normalSize && scene.size() == normalSize; }));
+                const bool restored = until([&] { return completed.exited && !(view.window.styleMask & NSWindowStyleMaskFullScreen) &&
+                    shell.size() == normalSize && scene.size() == normalSize; });
+                if (!restored) qWarning() << "Fullscreen restore:" << completed.entered << completed.exited
+                    << normalSize << shell.size() << scene.size() << shell.windowState();
+                QVERIFY(restored);
                 QVERIFY(errors.isEmpty());
             }
             shell.stopRendering();

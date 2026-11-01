@@ -177,13 +177,7 @@ QtMetalSessionShell::QtMetalSessionShell()
     connect(&m_Rendering->control, &QQuickRenderControl::sceneChanged,
             this, &QtMetalSessionShell::requestRender);
     connect(this, &QWindow::screenChanged, this, [this] { updateSceneSize(); });
-    connect(this, &QWindow::windowStateChanged, this, [this](Qt::WindowState state) {
-        updateKeepAwake();
-        if (m_RestoreWindowedSize && state == Qt::WindowNoState) {
-            m_RestoreWindowedSize = false;
-            resize(m_WindowedSize);
-        }
-    });
+    connect(this, &QWindow::windowStateChanged, this, &QtMetalSessionShell::updateKeepAwake);
 }
 
 QtMetalSessionShell::~QtMetalSessionShell()
@@ -209,7 +203,6 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
         resize(defaultWindowedSize(available.size(), desktop));
         setPosition(available.center() - QPoint(width() / 2, height() / 2));
     }
-    m_WindowedSize = size();
     create();
     auto& r = *m_Rendering;
     NSView* view = (NSView*)winId();
@@ -246,14 +239,11 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
 
 void QtMetalSessionShell::showSession(bool fullscreen)
 {
-    if (fullscreen) {
-        if (windowState() == Qt::WindowNoState) m_WindowedSize = size();
-        m_RestoreWindowedSize = false;
-        showFullScreen();
-    } else {
-        if (windowState() == Qt::WindowFullScreen) m_RestoreWindowedSize = !m_WindowedSize.isEmpty();
-        showNormal();
-    }
+    // Cocoa remembers the normal frame. Do not copy the Wayland decoration
+    // workaround here: Qt's requested state changes before the native Spaces
+    // animation completes, and resizing then interferes with Cocoa's restore.
+    if (fullscreen) showFullScreen();
+    else showNormal();
 }
 
 void QtMetalSessionShell::stopRendering()
