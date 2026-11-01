@@ -19,6 +19,7 @@ public:
     void stopRendering();
     bool renderingStopped() const;
     bool ownsKeyboard() const;
+    void setKeepAwake(bool enabled);
 
 signals:
     void renderingFailed(QString reason);
@@ -37,6 +38,7 @@ private:
     void synchronizeFrame();
     void frameFinished();
     void updateSceneSize();
+    void updateKeepAwake();
     std::unique_ptr<Rendering> m_Rendering;
     std::unique_ptr<QtSessionWindow> m_Surface;
     QSize m_WindowedSize;
@@ -44,4 +46,5 @@ private:
     bool m_Dirty = true;
     bool m_RenderingFrame = false;
     bool m_RestoreWindowedSize = false;
+    bool m_KeepAwake = false;
 };

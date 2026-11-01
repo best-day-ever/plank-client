@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #include <QCoreApplication>
 #include <QDynamicPropertyChangeEvent>
 #include <QQuickGraphicsDevice>
@@ -36,6 +37,7 @@ struct QtMetalSessionShell::Rendering
     {
         Q_ASSERT(!thread || thread->isFinished());
         delete thread;
+        if (idleAssertion != kIOPMNullAssertionID) IOPMAssertionRelease(idleAssertion);
         [layer release]; [queue release]; [device release];
     }
     QtMetalSessionShell* const shell;
@@ -44,6 +46,7 @@ struct QtMetalSessionShell::Rendering
     id<MTLDevice> device = nil;
     id<MTLCommandQueue> queue = nil;
     CAMetalLayer* layer = nil;
+    IOPMAssertionID idleAssertion = kIOPMNullAssertionID;
     std::mutex mutex;
     std::condition_variable changed;
     bool stop = false, requested = false, sync = false, synced = false, cancel = false;
@@ -152,6 +155,7 @@ QtMetalSessionShell::QtMetalSessionShell()
             this, &QtMetalSessionShell::requestRender);
     connect(this, &QWindow::screenChanged, this, [this] { updateSceneSize(); });
     connect(this, &QWindow::windowStateChanged, this, [this](Qt::WindowState state) {
+        updateKeepAwake();
         if (m_RestoreWindowedSize && state == Qt::WindowNoState) {
             m_RestoreWindowedSize = false;
             resize(m_WindowedSize);
@@ -233,6 +237,7 @@ void QtMetalSessionShell::showSession(bool fullscreen)
 
 void QtMetalSessionShell::stopRendering()
 {
+    setKeepAwake(false);
     std::lock_guard<std::mutex> lock(m_Rendering->mutex);
     m_Rendering->stop = true;
     m_Rendering->changed.notify_all();
@@ -248,6 +253,29 @@ bool QtMetalSessionShell::ownsKeyboard() const
     if (!isVisible() || !handle()) return false;
     NSWindow* native = ((NSView*)winId()).window;
     return native && NSApp.isActive && NSApp.keyWindow == native && native.isOnActiveSpace;
+}
+
+void QtMetalSessionShell::setKeepAwake(bool enabled)
+{
+    m_KeepAwake = enabled;
+    updateKeepAwake();
+}
+
+void QtMetalSessionShell::updateKeepAwake()
+{
+    auto& assertion = m_Rendering->idleAssertion;
+    const bool awake = m_KeepAwake && isVisible() && windowState() != Qt::WindowMinimized;
+    if (awake && assertion == kIOPMNullAssertionID) {
+        const auto result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep,
+            kIOPMAssertionLevelOn, CFSTR("PLANK remote desktop session"), &assertion);
+        if (result != kIOReturnSuccess) {
+            assertion = kIOPMNullAssertionID;
+            qWarning("Could not keep the Client display awake (%d)", int(result));
+        }
+    } else if (!awake && assertion != kIOPMNullAssertionID) {
+        IOPMAssertionRelease(assertion);
+        assertion = kIOPMNullAssertionID;
+    }
 }
 
 void QtMetalSessionShell::requestRender()
@@ -301,6 +329,9 @@ void QtMetalSessionShell::updateSceneSize()
 bool QtMetalSessionShell::event(QEvent* event)
 {
     switch (event->type()) {
+    case QEvent::Show:
+        updateKeepAwake();
+        break;
     case QEvent::DynamicPropertyChange:
         if (static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "plankMetalTransfer" && m_Rendering->layer) {
             const auto transfer = property("plankMetalTransfer").toString();
@@ -318,6 +349,7 @@ bool QtMetalSessionShell::event(QEvent* event)
         return QCoreApplication::sendEvent(m_Surface.get(), event);
     case QEvent::WindowDeactivate: case QEvent::Hide:
         m_Surface->cancelInput();
+        if (event->type() == QEvent::Hide) updateKeepAwake();
         break;
     case QEvent::DevicePixelRatioChange:
         updateSceneSize();

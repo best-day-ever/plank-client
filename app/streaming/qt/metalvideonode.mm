@@ -43,7 +43,7 @@ public:
     }
     QRectF rect() const override { return QRectF(QPointF(), m_Geometry.logicalSize); }
     RenderingFlags flags() const override { return BoundedRectRendering; }
-    StateFlags changedStates() const override { return ViewportState | ScissorState; }
+    StateFlags changedStates() const override { return ViewportState | ScissorState | CullState; }
 
     void prepare() override
     {

@@ -14,6 +14,7 @@
 #ifdef Q_OS_MACOS
 class MacRawWacomInput;
 class MacKeyboardCapture;
+class MacQuitShortcut;
 using QtRawWacomInput = MacRawWacomInput;
 #else
 class LinuxRawWacomInput;
@@ -92,6 +93,7 @@ private:
     std::thread m_TabletThread;
 #ifdef Q_OS_MACOS
     std::unique_ptr<MacKeyboardCapture> m_MacKeys;
+    std::unique_ptr<MacQuitShortcut> m_MacQuit;
     std::atomic_bool m_NormalizedPen{false};
     bool m_PenDown = false;
     bool m_PenPresent = false;

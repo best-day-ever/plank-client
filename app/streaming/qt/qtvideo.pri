@@ -1,6 +1,7 @@
 !linux:!macx: error("The Qt video frontend supports Linux and macOS")
 CONFIG += c++17 link_pkgconfig
 QT += quick
+INCLUDEPATH += $$PWD
 PKGCONFIG += libavutil
 SOURCES += $$PWD/videoitem.cpp $$PWD/videomailbox.cpp $$PWD/videoframe.cpp $$PWD/videopresenter.cpp
 HEADERS += $$PWD/videoitem.h $$PWD/videomailbox.h $$PWD/videoframe.h $$PWD/videopresenter.h $$PWD/decodedvideodelivery.h

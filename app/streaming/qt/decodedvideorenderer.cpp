@@ -97,6 +97,15 @@ public:
     bool notifyWindowChanged(PWINDOW_STATE_CHANGE_INFO) override { return true; }
     int getDecoderColorspace() override { return m_Identity ? COLORSPACE_IDENTITY_GBR : COLORSPACE_REC_709; }
     int getDecoderColorRange() override { return COLOR_RANGE_FULL; }
+#ifdef Q_OS_MACOS
+    int getDecoderCapabilities() override
+    {
+        // Same decoder capabilities as the existing VideoToolbox/Metal path;
+        // changing the window owner must not change loss recovery negotiation.
+        return CAPABILITY_REFERENCE_FRAME_INVALIDATION_HEVC |
+               CAPABILITY_REFERENCE_FRAME_INVALIDATION_AV1;
+    }
+#endif
 
     AVPixelFormat getPreferredPixelFormat(int format) override
     {

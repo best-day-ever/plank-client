@@ -7,7 +7,7 @@ linux: SOURCES += $$PWD/sessionshell.cpp
 macx {
     OBJECTIVE_SOURCES += $$PWD/metalsessionshell.mm
     HEADERS += $$PWD/metalsessionshell.h
-    LIBS += -framework Metal -framework QuartzCore
+    LIBS += -framework Metal -framework QuartzCore -framework IOKit
 }
 HEADERS += $$PWD/sessionwindow.h $$PWD/sessiongeometry.h $$PWD/sessionshell.h $$PWD/cursoritem.h $$PWD/sessionshortcut.h
 RESOURCES += $$PWD/qtsession.qrc

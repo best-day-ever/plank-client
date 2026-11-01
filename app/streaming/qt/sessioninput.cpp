@@ -3,6 +3,7 @@
 #ifdef Q_OS_MACOS
 #include "../input/macrawwacom.h"
 #include "../mackeyboardcapture.h"
+#include "../macquitshortcut.h"
 #include "../input/sdl-darwin-scancodes.h"
 #else
 #include "../input/linuxwacom.h"
@@ -21,9 +22,13 @@
 QtSessionInput::QtSessionInput(QObject* parent) : QObject(parent)
 {
 #ifdef Q_OS_MACOS
-    m_MacKeys = std::make_unique<MacKeyboardCapture>(
-        [this] { return m_Enabled && m_SystemKeys && (m_NativeFocus ? m_NativeFocus() : m_Focused); },
-        [this] { releaseAll(); });
+    const auto ownsKeyboard = [this] {
+        return m_Enabled && m_SystemKeys && (m_NativeFocus ? m_NativeFocus() : m_Focused);
+    };
+    m_MacKeys = std::make_unique<MacKeyboardCapture>(ownsKeyboard, [this] { releaseAll(); });
+    // Preserve ordinary menu/Dock Quit, but never let a remotely forwarded
+    // Command-Q also activate the local application's Quit shortcut.
+    m_MacQuit = std::make_unique<MacQuitShortcut>(ownsKeyboard);
     m_MacKeys->setQueueWake([this] {
         return QMetaObject::invokeMethod(this, [this] {
             m_MacKeys->dispatchPending([this](SDL_KeyboardEvent* event) {
@@ -43,7 +48,15 @@ QtSessionInput::QtSessionInput(QObject* parent) : QObject(parent)
     });
 #endif
 }
-QtSessionInput::~QtSessionInput() { Q_ASSERT(!m_TabletThread.joinable()); }
+QtSessionInput::~QtSessionInput()
+{
+    Q_ASSERT(!m_TabletThread.joinable());
+#ifdef Q_OS_MACOS
+    m_Enabled = false;
+    m_MacQuit.reset();
+    m_MacKeys.reset(); // Release callbacks still have valid input state.
+#endif
+}
 
 void QtSessionInput::startTablets(unsigned hostFeatures)
 {
@@ -220,6 +233,7 @@ void QtSessionInput::setSystemKeys(bool captured)
     m_SystemKeys = captured;
 #ifdef Q_OS_MACOS
     m_MacKeys->refresh();
+    m_MacQuit->refresh();
 #endif
 }
 bool QtSessionInput::sendPosition(QPointF position, bool onlyIfChanged)

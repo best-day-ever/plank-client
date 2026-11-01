@@ -197,6 +197,7 @@ void QtSessionRuntime::start(QWindow* launcher)
         m_Screens.append(shell->screen());
         shell->setTitle(m_Session->m_Computer->name + QStringLiteral(" — PLANK Client"));
 #ifdef Q_OS_MACOS
+        shell->setKeepAwake(primary && m_Session->m_Preferences->keepAwake);
         connect(shell.get(), &QtMetalSessionShell::renderingFailed, this, [this](QString reason) {
             emit m_Session->displayLaunchError(reason); stop();
         });
@@ -601,9 +602,16 @@ void QtSessionRuntime::updateFocus()
 #endif
     const auto policy = m_CapturePolicy;
     const bool fullscreen = !m_Windows.empty() && m_Windows.front()->windowState() == Qt::WindowFullScreen;
-    const bool grab = active && m_Streaming && m_InputGrabbed && !m_Stop.load() &&
+    const bool captureAllowed = m_Streaming && m_InputGrabbed && !m_Stop.load() &&
         (policy == StreamingPreferences::CSK_ALWAYS || (policy == StreamingPreferences::CSK_FULLSCREEN && fullscreen));
+#ifdef Q_OS_MACOS
+    // Keep policy separate from cached Qt focus. The native tap and Quit
+    // guard recheck AppKit's key window/Space on the first returned key.
+    m_Input->setSystemKeys(captureAllowed);
+#else
+    const bool grab = active && captureAllowed;
     m_Input->setSystemKeys(grab);
+#endif
 #ifdef Q_OS_LINUX
     QtPlatformSessionShell* focusedShell = nullptr;
     for (auto& shell : m_Windows)
