@@ -203,6 +203,7 @@ void QtSessionRuntime::start(QWindow* launcher)
         });
 #endif
         shell->prepareForSession(desktop, m_Fullscreen && (primary || m_SpanDisplays));
+        if (m_Stop.load()) return;
         auto& surface = shell->surface();
         surface.setDisplayMode(canSpan, m_SpanDisplays);
         surface.setLiveSession(true);

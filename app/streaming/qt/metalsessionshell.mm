@@ -16,6 +16,16 @@
 #include <mutex>
 
 namespace {
+CAMetalLayer* metalLayer(CALayer* root)
+{
+    if ([root isKindOfClass:[CAMetalLayer class]]) return (CAMetalLayer*)root;
+    // Cocoa may wrap the rendering layer in a layout/container layer. Follow
+    // public Core Animation children rather than depending on Qt's private type.
+    for (CALayer* child in root.sublayers)
+        if (auto* layer = metalLayer(child)) return layer;
+    return nil;
+}
+
 class RenderControl final : public QQuickRenderControl
 {
 public:
@@ -190,7 +200,8 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
     create();
     auto& r = *m_Rendering;
     NSView* view = (NSView*)winId();
-    if (![view.layer isKindOfClass:[CAMetalLayer class]]) {
+    r.layer = [metalLayer(view.layer) retain];
+    if (!r.layer) {
         emit renderingFailed(QStringLiteral("Qt did not create a native Metal window"));
         return;
     }
@@ -200,7 +211,6 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
         emit renderingFailed(QStringLiteral("A Metal device is not available"));
         return;
     }
-    r.layer = [(CAMetalLayer*)view.layer retain];
     r.layer.device = r.device;
     r.layer.pixelFormat = MTLPixelFormatRGB10A2Unorm;
     r.layer.opaque = YES;
@@ -209,9 +219,7 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
     r.layer.allowsNextDrawableTimeout = YES;
     r.layer.displaySyncEnabled = YES;
     r.layer.wantsExtendedDynamicRangeContent = NO;
-    auto colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-    r.layer.colorspace = colorSpace;
-    CGColorSpaceRelease(colorSpace);
+    updateColorSpace();
     m_Surface->setGraphicsDevice(QQuickGraphicsDevice::fromDeviceAndCommandQueue(
         (MTLDevice*)r.device, (MTLCommandQueue*)r.queue));
     updateSceneSize();
@@ -326,6 +334,20 @@ void QtMetalSessionShell::updateSceneSize()
     requestRender();
 }
 
+void QtMetalSessionShell::updateColorSpace()
+{
+    if (!m_Rendering->layer) return;
+    const auto transfer = property("plankMetalTransfer").toString();
+    auto space = CGColorSpaceCreateWithName(transfer == QStringLiteral("bt2020") ? kCGColorSpaceITUR_2020 :
+        transfer == QStringLiteral("bt709") ? kCGColorSpaceITUR_709 : kCGColorSpaceSRGB);
+    // Qt propagates NSWindow's color space to its layer on backing/display
+    // changes. Set both so resizing or crossing displays preserves the stream's
+    // transfer function instead of replacing it with the monitor profile.
+    ((NSView*)winId()).window.colorSpace = [[[NSColorSpace alloc] initWithCGColorSpace:space] autorelease];
+    m_Rendering->layer.colorspace = space;
+    CGColorSpaceRelease(space);
+}
+
 bool QtMetalSessionShell::event(QEvent* event)
 {
     switch (event->type()) {
@@ -333,13 +355,7 @@ bool QtMetalSessionShell::event(QEvent* event)
         updateKeepAwake();
         break;
     case QEvent::DynamicPropertyChange:
-        if (static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "plankMetalTransfer" && m_Rendering->layer) {
-            const auto transfer = property("plankMetalTransfer").toString();
-            auto space = CGColorSpaceCreateWithName(transfer == QStringLiteral("bt2020") ? kCGColorSpaceITUR_2020 :
-                transfer == QStringLiteral("bt709") ? kCGColorSpaceITUR_709 : kCGColorSpaceSRGB);
-            m_Rendering->layer.colorspace = space;
-            CGColorSpaceRelease(space);
-        }
+        if (static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "plankMetalTransfer") updateColorSpace();
         break;
     case QEvent::MouseMove: case QEvent::MouseButtonPress: case QEvent::MouseButtonRelease:
     case QEvent::MouseButtonDblClick: case QEvent::Wheel: case QEvent::TabletMove:

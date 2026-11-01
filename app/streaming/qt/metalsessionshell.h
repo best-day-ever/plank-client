@@ -38,6 +38,7 @@ private:
     void synchronizeFrame();
     void frameFinished();
     void updateSceneSize();
+    void updateColorSpace();
     void updateKeepAwake();
     std::unique_ptr<Rendering> m_Rendering;
     std::unique_ptr<QtSessionWindow> m_Surface;

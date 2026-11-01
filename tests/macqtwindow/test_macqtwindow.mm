@@ -11,6 +11,13 @@
 #include <memory>
 
 namespace {
+CAMetalLayer* findMetalLayer(CALayer* layer)
+{
+    if ([layer isKindOfClass:[CAMetalLayer class]]) return (CAMetalLayer*)layer;
+    for (CALayer* child in layer.sublayers)
+        if (auto* result = findMetalLayer(child)) return result;
+    return nil;
+}
 bool until(const std::function<bool()>& ready, int timeout = 15000)
 {
     QElapsedTimer timer;
@@ -72,8 +79,9 @@ private slots:
             QVERIFY(until([&] { return swaps.load()>0 || !errors.isEmpty(); }));
             QVERIFY(errors.isEmpty());
             auto* view = (NSView*)shell.winId();
-            QVERIFY([view.layer isKindOfClass:[CAMetalLayer class]]);
-            QCOMPARE(((CAMetalLayer*)view.layer).pixelFormat,MTLPixelFormatRGB10A2Unorm);
+            auto* layer = findMetalLayer(view.layer);
+            QVERIFY(layer);
+            QCOMPARE(layer.pixelFormat,MTLPixelFormatRGB10A2Unorm);
             QVERIFY(view.window.styleMask & NSWindowStyleMaskTitled);
             QVERIFY(view.window.styleMask & NSWindowStyleMaskResizable);
 
@@ -82,6 +90,7 @@ private slots:
             const auto picture = sample();
             QVERIFY(picture);
             for (QSize size : {QSize(800,450),QSize(1040,585),QSize(800,450)}) {
+                shell.setProperty("plankMetalTransfer",QStringLiteral("bt709"));
                 shell.resize(size);
                 QVERIFY(until([&] { return scene.size()==size; }));
                 const QSize pixels = size*shell.devicePixelRatio();
@@ -96,6 +105,12 @@ private slots:
                 QVERIFY(errors.isEmpty());
                 QCOMPARE(item->status()->error.load(),QtVideoStatus::None);
                 QVERIFY(item->status()->livePresented);
+                auto expectedSpace = CGColorSpaceCreateWithName(kCGColorSpaceITUR_709);
+                const bool layerMatches = CGColorSpaceEqualToColorSpace(layer.colorspace,expectedSpace);
+                const bool windowMatches = CGColorSpaceEqualToColorSpace(view.window.colorSpace.CGColorSpace,expectedSpace);
+                CGColorSpaceRelease(expectedSpace);
+                QVERIFY(layerMatches);
+                QVERIFY(windowMatches);
             }
             shell.hide();
             QTest::qWait(30);
