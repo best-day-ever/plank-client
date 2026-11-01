@@ -1,10 +1,16 @@
 #pragma once
 
+#ifdef Q_OS_MACOS
+#include "metalsessionshell.h"
+using QtPlatformSessionShell = QtMetalSessionShell;
+#else
 #include "sessionshell.h"
+#include "waylandsessionguard.h"
+using QtPlatformSessionShell = QtSessionShell;
+#endif
 #include "videopresenter.h"
 #include "decodedvideorenderer.h"
 #include "sessioninput.h"
-#include "waylandsessionguard.h"
 #include <QPointer>
 #include <QThread>
 #include <QTimer>
@@ -47,18 +53,20 @@ private:
     void setInputEnabled(bool enabled);
     void handleShortcut(int key);
     void toggleFullscreen();
-    void selectFullscreenDisplays(bool span, QtSessionShell* source);
+    void selectFullscreenDisplays(bool span, QtPlatformSessionShell* source);
     void showPresentationWindows();
     void minimize();
 
     Session* const m_Session;
     QPointer<QWindow> m_Launcher;
-    std::vector<std::unique_ptr<QtSessionShell>> m_Windows;
+    std::vector<std::unique_ptr<QtPlatformSessionShell>> m_Windows;
     QList<QPointer<QScreen>> m_Screens;
     std::unique_ptr<QtVideoPresenter> m_Presenter;
     std::unique_ptr<QtDecodedVideoRendererFactory> m_Factory;
     std::unique_ptr<QtSessionInput> m_Input;
+#ifdef Q_OS_LINUX
     std::unique_ptr<QtWaylandSessionGuard> m_WindowGuard;
+#endif
     QThread* m_Worker = nullptr;
     QTimer m_Tick;
     QTimer m_StartupDeadline;

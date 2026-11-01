@@ -18,6 +18,7 @@ public:
     void showSession(bool fullscreen);
     void stopRendering();
     bool renderingStopped() const;
+    bool ownsKeyboard() const;
 
 signals:
     void renderingFailed(QString reason);

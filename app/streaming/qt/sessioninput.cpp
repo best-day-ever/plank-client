@@ -1,16 +1,48 @@
 #include "sessioninput.h"
 #include "sessionshortcut.h"
+#ifdef Q_OS_MACOS
+#include "../input/macrawwacom.h"
+#include "../mackeyboardcapture.h"
+#include "../input/sdl-darwin-scancodes.h"
+#else
 #include "../input/linuxwacom.h"
 #include "../input/linuxrawwacom.h"
+#endif
+#include <Limelight.h>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QThread>
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <memory>
 #include <utility>
 
-QtSessionInput::QtSessionInput(QObject* parent) : QObject(parent) {}
+QtSessionInput::QtSessionInput(QObject* parent) : QObject(parent)
+{
+#ifdef Q_OS_MACOS
+    m_MacKeys = std::make_unique<MacKeyboardCapture>(
+        [this] { return m_Enabled && m_SystemKeys && (m_NativeFocus ? m_NativeFocus() : m_Focused); },
+        [this] { releaseAll(); });
+    m_MacKeys->setQueueWake([this] {
+        return QMetaObject::invokeMethod(this, [this] {
+            m_MacKeys->dispatchPending([this](SDL_KeyboardEvent* event) {
+                Qt::KeyboardModifiers mods;
+                if (event->mod & SDL_KMOD_CTRL) mods |= Qt::ControlModifier;
+                if (event->mod & SDL_KMOD_SHIFT) mods |= Qt::ShiftModifier;
+                if (event->mod & SDL_KMOD_ALT) mods |= Qt::AltModifier;
+                if (event->mod & SDL_KMOD_GUI) mods |= Qt::MetaModifier;
+                for (quint32 code = 0; code < SDL_arraysize(darwin_scancode_table); ++code) {
+                    if (event->scancode != SDL_SCANCODE_UNKNOWN && darwin_scancode_table[code] == event->scancode) {
+                        key(code, int(qtRemoteKey(code).vk), event->down, event->repeat, mods);
+                        break;
+                    }
+                }
+            });
+        }, Qt::QueuedConnection);
+    });
+#endif
+}
 QtSessionInput::~QtSessionInput() { Q_ASSERT(!m_TabletThread.joinable()); }
 
 void QtSessionInput::startTablets(unsigned hostFeatures)
@@ -21,7 +53,12 @@ void QtSessionInput::startTablets(unsigned hostFeatures)
 void QtSessionInput::tabletMain(unsigned hostFeatures)
 {
     const auto activity = [this] { tabletActivity(); };
-    std::unique_ptr<LinuxRawWacomInput> raw;
+    std::unique_ptr<QtRawWacomInput> raw;
+#ifdef Q_OS_MACOS
+    const auto rawFlags = LI_FF_RAW_HID_TABLET | LI_FF_RAW_HID_FOCUS_SUSPEND;
+    if ((hostFeatures & rawFlags) == rawFlags) raw = std::make_unique<QtRawWacomInput>(activity);
+    m_NormalizedPen.store(!raw && (hostFeatures & LI_FF_PEN_TOUCH_EVENTS));
+#else
     std::unique_ptr<LinuxWacomInput> normalized;
     if (!qEnvironmentVariableIntValue("PLANK_EXTERNAL_WACOM_BRIDGE")) {
         const auto decision = plankWacomTransportForConnectedDevice();
@@ -31,6 +68,7 @@ void QtSessionInput::tabletMain(unsigned hostFeatures)
         else if (hostFeatures & LI_FF_PEN_TOUCH_EVENTS)
             normalized = std::make_unique<LinuxWacomInput>(activity);
     }
+#endif
     m_RawControl.publish(raw.get());
     TabletState previous = TabletState::Streaming;
     for (;;) {
@@ -45,15 +83,21 @@ void QtSessionInput::tabletMain(unsigned hostFeatures)
         if (state != previous) {
             if (state == TabletState::Reconnecting) {
                 if (raw) raw->beginReconnect();
+#ifdef Q_OS_LINUX
                 if (normalized) normalized->beginReconnect();
+#endif
             } else if (state == TabletState::Streaming) {
                 if (raw) raw->finishReconnect();
+#ifdef Q_OS_LINUX
                 if (normalized) normalized->finishReconnect();
+#endif
             }
             previous = state;
         }
         if (raw) raw->setActive(focused && state == TabletState::Streaming);
+#ifdef Q_OS_LINUX
         if (normalized) normalized->setActive(focused && state == TabletState::Streaming);
+#endif
         if (state == TabletState::Stopped) break;
         {
             std::lock_guard<std::mutex> lock(m_TabletMutex);
@@ -62,7 +106,12 @@ void QtSessionInput::tabletMain(unsigned hostFeatures)
         m_TabletChanged.notify_all();
     }
     m_RawControl.clear();
-    raw.reset(); normalized.reset();
+    raw.reset();
+#ifdef Q_OS_LINUX
+    normalized.reset();
+#else
+    m_NormalizedPen.store(false);
+#endif
     {
         std::lock_guard<std::mutex> lock(m_TabletMutex);
         m_TabletFinished = true;
@@ -96,7 +145,7 @@ void QtSessionInput::requestFocus()
 }
 void QtSessionInput::handleRawHidControl(const unsigned char* data, unsigned int length)
 {
-    m_RawControl.invoke([&](LinuxRawWacomInput& input) { input.handleControl(data, length); });
+    m_RawControl.invoke([&](QtRawWacomInput& input) { input.handleControl(data, length); });
 }
 void QtSessionInput::handleCursorShape(const unsigned char* data, unsigned int length)
 {
@@ -166,6 +215,13 @@ void QtSessionInput::setFocused(bool focused)
     m_Focused = focused;
     requestFocus();
 }
+void QtSessionInput::setSystemKeys(bool captured)
+{
+    m_SystemKeys = captured;
+#ifdef Q_OS_MACOS
+    m_MacKeys->refresh();
+#endif
+}
 bool QtSessionInput::sendPosition(QPointF position, bool onlyIfChanged)
 {
     const auto size = m_StreamSize.load();
@@ -228,7 +284,7 @@ void QtSessionInput::key(quint32 scan, int key, bool down, bool repeat, Qt::Keyb
         const int shortcut = qtSessionShortcut(scan, key, modifiers);
         if (shortcut) { m_ShortcutKeys.insert(scan); releaseAll(); emit shortcutRequested(shortcut); return; }
     }
-    auto mapped = qtLinuxRemoteKey(scan);
+    auto mapped = qtRemoteKey(scan);
     if (down) {
         if (!m_Enabled || !mapped.vk || ((mapped.vk == 0x5b || mapped.vk == 0x5c) && !m_SystemKeys)) return;
         m_Keys.insert(scan, mapped);
@@ -247,6 +303,12 @@ void QtSessionInput::key(quint32 scan, int key, bool down, bool repeat, Qt::Keyb
 }
 void QtSessionInput::releaseAll()
 {
+#ifdef Q_OS_MACOS
+    if (m_NormalizedPen.load()) LiSendPenEvent(LI_TOUCH_EVENT_CANCEL_ALL, LI_TOOL_TYPE_UNKNOWN, 0,
+        0, 0, 0, 0, 0, LI_ROT_UNKNOWN, LI_TILT_UNKNOWN);
+    m_PenDown = false;
+    m_PenPresent = false;
+#endif
     m_LastPositionSize = 0;
     for (const auto& key : std::as_const(m_Keys))
         LiSendKeyboardEvent2(short(0x8000 | key.vk), KEY_ACTION_UP, 0, key.nonNormalized ? SS_KBE_FLAG_NON_NORMALIZED : 0);
@@ -254,6 +316,37 @@ void QtSessionInput::releaseAll()
     for (auto button : std::as_const(m_Buttons)) LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, button);
     m_Buttons.clear();
 }
+
+#ifdef Q_OS_MACOS
+bool QtSessionInput::capturesNativeKeys() const { return m_MacKeys->suppressSdlKeyEvent(); }
+
+void QtSessionInput::penLeave()
+{
+    if (!m_PenPresent) return;
+    LiSendPenEvent(LI_TOUCH_EVENT_CANCEL_ALL, LI_TOOL_TYPE_UNKNOWN, 0, 0, 0, 0, 0, 0, LI_ROT_UNKNOWN, LI_TILT_UNKNOWN);
+    m_PenDown = false; m_PenPresent = false;
+}
+
+void QtSessionInput::normalizedPen(QPointF position, float pressure, float rotation, int xTilt, int yTilt, bool eraser, int buttons)
+{
+    if (!m_NormalizedPen.load() || !m_Enabled || !m_Focused) return;
+    const auto packed = m_StreamSize.load();
+    const QSize size(int(packed >> 32), int(packed & 0xffffffffu));
+    if (size.isEmpty()) return;
+    const bool down = buttons & Qt::LeftButton;
+    m_PenPresent = true;
+    const auto type = down != m_PenDown ? (down ? LI_TOUCH_EVENT_DOWN : LI_TOUCH_EVENT_UP) :
+        (down ? LI_TOUCH_EVENT_MOVE : LI_TOUCH_EVENT_HOVER);
+    m_PenDown = down;
+    const unsigned char penButtons = ((buttons & Qt::RightButton) ? LI_PEN_BUTTON_PRIMARY : 0) |
+        ((buttons & Qt::MiddleButton) ? LI_PEN_BUTTON_SECONDARY : 0);
+    const auto tilt = uint8_t(qBound(0, qRound(std::hypot(xTilt, yTilt)), 90));
+    LiSendPenEvent(type, eraser ? LI_TOOL_TYPE_ERASER : LI_TOOL_TYPE_PEN, penButtons,
+        float(qBound(0.0, position.x() / size.width(), 1.0)), float(qBound(0.0, position.y() / size.height(), 1.0)),
+        qBound(0.0f, pressure, 1.0f), 0, 0, uint16_t((qRound(rotation) + 360) % 360), tilt);
+    tabletActivity();
+}
+#endif
 void QtSessionInput::pasteText()
 {
     if (!m_Enabled) return;

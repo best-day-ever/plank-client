@@ -2,7 +2,9 @@
 #ifdef PLANK_QT_SESSION
 #include <QQuickWindow>
 #include <QEvent>
+#ifdef Q_OS_LINUX
 #include "streaming/qt/sessionshell.h"
+#endif
 #endif
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -417,7 +419,11 @@ void configureSignalHandlers()
 int main(int argc, char *argv[])
 {
 #ifdef PLANK_QT_SESSION
+#ifdef Q_OS_MACOS
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Metal);
+#else
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#endif
 #endif
     SDL_SetMainReady();
 
@@ -673,7 +679,7 @@ int main(int argc, char *argv[])
     // Qt 5 and the threaded render loop on Qt 6.
     qputenv("QSG_RENDER_LOOP", "basic");
 #endif
-#ifdef PLANK_QT_SESSION
+#if defined(PLANK_QT_SESSION) && defined(Q_OS_LINUX)
     QtSessionShell::configureWaylandExposure();
 #endif
 

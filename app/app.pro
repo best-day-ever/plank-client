@@ -48,16 +48,17 @@ unix:contains(CONFIG, plank-transport) {
 
 TARGET = plank-client
 PLANK_PRIVATE_LIB_NAME = plank
-# Linux uses the Qt session frontend by default; macOS keeps its SDL session.
-linux: CONFIG += plank-qt-session
+# Both desktop platforms share the session scene and lifecycle. Their GPU,
+# native-window and audio adapters remain platform-specific.
+linux|macx: CONFIG += plank-qt-session
 contains(CONFIG, plank-qt-session) {
-    !linux: error("The Qt session frontend is Linux-only")
+    !linux:!macx: error("The Qt session frontend supports Linux and macOS")
     DEFINES += PLANK_QT_SESSION
     include(streaming/qt/qtsession.pri)
     include(streaming/qt/qtvideo.pri)
-    include(streaming/qt/qtwaylandguard.pri)
+    linux: include(streaming/qt/qtwaylandguard.pri)
     SOURCES += streaming/qt/sessionruntime.cpp streaming/qt/decodedvideorenderer.cpp streaming/qt/sessioninput.cpp
-    HEADERS += streaming/qt/sessioninput.h streaming/qt/linuxkeymap.h
+    HEADERS += streaming/qt/sessioninput.h streaming/qt/remotekeymap.h streaming/qt/linuxkeymap.h streaming/qt/mackeymap.h
     HEADERS += streaming/qt/sessionruntime.h streaming/qt/decodedvideorenderer.h streaming/qt/decodedvideodelivery.h
 }
 HEADERS += clientidentity.h

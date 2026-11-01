@@ -294,6 +294,13 @@ void QtVideoPresenter::deliver(QtVideoFrame::Ptr frame, const QtVideoMailbox::Pr
             outputs[index]->exposedAtDelivery = presentationWindow(output.window)->isExposed();
         }
         auto geometry = output.geometry;
+#ifdef Q_OS_MACOS
+        if (const auto* decoded = frame->decodedFrame()) {
+            const char* transfer = decoded->colorspace == AVCOL_SPC_BT2020_NCL ? "bt2020" :
+                (decoded->colorspace == AVCOL_SPC_BT709 && decoded->color_trc != AVCOL_TRC_IEC61966_2_1 ? "bt709" : "srgb");
+            presentationWindow(output.window)->setProperty("plankMetalTransfer", QString::fromLatin1(transfer));
+        }
+#endif
         if (probe) {
             // The fixed qualification frame is not a remote topology change.
             // Fill this output only for the probe; restore the session's exact

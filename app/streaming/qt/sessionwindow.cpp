@@ -56,6 +56,11 @@ QtSessionWindow::QtSessionWindow(QWindow* parent, QQuickRenderControl* renderCon
         }
     }
     if (m_Component.isError()) qWarning() << m_Component.errors();
+    m_ObservedSize = size();
+    // Redirected render-control windows have no platform surface and therefore
+    // no native resize event. The public geometry signals cover both modes.
+    connect(this, &QWindow::widthChanged, this, &QtSessionWindow::synchronizeSceneSize);
+    connect(this, &QWindow::heightChanged, this, &QtSessionWindow::synchronizeSceneSize);
     if (rootObject()) {
         m_Toolbar = rootObject()->findChild<QQuickItem*>(QStringLiteral("sessionToolbar"));
         m_TabletCursor = new QtTabletCursorItem(rootObject());
@@ -444,6 +449,7 @@ quint64 QtSessionWindow::keyIdentity(const QKeyEvent* event)
 
 void QtSessionWindow::keyPressEvent(QKeyEvent* event)
 {
+    if (m_NativeKeyCapture && m_NativeKeyCapture()) { event->accept(); return; }
     if (!remoteKeyboard()) {
         const int shortcut = qtSessionShortcut(qtPhysicalKey(event), event->key(), qtPhysicalModifiers(event->modifiers()));
         // Disconnect is local even during startup, released input or a Host
@@ -471,6 +477,7 @@ void QtSessionWindow::keyPressEvent(QKeyEvent* event)
 
 void QtSessionWindow::keyReleaseEvent(QKeyEvent* event)
 {
+    if (m_NativeKeyCapture && m_NativeKeyCapture()) { event->accept(); return; }
     const auto id = keyIdentity(event);
     if (m_RemoteKeys.contains(id)) {
         // X11 auto-repeat can synthesize release/press pairs; held ownership
@@ -516,11 +523,12 @@ void QtSessionWindow::focusOutEvent(QFocusEvent* event)
     QQuickWindow::focusOutEvent(event);
 }
 
-void QtSessionWindow::resizeEvent(QResizeEvent* event)
+void QtSessionWindow::synchronizeSceneSize()
 {
+    if (m_ObservedSize == size()) return;
+    m_ObservedSize = size();
     releaseRemoteInput();
     m_Geometry = {};
-    QQuickWindow::resizeEvent(event);
     if (m_Root) m_Root->setSize(size());
     emit presentationChanged();
     emit surfaceSizeChanged();
@@ -534,6 +542,17 @@ void QtSessionWindow::closeEvent(QCloseEvent* event)
 
 void QtSessionWindow::tabletEvent(QTabletEvent* event)
 {
+#ifdef Q_OS_MACOS
+    // Qt supplies normalized pen events only if native raw-HID is unavailable
+    // on this Host. The input owner chooses exactly one path for the session.
+    QPointF position;
+    if (m_RemoteInputEnabled && !m_Waiting && !localPointer(event->position()) &&
+            mapPointer(event->position(), position, event->pressure() > 0)) {
+        emit remotePen(position, float(event->pressure()), float(event->rotation()),
+            event->xTilt(), event->yTilt(), event->pointerType() == QPointingDevice::PointerType::Eraser,
+            int(event->buttons()));
+    }
+#endif
     // The existing raw-HID/normalized readers own tablet forwarding. Qt's
     // tablet event must not synthesize a duplicate mouse click or pressure.
     event->accept();

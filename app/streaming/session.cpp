@@ -1624,12 +1624,9 @@ bool Session::clipboardSyncEnabled() const
             (m_Computer->plankFeatureFlags & NvOutputTopology::ClipboardSyncFeature) != 0;
 }
 
-void Session::startClipboardSync()
+void Session::createClipboardSync()
 {
 #ifdef PLANK_TRANSPORT
-    if (!clipboardSyncEnabled() || m_PlankTransportEndpoint == nullptr) {
-        return;
-    }
     if (!m_ClipboardSync) {
         m_ClipboardSync = std::make_unique<MacClipboardSync>(
                     [this](const std::uint8_t* payload, std::size_t size) {
@@ -1639,9 +1636,19 @@ void Session::startClipboardSync()
                                    payload,
                                    size) == PLANK_TRANSPORT_OK;
                     },
-                    [this] { return anyPresentationWindowFocused(); },
+                    [this] {
+#ifdef PLANK_QT_SESSION
+                        return m_QtClipboardFocused.load();
+#else
+                        return anyPresentationWindowFocused();
+#endif
+                    },
                     [this] { return clipboardSyncEnabled(); },
                     [] {
+#ifdef PLANK_QT_SESSION
+                        // Qt's session timer drains the bounded pending value.
+                        return true;
+#else
                         SDL_Event event {};
                         event.type = SDL_EVENT_USER;
                         event.user.code = SDL_CODE_PLANK_CLIPBOARD;
@@ -1653,8 +1660,19 @@ void Session::startClipboardSync()
                             return false;
                         }
                         return true;
+#endif
                     });
     }
+#endif
+}
+
+void Session::startClipboardSync()
+{
+#ifdef PLANK_TRANSPORT
+    if (!clipboardSyncEnabled() || m_PlankTransportEndpoint == nullptr) {
+        return;
+    }
+    createClipboardSync();
     m_ClipboardSync->start();
     qInfo() << "Started PLANK clipboard sync";
 #endif
@@ -1749,7 +1767,7 @@ bool Session::initialize(IFFmpegRendererFactory* presenter)
     }
 
 #ifdef Q_OS_DARWIN
-    if (m_ClientDisplays.size() != macDisplayCount) {
+    if (!presenter && m_ClientDisplays.size() != macDisplayCount) {
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         emit displayLaunchError(tr("The Mac display layout changed during setup. Please connect again."));
         return false;
@@ -3801,13 +3819,6 @@ public:
 
 void Session::exec(QWindow* qtWindow)
 {
-#ifdef PLANK_QT_SESSION
-    // This returns immediately. Qt retains its normal GUI event loop through
-    // connect, takeover, streaming, recovery and asynchronous cleanup.
-    auto* runtime = new QtSessionRuntime(this);
-    runtime->start(qtWindow);
-    return;
-#endif
 #ifdef Q_OS_MACOS
     auto* application = static_cast<MacApplication*>(QCoreApplication::instance());
     if (!application->beginSession()) {
@@ -3829,6 +3840,13 @@ void Session::exec(QWindow* qtWindow)
         QObject::disconnect(exitConnection);
         application->endSession();
     }, Qt::QueuedConnection);
+#endif
+#ifdef PLANK_QT_SESSION
+    // This returns immediately. Qt retains its normal GUI event loop through
+    // connect, takeover, streaming, recovery and asynchronous cleanup.
+    auto* runtime = new QtSessionRuntime(this);
+    runtime->start(qtWindow);
+    return;
 #endif
     m_QtWindow = qtWindow;
 

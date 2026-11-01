@@ -5,6 +5,11 @@
 #include "../../backend/nvhttp.h"
 #include "../audio/microphone.h"
 #include "../camera/camera.h"
+#ifdef Q_OS_MACOS
+#include "../../macapplication.h"
+#include "../macclipboardsync.h"
+#include "../streamutils.h"
+#endif
 
 #include <QEvent>
 #include <QGuiApplication>
@@ -16,12 +21,23 @@
 QtSessionRuntime::QtSessionRuntime(Session* session) : QObject(session), m_Session(session)
 {
     m_Input = std::make_unique<QtSessionInput>();
+#ifdef Q_OS_LINUX
     m_WindowGuard = std::make_unique<QtWaylandSessionGuard>();
+#endif
     m_TargetBitrate = session->m_PlankBitrateKbps;
     m_CapturePolicy = session->m_Preferences->captureSysKeysMode;
     m_Fullscreen = session->m_IsFullScreen;
     m_RecoveryBitrate.store(m_TargetBitrate);
     connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, [this] { updateFocus(); });
+#ifdef Q_OS_MACOS
+    connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this] { updateFocus(); });
+    m_Input->setNativeFocus([this] {
+        if (m_Stop.load()) return false;
+        for (const auto& shell : m_Windows)
+            if (!shell->surface().displayMenuOpen() && shell->ownsKeyboard()) return true;
+        return false;
+    });
+#endif
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this](QScreen* removed) {
         bool inUse = false;
         for (int i = 0; i < m_Screens.size(); ++i)
@@ -47,6 +63,9 @@ QtSessionRuntime::QtSessionRuntime(Session* session) : QObject(session), m_Sessi
         showPresentationWindows();
         updateGeometry();
     });
+#ifdef Q_OS_MACOS
+    connect(static_cast<MacApplication*>(qGuiApp), &MacApplication::exitRequested, this, &QtSessionRuntime::stop);
+#endif
     connect(session, &Session::qtQuitRequested, this, &QtSessionRuntime::stop, Qt::QueuedConnection);
     connect(session, &Session::qtDecoderResetRequested, this, [this] { request(Command::ResetDecoder); }, Qt::QueuedConnection);
     connect(session, &Session::qtReconnectRequested, this, [this] { request(Command::Reconnect); }, Qt::QueuedConnection);
@@ -101,6 +120,14 @@ bool QtSessionRuntime::snapshotDisplays()
         display.displayId = index + 1;
         display.logicalBounds = {bounds.x(), bounds.y(), bounds.width(), bounds.height()};
         display.nativeSize = pixels;
+#ifdef Q_OS_MACOS
+        SDL_DisplayMode mode{};
+        SDL_Rect matched{};
+        if (!StreamUtils::getMacCurrentDisplayModeForBounds(display.logicalBounds, &mode, &matched, m_Fullscreen)) return false;
+        display.macMatchedBounds = QRect(matched.x, matched.y, matched.w, matched.h);
+        display.macBackingSize = QSize(mode.w, mode.h);
+        display.nativeSize = display.macBackingSize;
+#endif
         display.primary = screen->name() == selection.target;
         if (display.primary) session.m_TargetDisplayId = display.displayId;
         session.m_ClientDisplays.append(display);
@@ -141,6 +168,11 @@ void QtSessionRuntime::start(QWindow* launcher)
         emit m_Session->displayLaunchError(tr("Unable to read the Client display layout."));
         stop(); return;
     }
+#ifdef Q_OS_MACOS
+    // Allocate once on the GUI thread before workers can start/stop the sync
+    // state. Its internal mutex then protects polling across reconnections.
+    m_Session->createClipboardSync();
+#endif
     m_Presenter = std::make_unique<QtVideoPresenter>();
     const auto screens = QGuiApplication::screens();
     // Primary first: device creation and the A/V presentation clock use this
@@ -160,10 +192,15 @@ void QtSessionRuntime::start(QWindow* launcher)
     });
     for (auto* screen : presentationScreens) {
         const bool primary = screen == target;
-        auto shell = std::make_unique<QtSessionShell>();
+        auto shell = std::make_unique<QtPlatformSessionShell>();
         shell->setScreen(screen);
         m_Screens.append(shell->screen());
         shell->setTitle(m_Session->m_Computer->name + QStringLiteral(" — PLANK Client"));
+#ifdef Q_OS_MACOS
+        connect(shell.get(), &QtMetalSessionShell::renderingFailed, this, [this](QString reason) {
+            emit m_Session->displayLaunchError(reason); stop();
+        });
+#endif
         shell->prepareForSession(desktop, m_Fullscreen && (primary || m_SpanDisplays));
         auto& surface = shell->surface();
         surface.setDisplayMode(canSpan, m_SpanDisplays);
@@ -188,6 +225,10 @@ void QtSessionRuntime::start(QWindow* launcher)
         connect(&surface, &QtSessionWindow::remoteButton, m_Input.get(), &QtSessionInput::mouseButton);
         connect(&surface, &QtSessionWindow::remoteWheel, m_Input.get(), &QtSessionInput::wheel);
         connect(&surface, &QtSessionWindow::remoteKey, m_Input.get(), &QtSessionInput::key);
+#ifdef Q_OS_MACOS
+        connect(&surface, &QtSessionWindow::remotePen, m_Input.get(), &QtSessionInput::normalizedPen);
+        surface.setNativeKeyCapture([this] { return m_Input->capturesNativeKeys(); });
+#endif
         connect(m_Input.get(), &QtSessionInput::cursorShape, &surface, &QtSessionWindow::setCursorShape);
         connect(m_Input.get(), &QtSessionInput::cursorPosition, &surface, &QtSessionWindow::setHostCursorPosition);
         connect(m_Input.get(), &QtSessionInput::tabletActive, &surface, &QtSessionWindow::setTabletActive);
@@ -234,8 +275,12 @@ void QtSessionRuntime::start(QWindow* launcher)
             emit m_Session->displayLaunchError(tr("No exact-format Qt video device is available: %1").arg(reason));
             stop(); return;
         }
+#ifdef Q_OS_MACOS
+        m_Factory = std::make_unique<QtDecodedVideoRendererFactory>(m_Presenter->deliveryFactory());
+#else
         m_Factory = std::make_unique<QtDecodedVideoRendererFactory>(m_Presenter->softwareDevice(),
             m_Presenter->vaapiRenderNode(), m_Presenter->deliveryFactory());
+#endif
         m_Worker = QThread::create([this] { workerMain(); });
         m_Worker->setObjectName(QStringLiteral("Qt Session Worker"));
         connect(m_Worker, &QThread::finished, this, &QtSessionRuntime::finishWorker);
@@ -246,18 +291,25 @@ void QtSessionRuntime::start(QWindow* launcher)
     });
     showPresentationWindows();
     m_Tick.start();
+#ifdef Q_OS_LINUX
     m_WindowGuard->setIdleWindow(&m_Windows.front()->surface());
+#endif
     m_StartupDeadline.start();
     m_Presenter->initializeDevice();
 }
 
 bool QtSessionRuntime::eventFilter(QObject* object, QEvent* event)
 {
+#ifdef Q_OS_MACOS
+    if (event->type() == QEvent::TabletLeaveProximity) m_Input->penLeave();
+#endif
+#ifdef Q_OS_LINUX
     if (object == QCoreApplication::instance() && event->type() == QEvent::Quit && !m_Finished) {
         m_ExitApplication = true;
         stop();
         return true;
     }
+#endif
     return QObject::eventFilter(object, event);
 }
 
@@ -286,7 +338,9 @@ void QtSessionRuntime::stop()
     m_StartupDeadline.stop();
     m_Tick.stop();
     setInputEnabled(false);
+#ifdef Q_OS_LINUX
     m_WindowGuard->setIdleWindow(nullptr);
+#endif
     for (auto& shell : m_Windows) shell->hide();
     if (m_Presenter) m_Presenter->stop(); // also wakes test-frame qualification
     m_CommandChanged.notify_all();
@@ -408,11 +462,21 @@ void QtSessionRuntime::finishWorker()
     if (m_Worker && !m_Worker->wait(0)) {
         QTimer::singleShot(10, this, &QtSessionRuntime::finishWorker); return;
     }
+#ifdef Q_OS_MACOS
+    // GPU work is retired asynchronously. Never join a drawable/GPU wait while
+    // the GUI owns input, a permission dialog or the application Quit sequence.
+    for (auto& shell : m_Windows) shell->stopRendering();
+    for (const auto& shell : m_Windows) if (!shell->renderingStopped()) {
+        QTimer::singleShot(10, this, &QtSessionRuntime::finishWorker); return;
+    }
+#endif
     m_Finished = true;
     m_Stop.store(true);
     m_StartupDeadline.stop(); m_Tick.stop();
     setInputEnabled(false);
+#ifdef Q_OS_LINUX
     m_WindowGuard->setIdleWindow(nullptr);
+#endif
     delete m_Worker; m_Worker = nullptr;
     if (m_Presenter) m_Presenter->stop();
     m_Factory.reset();
@@ -463,9 +527,9 @@ void QtSessionRuntime::updateGeometry()
         return;
     }
     QSize canvas(0, 0);
-    QMap<QtSessionShell*, QRect> outputRects;
+    QMap<QtPlatformSessionShell*, QRect> outputRects;
     if (multi) {
-        std::vector<QtSessionShell*> ordered;
+        std::vector<QtPlatformSessionShell*> ordered;
         for (const auto& shell : m_Windows) {
             if (!shell->screen()) return; // screenRemoved owns controlled teardown
             ordered.push_back(shell.get());
@@ -475,7 +539,7 @@ void QtSessionRuntime::updateGeometry()
         });
         for (auto* shell : ordered) {
             const auto& surface = shell->surface();
-            const QSize pixels(qRound(surface.width() * surface.devicePixelRatio()), qRound(surface.height() * surface.devicePixelRatio()));
+            const QSize pixels(qRound(surface.width() * shell->devicePixelRatio()), qRound(surface.height() * shell->devicePixelRatio()));
             outputRects.insert(shell, QRect(QPoint(canvas.width(), 0), pixels));
             canvas.rwidth() += pixels.width();
             canvas.setHeight(qMax(canvas.height(), pixels.height()));
@@ -486,7 +550,7 @@ void QtSessionRuntime::updateGeometry()
         if (index && !multi) { shell.hide(); continue; }
         if (index && !shell.isVisible()) shell.showSession(true);
         auto& surface = shell.surface();
-        const QSize drawable(qRound(surface.width() * surface.devicePixelRatio()), qRound(surface.height() * surface.devicePixelRatio()));
+        const QSize drawable(qRound(surface.width() * shell.devicePixelRatio()), qRound(surface.height() * shell.devicePixelRatio()));
         if (!drawable.isValid()) continue;
         QRect output(QPoint(), drawable);
         if (multi) output = outputRects.value(&shell);
@@ -532,12 +596,16 @@ void QtSessionRuntime::updateFocus()
         active |= !shell->surface().displayMenuOpen() &&
                   (focused == shell.get() || focused == &shell->surface());
     m_Input->setFocused(active && !m_Stop.load());
+#ifdef Q_OS_MACOS
+    m_Session->m_QtClipboardFocused.store(active && m_Streaming && !m_Stop.load());
+#endif
     const auto policy = m_CapturePolicy;
     const bool fullscreen = !m_Windows.empty() && m_Windows.front()->windowState() == Qt::WindowFullScreen;
     const bool grab = active && m_Streaming && m_InputGrabbed && !m_Stop.load() &&
         (policy == StreamingPreferences::CSK_ALWAYS || (policy == StreamingPreferences::CSK_FULLSCREEN && fullscreen));
     m_Input->setSystemKeys(grab);
-    QtSessionShell* focusedShell = nullptr;
+#ifdef Q_OS_LINUX
+    QtPlatformSessionShell* focusedShell = nullptr;
     for (auto& shell : m_Windows)
         if (focused == shell.get() || focused == &shell->surface()) focusedShell = shell.get();
     m_WindowGuard->setWindows(focusedShell, focusedShell ? &focusedShell->surface() : nullptr);
@@ -547,6 +615,7 @@ void QtSessionRuntime::updateFocus()
     // XCB implements this public Qt API directly.
     if (QGuiApplication::platformName() != QStringLiteral("wayland"))
         for (auto& shell : m_Windows) shell->setKeyboardGrabEnabled(grab && shell.get() == focusedShell);
+#endif
 }
 
 void QtSessionRuntime::toggleFullscreen()
@@ -568,7 +637,7 @@ void QtSessionRuntime::showPresentationWindows()
     }
 }
 
-void QtSessionRuntime::selectFullscreenDisplays(bool span, QtSessionShell* source)
+void QtSessionRuntime::selectFullscreenDisplays(bool span, QtPlatformSessionShell* source)
 {
     if (m_Stop.load() || m_Windows.empty() || !source || !source->screen()) return;
     const bool canSpan = m_Windows.size() == 2 && ClientDisplays::canSpan(ClientDisplays::snapshot());
@@ -633,6 +702,12 @@ void QtSessionRuntime::handleShortcut(int key)
 void QtSessionRuntime::tick()
 {
     if (m_Stop.load()) return;
+#ifdef Q_OS_MACOS
+    if (m_Session->m_ClipboardSync) {
+        m_Session->m_ClipboardSync->applyPendingHostTextOnMainThread();
+        m_Session->m_ClipboardSync->pollLocalClipboardOnMainThread();
+    }
+#endif
     if (m_Session->m_ReconnectGreeterConfirmed.exchange(false)) setStatus(tr("Returning to the sign-in screen…"));
     if (m_ReconnectNoticeDeadline && SDL_GetTicks() >= m_ReconnectNoticeDeadline) {
         m_ReconnectNoticeDeadline = 0;

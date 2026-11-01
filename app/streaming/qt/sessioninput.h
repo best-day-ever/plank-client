@@ -1,7 +1,7 @@
 #pragma once
 #include "../input/remotecursor.h"
 #include "../plankcallbacktarget.h"
-#include "linuxkeymap.h"
+#include "remotekeymap.h"
 #include <QObject>
 #include <QImage>
 #include <QMap>
@@ -11,7 +11,14 @@
 #include <condition_variable>
 #include <thread>
 
+#ifdef Q_OS_MACOS
+class MacRawWacomInput;
+class MacKeyboardCapture;
+using QtRawWacomInput = MacRawWacomInput;
+#else
 class LinuxRawWacomInput;
+using QtRawWacomInput = LinuxRawWacomInput;
+#endif
 
 // Qt owns keys, buttons and cursor images on the GUI thread. Only lifecycle
 // transitions of the existing tablet readers run on the tablet-control worker:
@@ -34,7 +41,7 @@ public:
     void setStreamSize(QSize size);
     void setEnabled(bool enabled);
     void setFocused(bool focused);
-    void setSystemKeys(bool captured) { m_SystemKeys = captured; }
+    void setSystemKeys(bool captured);
     void mouseMotion(QPointF position);
     void mouseButton(int button, bool down, QPointF position);
     void wheel(QPointF position, QPoint angleDelta, QPoint pixelDelta, bool inverted);
@@ -42,6 +49,12 @@ public:
     void releaseAll();
     void activateMouse();
     void pasteText();
+#ifdef Q_OS_MACOS
+    void normalizedPen(QPointF position, float pressure, float rotation, int xTilt, int yTilt, bool eraser, int buttons);
+    bool capturesNativeKeys() const;
+    void setNativeFocus(std::function<bool()> focused) { m_NativeFocus = std::move(focused); }
+    void penLeave();
+#endif
 
 signals:
     void cursorShape(QImage image, QPoint hotspot, bool visible);
@@ -60,14 +73,14 @@ private:
     void consumePosition();
 
     PlankRemoteCursor m_Cursor;
-    PlankCallbackTarget<LinuxRawWacomInput> m_RawControl;
+    PlankCallbackTarget<QtRawWacomInput> m_RawControl;
     std::atomic<std::uint64_t> m_StreamSize{0};
     std::atomic_bool m_ActivityPending{false};
     // GUI-thread state: last successfully queued mouse position, in wire pixels.
     // A zero size invalidates it after focus, transport or tablet ownership changes.
     QPoint m_LastPosition;
     std::uint64_t m_LastPositionSize = 0;
-    QMap<quint32, QtLinuxRemoteKey> m_Keys;
+    QMap<quint32, QtRemoteKey> m_Keys;
     QSet<int> m_Buttons;
     QSet<quint32> m_ShortcutKeys;
     bool m_Enabled = false, m_Focused = false, m_SystemKeys = false, m_TabletActive = false;
@@ -77,4 +90,11 @@ private:
     bool m_TabletFocus = false, m_TabletFinished = false;
     std::uint64_t m_RequestedRevision = 0, m_AppliedRevision = 0;
     std::thread m_TabletThread;
+#ifdef Q_OS_MACOS
+    std::unique_ptr<MacKeyboardCapture> m_MacKeys;
+    std::atomic_bool m_NormalizedPen{false};
+    bool m_PenDown = false;
+    bool m_PenPresent = false;
+    std::function<bool()> m_NativeFocus;
+#endif
 };

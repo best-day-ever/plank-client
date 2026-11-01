@@ -4,6 +4,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <QCoreApplication>
+#include <QDynamicPropertyChangeEvent>
 #include <QQuickGraphicsDevice>
 #include <QQuickRenderControl>
 #include <QQuickRenderTarget>
@@ -242,6 +243,13 @@ bool QtMetalSessionShell::renderingStopped() const
     return !m_Rendering->thread || m_Rendering->thread->isFinished();
 }
 
+bool QtMetalSessionShell::ownsKeyboard() const
+{
+    if (!isVisible() || !handle()) return false;
+    NSWindow* native = ((NSView*)winId()).window;
+    return native && NSApp.isActive && NSApp.keyWindow == native && native.isOnActiveSpace;
+}
+
 void QtMetalSessionShell::requestRender()
 {
     m_Dirty = true;
@@ -293,6 +301,15 @@ void QtMetalSessionShell::updateSceneSize()
 bool QtMetalSessionShell::event(QEvent* event)
 {
     switch (event->type()) {
+    case QEvent::DynamicPropertyChange:
+        if (static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "plankMetalTransfer" && m_Rendering->layer) {
+            const auto transfer = property("plankMetalTransfer").toString();
+            auto space = CGColorSpaceCreateWithName(transfer == QStringLiteral("bt2020") ? kCGColorSpaceITUR_2020 :
+                transfer == QStringLiteral("bt709") ? kCGColorSpaceITUR_709 : kCGColorSpaceSRGB);
+            m_Rendering->layer.colorspace = space;
+            CGColorSpaceRelease(space);
+        }
+        break;
     case QEvent::MouseMove: case QEvent::MouseButtonPress: case QEvent::MouseButtonRelease:
     case QEvent::MouseButtonDblClick: case QEvent::Wheel: case QEvent::TabletMove:
     case QEvent::TabletPress: case QEvent::TabletRelease: case QEvent::KeyPress:

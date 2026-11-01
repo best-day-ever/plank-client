@@ -79,6 +79,7 @@ public:
     // During a compositor mouse grab, coordinates can leave this window. The
     // session maps that event through the visible outputs' existing viewports.
     void setDragMapper(std::function<bool(QPointF, QPointF&)> mapper) { m_DragMapper = std::move(mapper); }
+    void setNativeKeyCapture(std::function<bool()> captured) { m_NativeKeyCapture = std::move(captured); }
     void setRemoteInputEnabled(bool enabled);
     void setRemoteCursor(const QCursor& cursor);
     void setPinned(bool pinned);
@@ -118,6 +119,7 @@ signals:
     void remoteButton(int button, bool down, QPointF streamPosition);
     void remoteWheel(QPointF streamPosition, QPoint angleDelta, QPoint pixelDelta, bool inverted);
     void remoteKey(quint32 scanCode, int key, bool down, bool repeat, Qt::KeyboardModifiers modifiers);
+    void remotePen(QPointF position, float pressure, float rotation, int xTilt, int yTilt, bool eraser, int buttons);
     void bitrateRequested(int kbps);
     void disconnectRequested();
 
@@ -131,7 +133,6 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
-    void resizeEvent(QResizeEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void tabletEvent(QTabletEvent* event) override;
 
@@ -144,6 +145,7 @@ private:
     void updateTabletCursor();
     void scheduleHide();
     void releaseRemoteInput();
+    void synchronizeSceneSize();
     bool remoteKeyboard() const;
     static quint64 keyIdentity(const QKeyEvent* event);
     QWindow* controlWindow();
@@ -152,6 +154,7 @@ private:
     QQmlEngine m_Engine;
     QQmlComponent m_Component{&m_Engine};
     QQuickItem* m_Root = nullptr;
+    QSize m_ObservedSize;
     QPointer<QWindow> m_ControlWindow;
     const bool m_Redirected;
     QtSessionGeometry m_Geometry;
@@ -159,6 +162,7 @@ private:
     bool m_SpanningDisplays = false;
     bool m_DisplayMenuOpen = false;
     std::function<bool(QPointF, QPointF&)> m_DragMapper;
+    std::function<bool()> m_NativeKeyCapture;
     QPointer<QQuickItem> m_Toolbar;
     QTimer m_RevealTimer;
     QTimer m_HideTimer;

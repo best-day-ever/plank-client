@@ -268,6 +268,7 @@ private:
                                           size_t payloadLength);
 #endif
 #ifdef Q_OS_MACOS
+    void createClipboardSync();
     void startClipboardSync();
     void stopClipboardSync();
     void startClipboardPollTimer();
@@ -506,6 +507,9 @@ private:
 #ifdef Q_OS_MACOS
     std::unique_ptr<MacClipboardSync> m_ClipboardSync;
     ClipboardPollTimer m_ClipboardPollTimer;
+#ifdef PLANK_QT_SESSION
+    std::atomic_bool m_QtClipboardFocused{false};
+#endif
 #endif
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
