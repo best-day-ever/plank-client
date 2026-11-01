@@ -1,18 +1,21 @@
 #include "videopresenter.h"
 
+#ifdef Q_OS_LINUX
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#endif
 #include <QCoreApplication>
 #include <QRunnable>
 #include <QThread>
 #include <QTimer>
+#include <QQuickRenderControl>
 
 struct QtVideoPresenter::State {
     std::mutex mutex;
     QtVideoPresenter* owner = nullptr; // posting/retirement serialized by mutex
     QtVideoMailbox::Producer producer;
-    std::shared_ptr<QtEglVideoStatus> primary;
-    std::vector<std::shared_ptr<QtEglVideoStatus>> outputs;
+    std::shared_ptr<QtVideoStatus> primary;
+    std::vector<std::shared_ptr<QtVideoStatus>> outputs;
     std::vector<bool> required;
     size_t primaryIndex = 0;
     bool probeDelivered = false;
@@ -20,6 +23,13 @@ struct QtVideoPresenter::State {
 };
 
 namespace {
+QWindow* presentationWindow(QQuickWindow* window)
+{
+    if (!window) return nullptr;
+    auto* redirected = QQuickRenderControl::renderWindowFor(window);
+    return redirected ? redirected : window;
+}
+#ifdef Q_OS_LINUX
 QString currentRenderNode()
 {
     const auto queryDisplay = reinterpret_cast<PFNEGLQUERYDISPLAYATTRIBEXTPROC>(eglGetProcAddress("eglQueryDisplayAttribEXT"));
@@ -33,8 +43,9 @@ QString currentRenderNode()
     if (!extensions.contains("EGL_EXT_device_drm_render_node")) return {};
     return QString::fromUtf8(queryDevice(eglDevice, EGL_DRM_RENDER_NODE_FILE_EXT));
 }
+#endif
 
-void wakeQualification(const std::shared_ptr<QtEglVideoStatus>& status)
+void wakeQualification(const std::shared_ptr<QtVideoStatus>& status)
 {
     if (!status) return;
     std::lock_guard<std::mutex> lock(status->presentationMutex);
@@ -52,8 +63,8 @@ QtVideoPresenter::QtVideoPresenter(QObject* parent)
     m_ErrorTimer.setInterval(100);
     connect(&m_ErrorTimer, &QTimer::timeout, this, [this] {
         for (const auto& output : m_Outputs) {
-            if (output.window && output.window->isVisible() && output.item &&
-                    output.item->status()->error.load() != QtEglVideoStatus::None) {
+            if (output.window && presentationWindow(output.window)->isVisible() && output.item &&
+                    output.item->status()->error.load() != QtVideoStatus::None) {
                 // Qualification reports failure to the decoder so it can try
                 // the exact software format. Only a live failure ends output.
                 std::unique_lock<std::mutex> lock(m_State->mutex);
@@ -79,7 +90,7 @@ void QtVideoPresenter::addOutput(QQuickWindow* window, const QtSessionGeometry& 
 {
     Q_ASSERT(QThread::currentThread() == thread());
     Q_ASSERT(!m_Started && window);
-    auto* item = new QtEglVideoItem(window->contentItem());
+    auto* item = new QtPlatformVideoItem(window->contentItem());
     item->setPresentation(geometry);
     item->setPrimaryOutput(primary);
     m_Outputs.push_back({window, item, geometry, primary});
@@ -112,7 +123,16 @@ void QtVideoPresenter::initializeDevice()
     if (!window) { emit deviceReady(false, QStringLiteral("Qt presentation window was closed")); return; }
     // Device creation uses the actual Qt render context. It neither creates a
     // second window nor touches GUI objects from the render worker.
-    window->scheduleRenderJob(QRunnable::create([state] {
+    window->scheduleRenderJob(QRunnable::create([state, window] {
+#ifdef Q_OS_MACOS
+        const bool available = window->rendererInterface()->graphicsApi() == QSGRendererInterface::Metal &&
+            window->rendererInterface()->getResource(window, QSGRendererInterface::DeviceResource);
+        std::lock_guard<std::mutex> lock(state->mutex);
+        auto* owner = state->owner;
+        if (owner) QMetaObject::invokeMethod(owner, [owner, available] {
+            emit owner->deviceReady(available, available ? QString() : QStringLiteral("Qt Metal device is unavailable"));
+        }, Qt::QueuedConnection);
+#else
         QString error;
         const auto node = currentRenderNode();
         auto device = QtSoftwareVideoDevice::createForCurrentContext(error);
@@ -121,10 +141,12 @@ void QtVideoPresenter::initializeDevice()
         if (owner) QMetaObject::invokeMethod(owner, [owner, device, node, error] {
             owner->finishDevice(device, node, error);
         }, Qt::QueuedConnection);
+#endif
     }), QQuickWindow::BeforeRenderingStage);
     window->update();
 }
 
+#ifdef Q_OS_LINUX
 void QtVideoPresenter::finishDevice(QtSoftwareVideoDevice::Ptr device, QString node, QString error)
 {
     {
@@ -136,6 +158,7 @@ void QtVideoPresenter::finishDevice(QtSoftwareVideoDevice::Ptr device, QString n
     for (auto& output : m_Outputs) if (output.item) output.item->setSoftwareDevice(m_SoftwareDevice);
     emit deviceReady(m_SoftwareDevice || !m_RenderNode.isEmpty(), error);
 }
+#endif
 
 std::function<QtDecodedVideoDelivery()> QtVideoPresenter::deliveryFactory() const
 {
@@ -145,8 +168,8 @@ std::function<QtDecodedVideoDelivery()> QtVideoPresenter::deliveryFactory() cons
         const auto state = weak.lock();
         if (!state) return delivery;
         QtVideoMailbox::Producer producer;
-        std::shared_ptr<QtEglVideoStatus> status;
-        std::shared_ptr<QtEglVideoStatus> retired;
+        std::shared_ptr<QtVideoStatus> status;
+        std::shared_ptr<QtVideoStatus> retired;
         {
             std::lock_guard<std::mutex> lock(state->mutex);
             if (!state->owner || !state->primary) return delivery;
@@ -155,7 +178,7 @@ std::function<QtDecodedVideoDelivery()> QtVideoPresenter::deliveryFactory() cons
             state->live = false;
             state->probeDelivered = false;
             retired = std::move(state->primary);
-            for (auto& output : state->outputs) output = std::make_shared<QtEglVideoStatus>();
+            for (auto& output : state->outputs) output = std::make_shared<QtVideoStatus>();
             std::fill(state->required.begin(), state->required.end(), false);
             status = state->primary = state->outputs[state->primaryIndex];
         }
@@ -206,7 +229,7 @@ std::function<QtDecodedVideoDelivery()> QtVideoPresenter::deliveryFactory() cons
                         if (!state->required[index]) continue;
                         const auto& output = state->outputs[index];
                         std::lock_guard<std::mutex> feedbackLock(output->presentationMutex);
-                        failed |= output->error.load() != QtEglVideoStatus::None;
+                        failed |= output->error.load() != QtVideoStatus::None;
                         accepted &= output->swappedFrame.lock() == frame;
                     }
                 }
@@ -242,8 +265,8 @@ std::function<QtDecodedVideoDelivery()> QtVideoPresenter::deliveryFactory() cons
 void QtVideoPresenter::deliver(QtVideoFrame::Ptr frame, const QtVideoMailbox::Producer& producer)
 {
     bool probe;
-    std::shared_ptr<QtEglVideoStatus> generation;
-    std::vector<std::shared_ptr<QtEglVideoStatus>> outputs;
+    std::shared_ptr<QtVideoStatus> generation;
+    std::vector<std::shared_ptr<QtVideoStatus>> outputs;
     {
         std::lock_guard<std::mutex> lock(m_State->mutex);
         // The mailbox may have claimed an old frame immediately before the
@@ -256,7 +279,7 @@ void QtVideoPresenter::deliver(QtVideoFrame::Ptr frame, const QtVideoMailbox::Pr
             m_State->probeDelivered = true;
             for (size_t index = 0; index < m_Outputs.size(); ++index)
                 m_State->required[index] = m_Outputs[index].primary ||
-                    (m_Outputs[index].window && m_Outputs[index].window->isVisible());
+                    (m_Outputs[index].window && presentationWindow(m_Outputs[index].window)->isVisible());
         }
     }
     for (size_t index = 0; index < m_Outputs.size(); ++index) {
@@ -267,8 +290,8 @@ void QtVideoPresenter::deliver(QtVideoFrame::Ptr frame, const QtVideoMailbox::Pr
         }
         if (probe) {
             std::lock_guard<std::mutex> lock(outputs[index]->presentationMutex);
-            outputs[index]->visibleAtDelivery = output.window->isVisible();
-            outputs[index]->exposedAtDelivery = output.window->isExposed();
+            outputs[index]->visibleAtDelivery = presentationWindow(output.window)->isVisible();
+            outputs[index]->exposedAtDelivery = presentationWindow(output.window)->isExposed();
         }
         auto geometry = output.geometry;
         if (probe) {

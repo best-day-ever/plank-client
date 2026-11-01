@@ -1,6 +1,6 @@
 #pragma once
 
-#include "linuxkeymap.h"
+#include "remotekeymap.h"
 #include <QtCore/Qt>
 
 inline int qtSessionShortcut(quint32 scan, int key, Qt::KeyboardModifiers modifiers)
@@ -12,6 +12,6 @@ inline int qtSessionShortcut(quint32 scan, int key, Qt::KeyboardModifiers modifi
     // Match the displayed Latin key first, then the physical position for
     // non-Latin layouts, just as the ordinary Client does.
     if (special(key)) return key;
-    const int physical = qtLinuxRemoteKey(scan).vk;
+    const int physical = qtRemoteKey(scan).vk;
     return special(physical) ? physical : 0;
 }

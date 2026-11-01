@@ -434,13 +434,18 @@ bool QtSessionWindow::remoteKeyboard() const
 
 quint64 QtSessionWindow::keyIdentity(const QKeyEvent* event)
 {
+#ifdef Q_OS_MACOS
+    // A (Cocoa key code zero) is a real physical key, not a missing scan code.
+    return (quint64(1) << 32) | qtPhysicalKey(event);
+#else
     return event->nativeScanCode() ? (quint64(1) << 32) | event->nativeScanCode() : quint32(event->key());
+#endif
 }
 
 void QtSessionWindow::keyPressEvent(QKeyEvent* event)
 {
     if (!remoteKeyboard()) {
-        const int shortcut = qtSessionShortcut(event->nativeScanCode(), event->key(), event->modifiers());
+        const int shortcut = qtSessionShortcut(qtPhysicalKey(event), event->key(), qtPhysicalModifiers(event->modifiers()));
         // Disconnect is local even during startup, released input or a Host
         // timeout. It must not depend on a healthy remote input channel.
         if (shortcut == Qt::Key_Q || (!m_Waiting && shortcut == Qt::Key_Z)) {
@@ -459,8 +464,8 @@ void QtSessionWindow::keyPressEvent(QKeyEvent* event)
         event->accept();
         return;
     }
-    m_RemoteKeys.insert(id, {event->nativeScanCode(), event->key(), event->modifiers()});
-    emit remoteKey(event->nativeScanCode(), event->key(), true, event->isAutoRepeat(), event->modifiers());
+    m_RemoteKeys.insert(id, {qtPhysicalKey(event), event->key(), qtPhysicalModifiers(event->modifiers())});
+    emit remoteKey(qtPhysicalKey(event), event->key(), true, event->isAutoRepeat(), qtPhysicalModifiers(event->modifiers()));
     event->accept();
 }
 
@@ -472,7 +477,7 @@ void QtSessionWindow::keyReleaseEvent(QKeyEvent* event)
         // lasts until the real release on both X11 and Wayland.
         if (!event->isAutoRepeat()) {
             m_RemoteKeys.remove(id);
-            emit remoteKey(event->nativeScanCode(), event->key(), false, false, event->modifiers());
+            emit remoteKey(qtPhysicalKey(event), event->key(), false, false, qtPhysicalModifiers(event->modifiers()));
         }
         event->accept();
     } else if (!remoteKeyboard()) {

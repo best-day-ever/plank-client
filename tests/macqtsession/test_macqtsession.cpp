@@ -1,5 +1,7 @@
 #include "sessionwindow.h"
 #include "metalsessionshell.h"
+#include "remotekeymap.h"
+#include "sessionshortcut.h"
 #include <QQuickRenderControl>
 #include <QQuickRenderTarget>
 #include <QtTest>
@@ -29,6 +31,22 @@ class MacQtSessionTest final : public QObject
 {
     Q_OBJECT
 private slots:
+    void physicalMacKeysAndShortcuts()
+    {
+        QCOMPARE(qtRemoteKey(0).vk, 0x41); // A has a valid zero Cocoa code.
+        QCOMPARE(qtRemoteKey(56).vk, 0xa0);
+        QCOMPARE(qtRemoteKey(60).vk, 0xa1);
+        QCOMPARE(qtRemoteKey(55).vk, 0x5b);
+        QCOMPARE(qtRemoteKey(59).vk, 0xa2);
+        QCOMPARE(qtRemoteKey(76).vk, 0x0d);
+        QCOMPARE(qtRemoteKey(1000).vk, 0);
+        const auto mods = qtPhysicalModifiers(Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(mods, Qt::MetaModifier | Qt::ShiftModifier);
+        QCOMPARE(qtSessionShortcut(12, Qt::Key_unknown,
+            Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier), int(Qt::Key_Q));
+        // Ordinary Command-Q belongs to the remote app, not local disconnect.
+        QCOMPARE(qtSessionShortcut(12, Qt::Key_Q, Qt::MetaModifier), 0);
+    }
     void redirectedSceneKeepsControlsAndRemoteInputSeparate()
     {
         QWindow host;
