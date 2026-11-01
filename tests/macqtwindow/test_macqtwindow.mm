@@ -140,6 +140,7 @@ private slots:
             QVERIFY(errors.isEmpty());
             if (cycle == 0) {
                 const QSize normalSize = shell.size();
+                QCOMPARE(QSize(qRound(view.bounds.size.width), qRound(view.bounds.size.height)), normalSize);
                 FullscreenCompletion completed(view.window);
                 shell.showSession(true);
                 // Qt's requested state/style mask precedes Cocoa's completed

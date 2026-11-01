@@ -48,6 +48,10 @@ struct QtMetalSessionShell::Rendering
     {
         Q_ASSERT(!thread || thread->isFinished());
         delete thread;
+        for (id observer : {willEnterFullscreen, didExitFullscreen}) {
+            if (observer) [NSNotificationCenter.defaultCenter removeObserver:observer];
+            [observer release];
+        }
         if (idleAssertion != kIOPMNullAssertionID) IOPMAssertionRelease(idleAssertion);
         [layer release]; [queue release]; [device release];
     }
@@ -57,12 +61,39 @@ struct QtMetalSessionShell::Rendering
     id<MTLDevice> device = nil;
     id<MTLCommandQueue> queue = nil;
     CAMetalLayer* layer = nil;
+    id willEnterFullscreen = nil, didExitFullscreen = nil;
+    NSRect normalFrame = NSZeroRect;
     IOPMAssertionID idleAssertion = kIOPMNullAssertionID;
     std::mutex mutex;
     std::condition_variable changed;
     bool stop = false, requested = false, sync = false, synced = false, cancel = false;
     QSize pixels;
     qreal dpr = 1;
+
+    void observeWindow(NSWindow* window)
+    {
+        auto* state = this;
+        willEnterFullscreen = [[NSNotificationCenter.defaultCenter
+            addObserverForName:NSWindowWillEnterFullScreenNotification object:window queue:nil
+            usingBlock:^(NSNotification*) {
+                state->normalFrame = window.frame;
+            }] retain];
+        didExitFullscreen = [[NSNotificationCenter.defaultCenter
+            addObserverForName:NSWindowDidExitFullScreenNotification object:window queue:nil
+            usingBlock:^(NSNotification*) {
+                const NSRect frame = state->normalFrame;
+                // With a programmatically resized Cocoa window, fullscreen can
+                // restore its initial frame. Preserve the user's current frame,
+                // after AppKit/Qt finish their native transition (not at the
+                // earlier Qt windowStateChanged request).
+                QMetaObject::invokeMethod(state->shell, [owner = state->shell, frame] {
+                    if (!owner->handle() || owner->windowState() != Qt::WindowNoState || NSIsEmptyRect(frame)) return;
+                    NSWindow* native = ((NSView*)owner->winId()).window;
+                    if (!native || (native.styleMask & NSWindowStyleMaskFullScreen)) return;
+                    [native setFrame:[native constrainFrameRect:frame toScreen:native.screen] display:YES];
+                }, Qt::QueuedConnection);
+            }] retain];
+    }
 
     void fail(QString reason)
     {
@@ -206,6 +237,7 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
     create();
     auto& r = *m_Rendering;
     NSView* view = (NSView*)winId();
+    r.observeWindow(view.window);
     r.layer = [metalLayer(view.layer) retain];
     if (!r.layer) {
         emit renderingFailed(QStringLiteral("Qt did not create a native Metal window"));
@@ -239,9 +271,8 @@ void QtMetalSessionShell::prepareForSession(QSize desktop, bool fullscreen)
 
 void QtMetalSessionShell::showSession(bool fullscreen)
 {
-    // Cocoa remembers the normal frame. Do not copy the Wayland decoration
-    // workaround here: Qt's requested state changes before the native Spaces
-    // animation completes, and resizing then interferes with Cocoa's restore.
+    // Use native Spaces. Frame restoration follows Cocoa's completion
+    // notification, not Qt's earlier requested window-state change.
     if (fullscreen) showFullScreen();
     else showNormal();
 }

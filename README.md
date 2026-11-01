@@ -31,7 +31,14 @@ It upgrades the existing Client without changing its bookmarks, trust store,
 configuration or log locations. The separate experimental `plank-client-qt`
 package is retired; its test profile is not automatically copied over existing
 PLANK settings. Quit and remove that test package separately if it is installed.
-The macOS Client keeps its existing SDL/Metal implementation.
+The released macOS Client uses its SDL/Metal implementation. The
+`macos-qt-session` development branch moves the Mac streaming window and controls
+to the shared Qt frontend, with native Metal presentation and the existing
+SDL/CoreAudio playback path. Its signed candidates require installed session
+validation before release; pointer confinement and Mac webcam capture remain
+open parity work. See the
+[candidate plan](https://github.com/instinctual/plank/blob/macos-qt-session/docs/development/plans/macos-qt-session.plan)
+for scope and acceptance checks.
 
 Other platforms inherited from upstream are not qualified PLANK products.
 See the [platform and acceptance documentation](https://github.com/instinctual/plank/blob/main/docs/development/platforms.md)
