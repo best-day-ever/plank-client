@@ -4,6 +4,7 @@
 #include "sessionshortcut.h"
 #include <QQuickRenderControl>
 #include <QQuickRenderTarget>
+#include <QTabletEvent>
 #include <QtTest>
 
 namespace {
@@ -83,7 +84,27 @@ private slots:
         QCOMPARE(toggles.count(), 1);
         QCOMPARE(buttons.count(), 2);
 
+        const QPointingDevice pen(QStringLiteral("test pen"), 1, QInputDevice::DeviceType::Stylus,
+            QPointingDevice::PointerType::Pen, QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1, 3);
+        const auto tablet = [&](QEvent::Type type, QPointF position, bool down) {
+            QTabletEvent event(type, &pen, position, position, down ? .7 : 0, 10, 20, 0, 0, 0,
+                Qt::NoModifier, Qt::LeftButton, down ? Qt::LeftButton : Qt::NoButton);
+            QCoreApplication::sendEvent(&scene, &event);
+        };
+        QSignalSpy strokes(&scene, &QtSessionWindow::remotePen);
+        QSignalSpy cancels(&scene, &QtSessionWindow::remotePenCancelled);
+        tablet(QEvent::TabletPress, {720,450}, true);
+        tablet(QEvent::TabletRelease, {1600,1000}, false);
+        QCOMPARE(strokes.count(), 2);
+        QCOMPARE(strokes.last().at(6).toInt(), int(Qt::NoButton));
+        tablet(QEvent::TabletPress, {720,450}, true);
+        tablet(QEvent::TabletRelease, point, false); // release over the toolbar
+        QCOMPARE(strokes.count(), 4);
+        QCOMPARE(strokes.last().at(6).toInt(), int(Qt::NoButton));
+        tablet(QEvent::TabletPress, {720,450}, true);
+
         scene.resize(1100, 700);
+        QVERIFY(!cancels.isEmpty());
         QCOMPARE(scene.rootObject()->size(), QSizeF(1100, 700));
         QVERIFY(!scene.presentation().valid()); // Input awaits matching new geometry.
         scene.setWaiting(true);

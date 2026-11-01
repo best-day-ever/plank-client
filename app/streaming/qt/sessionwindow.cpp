@@ -496,6 +496,9 @@ void QtSessionWindow::keyReleaseEvent(QKeyEvent* event)
 
 void QtSessionWindow::releaseRemoteInput()
 {
+#ifdef Q_OS_MACOS
+    cancelPen();
+#endif
     const auto buttons = m_RemoteButtons;
     m_RemoteButtons = {};
     for (unsigned bit = 1; bit <= unsigned(Qt::MaxMouseButton); bit <<= 1) {
@@ -546,8 +549,11 @@ void QtSessionWindow::tabletEvent(QTabletEvent* event)
     // Qt supplies normalized pen events only if native raw-HID is unavailable
     // on this Host. The input owner chooses exactly one path for the session.
     QPointF position;
-    if (m_RemoteInputEnabled && !m_Waiting && !localPointer(event->position()) &&
-            mapPointer(event->position(), position, event->pressure() > 0)) {
+    // A stroke started remotely owns its release, even when the tip is lifted
+    // over a toolbar or letterbox. Do not leave the Host with a held pen tip.
+    if (m_RemoteInputEnabled && !m_Waiting && (m_RemotePenDown || !localPointer(event->position())) &&
+            mapPointer(event->position(), position, m_RemotePenDown)) {
+        m_RemotePenDown = event->buttons().testFlag(Qt::LeftButton);
         emit remotePen(position, float(event->pressure()), float(event->rotation()),
             event->xTilt(), event->yTilt(), event->pointerType() == QPointingDevice::PointerType::Eraser,
             int(event->buttons()));
@@ -557,6 +563,14 @@ void QtSessionWindow::tabletEvent(QTabletEvent* event)
     // tablet event must not synthesize a duplicate mouse click or pressure.
     event->accept();
 }
+
+#ifdef Q_OS_MACOS
+void QtSessionWindow::cancelPen()
+{
+    m_RemotePenDown = false;
+    emit remotePenCancelled();
+}
+#endif
 
 bool QtSessionWindow::mapPointer(QPointF logical, QPointF& stream, bool drag) const
 {

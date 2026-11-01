@@ -229,6 +229,7 @@ void QtSessionRuntime::start(QWindow* launcher)
         connect(&surface, &QtSessionWindow::remoteKey, m_Input.get(), &QtSessionInput::key);
 #ifdef Q_OS_MACOS
         connect(&surface, &QtSessionWindow::remotePen, m_Input.get(), &QtSessionInput::normalizedPen);
+        connect(&surface, &QtSessionWindow::remotePenCancelled, m_Input.get(), &QtSessionInput::penLeave);
         surface.setNativeKeyCapture([this] { return m_Input->capturesNativeKeys(); });
 #endif
         connect(m_Input.get(), &QtSessionInput::cursorShape, &surface, &QtSessionWindow::setCursorShape);
@@ -303,7 +304,8 @@ void QtSessionRuntime::start(QWindow* launcher)
 bool QtSessionRuntime::eventFilter(QObject* object, QEvent* event)
 {
 #ifdef Q_OS_MACOS
-    if (event->type() == QEvent::TabletLeaveProximity) m_Input->penLeave();
+    if (event->type() == QEvent::TabletLeaveProximity)
+        for (auto& shell : m_Windows) shell->surface().cancelPen();
 #endif
 #ifdef Q_OS_LINUX
     if (object == QCoreApplication::instance() && event->type() == QEvent::Quit && !m_Finished) {

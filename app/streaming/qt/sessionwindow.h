@@ -81,6 +81,9 @@ public:
     void setDragMapper(std::function<bool(QPointF, QPointF&)> mapper) { m_DragMapper = std::move(mapper); }
     void setNativeKeyCapture(std::function<bool()> captured) { m_NativeKeyCapture = std::move(captured); }
     void setRemoteInputEnabled(bool enabled);
+#ifdef Q_OS_MACOS
+    void cancelPen();
+#endif
     void setRemoteCursor(const QCursor& cursor);
     void setPinned(bool pinned);
     void setWaiting(bool waiting);
@@ -120,6 +123,7 @@ signals:
     void remoteWheel(QPointF streamPosition, QPoint angleDelta, QPoint pixelDelta, bool inverted);
     void remoteKey(quint32 scanCode, int key, bool down, bool repeat, Qt::KeyboardModifiers modifiers);
     void remotePen(QPointF position, float pressure, float rotation, int xTilt, int yTilt, bool eraser, int buttons);
+    void remotePenCancelled();
     void bitrateRequested(int kbps);
     void disconnectRequested();
 
@@ -194,4 +198,7 @@ private:
     bool m_HostCursorVisible = true;
     bool m_TabletActive = false;
     bool m_EmbeddedCursor = false;
+#ifdef Q_OS_MACOS
+    bool m_RemotePenDown = false;
+#endif
 };

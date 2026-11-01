@@ -69,6 +69,7 @@ private slots:
             Window window;
             auto& shell = window.shell;
             QSignalSpy errors(&shell,&QtMetalSessionShell::renderingFailed);
+            QObject::connect(&shell,&QtMetalSessionShell::renderingFailed,&shell,[](const QString& error) { qWarning().noquote() << error; });
             auto& scene = shell.surface();
             scene.setLiveSession(true);
             scene.setPinned(true);

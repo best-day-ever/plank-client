@@ -65,6 +65,7 @@ struct QtMetalSessionShell::Rendering
 
     void fail(QString reason)
     {
+        qWarning().noquote() << "Qt Metal session:" << reason;
         QMetaObject::invokeMethod(shell, [owner = shell, reason] {
             emit owner->renderingFailed(reason);
         }, Qt::QueuedConnection);
@@ -78,6 +79,15 @@ struct QtMetalSessionShell::Rendering
                 fail(QStringLiteral("Could not initialize the Qt Metal scene"));
                 return;
             }
+            id<MTLCommandBuffer> submission = nil;
+            // Qt exposes the native command buffer while recording the frame,
+            // then clears that public resource before render() returns. Capture
+            // it at the documented render signal, before endFrame() commits it.
+            const auto recording = QObject::connect(&scene, &QQuickWindow::afterRendering, &scene,
+                [&scene, &submission] {
+                    submission = (id<MTLCommandBuffer>)scene.rendererInterface()->getResource(
+                        &scene, QSGRendererInterface::CommandListResource);
+                }, Qt::DirectConnection);
             for (;;) {
                 QSize framePixels;
                 qreal frameDpr;
@@ -101,7 +111,7 @@ struct QtMetalSessionShell::Rendering
                     }
                     const auto texture = drawable.texture;
                     if (texture.pixelFormat != MTLPixelFormatRGB10A2Unorm) {
-                        fail(QStringLiteral("The Qt Metal drawable changed pixel format"));
+                        fail(QStringLiteral("The Qt Metal drawable changed pixel format (%1)").arg(qulonglong(texture.pixelFormat)));
                         break;
                     }
                     if (texture.width != NSUInteger(framePixels.width()) ||
@@ -134,19 +144,21 @@ struct QtMetalSessionShell::Rendering
                         synced = true;
                     }
                     changed.notify_all(); // GUI can dispatch immediately again.
+                    submission = nil;
                     control.render();
-                    auto command = (id<MTLCommandBuffer>)scene.rendererInterface()->getResource(
-                        &scene, QSGRendererInterface::CommandListResource);
+                    auto command = submission;
                     if (command) [command presentDrawable:drawable];
                     control.endFrame(); // Qt waits for GPU completion on this worker.
                     if (!command || command.status == MTLCommandBufferStatusError) {
-                        fail(QStringLiteral("The Qt Metal presentation command failed"));
+                        fail(QStringLiteral("The Qt Metal presentation command failed: %1").arg(
+                            command ? QString::fromNSString(command.error.description) : QStringLiteral("no command buffer")));
                         break;
                     }
                     emit scene.frameSwapped();
                     QMetaObject::invokeMethod(shell, &QtMetalSessionShell::frameFinished, Qt::QueuedConnection);
                 }
             }
+            QObject::disconnect(recording);
             control.invalidate();
         }
     }
