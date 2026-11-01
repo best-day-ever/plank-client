@@ -264,12 +264,16 @@ void ConnectivityTest::systemPingLoopback()
     Monitor monitor(settings);
     monitor.start();
     QTRY_COMPARE_WITH_TIMEOUT(monitor.state(), Monitor::Reachable, 4000);
-    monitor.refreshSummary();
-    QTRY_VERIFY_WITH_TIMEOUT(!monitor.summaryRunning(), 4000);
-    QCOMPARE(monitor.summaryResults().size(), 1);
-    const auto row = monitor.summaryResults().first().toMap();
-    QCOMPARE(row.value("state").toInt(), int(Monitor::Reachable));
-    QVERIFY(row.value("roundTripMs").toDouble() >= 0);
+    // Exercise varying real timings: macOS's unused single-sample standard
+    // deviation can be NaN, even though the RTT is valid.
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        monitor.refreshSummary();
+        QTRY_VERIFY_WITH_TIMEOUT(!monitor.summaryRunning(), 4000);
+        QCOMPARE(monitor.summaryResults().size(), 1);
+        const auto row = monitor.summaryResults().first().toMap();
+        QCOMPARE(row.value("state").toInt(), int(Monitor::Reachable));
+        QVERIFY(row.value("roundTripMs").toDouble() >= 0);
+    }
 }
 
 void ConnectivityTest::summaryChecksEveryTargetConcurrently()
@@ -311,8 +315,12 @@ void ConnectivityTest::summaryRoundTripFormats_data()
     QTest::addColumn<double>("expectedMs");
     QTest::newRow("iputils") << QString("PING example\n\nrtt min/avg/max/mdev = 8.125/8.125/8.125/0.000 ms\n") << 8.125;
     QTest::newRow("macOS") << QString("round-trip min/avg/max/stddev = 0.187/0.187/0.187/0.000 ms\n") << 0.187;
+    QTest::newRow("macOS NaN deviation") << QString("round-trip min/avg/max/stddev = 0.187/0.187/0.187/nan ms\n") << 0.187;
+    QTest::newRow("macOS negative NaN deviation") << QString("round-trip min/avg/max/stddev = 0.187/0.187/0.187/-nan ms\n") << 0.187;
     QTest::newRow("missing") << QString("reply received\n") << -1.0;
     QTest::newRow("malformed") << QString("rtt min/avg/max/mdev = 1.0/NaN/1.0/0.0 ms\n") << -1.0;
+    QTest::newRow("negative RTT") << QString("rtt min/avg/max/mdev = 1.0/-1.0/1.0/0.0 ms\n") << -1.0;
+    QTest::newRow("infinite RTT") << QString("rtt min/avg/max/mdev = 1.0/inf/1.0/0.0 ms\n") << -1.0;
     QTest::newRow("bounded output") << (QString(5000, 'x') + "\nrtt min/avg/max/mdev = 1/1/1/0 ms\n") << -1.0;
 }
 

@@ -74,8 +74,10 @@ struct InternetConnectivity::Probe : QObject
         // -q -c 1 emits this summary on both iputils and macOS ping. Parse the
         // actual ICMP RTT, never process startup/exit time. Success without a
         // recognized timing line remains reachable with no RTT available.
+        // Read only the average. macOS can print NaN for the unused standard
+        // deviation when its single-sample variance rounds below zero.
         static const QRegularExpression summary(QStringLiteral(
-            R"((?:^|\n)(?:rtt|round-trip) min/avg/max/(?:mdev|stddev) = [0-9]+(?:\.[0-9]+)?/([0-9]+(?:\.[0-9]+)?)/[0-9]+(?:\.[0-9]+)?/[0-9]+(?:\.[0-9]+)? ms(?:\r?\n|$))"));
+            R"((?:^|\n)(?:rtt|round-trip) min/avg/max/(?:mdev|stddev) = [0-9]+(?:\.[0-9]+)?/([0-9]+(?:\.[0-9]+)?)/)"));
         const auto match = summary.match(QString::fromLatin1(output));
         if (!match.hasMatch()) return -1;
         bool ok = false;
