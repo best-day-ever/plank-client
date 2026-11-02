@@ -165,6 +165,37 @@ private slots:
         QVERIFY(keys[1].mod & SDL_KMOD_LALT);
         QVERIFY(keys[1].down && !keys[2].down && !keys[3].down);
     }
+    void qtDispatcherCoalescesWithoutSdlWakeEvents()
+    {
+        state().active = false;
+        int wakes = 0;
+        m_Capture->setQueueWake([&] { ++wakes; return true; });
+        state().active = true;
+        QVERIFY(capture(kVK_ANSI_A));
+        QVERIFY(capture(kVK_ANSI_A, kCGEventKeyUp));
+        QCOMPARE(wakes, 1);
+        QVERIFY(!SDL_HasEvent(state().eventType));
+        std::vector<SDL_KeyboardEvent> keys;
+        m_Capture->dispatchPending([&](SDL_KeyboardEvent* event) { keys.push_back(*event); });
+        QCOMPARE(keys.size(), size_t(2));
+        QVERIFY(keys[0].down && !keys[1].down);
+        QVERIFY(capture(kVK_ANSI_B));
+        QCOMPARE(wakes, 2);
+        m_Focus = false;
+        m_Capture->dispatchPending([&](SDL_KeyboardEvent* event) { keys.push_back(*event); });
+        QCOMPARE(keys.size(), size_t(2)); // Background keys cannot leak to Host.
+        QVERIFY(state().pending.empty());
+    }
+    void qtDispatcherFailureReleasesCapture()
+    {
+        state().active = false;
+        m_Capture->setQueueWake([] { return false; });
+        state().active = true;
+        QVERIFY(!capture(kVK_ANSI_A));
+        QVERIFY(!state().active);
+        QVERIFY(state().pending.empty());
+        QCOMPARE(m_Releases, 1);
+    }
     void heldAndRightModifiersAreReconciled()
     {
         const auto flags = kCGEventFlagMaskCommand | NX_DEVICERCMDKEYMASK |

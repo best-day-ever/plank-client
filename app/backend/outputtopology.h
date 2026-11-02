@@ -100,7 +100,7 @@ struct NvOutputTopology
     static const int ClipboardFilesFeature = 0x1000000;
     // Only advertise a clipboard receiver/sender when this client implements
     // it. Linux must not cause the host to read or transmit unused clipboard data.
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     static const int PlatformClipboardSyncFeature = ClipboardSyncFeature;
     static const int PlatformClipboardFilesFeature = ClipboardFilesFeature;
 #else

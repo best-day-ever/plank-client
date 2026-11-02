@@ -1,3 +1,11 @@
+## 1.2.14 — Windows clipboard and connection improvements
+
+- Enable Windows text copy/paste and file transfer with Linux workstations when your account has the corresponding permissions.
+- Show Internet reachability separately from workstation status; click the indicator for address-by-address ping results.
+- Start new workstation bookmarks with Native (1:1 pixels) scaling while preserving existing choices.
+- Include the latest keyboard and tablet recovery improvements, keeping Fernweh sign-in, updates, display setup and collaboration controls.
+- Preserve authenticated display capabilities, selected monitor identities and the primary screen through desktop handoff and reconnect.
+
 ## 1.1.046 — Authenticated display capabilities
 
 - Preserve the workstation's authenticated display capabilities across background discovery and reconnect, keeping the selected screens on the current display protocol.

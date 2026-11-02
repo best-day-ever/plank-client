@@ -129,6 +129,18 @@ public:
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) = 0;
     virtual void renderFrame(AVFrame* frame) = 0;
 
+    // Qt owns presentation scheduling and reports completion separately from
+    // submission. Do not place a second Pacer queue in front of that owner or
+    // publish the A/V clock when a frame has merely been queued.
+    virtual bool ownsPresentationScheduling() const { return false; }
+    virtual void discardPendingFrames() {}
+    virtual bool resumePresentation() { return true; }
+    virtual void collectPresentationStats(VIDEO_STATS&) {}
+    virtual bool usesCustomDecodeBuffers() const { return false; }
+    virtual int getDecodeBuffer(AVCodecContext* context, AVFrame* frame, int flags) {
+        return avcodec_default_get_buffer2(context, frame, flags);
+    }
+
     enum class InitFailureReason
     {
         Unknown,
@@ -353,4 +365,14 @@ public:
 
     virtual void unmapDrmPrimeFrame(AVDRMFrameDescriptor*) {}
 #endif
+};
+
+// Window-independent decoder selection boundary. The existing exact-profile
+// test decode is still mandatory. Returning null rejects only this backend;
+// it does not authorize another profile or a CPU-copy presentation fallback.
+class IFFmpegRendererFactory
+{
+public:
+    virtual ~IFFmpegRendererFactory() = default;
+    virtual IFFmpegRenderer* createRenderer(const AVCodecHWConfig* hardware) = 0;
 };

@@ -21,7 +21,7 @@ ApplicationWindow {
     }
 
     id: window
-    title: qsTr("BDE fernweh")
+    title: Qt.application.displayName
     width: 1280
     height: 1200
     minimumHeight: 900
@@ -51,7 +51,7 @@ ApplicationWindow {
         if (SystemProperties.isWow64) {
             wow64Dialog.open()
         }
-        else if (!SystemProperties.hasHardwareAcceleration) {
+        else if (SystemProperties.hardwareCapabilityKnown && !SystemProperties.hasHardwareAcceleration) {
             if (SystemProperties.isRunningXWayland) {
                 xWaylandDialog.open()
             }
@@ -287,7 +287,9 @@ ApplicationWindow {
 
         Label {
             id: titleLabel
-            visible: toolBar.width > 700
+            // Center only when neither side's controls would overlap the title.
+            visible: toolBar.width > 2 * Math.max(titleRowLabel.x,
+                         toolBar.width - titleRowLabel.x - titleRowLabel.width) + implicitWidth + 24
             anchors.fill: parent
             text: stackView.currentItem ? stackView.currentItem.objectName : ""
             color: theme.textPrimary
@@ -362,6 +364,10 @@ ApplicationWindow {
                 // the remaining space in the RowLayout. To "hide" it, we
                 // just set the text to empty string.
                 text: !titleLabel.visible && stackView.currentItem ? stackView.currentItem.objectName : ""
+            }
+
+            PlankInternetStatus {
+                monitor: internetConnectivity
             }
 
             NavigableToolButton {
@@ -572,7 +578,8 @@ ApplicationWindow {
             addHostLayout.currentIndex = 0
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
-            addScalingChoice.currentIndex = 1
+            addScalingChoice.currentIndex = 0
+            addClientDisplays.selection = "current"
         }
 
         onAccepted: {
@@ -585,7 +592,8 @@ ApplicationWindow {
                                                    addScalingChoice.currentIndex,
                                                    addVideoSettings.videoProfile,
                                                    addVideoSettings.captureSource,
-                                                   addVideoSettings.officeBitratesKbps)
+                                                   addVideoSettings.officeBitratesKbps,
+                                                   addClientDisplays.selection)
             }
         }
 
@@ -715,6 +723,11 @@ ApplicationWindow {
                 }
             }
 
+            PlankClientDisplayBox {
+                id: addClientDisplays
+                Layout.fillWidth: true
+            }
+
             Label {
                 Layout.topMargin: 10
                 text: qsTr("Scaling")
@@ -724,7 +737,7 @@ ApplicationWindow {
             PlankComboBox {
                 id: addScalingChoice
                 Layout.fillWidth: true
-                currentIndex: 1
+                currentIndex: 0
                 model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
             }
 

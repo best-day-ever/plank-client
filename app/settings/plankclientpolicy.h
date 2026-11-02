@@ -1,11 +1,21 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 class PlankClientPolicy
 {
 public:
+    struct InternetCheck {
+        bool enabled = true;
+        QStringList hosts = {QStringLiteral("8.8.8.8"), QStringLiteral("1.1.1.1"),
+                             QStringLiteral("9.9.9.9")};
+        int intervalMs = 15000;
+        int timeoutMs = 1000;
+        QString error;
+    };
+
     explicit PlankClientPolicy(
             const QString& configPath = defaultConfigPath());
 
@@ -16,6 +26,7 @@ public:
     quint16 networkPort() const;
     bool relayWakeEnabled() const;
     quint16 relayWakePort() const;
+    InternetCheck internetCheck() const;
 
     static constexpr quint16 BuiltInNetworkPort = 28989;
     static constexpr quint16 BuiltInRelayWakePort = 28988;

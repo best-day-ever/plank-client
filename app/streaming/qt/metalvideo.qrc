@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/qt-video">
+    <file alias="video.metal">../../shaders/vt_renderer.metal</file>
+  </qresource>
+</RCC>

@@ -172,6 +172,13 @@ int ComputerModel::plankScalingChoice(int computerIndex) const
     return computer->plankScalingMode == NvOutputTopology::NativeScalingMode ? 0 : 1;
 }
 
+QString ComputerModel::plankClientDisplays(int computerIndex) const
+{
+    if (computerIndex < 0 || computerIndex >= m_Computers.size()) return QStringLiteral("current");
+    QReadLocker lock(&m_Computers[computerIndex]->lock);
+    return m_Computers[computerIndex]->plankClientDisplays;
+}
+
 int ComputerModel::plankVideoProfile(int computerIndex) const
 {
     Q_ASSERT(computerIndex >= 0 && computerIndex < m_Computers.count());
@@ -256,7 +263,8 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                          int virtualMode1Choice,
                                          int virtualMode2Choice,
                                          int videoProfile, int captureSource,
-                                         const QVariantList& profileBitratesKbps)
+                                         const QVariantList& profileBitratesKbps,
+                                         const QString& clientDisplays)
 {
     if (computerIndex < 0 || computerIndex >= m_Computers.count()) {
         return false;
@@ -281,7 +289,7 @@ bool ComputerModel::editComputerBookmark(int computerIndex, QString address,
                                                   hostLayout,
                                                   virtualMode1, virtualMode2,
                                                   videoProfile, captureSource,
-                                                  profileBitratesKbps);
+                                                  profileBitratesKbps, clientDisplays);
 }
 
 void ComputerModel::deleteComputer(int computerIndex)

@@ -1,0 +1,10 @@
+QT += core gui testlib qml quick quickcontrols2
+QT -= widgets
+TEMPLATE = app
+CONFIG += console testcase c++17 link_pkgconfig
+PKGCONFIG += fontconfig
+DEFINES += PLANK_QT_SESSION
+INCLUDEPATH += ../../app
+SOURCES += test_qtsystemproperties.cpp ../../app/backend/systemproperties.cpp ../../app/backend/outputtopology.cpp
+HEADERS += ../../app/backend/systemproperties.h
+RESOURCES += selection.qrc

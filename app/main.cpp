@@ -1,4 +1,11 @@
 #include <QGuiApplication>
+#ifdef PLANK_QT_SESSION
+#include <QQuickWindow>
+#include <QEvent>
+#ifdef Q_OS_LINUX
+#include "streaming/qt/sessionshell.h"
+#endif
+#endif
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -7,6 +14,7 @@
 #include <QMutex>
 #include <QtDebug>
 #include <QNetworkProxyFactory>
+#include <QNetworkInformation>
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
@@ -17,6 +25,8 @@
 #include <QRegularExpression>
 #include <QPointer>
 #include <QTimer>
+#include "clientidentity.h"
+#include "backend/internetconnectivity.h"
 
 #ifdef Q_OS_UNIX
 #include <sys/socket.h>
@@ -364,11 +374,17 @@ int SDLCALL signalHandlerThread(void* data)
                 _Exit(1);
             }
 
+            // Qt owns dispatch throughout the Linux session. Its Quit
+            // filter keeps the event loop alive until asynchronous teardown.
+#ifdef PLANK_QT_SESSION
+            QCoreApplication::postEvent(QCoreApplication::instance(), new QEvent(QEvent::Quit));
+#else
             // Route termination through the normal client disconnect path.
             SDL_Event event = {};
             event.type = SDL_EVENT_QUIT;
             event.quit.timestamp = SDL_GetTicksNS();
             SDL_PushEvent(&event);
+#endif
             requestedQuit = true;
             break;
         }
@@ -406,14 +422,21 @@ void configureSignalHandlers()
 
 int main(int argc, char *argv[])
 {
+#ifdef PLANK_QT_SESSION
+#ifdef Q_OS_MACOS
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Metal);
+#else
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#endif
+#endif
     SDL_SetMainReady();
 
     // Set the SDL3 application identity before any subsystem can initialize.
     // On Wayland, GNOME uses this ID to match the stream window to our desktop
     // entry and persist the user's keyboard-shortcut inhibitor decision.
-    SDL_SetAppMetadata("BDE fernweh",
+    SDL_SetAppMetadata(PlankClientIdentity::displayName,
                        PLANK_VERSION_STR,
-                       "la.instinctual.Plank.Client");
+                       PlankClientIdentity::desktopId);
 
     // Set the app version for the QCommandLineParser's showVersion() command
     QCoreApplication::setApplicationVersion(PLANK_VERSION_STR);
@@ -423,7 +446,7 @@ int main(int argc, char *argv[])
     // initialized. There are no deployed legacy clients requiring migration.
     QCoreApplication::setOrganizationName("Instinctual");
     QCoreApplication::setOrganizationDomain("instinctual.la");
-    QCoreApplication::setApplicationName("PLANK");
+    QCoreApplication::setApplicationName(PlankClientIdentity::applicationName);
 
     if (QFile(QDir::currentPath() + "/portable.dat").exists()) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -463,8 +486,9 @@ int main(int argc, char *argv[])
     if (!logDirectoryReady) {
         QTextStream(stderr) << "Unable to create private log directory: " << logDir.absolutePath() << Qt::endl;
     }
-    logNamePattern = "plank-client-*.log";
-    const QString logFileName = QString("plank-client-%1-%2.log")
+    const QString logPrefix = QString::fromLatin1(PlankClientIdentity::executable);
+    logNamePattern = logPrefix + QStringLiteral("-*.log");
+    const QString logFileName = logPrefix + QString("-%1-%2.log")
                                     .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz"))
                                     .arg(QCoreApplication::applicationPid());
 #else
@@ -659,6 +683,9 @@ int main(int argc, char *argv[])
     // Qt 5 and the threaded render loop on Qt 6.
     qputenv("QSG_RENDER_LOOP", "basic");
 #endif
+#if defined(PLANK_QT_SESSION) && defined(Q_OS_LINUX)
+    QtSessionShell::configureWaylandExposure();
+#endif
 
 #if defined(Q_OS_DARWIN) && defined(QT_DEBUG) && !defined(HAVE_LIBPLACEBO_VULKAN)
     // Enable Metal valiation for debug builds without libplacebo
@@ -788,7 +815,7 @@ int main(int argc, char *argv[])
     qInfo() << "PLANK TLS backend:" << QSslSocket::activeBackend()
             << QSslSocket::sslLibraryVersionString();
 #endif
-    QGuiApplication::setApplicationDisplayName("BDE fernweh");
+    QGuiApplication::setApplicationDisplayName(PlankClientIdentity::displayName);
 
 #ifdef Q_OS_DARWIN
     // macOS defaults "Keyboard navigation" to text fields and lists only, which
@@ -923,10 +950,12 @@ int main(int argc, char *argv[])
 
     // Match the PLANK desktop entry so Wayland and X11 shells group
     // both the Qt launcher and SDL stream window under the packaged identity.
-    app.setDesktopFileName("la.instinctual.Plank.Client");
+    app.setDesktopFileName(PlankClientIdentity::desktopId);
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
+    qmlRegisterUncreatableType<InternetConnectivity>("InternetConnectivity", 1, 0,
+        "InternetConnectivity", "The application owns the connectivity monitor");
     qmlRegisterUncreatableType<Session>("Session", 1, 0, "Session", "Session cannot be created from QML");
     qmlRegisterSingletonType<ComputerManager>("ComputerManager", 1, 0,
                                               "ComputerManager",
@@ -1029,6 +1058,27 @@ int main(int argc, char *argv[])
 
     engine.rootContext()->setContextProperty("initialView", initialView);
     engine.rootContext()->setContextProperty("showOnboarding", showOnboarding);
+    auto* internetConnectivity = new InternetConnectivity(PlankClientPolicy().internetCheck(), &engine);
+    engine.rootContext()->setContextProperty("internetConnectivity", internetConnectivity);
+    // Do not probe during --version or the Installer's permissions-only setup.
+    if (!initialView.isEmpty()) {
+        QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                         internetConnectivity, &InternetConnectivity::stop);
+        QObject::connect(&app, &QGuiApplication::applicationStateChanged,
+                         internetConnectivity, [internetConnectivity](Qt::ApplicationState state) {
+            if (state == Qt::ApplicationActive) internetConnectivity->refreshIfStale();
+        });
+        if (internetConnectivity->state() != InternetConnectivity::Disabled) {
+            QNetworkInformation::loadDefaultBackend();
+            if (auto* network = QNetworkInformation::instance()) {
+                QObject::connect(network, &QNetworkInformation::reachabilityChanged,
+                                 internetConnectivity, &InternetConnectivity::networkChanged);
+                QObject::connect(network, &QNetworkInformation::transportMediumChanged,
+                                 internetConnectivity, &InternetConnectivity::networkChanged);
+            }
+        }
+        QTimer::singleShot(0, internetConnectivity, &InternetConnectivity::start);
+    }
     engine.rootContext()->setContextProperty(
                 "runConfigChecks",
                 commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
@@ -1075,6 +1125,9 @@ int main(int argc, char *argv[])
         if (engine.rootObjects().isEmpty()) {
             return -1;
         }
+#ifdef PLANK_QT_SESSION
+        qInfo() << "Qt launcher ready; decoder qualification deferred to the stream surface";
+#endif
     }
 
     int err = app.exec();
