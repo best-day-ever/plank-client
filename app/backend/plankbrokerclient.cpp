@@ -496,7 +496,31 @@ PlankBroker::Lease PlankBrokerClient::connect(const QString& sessionToken, const
     return lease;
 }
 
-void PlankBrokerClient::keepalive(const QString& sessionToken, const QString& hostId) const
+PlankBrokerClient::RenewingLease PlankBrokerClient::connectAndRenew(const QString& sessionToken, const QString& hostId) const
+{
+    RenewingLease result;
+    result.lease = connect(sessionToken, hostId);
+    result.expiresIn = result.lease.expiresIn;
+    try {
+        result.expiresIn = keepalive(sessionToken, hostId);
+    } catch (const PlankBrokerError& error) {
+        switch (error.kind()) {
+        case PlankBrokerError::SessionExpired:
+        case PlankBrokerError::Denied:
+        case PlankBrokerError::NotConfigured:
+        case PlankBrokerError::Tls:
+            result.lease.gssapiToken.fill(QChar('\0'));
+            throw;
+        default:
+            // Preserve the original deadline after a transient failure; a
+            // successful connect alone has not granted the longer renewal TTL.
+            result.renewalFailure = error.kind();
+        }
+    }
+    return result;
+}
+
+int PlankBrokerClient::keepalive(const QString& sessionToken, const QString& hostId) const
 {
     if (sessionToken.isEmpty()) throw PlankBrokerError(PlankBrokerError::SessionExpired);
     if (!PlankBroker::isHostId(hostId)) throw PlankBrokerError(PlankBrokerError::Denied);
@@ -504,6 +528,9 @@ void PlankBrokerClient::keepalive(const QString& sessionToken, const QString& ho
     const Response response = request("POST", PlankBroker::hostActionPath(hostId, QStringLiteral("keepalive")),
                                       &empty, sessionToken);
     throwForBearerStatus(response.status, response.body);
+    int expiresIn = 0;
+    if (!PlankBroker::parseKeepalive(response.body, expiresIn)) throw PlankBrokerError(PlankBrokerError::Protocol);
+    return expiresIn;
 }
 
 void PlankBrokerClient::logout(const QString& sessionToken) const

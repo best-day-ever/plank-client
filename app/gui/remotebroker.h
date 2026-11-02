@@ -163,14 +163,43 @@ private:
     {
     public:
         QString get() const { QMutexLocker lock(&m_Lock); return m_Token; }
-        void set(QString token, bool bound = false) { QMutexLocker lock(&m_Lock); m_Token = std::move(token); m_Bound = bound; }
-        void clear() { QMutexLocker lock(&m_Lock); m_Token.fill(QChar('\0')); m_Token.clear(); m_Bound = false; }
+        void set(QString token, bool bound = false) {
+            QMutexLocker lock(&m_Lock);
+            m_Token = std::move(token);
+            m_Bound = bound;
+            ++m_Revision;
+            ++m_Lease;
+        }
+        void clear() {
+            QMutexLocker lock(&m_Lock);
+            m_Token.fill(QChar('\0'));
+            m_Token.clear();
+            m_Bound = false;
+            ++m_Revision;
+            ++m_Lease;
+        }
         bool hasToken() const { QMutexLocker lock(&m_Lock); return !m_Token.isEmpty(); }
         bool proofRequired() const { QMutexLocker lock(&m_Lock); return m_Bound; }
+        quint64 revision() const { QMutexLocker lock(&m_Lock); return m_Revision; }
+        quint64 beginLease(quint64 revision) {
+            QMutexLocker lock(&m_Lock);
+            return revision == m_Revision && !m_Token.isEmpty() ? ++m_Lease : 0;
+        }
+        bool currentLease(quint64 revision, quint64 lease) const {
+            QMutexLocker lock(&m_Lock);
+            return lease != 0 && revision == m_Revision && lease == m_Lease && !m_Token.isEmpty();
+        }
+        QString getForRevision(quint64 revision) const {
+            QMutexLocker lock(&m_Lock);
+            return revision == m_Revision ? m_Token : QString();
+        }
+        void cancelLease() { QMutexLocker lock(&m_Lock); ++m_Lease; }
     private:
         mutable QMutex m_Lock;
         QString m_Token;
         bool m_Bound = false;
+        quint64 m_Revision = 0;
+        quint64 m_Lease = 0;
     };
 
     PlankBrokerClient::Config clientConfig() const;
@@ -185,7 +214,9 @@ private:
     bool bookmarkSeedFor(const QString& hostId, const QString& hostName, RemoteStreamSetup::Setup& seed) const;
     RemoteStreamSetup::Resolution resolveStreamSetup(const QString& hostId, int platform) const;
     QString hostNameFor(const QString& hostId) const;
-    void startKeepalive(const QString& hostId, Session* session);
+    void startKeepalive(const QString& hostId, quint64 authentication, quint64 grant,
+                        const QString& token, qint64 grantedAtMs, int expiresIn);
+    void attachKeepaliveSession(Session* session);
     void stopKeepalive();
     void scheduleKeepalive();
     void sendKeepalive();
@@ -210,9 +241,9 @@ private:
     QVector<NvComputer*> m_Computers;
 
     QTimer m_KeepaliveTimer;
-    PlankBroker::KeepaliveSchedule m_KeepaliveSchedule;
+    PlankBroker::LeaseRenewal m_LeaseRenewal;
     QString m_KeepaliveHostId;
     QPointer<Session> m_KeepaliveSession;
-    bool m_KeepaliveInFlight = false;
+    Session* m_KeepaliveOwner = nullptr; // identity only; never dereferenced
     quint64 m_Generation = 0;
 };

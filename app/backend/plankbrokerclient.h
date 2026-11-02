@@ -131,7 +131,16 @@ public:
     // X-Plank-Device-Proof (section 14.2) when the signer produces a proof.
     QVector<PlankBroker::Host> hosts(const QString& sessionToken) const;
     PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId) const;
-    void keepalive(const QString& sessionToken, const QString& hostId) const;
+    struct RenewingLease {
+        PlankBroker::Lease lease;
+        int expiresIn = 0;
+        int renewalFailure = -1;
+    };
+    // Called on the connection worker before workstation preparation. The
+    // immediate first renewal protects the short initial lease even when GUI
+    // setup briefly blocks dispatching the subsequent Qt timer.
+    RenewingLease connectAndRenew(const QString& sessionToken, const QString& hostId) const;
+    int keepalive(const QString& sessionToken, const QString& hostId) const;
     void logout(const QString& sessionToken) const;
     // A fresh password + OTP session may register one key with the user's
     // own IPA rights. The broker holds the proven password only briefly;
