@@ -1,6 +1,7 @@
 #include "remotebroker.h"
 
 #include "backend/brokersessionstore.h"
+#include "backend/brokerdevicekey.h"
 #include "backend/clientdisplayprobe.h"
 #include "backend/computermanager.h"
 #include "backend/displayplanner.h"
@@ -46,6 +47,7 @@ qint64 nowMs() { return monotonicClock().elapsed(); }
     qWarning() << "Remote access broker admission failed; kind" << static_cast<int>(error.kind());
     switch (error.kind()) {
     case PlankBrokerError::Network:
+    case PlankBrokerError::DeviceKeyUnavailable:
         throw QtNetworkReplyException(QNetworkReply::TimeoutError, error.userMessage());
     case PlankBrokerError::Tls:
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError, error.userMessage());
@@ -82,6 +84,8 @@ RemoteBroker::RemoteBroker(StreamingPreferences* preferences, QObject* parent)
     connect(&m_KeepaliveTimer, &QTimer::timeout, this, &RemoteBroker::sendKeepalive);
     connect(m_Preferences, &StreamingPreferences::brokerChanged,
             this, &RemoteBroker::configurationChanged);
+    connect(m_Preferences, &StreamingPreferences::brokerChanged,
+            this, &RemoteBroker::stateChanged);
     // The relying party is a broker setting; its keys are listed per rp.
     connect(m_Preferences, &StreamingPreferences::brokerChanged,
             this, &RemoteBroker::refreshPasskeys);
@@ -102,7 +106,14 @@ void RemoteBroker::initialize(ComputerManager* computerManager)
     if (!signedIn() && configured()) {
         BrokerSessionStore::Saved saved;
         if (BrokerSessionStore::load(brokerAddress(), saved)) {
-            m_Token->set(saved.token);
+            BrokerSessionStore::rememberUsername(brokerAddress(), saved.username);
+            if (BrokerSessionStore::needsDeviceSignIn(saved)) {
+                saved.token.fill(QChar('\0'));
+                BrokerSessionStore::clear(brokerAddress());
+                reportSessionNotice(tr("Sign in once more with your password and authenticator code to keep this Windows device signed in. Your username has been remembered."));
+                return;
+            }
+            m_Token->set(saved.token, saved.deviceBound);
             saved.token.fill(QChar('\0'));
             m_Username = saved.username;
             emit stateChanged();
@@ -112,23 +123,23 @@ void RemoteBroker::initialize(ComputerManager* computerManager)
 
 PlankBrokerClient::Config RemoteBroker::clientConfig() const
 {
-    PlankBrokerClient::Config config;
-    config.host = m_Preferences->brokerHost;
-    config.port = static_cast<quint16>(qBound(0, m_Preferences->brokerPort, 65535));
-    config.pins = m_Preferences->brokerPins;
-    // Device-bound sessions (bde-linux docs/plank-broker.md 14): with the
-    // bundled helper (macOS) the session is bound to a Secure Enclave key
-    // for this broker host and every bearer call carries a proof. No helper,
-    // an IP-literal broker or any helper failure: unbound, exactly as before.
-    const QString deviceHost = m_Preferences->brokerHost.trimmed().toLower();
-    if (m_PasskeyHelper.available() && PlankBroker::isPasskeyRpId(deviceHost)) {
-        const PlankPasskeyHelper helper(m_PasskeyHelper.program());
-        config.devicePublicKey = [helper, deviceHost]() { return helper.devicePublicKey(deviceHost); };
-        config.deviceSigner = [helper, deviceHost](const QByteArray& message) {
-            return helper.deviceSign(deviceHost, message);
-        };
-    }
-    return config;
+    const auto token = m_Token;
+    return BrokerDeviceKey::clientConfig(m_Preferences->brokerHost,
+                static_cast<quint16>(qBound(0, m_Preferences->brokerPort, 65535)),
+                m_Preferences->brokerPins, [token]() { return token->proofRequired(); },
+                m_PasskeyHelper.program());
+}
+
+QString RemoteBroker::rememberedUsername() const
+{
+    return BrokerSessionStore::rememberedUsername(brokerAddress());
+}
+
+void RemoteBroker::reportSessionNotice(const QString& text)
+{
+    if (m_SessionNotice == text) return;
+    m_SessionNotice = text;
+    emit stateChanged();
 }
 
 QString RemoteBroker::brokerAddress() const
@@ -163,6 +174,7 @@ void RemoteBroker::signOutLocally(const QString& message)
     m_Username.clear();
     m_Hosts.clear();
     m_BusyText.clear();
+    if (!message.isEmpty()) m_SessionNotice = message;
     emit hostsChanged();
     emit stateChanged();
     if (!message.isEmpty()) {
@@ -175,6 +187,10 @@ void RemoteBroker::handleBrokerError(const PlankBrokerError& error, bool connect
     setBusy(QString());
     if (error.kind() == PlankBrokerError::SessionExpired) {
         signOutLocally(error.userMessage());
+        return;
+    }
+    if (error.kind() == PlankBrokerError::DeviceKeyUnavailable) {
+        reportSessionNotice(error.userMessage());
         return;
     }
     if (connecting && error.kind() == PlankBrokerError::Denied) {
@@ -213,6 +229,7 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
         QString token;
         QString confirmedUser;
         bool offerTouchId = false;
+        bool deviceBound = false;
         std::unique_ptr<PlankBrokerError> failure;
         try {
             PlankBrokerClient client(config);
@@ -229,6 +246,7 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
                 throw PlankBrokerError(PlankBrokerError::Denied);
             }
             token = reply.sessionToken;
+            deviceBound = reply.deviceBound;
             confirmedUser = reply.username.isEmpty() ? user : reply.username;
             if (reply.passkeySetupAvailable) {
                 const PlankPasskeyHelper helper(helperProgram);
@@ -251,7 +269,7 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
         }
         password.fill(QChar('\0'));
         otp.fill(QChar('\0'));
-        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, offerTouchId,
+        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, offerTouchId, deviceBound,
                                          failure = std::shared_ptr<PlankBrokerError>(failure.release())]() mutable {
             if (!self || generation != self->m_Generation) {
                 token.fill(QChar('\0'));
@@ -261,7 +279,7 @@ void RemoteBroker::signIn(const QString& username, QString password, QString otp
                 self->handleBrokerError(*failure, false);
                 return;
             }
-            self->finishSignIn(token, confirmedUser, offerTouchId);
+            self->finishSignIn(token, confirmedUser, offerTouchId, deviceBound);
             token.fill(QChar('\0'));
         }, Qt::QueuedConnection);
     });
@@ -273,14 +291,16 @@ QString RemoteBroker::passkeyRpId() const
     return PlankBroker::isPasskeyRpId(rpId) ? rpId : PlankBroker::defaultPasskeyRpId();
 }
 
-void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser, bool offerTouchId)
+void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser, bool offerTouchId, bool deviceBound)
 {
     m_TouchIdSetupPending = offerTouchId;
     m_TouchIdSetupBusy = false;
     m_TouchIdSetupError.clear();
-    m_Token->set(token);
+    m_Token->set(token, deviceBound);
     // Password + code and Touch ID both end here: remember the session.
-    BrokerSessionStore::save(brokerAddress(), confirmedUser, token);
+    const bool saved = BrokerSessionStore::save(brokerAddress(), confirmedUser, token, deviceBound);
+    BrokerSessionStore::rememberUsername(brokerAddress(), confirmedUser);
+    m_SessionNotice = saved ? QString() : tr("You are signed in, but this computer could not save the sign-in. You may need to sign in again after restarting Fernweh.");
     token.fill(QChar('\0'));
     // Lasting proof this Mac was used before, beyond the Keychain session
     // that sign-out and an expired session clear: no wizard on next launch.
@@ -295,7 +315,7 @@ void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser, boo
     if (offerTouchId) emit touchIdSetupRequested();
 }
 
-void RemoteBroker::adoptSession(QString token, const QString& confirmedUser)
+void RemoteBroker::adoptSession(QString token, const QString& confirmedUser, bool deviceBound)
 {
     if (token.isEmpty() || confirmedUser.isEmpty()) {
         token.fill(QChar('\0'));
@@ -303,7 +323,7 @@ void RemoteBroker::adoptSession(QString token, const QString& confirmedUser)
     }
     // Anything still in flight belongs to the previous state.
     ++m_Generation;
-    finishSignIn(token, confirmedUser);
+    finishSignIn(token, confirmedUser, false, deviceBound);
     token.fill(QChar('\0'));
 }
 
@@ -349,8 +369,9 @@ void RemoteBroker::signInWithPasskey(const QString& username)
             qInfo() << "Remote access session device-bound:" << outcome.reply.deviceBound;
         }
         const QString confirmedUser = outcome.reply.username.isEmpty() ? user : outcome.reply.username;
+        const bool deviceBound = outcome.reply.deviceBound;
         const auto result = outcome.result;
-        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, result, failure]() mutable {
+        QMetaObject::invokeMethod(qApp, [self, generation, token, confirmedUser, result, failure, deviceBound]() mutable {
             if (!self || generation != self->m_Generation) {
                 token.fill(QChar('\0'));
                 return;
@@ -361,7 +382,7 @@ void RemoteBroker::signInWithPasskey(const QString& username)
             }
             switch (result) {
             case PlankBrokerClient::PasskeySignIn::Authenticated:
-                self->finishSignIn(token, confirmedUser);
+                self->finishSignIn(token, confirmedUser, false, deviceBound);
                 return;
             case PlankBrokerClient::PasskeySignIn::NotConfirmed:
                 self->setBusy(QString());
@@ -1195,6 +1216,7 @@ void RemoteBroker::scheduleKeepalive()
     if (delay < 0) {
         if (m_KeepaliveSchedule.active()) {
             qWarning() << "Remote access lease keepalive gave up after repeated failures";
+            reportSessionNotice(tr("Fernweh could not renew remote access to this workstation. An existing direct connection may continue; check the network and sign in again before reconnecting."));
         }
         stopKeepalive();
         return;
@@ -1229,9 +1251,18 @@ void RemoteBroker::sendKeepalive()
                        failureKind == PlankBrokerError::Tls) {
                 // Established flows may survive, but the lease cannot be renewed.
                 qWarning() << "Remote access lease keepalive rejected; kind" << failureKind;
-                self->stopKeepalive();
+                const PlankBrokerError failure(static_cast<PlankBrokerError::Kind>(failureKind));
+                if (failure.kind() == PlankBrokerError::SessionExpired)
+                    self->signOutLocally(failure.userMessage());
+                else {
+                    self->reportSessionNotice(failure.kind() == PlankBrokerError::Denied ?
+                        tr("Remote access to this workstation is no longer authorized. An existing direct connection may continue; ask the studio to check your access before reconnecting.") : failure.userMessage());
+                    self->stopKeepalive();
+                }
                 return;
             } else {
+                if (failureKind == PlankBrokerError::DeviceKeyUnavailable)
+                    self->reportSessionNotice(PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable).userMessage());
                 self->m_KeepaliveSchedule.recordFailure();
             }
             self->scheduleKeepalive();

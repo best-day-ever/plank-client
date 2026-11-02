@@ -42,5 +42,7 @@
         <file>gui/PlankCheckBox.qml</file>
         <file>gui/PlankComboBox.qml</file>
         <file>gui/PlankTextField.qml</file>
+        <file>gui/BrokerUsernameField.qml</file>
+        <file>gui/BrokerSessionBanner.qml</file>
     </qresource>
 </RCC>

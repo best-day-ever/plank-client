@@ -1192,7 +1192,7 @@ void TestPlankBroker::brokerSessionStoreEncodesOnlyUserAndToken()
     const QString token = QStringLiteral("aB3-_xYz0123456789aB3-_xYz0123456789aB3-_xY");
     const QByteArray encoded = BrokerSessionStore::encode(QStringLiteral("finn"), token);
     const QJsonObject object = QJsonDocument::fromJson(encoded).object();
-    QCOMPARE(object.keys(), QStringList({QStringLiteral("token"), QStringLiteral("user"), QStringLiteral("v")}));
+    QCOMPARE(object.keys(), QStringList({QStringLiteral("device_bound"), QStringLiteral("token"), QStringLiteral("user"), QStringLiteral("v")}));
     BrokerSessionStore::Saved saved;
     QVERIFY(BrokerSessionStore::decode(encoded, saved));
     QCOMPARE(saved.username, QStringLiteral("finn"));
@@ -2426,7 +2426,7 @@ void TestPlankBroker::tlsDeviceSigningFailureSendsNoProof()
             PlankBrokerClient(config).hosts(QStringLiteral("t"));
             QFAIL("a failed device signature must not send the request");
         } catch (const PlankBrokerError& error) {
-            QCOMPARE(error.kind(), PlankBrokerError::Network);
+            QCOMPARE(error.kind(), PlankBrokerError::DeviceKeyUnavailable);
         }
         QCoreApplication::processEvents();
         QVERIFY(server.requestLog.isEmpty());

@@ -157,6 +157,9 @@ Reply Conversation::send(Endpoint endpoint, QJsonObject body) const
     Reply reply = parseReply(endpoint, response.status, response.body);
     response.body.fill('\0');
     throwForTransport(reply);
+    if (reply.session.kind == PlankBroker::ReplyKind::Authenticated &&
+            m_Client.config().requireDeviceBinding && !reply.session.deviceBound)
+        throw PlankBrokerError(PlankBrokerError::Protocol);
     return reply;
 }
 
@@ -199,14 +202,15 @@ Outcome Conversation::begin(const QString& username, QString oneTimePassword)
     }
 
     QJsonObject start {{QStringLiteral("username"), m_Username}};
-    const PlankBrokerClient::Config& config = m_Client.config();
-    if (config.devicePublicKey) {
-        // Same device binding as /v1/auth/start (section 14.2), optional.
-        const QString deviceKey = config.devicePublicKey();
-        if (PlankBroker::isDevicePublicKey(deviceKey)) start.insert(QStringLiteral("device_key"), deviceKey);
-    }
     Reply reply;
     try {
+        const PlankBrokerClient::Config& config = m_Client.config();
+        if (config.devicePublicKey) {
+            // Same device binding as /v1/auth/start (section 14.2).
+            const QString deviceKey = config.devicePublicKey();
+            if (PlankBroker::isDevicePublicKey(deviceKey)) start.insert(QStringLiteral("device_key"), deviceKey);
+            else if (config.requireDeviceBinding) throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
+        }
         reply = send(Endpoint::Start, start);
     } catch (...) {
         zero(oneTimePassword);

@@ -54,6 +54,9 @@ QString PlankBrokerError::userMessage() const
     case SessionExpired:
         return QCoreApplication::translate("PlankBroker",
             "Your remote session has ended. Please sign in again.");
+    case DeviceKeyUnavailable:
+        return QCoreApplication::translate("PlankBroker",
+            "This device's sign-in key is unavailable. Unlock this computer and try again.");
     case Unavailable:
         return QCoreApplication::translate("PlankBroker",
             "The workstation is temporarily unavailable.");
@@ -116,6 +119,9 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
     }
     if (!sessionToken.isEmpty()) {
         request.setRawHeader("Authorization", "Bearer " + sessionToken.toLatin1());
+        const bool proofRequired = m_Config.deviceProofRequired && m_Config.deviceProofRequired();
+        if (proofRequired && !m_Config.deviceSigner)
+            throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
         if (m_Config.deviceSigner) {
             // Section 14.2: prove possession of the device key the session is
             // bound to. No key on this device: unbound, send as before. Signing
@@ -129,10 +135,11 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
                 request.setRawHeader(PlankBroker::deviceTimeHeader(), QByteArray::number(now));
                 request.setRawHeader(PlankBroker::deviceProofHeader(), signature.signature.toLatin1());
             } else if (signature.status == DeviceSignature::NoKey) {
+                if (proofRequired) throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
                 qWarning() << "Remote access: no device key was found for this bearer request";
             } else {
                 qWarning() << "Remote access: the device key could not sign this request; not sending it";
-                throw PlankBrokerError(PlankBrokerError::Network);
+                throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
             }
         }
     }
@@ -231,7 +238,8 @@ PlankBroker::AuthReply PlankBrokerClient::start(const QString& username, PlankBr
         const QString deviceKey = m_Config.devicePublicKey();
         if (PlankBroker::isDevicePublicKey(deviceKey)) {
             body.insert(QStringLiteral("device_key"), deviceKey);
-        }
+        } else if (m_Config.requireDeviceBinding)
+            throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
     }
     Response response = request("POST", QStringLiteral("/v1/auth/start"), &body, QString());
     const PlankBroker::AuthReply reply = PlankBroker::parseAuthReply(response.status, response.body);
@@ -277,6 +285,9 @@ PlankBroker::AuthReply PlankBrokerClient::sendRespond(const QJsonObject& body) c
     Response response = request("POST", QStringLiteral("/v1/auth/respond"), &body, QString());
     const PlankBroker::AuthReply reply = PlankBroker::parseAuthReply(response.status, response.body);
     response.body.fill('\0');
+    if (reply.kind == PlankBroker::ReplyKind::Authenticated &&
+            m_Config.requireDeviceBinding && !reply.deviceBound)
+        throw PlankBrokerError(PlankBrokerError::Protocol);
     switch (reply.kind) {
     case PlankBroker::ReplyKind::Challenge:
     case PlankBroker::ReplyKind::Authenticated:

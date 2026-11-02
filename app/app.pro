@@ -288,6 +288,7 @@ SOURCES += \
     backend/hosttruststore.cpp \
     backend/hosttlsguard.cpp \
     backend/brokersessionstore.cpp \
+    backend/brokerdevicekey.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
@@ -350,6 +351,7 @@ HEADERS += \
     backend/hosttlsguard.h \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
+    backend/brokerdevicekey.h \
     backend/remotedisplaysetup.h \
     backend/remotestreamsetup.h \
     backend/desktopstage.h \
@@ -847,6 +849,7 @@ macx|win32 {
     HEADERS += streaming/clipboardsync.h streaming/clipboardplatform.h streaming/clipboardpolltimer.h streaming/plankclipboard.h
 }
 win32 {
+    LIBS += -lncrypt
     SOURCES += streaming/windowsclipboard.cpp
     contains(CONFIG, plank-transport) {
         SOURCES += streaming/windowsfileclipboard.cpp
