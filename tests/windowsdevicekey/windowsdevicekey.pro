@@ -6,6 +6,7 @@ SOURCES += test_windowsdevicekey.cpp \
     ../../app/backend/brokerdevicekey.cpp \
     ../../app/backend/brokersessionstore.cpp \
     ../../app/backend/plankpasskey.cpp \
+    ../../app/backend/plankenrollment.cpp \
     ../../app/backend/plankbrokerclient.cpp
 HEADERS += ../../app/backend/brokerdevicekey.h ../../app/backend/brokersessionstore.h
 RESOURCES += ui.qrc

@@ -205,6 +205,8 @@ Outcome Conversation::begin(const QString& username, QString oneTimePassword)
     Reply reply;
     try {
         const PlankBrokerClient::Config& config = m_Client.config();
+        if (config.requireDeviceBinding && !config.devicePublicKey)
+            throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
         if (config.devicePublicKey) {
             // Same device binding as /v1/auth/start (section 14.2).
             const QString deviceKey = config.devicePublicKey();

@@ -1,5 +1,6 @@
 #include "backend/brokerdevicekey.h"
 #include "backend/brokersessionstore.h"
+#include "backend/plankenrollment.h"
 
 #include <QtTest>
 #include <QGuiApplication>
@@ -178,6 +179,26 @@ private slots:
         } catch (const PlankBrokerError& error) {
             QCOMPARE(error.kind(), PlankBrokerError::DeviceKeyUnavailable);
         }
+    }
+
+    void requiredBindingNeverStartsAnUnboundConversation() {
+        auto config = BrokerDeviceKey::clientConfig("broker.example.invalid", 443, {QString(64, 'a')}, {}, {});
+        config.requireDeviceBinding = true;
+        config.devicePublicKey = {};
+        try {
+            PlankBrokerClient(config).start("artist");
+            QFAIL("required binding cannot silently start an unbound sign-in");
+        } catch (const PlankBrokerError& error) {
+            QCOMPARE(error.kind(), PlankBrokerError::DeviceKeyUnavailable);
+        }
+        PlankEnrollment::Conversation enrollment(config);
+        try {
+            enrollment.begin("artist", "disposable-password");
+            QFAIL("enrollment must use the same device-binding requirement");
+        } catch (const PlankBrokerError& error) {
+            QCOMPARE(error.kind(), PlankBrokerError::DeviceKeyUnavailable);
+        }
+        QVERIFY(!enrollment.hasConversation());
     }
 
     void usernamePrefillPreservesTypedEdits() {

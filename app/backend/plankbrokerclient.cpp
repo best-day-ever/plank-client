@@ -232,6 +232,8 @@ PlankBroker::AuthReply PlankBrokerClient::start(const QString& username, PlankBr
     if (method == PlankBroker::AuthMethod::Passkey) {
         body.insert(QStringLiteral("method"), QStringLiteral("passkey"));
     }
+    if (m_Config.requireDeviceBinding && !m_Config.devicePublicKey)
+        throw PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable);
     if (m_Config.devicePublicKey) {
         // Section 14.2: bind the session to this device when a key is at
         // hand; otherwise sign in unbound (never fail because of the key).
@@ -244,6 +246,9 @@ PlankBroker::AuthReply PlankBrokerClient::start(const QString& username, PlankBr
     Response response = request("POST", QStringLiteral("/v1/auth/start"), &body, QString());
     const PlankBroker::AuthReply reply = PlankBroker::parseAuthReply(response.status, response.body);
     response.body.fill('\0');
+    if (reply.kind == PlankBroker::ReplyKind::Authenticated &&
+            m_Config.requireDeviceBinding && !reply.deviceBound)
+        throw PlankBrokerError(PlankBrokerError::Protocol);
     switch (reply.kind) {
     case PlankBroker::ReplyKind::Challenge:
         return reply;
