@@ -1,4 +1,5 @@
 #include "sessionruntime.h"
+#include "../../clientidentity.h"
 #include "../session.h"
 #include "../../backend/hostrecovery.h"
 #include "../../backend/clientdisplays.h"
@@ -195,7 +196,8 @@ void QtSessionRuntime::start(QWindow* launcher)
         auto shell = std::make_unique<QtPlatformSessionShell>();
         shell->setScreen(screen);
         m_Screens.append(shell->screen());
-        shell->setTitle(m_Session->m_Computer->name + QStringLiteral(" — PLANK Client"));
+        shell->setTitle(m_Session->m_Computer->name + QStringLiteral(" — ") +
+                        QString::fromLatin1(PlankClientIdentity::displayName));
 #ifdef Q_OS_MACOS
         shell->setKeepAwake(primary && m_Session->m_Preferences->keepAwake);
         connect(shell.get(), &QtMetalSessionShell::renderingFailed, this, [this](QString reason) {
