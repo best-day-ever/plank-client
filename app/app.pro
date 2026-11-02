@@ -794,8 +794,8 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest
 }
 macx {
-    # Oldest supported macOS (Qt 6.10 floor: 13); the build scripts pass the same value.
-    isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 13.0
+    # Oldest supported macOS for Fernweh; the build scripts also target 15.0.
+    isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 15.0
     QMAKE_MACOSX_DEPLOYMENT_TARGET = $$PLANK_MACOS_DEPLOYMENT_TARGET
     QMAKE_APPLE_DEVICE_ARCHS = arm64
     QMAKE_CFLAGS += -Werror=unguarded-availability-new
