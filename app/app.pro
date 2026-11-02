@@ -288,6 +288,7 @@ SOURCES += \
     backend/hosttruststore.cpp \
     backend/hosttlsguard.cpp \
     backend/brokersessionstore.cpp \
+    backend/brokerdevicekey.cpp \
     backend/computermanager.cpp \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
@@ -350,6 +351,8 @@ HEADERS += \
     backend/hosttlsguard.h \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
+    backend/brokersessionstate.h \
+    backend/brokerdevicekey.h \
     backend/remotedisplaysetup.h \
     backend/remotestreamsetup.h \
     backend/desktopstage.h \
@@ -792,8 +795,8 @@ win32 {
     QMAKE_LFLAGS += /MANIFEST:embed /MANIFESTINPUT:$${PWD}/plank-client.exe.manifest
 }
 macx {
-    # Oldest supported macOS (Qt 6.10 floor: 13); the build scripts pass the same value.
-    isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 13.0
+    # Oldest supported macOS for Fernweh; the build scripts also target 15.0.
+    isEmpty(PLANK_MACOS_DEPLOYMENT_TARGET): PLANK_MACOS_DEPLOYMENT_TARGET = 15.0
     QMAKE_MACOSX_DEPLOYMENT_TARGET = $$PLANK_MACOS_DEPLOYMENT_TARGET
     QMAKE_APPLE_DEVICE_ARCHS = arm64
     QMAKE_CFLAGS += -Werror=unguarded-availability-new
@@ -847,6 +850,7 @@ macx|win32 {
     HEADERS += streaming/clipboardsync.h streaming/clipboardplatform.h streaming/clipboardpolltimer.h streaming/plankclipboard.h
 }
 win32 {
+    LIBS += -lncrypt
     SOURCES += streaming/windowsclipboard.cpp
     contains(CONFIG, plank-transport) {
         SOURCES += streaming/windowsfileclipboard.cpp

@@ -31,6 +31,7 @@ public:
         SessionExpired,  // bearer rejected; sign in again
         Unavailable,     // host temporarily offline during desktop handoff
         Protocol,        // malformed reply
+        DeviceKeyUnavailable, // local device key temporarily unavailable
     };
 
     PlankBrokerError(Kind kind, int retryAfter = 0) : m_Kind(kind), m_RetryAfter(retryAfter) {}
@@ -57,7 +58,7 @@ public:
     // deviceSigner: a signature over a proof message. NoKey (this device has
     //   no key for the broker, so the session is unbound) sends the request
     //   without proof headers; Failed (Mac locked, helper error) sends nothing
-    //   and throws a retryable Network error, so a bound session is never
+    //   and throws a retryable DeviceKeyUnavailable error, so a bound session is never
     //   signed out just because signing was briefly impossible.
     struct DeviceSignature {
         enum Status { Signed, NoKey, Failed };
@@ -73,6 +74,15 @@ public:
         QStringList pins;
         DevicePublicKeyProvider devicePublicKey;
         DeviceSigner deviceSigner;
+        std::function<bool()> deviceProofRequired;
+        bool requireDeviceBinding = false;
+
+        Config withFrozenDeviceProofRequirement() const {
+            Config copy = *this;
+            const bool required = deviceProofRequired && deviceProofRequired();
+            copy.deviceProofRequired = [required]() { return required; };
+            return copy;
+        }
     };
 
     explicit PlankBrokerClient(Config config);
@@ -128,7 +138,16 @@ public:
     // X-Plank-Device-Proof (section 14.2) when the signer produces a proof.
     QVector<PlankBroker::Host> hosts(const QString& sessionToken) const;
     PlankBroker::Lease connect(const QString& sessionToken, const QString& hostId) const;
-    void keepalive(const QString& sessionToken, const QString& hostId) const;
+    struct RenewingLease {
+        PlankBroker::Lease lease;
+        int expiresIn = 0;
+        int renewalFailure = -1;
+    };
+    // Called on the connection worker before workstation preparation. The
+    // immediate first renewal protects the short initial lease even when GUI
+    // setup briefly blocks dispatching the subsequent Qt timer.
+    RenewingLease connectAndRenew(const QString& sessionToken, const QString& hostId) const;
+    int keepalive(const QString& sessionToken, const QString& hostId) const;
     void logout(const QString& sessionToken) const;
     // A fresh password + OTP session may register one key with the user's
     // own IPA rights. The broker holds the proven password only briefly;

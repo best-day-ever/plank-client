@@ -23,6 +23,8 @@
 #include <QUrl>
 #include <QVector>
 #include <QtGlobal>
+#include <limits>
+#include <optional>
 
 namespace PlankBroker
 {
@@ -647,6 +649,23 @@ inline bool parseHosts(const QByteArray& body, QVector<Host>& hosts)
     return true;
 }
 
+inline bool parseLeaseSeconds(const QJsonValue& value, int& seconds)
+{
+    if (!value.isDouble() || value.toDouble() < 1 ||
+            value.toDouble() > (std::numeric_limits<int>::max)() ||
+            value.toDouble() != static_cast<double>(value.toInt())) return false;
+    seconds = value.toInt();
+    return true;
+}
+
+inline bool parseKeepalive(const QByteArray& body, int& expiresIn)
+{
+    expiresIn = 0;
+    QJsonObject object;
+    return parseObject(body, object) && object.value(QStringLiteral("state")) == QJsonValue(QStringLiteral("ok")) &&
+            parseLeaseSeconds(object.value(QStringLiteral("expires_in")), expiresIn);
+}
+
 inline bool parseLease(const QByteArray& body, Lease& lease)
 {
     lease = Lease();
@@ -672,14 +691,13 @@ inline bool parseLease(const QByteArray& body, Lease& lease)
             !isCanonicalSha256Hex(parsed.hostCertSha256) ||
             !isPrintableAscii(parsed.username, 255) ||
             parsed.gssapiToken.isEmpty() || parsed.gssapiToken.size() > MaximumGssapiTokenLength ||
-            (!expires.isUndefined() && (!expires.isDouble() || expires.toDouble() < 1))) {
+            (!expires.isUndefined() && !parseLeaseSeconds(expires, parsed.expiresIn))) {
         return false;
     }
     const QByteArray encoded = parsed.gssapiToken.toLatin1();
     const auto decoded = QByteArray::fromBase64Encoding(encoded, QByteArray::AbortOnBase64DecodingErrors);
     if (!decoded || decoded.decoded.isEmpty()) return false;
     parsed.port = static_cast<quint16>(port.toInt());
-    if (!expires.isUndefined()) parsed.expiresIn = expires.toInt();
     lease = parsed;
     return true;
 }
@@ -820,43 +838,111 @@ inline AdmissionResult parseHostAdmission(const QJsonObject& reply, QString& ses
 }
 
 // ---------------------------------------------------------------------------
-// Keepalive (section 10.2 step 4: at least every 60 s while streaming)
+// Renew the actual granted lease, including time spent preparing a stream.
 // ---------------------------------------------------------------------------
 
 class KeepaliveSchedule
 {
 public:
-    static constexpr qint64 IntervalMs = 30000;   // regular cadence (30-45 s window)
-    static constexpr qint64 RetryMs = 10000;      // after a transient failure
-    static constexpr qint64 LeaseWindowMs = 60000;
+    static constexpr qint64 IntervalMs = 30000;
+    static constexpr qint64 RetryMs = 10000;
     static constexpr qint64 SafetyMarginMs = 5000;
 
-    void start(qint64 nowMs) { m_LastSuccessMs = nowMs; m_Failures = 0; m_Active = true; }
+    void start(qint64 grantedAtMs, int expiresIn) { m_Active = true; recordSuccess(grantedAtMs, expiresIn); }
     void stop() { m_Active = false; }
     bool active() const { return m_Active; }
     int failures() const { return m_Failures; }
 
-    void recordSuccess(qint64 nowMs) { m_LastSuccessMs = nowMs; m_Failures = 0; }
-    void recordFailure() { ++m_Failures; }
+    void recordSuccess(qint64 grantedAtMs, int expiresIn)
+    {
+        m_LastSuccessMs = grantedAtMs;
+        m_LeaseWindowMs = qMax<qint64>(0, expiresIn) * 1000;
+        m_Failures = 0;
+    }
+    void recordFailure(qint64 nowMs) { ++m_Failures; m_RetryAtMs = nowMs + RetryMs; }
 
     // Delay until the next keepalive, or -1 once the lease must be assumed
     // lost (no success within the lease window) or the schedule is stopped.
     qint64 nextDelayMs(qint64 nowMs) const
     {
         if (!m_Active) return -1;
-        const qint64 deadline = m_LastSuccessMs + LeaseWindowMs - SafetyMarginMs;
+        const qint64 margin = qMin(SafetyMarginMs, m_LeaseWindowMs / 6);
+        const qint64 deadline = m_LastSuccessMs + m_LeaseWindowMs - margin;
+        if (nowMs >= deadline) return -1;
         if (m_Failures == 0) {
-            return qMax<qint64>(0, qMin(m_LastSuccessMs + IntervalMs, deadline) - nowMs);
+            const qint64 interval = qMin(IntervalMs, m_LeaseWindowMs / 3);
+            return qMax<qint64>(0, qMin(m_LastSuccessMs + interval, deadline) - nowMs);
         }
-        const qint64 remaining = deadline - nowMs;
-        if (remaining <= 0) return -1;
-        return qMin(RetryMs, remaining);
+        return qMax<qint64>(0, qMin(m_RetryAtMs, deadline) - nowMs);
     }
 
 private:
     qint64 m_LastSuccessMs = 0;
+    qint64 m_LeaseWindowMs = 0;
+    qint64 m_RetryAtMs = 0;
     int m_Failures = 0;
     bool m_Active = false;
+};
+
+// One state machine is used by the Qt timer and deterministic network tests.
+// A reply owns exactly one grant and authentication, even when reconnecting to
+// the same host. In-flight work from a replaced grant cannot reset its timer or
+// report a terminal authentication error against the replacement.
+class LeaseRenewal
+{
+public:
+    struct Request {
+        quint64 grant = 0;
+        quint64 authentication = 0;
+        QString hostId;
+        QString token;
+        qint64 startedMs = 0;
+        quint64 attempt = 0;
+    };
+
+    void start(quint64 grant, quint64 authentication, const QString& hostId,
+               const QString& token, qint64 grantedAtMs, int expiresIn)
+    {
+        stop();
+        m_Identity = {grant, authentication, hostId, token, grantedAtMs};
+        m_Schedule.start(grantedAtMs, expiresIn);
+    }
+    void stop()
+    {
+        m_Schedule.stop();
+        m_InFlight = false;
+        m_Identity.token.fill(QChar('\0'));
+        m_Identity = Request();
+    }
+    bool active() const { return m_Schedule.active(); }
+    quint64 grant() const { return m_Identity.grant; }
+    quint64 authentication() const { return m_Identity.authentication; }
+    const QString& hostId() const { return m_Identity.hostId; }
+    qint64 nextDelayMs(qint64 nowMs) const { return m_Schedule.nextDelayMs(nowMs); }
+    std::optional<Request> beginRequest(qint64 nowMs)
+    {
+        if (m_InFlight || nextDelayMs(nowMs) != 0) return std::nullopt;
+        m_InFlight = true;
+        Request request = m_Identity;
+        request.startedMs = nowMs;
+        request.attempt = ++m_Attempt;
+        return request;
+    }
+    bool recordResult(const Request& request, qint64 nowMs, int expiresIn)
+    {
+        if (!active() || !m_InFlight || request.grant != m_Identity.grant ||
+                request.authentication != m_Identity.authentication || request.hostId != m_Identity.hostId ||
+                request.token != m_Identity.token || request.attempt != m_Attempt) return false;
+        m_InFlight = false;
+        if (expiresIn > 0) m_Schedule.recordSuccess(request.startedMs, expiresIn);
+        else m_Schedule.recordFailure(nowMs);
+        return true;
+    }
+private:
+    Request m_Identity;
+    KeepaliveSchedule m_Schedule;
+    bool m_InFlight = false;
+    quint64 m_Attempt = 0;
 };
 
 } // namespace PlankBroker

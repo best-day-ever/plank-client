@@ -59,10 +59,10 @@ bool isAvailable()
     return true;
 }
 
-bool save(const QString& brokerAddress, const QString& username, const QString& token)
+bool save(const QString& brokerAddress, const QString& username, const QString& token, bool deviceBound)
 {
     if (brokerAddress.isEmpty()) return false;
-    QByteArray payload = encode(username, token);
+    QByteArray payload = encode(username, token, deviceBound);
     CfRelease service, account, query, data, attributes;
     query.ref = baseQuery(brokerAddress, service, account);
     data.ref = CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(payload.constData()), payload.size());
@@ -135,11 +135,11 @@ bool isAvailable()
     return !QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation).isEmpty();
 }
 
-bool save(const QString& brokerAddress, const QString& username, const QString& token)
+bool save(const QString& brokerAddress, const QString& username, const QString& token, bool deviceBound)
 {
     const QString path = sessionPath(brokerAddress);
     if (path.isEmpty() || username.isEmpty() || token.isEmpty()) return false;
-    QByteArray plaintext = encode(username, token);
+    QByteArray plaintext = encode(username, token, deviceBound);
     if (plaintext.size() > 4096) {
         plaintext.fill('\0');
         return false;
@@ -206,7 +206,7 @@ void clear(const QString& brokerAddress)
 #else
 
 bool isAvailable() { return false; }
-bool save(const QString&, const QString&, const QString&) { return false; }
+bool save(const QString&, const QString&, const QString&, bool) { return false; }
 bool load(const QString&, Saved& saved) { saved = Saved(); return false; }
 void clear(const QString&) {}
 

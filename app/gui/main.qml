@@ -9,6 +9,7 @@ import DisplaySetup 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import FernwehUpdater 1.0
+import RemoteBroker 1.0
 
 ApplicationWindow {
     property bool pollingActive: false
@@ -131,6 +132,17 @@ ApplicationWindow {
     }
 
     // Screens changed (dock, undock, a lid opened) while no stream runs.
+    BrokerSessionBanner {
+        z: 20
+        message: RemoteBroker.sessionNotice
+        width: Math.min(760, parent.width - 40)
+        height: implicitHeight
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 12
+        onDismissed: RemoteBroker.dismissSessionNotice()
+    }
+
     Rectangle {
         id: displayBanner
         readonly property bool streaming: qmltypeof(stackView.currentItem, "StreamSegue")
