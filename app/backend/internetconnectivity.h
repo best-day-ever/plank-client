@@ -30,6 +30,9 @@ public:
         QString program;
         QStringList arguments;
         int noResponseExitCode = 1;
+        // Windows can exit zero for an ICMP error. Require an actual echo
+        // reply instead of interpreting its localized human-readable status.
+        bool requiresWindowsEchoReply = false;
     };
     using CommandFactory = std::function<PingCommand(const QString&, int)>;
 

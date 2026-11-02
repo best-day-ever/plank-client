@@ -19,6 +19,10 @@ private slots:
     void networkErrorIsNotUtilityFailure_data();
     void networkErrorIsNotUtilityFailure();
     void restartAndStopDiscardCancelledResults();
+    void systemPingCommandUsesPlatformContract();
+    void windowsEchoReplies_data();
+    void windowsEchoReplies();
+    void windowsProbeDeadlineAndCancellation();
     void systemPingLoopback();
     void summaryChecksEveryTargetConcurrently();
     void summaryRoundTripFormats_data();

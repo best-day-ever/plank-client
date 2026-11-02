@@ -5,6 +5,9 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QtDebug>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 // One bounded asynchronous ping, shared by the ordered background check and
 // the on-demand concurrent summary. Cancellation reaps the child before reuse.
@@ -71,6 +74,26 @@ struct InternetConnectivity::Probe : QObject
 
     double roundTripMs() const
     {
+        if (command.requiresWindowsEchoReply) {
+            // Labels vary with the Windows display language. An IPv4 echo
+            // reply includes a bounded numeric latency followed by ms and a
+            // TTL. Destination-unreachable replies and summaries have no such
+            // pair, even when ping.exe returns success. Parse one line only.
+            static const QRegularExpression reply(QStringLiteral(
+                R"((?:^|[\r\n])[^\r\n]*([=<])[ \t]*([0-9]{1,5})[ \t]*ms[ \t]+TTL[ \t]*=[ \t]*([0-9]{1,3})(?=\s|$))"),
+                QRegularExpression::CaseInsensitiveOption);
+            const auto match = reply.match(QString::fromLatin1(output));
+            if (!match.hasMatch()) return -1;
+            bool timeOk = false, ttlOk = false;
+            const int latency = match.captured(2).toInt(&timeOk);
+            const int ttl = match.captured(3).toInt(&ttlOk);
+            if (!timeOk || !ttlOk || latency > deadline.interval() || ttl < 1 || ttl > 255) return -1;
+            // The native utility reports submillisecond replies as <1ms. The
+            // summary already renders every value below one millisecond as <1.
+            if (match.captured(1) == QLatin1String("<"))
+                return latency == 1 ? 0.0 : -1;
+            return latency;
+        }
         // -q -c 1 emits this summary on both iputils and macOS ping. Parse the
         // actual ICMP RTT, never process startup/exit time. Success without a
         // recognized timing line remains reachable with no RTT available.
@@ -96,7 +119,9 @@ struct InternetConnectivity::Probe : QObject
             const bool routeUnavailable = error.contains("Network is unreachable") ||
                     error.contains("No route to host") || error.contains("Network is down") ||
                     error.contains("Host is down") || error.contains("Host is unreachable");
-            if (exitStatus == QProcess::NormalExit && exitCode == 0) state = Reachable;
+            if (exitStatus == QProcess::NormalExit && exitCode == 0) {
+                state = !command.requiresWindowsEchoReply || roundTripMs() >= 0 ? Reachable : NoResponse;
+            }
             else if (exitStatus != QProcess::NormalExit ||
                      (exitCode != command.noResponseExitCode && !routeUnavailable)) state = Unavailable;
         }
@@ -139,7 +164,7 @@ InternetConnectivity::InternetConnectivity(const PlankClientPolicy::InternetChec
         m_State = Unavailable;
         m_Detail = m_ConfigurationError;
     }
-    else m_Detail = tr("Checking the configured Internet addresses. PLANK connections remain available.");
+    else m_Detail = tr("Checking the configured Internet addresses. Fernweh connections remain available.");
 
     m_Poll.setSingleShot(true);
     m_NetworkChange.setSingleShot(true);
@@ -176,6 +201,16 @@ InternetConnectivity::PingCommand InternetConnectivity::systemPingCommand(const 
     return {QStringLiteral("/usr/bin/ping"),
             {QStringLiteral("-4"), QStringLiteral("-n"), QStringLiteral("-q"), QStringLiteral("-c"), QStringLiteral("1"),
              QStringLiteral("-w"), deadline, address.toString()}, 1};
+#elif defined(Q_OS_WIN)
+    Q_UNUSED(deadline)
+    wchar_t systemDirectory[MAX_PATH + 1] {};
+    const auto length = GetSystemDirectoryW(systemDirectory, MAX_PATH + 1);
+    if (length == 0 || length > MAX_PATH) return {};
+    // Use the OS utility directly, never cmd.exe or executable search paths.
+    // -n counts requests and -w is milliseconds on Windows (Microsoft ping).
+    return {QString::fromWCharArray(systemDirectory, int(length)) + QStringLiteral("/PING.EXE"),
+            {QStringLiteral("-4"), QStringLiteral("-n"), QStringLiteral("1"),
+             QStringLiteral("-w"), QString::number(timeoutMs), address.toString()}, 1, true};
 #else
     Q_UNUSED(deadline)
     return {};
@@ -270,12 +305,12 @@ void InternetConnectivity::targetFinished(Probe* probe, State state)
     }
     if (m_ProbeError) {
         completeRound(Unavailable, tr("One or more Internet checks could not run. "
-                                      "Check the system ping utility and client.conf. PLANK connections remain available."));
+                                      "Check the system ping utility and client.conf. Fernweh connections remain available."));
     }
     else {
         completeRound(NoResponse, tr("None of the configured Internet addresses replied. "
                                      "Your connection may be unavailable, or the network may block ping. "
-                                     "PLANK connections remain available."));
+                                     "Fernweh connections remain available."));
     }
 }
 

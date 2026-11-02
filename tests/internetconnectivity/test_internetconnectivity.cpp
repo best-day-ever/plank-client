@@ -4,6 +4,7 @@
 #include <QtTest>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -252,6 +253,119 @@ void ConnectivityTest::restartAndStopDiscardCancelledResults()
     stopped.stop();
     QTRY_VERIFY(stopped.findChildren<QProcess*>().isEmpty());
     QCOMPARE(stoppedUpdates.size(), 0);
+}
+
+void ConnectivityTest::systemPingCommandUsesPlatformContract()
+{
+    const auto command = Monitor::systemPingCommand("192.0.2.1", 725);
+    QVERIFY(QFileInfo(command.program).isAbsolute());
+#ifdef Q_OS_WIN
+    QCOMPARE(QFileInfo(command.program).fileName().toLower(), QString("ping.exe"));
+    QCOMPARE(command.arguments, QStringList({"-4", "-n", "1", "-w", "725", "192.0.2.1"}));
+    QVERIFY(command.requiresWindowsEchoReply);
+#else
+    QVERIFY(!command.requiresWindowsEchoReply);
+    QVERIFY(command.arguments.contains("-c"));
+    QVERIFY(command.arguments.contains("1"));
+    QCOMPARE(command.arguments.last(), QString("192.0.2.1"));
+#endif
+}
+
+void ConnectivityTest::windowsEchoReplies_data()
+{
+    QTest::addColumn<QString>("output");
+    QTest::addColumn<int>("exitCode");
+    QTest::addColumn<int>("expectedState");
+    QTest::addColumn<double>("expectedMs");
+    QTest::newRow("submillisecond") << QString("Reply from 192.0.2.1: bytes=32 time<1ms TTL=128\r\n")
+        << 0 << int(Monitor::Reachable) << 0.0;
+    QTest::newRow("spaced localized labels") << QString("Antwort von 192.0.2.1: Bytes=32 Zeit = 12 ms TTL = 64\r\n")
+        << 0 << int(Monitor::Reachable) << 12.0;
+    QTest::newRow("localized labels") << QString::fromUtf8("Réponse de 192.0.2.1 : octets=32 temps=8ms TTL=37\r\n")
+        << 0 << int(Monitor::Reachable) << 8.0;
+    QTest::newRow("destination unreachable exits zero") << QString("Reply from 192.0.2.254: Destination host unreachable.\r\nPackets: Sent = 1, Received = 1, Lost = 0 (0% loss)\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("localized no route") << QString("Antwort von 192.0.2.254: Zielhost nicht erreichbar.\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("ttl expired") << QString("Reply from 192.0.2.254: TTL expired in transit.\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("request timed out") << QString("Request timed out.\r\n")
+        << 1 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("nonzero overrides reply") << QString("Reply from 192.0.2.1: bytes=32 time=2ms TTL=128\r\n")
+        << 1 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("utility failure") << QString("invalid command line\r\n")
+        << 64 << int(Monitor::Unavailable) << -1.0;
+    QTest::newRow("latency without ttl") << QString("Minimum = 2ms, Maximum = 2ms, Average = 2ms\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("different lines cannot form reply") << QString("time=2ms\r\nTTL=128\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("negative latency") << QString("Reply from 192.0.2.1: time=-1ms TTL=128\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("oversized latency") << QString("Reply from 192.0.2.1: time=9999999999ms TTL=128\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("latency beyond deadline") << QString("Reply from 192.0.2.1: time=1001ms TTL=128\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("invalid ttl") << QString("Reply from 192.0.2.1: time=2ms TTL=256\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+    QTest::newRow("bounded output") << (QString(5000, 'x') + "\r\nReply from 192.0.2.1: time=2ms TTL=128\r\n")
+        << 0 << int(Monitor::NoResponse) << -1.0;
+}
+
+void ConnectivityTest::windowsEchoReplies()
+{
+    QFETCH(QString, output);
+    QFETCH(int, exitCode);
+    QFETCH(int, expectedState);
+    QFETCH(double, expectedMs);
+    Settings settings;
+    settings.hosts = {"192.0.2.1"};
+    Monitor monitor(settings, nullptr, [output, exitCode](const QString&, int) {
+        auto command = stub(exitCode, 10, {}, output);
+        command.requiresWindowsEchoReply = true;
+        return command;
+    });
+    monitor.start();
+    QTRY_COMPARE(int(monitor.state()), expectedState);
+    monitor.refreshSummary();
+    QTRY_VERIFY(!monitor.summaryRunning());
+    const auto row = monitor.summaryResults().first().toMap();
+    QCOMPARE(row.value("state").toInt(), expectedState);
+    QCOMPARE(row.value("roundTripMs").toDouble(), expectedMs);
+    monitor.stop();
+    QTRY_VERIFY(monitor.findChildren<QProcess*>().isEmpty());
+}
+
+void ConnectivityTest::windowsProbeDeadlineAndCancellation()
+{
+    Settings settings;
+    settings.hosts = {"192.0.2.1"};
+    settings.timeoutMs = 100;
+    bool slow = true;
+    Monitor monitor(settings, nullptr, [&slow](const QString&, int) {
+        auto command = stub(0, slow ? 60000 : 0, {}, "Reply from 192.0.2.1: time<1ms TTL=128\r\n");
+        command.requiresWindowsEchoReply = true;
+        return command;
+    });
+    int heartbeat = 0;
+    QTimer timer;
+    connect(&timer, &QTimer::timeout, this, [&heartbeat] { ++heartbeat; });
+    timer.start(10);
+    monitor.start();
+    QTRY_COMPARE_WITH_TIMEOUT(monitor.state(), Monitor::NoResponse, 2500);
+    QVERIFY(heartbeat >= 3);
+    QTRY_VERIFY(monitor.findChildren<QProcess*>().isEmpty());
+    monitor.refreshSummary();
+    monitor.cancelSummary();
+    slow = false;
+    monitor.refreshSummary();
+    QTRY_VERIFY(!monitor.summaryRunning());
+    QCOMPARE(monitor.summaryResults().first().toMap().value("state").toInt(), int(Monitor::Reachable));
+    QTRY_VERIFY(monitor.findChildren<QProcess*>().isEmpty());
+    slow = true;
+    monitor.refreshSummary();
+    monitor.stop();
+    QTRY_VERIFY(monitor.findChildren<QProcess*>().isEmpty());
+    QVERIFY(!monitor.summaryRunning());
 }
 
 void ConnectivityTest::systemPingLoopback()
