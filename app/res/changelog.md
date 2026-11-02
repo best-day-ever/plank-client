@@ -16,6 +16,171 @@
 ## 1.1.042 — Collaboration candidate
 
 - Request to join another user’s desktop with their approval for viewing or keyboard and mouse control. Collaboration preserves the owner’s display layout; clipboard, files and devices remain private.
+## 1.2.13 — macOS Qt session candidate
+
+### Client
+- Bring the Ubuntu toolbar, display controls and automatic connection recovery to the Mac streaming window.
+- Present video and controls together through Metal, preserving ten-bit color and smooth windowed scaling.
+- Keep native Mac fullscreen Spaces, keyboard shortcuts, clipboard and existing audio playback.
+
+## 1.2.12 — Internet ping details
+
+### Client
+- Click the Internet indicator to check every configured address and see its status and response time.
+- Refresh the results on demand, with the last check shown in local time.
+
+## 1.2.11 — Connection status and Mac displays
+
+### Client
+- Make the Internet status easier to read with larger text and clear status colors.
+
+### Host
+- Allow optional mirroring of physical Mac screens to the PLANK workspace.
+- Wait for macOS to finish creating a virtual display before preparing mirroring.
+
+## 1.2.10 — Internet connectivity
+
+### Client
+- Show Internet reachability in the main window, separately from each Host's status.
+- Check configurable addresses in order at startup and every 15 seconds, without blocking connections.
+
+## 1.2.05 — Display choices and macOS input
+
+### Client
+- Choose one monitor or span both for Ubuntu fullscreen sessions, including separate sessions on separate monitors.
+- Switch fullscreen displays from the toolbar without changing the Host's desktop resolution.
+- Default new bookmarks to Native (1:1 pixels), while preserving existing scaling preferences.
+
+### Host
+- Improve first-click application switching on macOS by keeping mouse press, drag and release events paired.
+- Provide one Apple Silicon Host package for macOS 26.7 and newer, retaining newer macOS capabilities.
+
+## 1.2.04 — Ubuntu fullscreen displays
+
+### Client
+- Choose a Client monitor per bookmark, or span one session across both monitors.
+- Match the Host desktop to the selected Client displays when using Match Client.
+- Switch between one-monitor fullscreen and spanning from the toolbar without resizing the Host.
+- Move between independent fullscreen sessions on different monitors.
+
+## 1.2.02 — Idle desktop status
+
+### Client
+- Stop showing “Waiting for workstation” just because the remote desktop is unchanged.
+- Keep automatic recovery for connection failures, Host restarts and login/logout transitions.
+
+## 1.2.01 — Ubuntu scrolling
+
+### Client
+- Fix mouse-wheel scrolling being ignored by Linux desktop applications.
+- Keep correct pointer positioning when changing windows or returning from tablet input.
+
+## 1.2.00 — Qt becomes the Ubuntu Client
+
+### Client
+- Use Qt for Ubuntu streaming windows, the toolbar, input and cursor handling.
+- Play Ubuntu audio directly through PipeWire, with the existing synchronization controls.
+- Improve window sizing, toolbar access and automatic recovery after network interruptions.
+- Preserve the Host's virtual Wacom tablet when the same USB tablet disconnects and returns.
+- Keep existing PLANK bookmarks, settings and trusted Hosts when upgrading.
+- Leave the macOS Client's window, audio and presentation implementation unchanged.
+
+### Host
+- Build the Linux Host with CUDA 13.2 Update 2 for the qualified NVIDIA driver baseline.
+- Retain the existing codec profiles and full supported GPU architecture set.
+
+## 1.1.052 — Ubuntu Qt window sizing
+
+### Client
+- Start windowed sessions at a larger size that fits the screen and matches the remote desktop's proportions.
+- Keep your manually resized window size when switching out of fullscreen.
+- Wait for the configured window size before showing the video surface at startup.
+- Keep the remote picture proportional during resizing, without changing the Host resolution.
+
+## 1.1.051 — Ubuntu Qt toolbar spacing
+
+### Client
+- Bring microphone, camera and window controls closer together, without shrinking their icons or click targets.
+- Make the RTT column narrower and show whole milliseconds, with an indication for delays above 999 ms.
+- Keep the Encoder Target slider and existing toolbar behavior unchanged.
+
+### Host
+- No changes; no Host update is needed.
+
+## 1.1.050 — Ubuntu Qt connection recovery
+
+### Client
+- Fix video startup stopping when Wayland considers the covered parent window hidden.
+- Keep hardware-decoder checks, ten-bit presentation and native PipeWire playback.
+- Preserve ordinary window hiding, minimizing and restoring.
+
+## 1.1.049 — Ubuntu Qt native audio candidate
+
+### Client
+- Use PipeWire directly for Qt audio playback, following the system's selected output and volume.
+- Measure output timing and protect audio headroom while smoothly correcting synchronization.
+- Recover a depleted audio queue with a short refill instead of repeated fragments of sound.
+- Keep the ordinary Client and microphone/camera forwarding unchanged.
+
+### Host
+- No changes; no Host update is needed.
+
+## 1.1.048 — Ubuntu Qt connection appearance
+
+### Client
+- Keep the screen black while checking the decoder, instead of briefly showing its test image.
+- Keep the connecting message until the first real Host frame is displayed.
+- Apply the same protection when a reconnect needs to restart the decoder.
+- Retain exact-format decoder checks and the accepted toolbar improvements.
+
+### Host
+- No changes; no Host update is needed.
+
+## 1.1.047 — Ubuntu Qt toolbar icons
+
+### Client
+- Give toolbar icons consistent size and line weight, including minimize and close.
+- Remove the permanent button boxes; show a subtle highlight only while hovering or pressing.
+- Keep larger invisible click targets, without increasing toolbar height.
+- Retain stacked stats, windowed toolbar access and automatic network recovery.
+
+### Host
+- No changes; no Host update is needed.
+
+## 1.1.046 — Ubuntu Qt toolbar and recovery
+
+### Client
+- Restore the pin icon and the fullscreen/restore corner icons in the Qt toolbar.
+- Put FPS, Video Mbps, Loss and RTT labels above their values, matching the regular client.
+- Keep the toolbar and controls steady as numbers change, without increasing its height.
+- Retain the accepted windowed toolbar reveal behavior.
+- Recover automatically after network interruptions, without needing to click Keep Waiting.
+- Keep Disconnect available while waiting and retain the optional automatic-disconnect setting.
+
+### Host
+- No changes; no Host update is needed.
+
+## 1.1.045 — Ubuntu Qt window controls
+
+### Client
+- Make the toolbar easier to reveal in windowed mode with a wider hover area below the title bar.
+- Keep the one-second reveal delay, five-second hide delay and your Pin preference unchanged.
+- Retain the recent fixes for hardware video presentation and Wacom cursor updates.
+
+### Host
+- No changes; no Host update is needed.
+
+## 1.1.042 — Ubuntu Qt client candidate
+
+### Client
+- Add a separate PLANK Client Qt app for testing, without replacing your installed client or sharing its settings.
+- Let Qt manage streaming windows, the toolbar, cursors and input on Ubuntu.
+- Preserve the existing encoding profiles, audio synchronization, microphone, camera and Wacom forwarding.
+- Keep the interface responsive during connection, recovery and disconnect.
+- Keep the Disconnect shortcut available while remote input is released or the Host is unreachable.
+
+### Host
+- No changes; use the same Host as the ordinary client.
 
 ## 1.1.037 — Client session recovery candidate
 

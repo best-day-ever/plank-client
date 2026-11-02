@@ -56,7 +56,7 @@ extern "C" {
 #endif
 
 // This is gross but it allows us to use sizeof()
-#include "ffmpeg_videosamples.cpp"
+#include "ffmpeg-testframes.h"
 
 #define MAX_DECODER_PASS 2
 
@@ -156,6 +156,7 @@ bool FFmpegVideoDecoder::suspendForReconnect()
     if (m_Pacer != nullptr) {
         m_Pacer->discardQueuedFrames();
     }
+    if (m_FrontendRenderer != nullptr) m_FrontendRenderer->discardPendingFrames();
     avcodec_flush_buffers(m_VideoDecoderCtx);
     m_FramesIn = 0;
     m_FramesOut = 0;
@@ -171,7 +172,8 @@ bool FFmpegVideoDecoder::suspendForReconnect()
 bool FFmpegVideoDecoder::resumeAfterReconnect()
 {
     if (m_TestOnly || m_DecoderThread != nullptr || m_VideoDecoderCtx == nullptr ||
-            m_Pacer == nullptr || m_FrontendRenderer == nullptr) {
+            m_FrontendRenderer == nullptr ||
+            (m_Pacer == nullptr && !m_FrontendRenderer->ownsPresentationScheduling())) {
         return false;
     }
 
@@ -179,6 +181,8 @@ bool FFmpegVideoDecoder::resumeAfterReconnect()
     // (Session::configurePlankLaunchGeometry); report the decoded size again
     // on the first resumed frame even if it did not change.
     m_DecodedFrameSizeTracker.reset();
+    if (!m_FrontendRenderer->resumePresentation()) return false;
+
     m_DecoderThread = SDL_CreateThread(FFmpegVideoDecoder::decoderThreadProcThunk,
                                        "FFDecoder", this);
     if (m_DecoderThread == nullptr) {
@@ -391,6 +395,10 @@ void FFmpegVideoDecoder::reset()
 
 bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool useAlternateFrontend)
 {
+    if (params->rendererFactory) {
+        m_FrontendRenderer = m_BackendRenderer;
+        return m_FrontendRenderer != nullptr;
+    }
     if (useAlternateFrontend) {
 #ifdef HAVE_EGL
         // Identity GBR relies on importing the packed Y410 VAAPI surface as
@@ -551,7 +559,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     m_IdentityGbrEnabled = params->enableIdentityGbr;
 
     // Don't bother initializing Pacer if we're not actually going to render
-    if (!testFrame) {
+    if (!testFrame && !m_FrontendRenderer->ownsPresentationScheduling()) {
         m_Pacer = new Pacer(m_FrontendRenderer, &m_ActiveWndVideoStats);
         if (!m_Pacer->initialize(params->window, params->frameRate,
                                  params->enableFramePacing || (params->enableVsync && (m_FrontendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_FORCE_PACING)))) {
@@ -611,6 +619,12 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     // Stash a pointer to this object in the context
     SDL_assert(m_VideoDecoderCtx->opaque == nullptr);
     m_VideoDecoderCtx->opaque = this;
+    if (m_BackendRenderer->usesCustomDecodeBuffers()) {
+        m_VideoDecoderCtx->get_buffer2 = [](AVCodecContext* context, AVFrame* frame, int flags) {
+            const auto decoder = static_cast<FFmpegVideoDecoder*>(context->opaque);
+            return decoder->m_BackendRenderer->getDecodeBuffer(context, frame, flags);
+        };
+    }
 
     int err = avcodec_open2(m_VideoDecoderCtx, decoder, &options);
     av_dict_free(&options);
@@ -634,21 +648,21 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
                 m_Pkt->size = k_Nvenc420H264High8TestFrameSize;
             }
             else {
-                m_Pkt->data = (uint8_t*)k_H264TestFrame;
-                m_Pkt->size = sizeof(k_H264TestFrame);
+                m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_H264TestFrame;
+                m_Pkt->size = sizeof(PlankDecoderTestFrames::k_H264TestFrame);
             }
             break;
         case VIDEO_FORMAT_H264_HIGH8_422:
-            m_Pkt->data = (uint8_t*)k_H264High8_422TestFrame;
-            m_Pkt->size = sizeof(k_H264High8_422TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_H264High8_422TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_H264High8_422TestFrame);
             break;
         case VIDEO_FORMAT_H264_HIGH10_422:
-            m_Pkt->data = (uint8_t*)k_H264High10_422TestFrame;
-            m_Pkt->size = sizeof(k_H264High10_422TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_H264High10_422TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_H264High10_422TestFrame);
             break;
         case VIDEO_FORMAT_H265:
-            m_Pkt->data = (uint8_t*)k_HEVCMainTestFrame;
-            m_Pkt->size = sizeof(k_HEVCMainTestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_HEVCMainTestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_HEVCMainTestFrame);
             break;
         case VIDEO_FORMAT_H265_MAIN10:
             if (params->captureSource == DecoderCaptureSource::ScreenCaptureKit) {
@@ -660,34 +674,34 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
                 m_Pkt->size = k_Nvenc420HEVCMain10TestFrameSize;
             }
             else {
-                m_Pkt->data = (uint8_t*)k_HEVCMain10TestFrame;
-                m_Pkt->size = sizeof(k_HEVCMain10TestFrame);
+                m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_HEVCMain10TestFrame;
+                m_Pkt->size = sizeof(PlankDecoderTestFrames::k_HEVCMain10TestFrame);
             }
             break;
         case VIDEO_FORMAT_AV1_MAIN8:
-            m_Pkt->data = (uint8_t*)k_AV1Main8TestFrame;
-            m_Pkt->size = sizeof(k_AV1Main8TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_AV1Main8TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_AV1Main8TestFrame);
             break;
         case VIDEO_FORMAT_AV1_MAIN10:
-            m_Pkt->data = (uint8_t*)k_AV1Main10TestFrame;
-            m_Pkt->size = sizeof(k_AV1Main10TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_AV1Main10TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_AV1Main10TestFrame);
             break;
         case VIDEO_FORMAT_H264_HIGH8_444:
-            m_Pkt->data = (uint8_t*)k_h264High_444TestFrame;
-            m_Pkt->size = sizeof(k_h264High_444TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_h264High_444TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_h264High_444TestFrame);
             break;
         case VIDEO_FORMAT_H264_HIGH10_444:
-            m_Pkt->data = (uint8_t*)k_h264High10_444TestFrame;
-            m_Pkt->size = sizeof(k_h264High10_444TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_h264High10_444TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_h264High10_444TestFrame);
             break;
         case VIDEO_FORMAT_H265_REXT8_444:
             if (params->enableIdentityGbr) {
-                m_Pkt->data = (uint8_t*)k_HEVCRExt8_444IdentityGbrTestFrame;
-                m_Pkt->size = sizeof(k_HEVCRExt8_444IdentityGbrTestFrame);
+                m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_HEVCRExt8_444IdentityGbrTestFrame;
+                m_Pkt->size = sizeof(PlankDecoderTestFrames::k_HEVCRExt8_444IdentityGbrTestFrame);
             }
             else {
-                m_Pkt->data = (uint8_t*)k_HEVCRExt8_444TestFrame;
-                m_Pkt->size = sizeof(k_HEVCRExt8_444TestFrame);
+                m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_HEVCRExt8_444TestFrame;
+                m_Pkt->size = sizeof(PlankDecoderTestFrames::k_HEVCRExt8_444TestFrame);
             }
             break;
         case VIDEO_FORMAT_H265_REXT10_444:
@@ -696,21 +710,21 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
                 m_Pkt->size = k_AppleHEVCRext10TestFrameSize;
             }
             else if (params->enableIdentityGbr) {
-                m_Pkt->data = (uint8_t*)k_HEVCRExt10_444IdentityGbrTestFrame;
-                m_Pkt->size = sizeof(k_HEVCRExt10_444IdentityGbrTestFrame);
+                m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_HEVCRExt10_444IdentityGbrTestFrame;
+                m_Pkt->size = sizeof(PlankDecoderTestFrames::k_HEVCRExt10_444IdentityGbrTestFrame);
             }
             else {
-                m_Pkt->data = (uint8_t*)k_HEVCRExt10_444TestFrame;
-                m_Pkt->size = sizeof(k_HEVCRExt10_444TestFrame);
+                m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_HEVCRExt10_444TestFrame;
+                m_Pkt->size = sizeof(PlankDecoderTestFrames::k_HEVCRExt10_444TestFrame);
             }
             break;
         case VIDEO_FORMAT_AV1_HIGH8_444:
-            m_Pkt->data = (uint8_t*)k_AV1High8_444TestFrame;
-            m_Pkt->size = sizeof(k_AV1High8_444TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_AV1High8_444TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_AV1High8_444TestFrame);
             break;
         case VIDEO_FORMAT_AV1_HIGH10_444:
-            m_Pkt->data = (uint8_t*)k_AV1High10_444TestFrame;
-            m_Pkt->size = sizeof(k_AV1High10_444TestFrame);
+            m_Pkt->data = (uint8_t*)PlankDecoderTestFrames::k_AV1High10_444TestFrame;
+            m_Pkt->size = sizeof(PlankDecoderTestFrames::k_AV1High10_444TestFrame);
             break;
         default:
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -1412,12 +1426,15 @@ bool FFmpegVideoDecoder::tryInitializeRenderer(const AVCodec* decoder,
     // i == 0 - Indirect via EGL or DRM frontend with zero-copy DMA-BUF passing
     // i == 1 - Direct rendering or indirect via SDL read-back
 #ifdef HAVE_EGL
-    for (int i = 0; i < 2; i++) {
+    for (int i = params->rendererFactory ? 1 : 0; i < 2; i++) {
 #else
     for (int i = 1; i < 2; i++) {
 #endif
         SDL_assert(m_BackendRenderer == nullptr);
-        if ((m_BackendRenderer = createRendererFunc()) != nullptr &&
+        const auto createRenderer = [&] {
+            return params->rendererFactory ? params->rendererFactory->createRenderer(hwConfig) : createRendererFunc();
+        };
+        if ((m_BackendRenderer = createRenderer()) != nullptr &&
                 m_BackendRenderer->initialize((m_TestOnly || m_BackendRenderer->needsTestFrame()) ? &testFrameDecoderParams : params) &&
                 completeInitialization(decoder, requiredFormat,
                                        (m_TestOnly || m_BackendRenderer->needsTestFrame()) ? &testFrameDecoderParams : params,
@@ -1432,7 +1449,7 @@ bool FFmpegVideoDecoder::tryInitializeRenderer(const AVCodec* decoder,
             if (m_BackendRenderer->needsTestFrame()) {
                 // The test worked, so now let's initialize it for real
                 reset();
-                if ((m_BackendRenderer = createRendererFunc()) != nullptr &&
+                if ((m_BackendRenderer = createRenderer()) != nullptr &&
                         m_BackendRenderer->initialize(params) &&
                         completeInitialization(decoder, requiredFormat, params, false, i == 0 /* EGL/DRM */)) {
                     return true;
@@ -1509,6 +1526,11 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
 {
     if (!decoder) {
         return false;
+    }
+
+    if (params->rendererFactory && !tryHwAccel) {
+        return tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, nullptr, nullptr,
+                                     []() -> IFFmpegRenderer* { return nullptr; });
     }
 
     const AVPixelFormat* pixelFormats = getSupportedPixelFormats(decoder);
@@ -1961,9 +1983,7 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                      "Stream changed its negotiated profile/chroma/color format; disconnecting");
                         SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
-                        SDL_Event event{};
-                        event.type = SDL_EVENT_QUIT;
-                        SDL_PushEvent(&event);
+                        Session::requestSessionQuit();
                         av_frame_free(&frame);
                         return;
                     }
@@ -2052,7 +2072,12 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     m_ActiveWndVideoStats.decodedFrames++;
 
                     // Queue the frame for rendering (or render now if pacer is disabled)
-                    m_Pacer->submitFrame(frame);
+                    if (m_FrontendRenderer->ownsPresentationScheduling()) {
+                        m_FrontendRenderer->renderFrame(frame);
+                        av_frame_free(&frame);
+                    } else {
+                        m_Pacer->submitFrame(frame);
+                    }
                 }
                 else if (err == AVERROR(EAGAIN)) {
                     VIDEO_FRAME_HANDLE handle;
@@ -2084,9 +2109,7 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                      "Resetting decoder due to consistent failure");
 
-                        SDL_Event event;
-                        event.type = SDL_EVENT_RENDER_DEVICE_RESET;
-                        SDL_PushEvent(&event);
+                        Session::requestDecoderReset();
 
                         // Don't consume any additional data
                         SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
@@ -2131,6 +2154,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 
     // Flip stats windows roughly every second
     if (SDL_GetTicks() >= m_ActiveWndVideoStats.measurementStartTimestamp + 1000) {
+        m_FrontendRenderer->collectPresentationStats(m_ActiveWndVideoStats);
         VIDEO_STATS lastTwoWndStats = {};
         addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
         addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
@@ -2145,7 +2169,11 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
                                             currentVideoMbps);
 
         // Update overlay stats if it's enabled
-        if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
+        if (Session::get()->usesQtPresentation()) {
+            char text[2048];
+            stringifyVideoStats(lastTwoWndStats, text, sizeof(text));
+            emit Session::get()->qtStatisticsUpdated(QString::fromUtf8(text));
+        } else if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
             stringifyVideoStats(lastTwoWndStats,
                                 Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug),
                                 Session::get()->getOverlayManager().getOverlayMaxTextLength());
@@ -2222,9 +2250,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Resetting decoder due to consistent failure");
 
-            SDL_Event event;
-            event.type = SDL_EVENT_RENDER_DEVICE_RESET;
-            SDL_PushEvent(&event);
+            Session::requestDecoderReset();
 
             // Don't consume any additional data
             SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
@@ -2241,5 +2267,5 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 
 void FFmpegVideoDecoder::renderFrameOnMainThread()
 {
-    m_Pacer->renderOnMainThread();
+    if (m_Pacer) m_Pacer->renderOnMainThread();
 }

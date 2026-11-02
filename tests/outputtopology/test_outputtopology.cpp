@@ -61,17 +61,31 @@ void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
                             NvOutputTopology::ClipboardSyncFeature;
     const auto files = NvOutputTopology::SupportedFeatureFlags &
                        NvOutputTopology::ClipboardFilesFeature;
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     QCOMPARE(negotiated, NvOutputTopology::ClipboardSyncFeature);
     QCOMPARE(files, NvOutputTopology::ClipboardFilesFeature);
 #else
     QCOMPARE(negotiated, 0);
     QCOMPARE(files, 0);
 #endif
+    // Exercise the same authenticated-topology intersection that Session sends
+    // in its launch request. Native clipboard helpers alone cannot enable it.
+    const int clipboardFeatures = NvOutputTopology::ClipboardSyncFeature |
+            NvOutputTopology::ClipboardFilesFeature;
+    const int descriptionFeatures = NvOutputTopology::OutputTopologyFeature |
+            NvOutputTopology::SelectedOutputFeature | NvOutputTopology::UnifiedAbsoluteInputFeature;
+    NvOutputTopology topology;
+    topology.schemaVersion = NvOutputTopology::ProtocolVersion;
+    topology.featureFlags = descriptionFeatures | clipboardFeatures;
+    const int launch = topology.launchFeatureFlags(descriptionFeatures | clipboardFeatures);
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    QCOMPARE(launch & clipboardFeatures, clipboardFeatures);
+#else
+    QCOMPARE(launch & clipboardFeatures, 0);
+#endif
     // A host without the feature cannot enable it on any client platform.
-    QCOMPARE(NvOutputTopology::SupportedFeatureFlags &
-             ~NvOutputTopology::ClipboardSyncFeature &
-             NvOutputTopology::ClipboardSyncFeature, 0);
+    topology.featureFlags = descriptionFeatures;
+    QCOMPARE(topology.launchFeatureFlags(descriptionFeatures | clipboardFeatures) & clipboardFeatures, 0);
 }
 
 void TestOutputTopology::matchesMacFullscreenViewport()

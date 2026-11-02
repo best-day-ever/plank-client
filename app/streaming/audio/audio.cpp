@@ -5,7 +5,11 @@
 #include "renderers/slaud.h"
 #endif
 
+#if defined(PLANK_QT_SESSION) && defined(Q_OS_LINUX)
+#include "renderers/pipewire.h"
+#else
 #include "renderers/sdl.h"
+#endif
 
 #include <Limelight.h>
 
@@ -19,6 +23,14 @@
 
 IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig)
 {
+#if defined(PLANK_QT_SESSION) && defined(Q_OS_LINUX)
+    // Direct PipeWire playback belongs to the Linux platform, not the window
+    // toolkit. macOS retains its qualified SDL/CoreAudio audio clock/backend.
+    TRY_INIT_RENDERER(PipeWireAudioRenderer, opusConfig,
+                      m_Computer->plankAuthentication,
+                      m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT)
+    return nullptr;
+#else
     // Handle explicit ML_AUDIO setting and fail if the requested backend fails
     QString mlAudio = qgetenv("ML_AUDIO").toLower();
     if (mlAudio == "sdl") {
@@ -47,12 +59,13 @@ IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATI
     TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
 #endif
 
-    // PLANK uses SDL as its sole audio renderer.
+    // Default playback backend on platforms without direct PipeWire.
     TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig,
                       m_Computer->plankAuthentication,
                       m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT)
 
     return nullptr;
+#endif
 }
 
 bool Session::initializeAudioRenderer()

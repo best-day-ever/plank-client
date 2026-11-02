@@ -78,6 +78,24 @@ win32:contains(CONFIG, plank-transport) {
 }
 
 TARGET = plank-client
+PLANK_PRIVATE_LIB_NAME = plank
+# Both desktop platforms share the session scene and lifecycle. Their GPU,
+# native-window and audio adapters remain platform-specific.
+linux: CONFIG += plank-qt-session
+# Fernweh keeps its qualified Mac SDL session until the Qt adapter has the
+# same clipboard, collaboration and display contracts. No runtime preference.
+macx:!contains(CONFIG, bde-sdl-session): CONFIG += plank-qt-session
+contains(CONFIG, plank-qt-session) {
+    !linux:!macx: error("The Qt session frontend supports Linux and macOS")
+    DEFINES += PLANK_QT_SESSION
+    include(streaming/qt/qtsession.pri)
+    include(streaming/qt/qtvideo.pri)
+    linux: include(streaming/qt/qtwaylandguard.pri)
+    SOURCES += streaming/qt/sessionruntime.cpp streaming/qt/decodedvideorenderer.cpp streaming/qt/sessioninput.cpp
+    HEADERS += streaming/qt/sessioninput.h streaming/qt/remotekeymap.h streaming/qt/linuxkeymap.h streaming/qt/mackeymap.h
+    HEADERS += streaming/qt/sessionruntime.h streaming/qt/decodedvideorenderer.h streaming/qt/decodedvideodelivery.h
+}
+HEADERS += clientidentity.h
 
 include(../globaldefs.pri)
 
@@ -277,6 +295,7 @@ SOURCES += \
     backend/plankenrollment.cpp \
     backend/plankpasskey.cpp \
     backend/qrencoder.cpp \
+    backend/internetconnectivity.cpp \
     cli/commandlineparser.cpp \
     cli/startstream.cpp \
     settings/plankclientpolicy.cpp \
@@ -349,6 +368,7 @@ HEADERS += \
     cli/startstream.h \
     settings/streamingpreferences.h \
     settings/plankclientpolicy.h \
+    backend/internetconnectivity.h \
     streaming/avsynccontroller.h \
     streaming/input/input.h \
     streaming/input/plankpointerlogic.h \
@@ -374,6 +394,14 @@ HEADERS += \
     path.h \
     streaming/video/overlaymanager.h \
     backend/systemproperties.h
+HEADERS += backend/clientdisplays.h
+
+linux:contains(CONFIG, plank-qt-session) {
+    SOURCES -= streaming/audio/renderers/sdlaud.cpp
+    HEADERS -= streaming/audio/renderers/sdl.h
+    SOURCES += streaming/audio/renderers/pipewire.cpp
+    HEADERS += streaming/audio/renderers/pipewire.h streaming/audio/renderers/pipewirebuffer.h
+}
 
 contains(DEFINES, HAVE_LIBINPUT_TABLET) {
     SOURCES += streaming/input/linuxwacom.cpp
@@ -509,9 +537,18 @@ libplacebo {
     DEFINES += HAVE_LIBPLACEBO_VULKAN
     SOURCES += \
         streaming/video/ffmpeg-renderers/plvk.cpp \
+        streaming/video/ffmpeg-renderers/plvkframepool.cpp \
         streaming/video/ffmpeg-renderers/plvk_c.c
+
+    contains(CONFIG, plank-qt-session) {
+        # qtsoftwarevideo.pri already names the same shared sources by their
+        # absolute paths. Link each allocator/transfer implementation once.
+        SOURCES -= streaming/video/ffmpeg-renderers/plvkframepool.cpp streaming/video/ffmpeg-renderers/plvk_c.c
+    }
     HEADERS += \
-        streaming/video/ffmpeg-renderers/plvk.h
+        streaming/video/ffmpeg-renderers/plvk.h \
+        streaming/video/ffmpeg-renderers/plvkframepool.h \
+        streaming/video/ffmpeg-testframes.h
 
     macx {
         SOURCES += streaming/video/ffmpeg-renderers/plvk_objc.mm
@@ -715,7 +752,7 @@ unix:!macx: {
     # FFmpeg runtime remains private to PLANK under /usr/lib/plank. Resolve
     # those libraries relative to the executable instead of relying on a
     # launcher-provided LD_LIBRARY_PATH.
-    QMAKE_LFLAGS += "-Wl,-rpath,'\$$ORIGIN/../lib/plank'"
+    QMAKE_LFLAGS += "-Wl,-rpath,'\$$ORIGIN/../lib/$$PLANK_PRIVATE_LIB_NAME'"
 
     isEmpty(PREFIX) {
         PREFIX = /usr/local
@@ -739,6 +776,11 @@ unix:!macx: {
     appstream.path = $$PREFIX/$$DATADIR/metainfo/
 
     INSTALLS += target desktop icons appstream
+    contains(CONFIG, plank-qt-session) {
+        # Experimental metadata is installed by the co-installable DEB
+        # packager, never by overwriting production files via make install.
+        INSTALLS -= desktop icons appstream
+    }
 }
 win32 {
     RC_ICONS = bde-fernweh.ico

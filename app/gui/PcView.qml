@@ -465,7 +465,7 @@ CenteredGridView {
         property int pcIndex: -1
         property string originalAddress: ""
         property string originalNickname: ""
-        property int scalingIndex: 1
+        property int scalingIndex: 0
         property int hostLayoutIndex: 0
         property int hostDisplayPolicy: -1
         property int virtualMode1Index: 9
@@ -514,6 +514,7 @@ CenteredGridView {
             editAddressText.text = originalAddress
             editNicknameText.text = originalNickname
             editScalingChoice.currentIndex = scalingIndex
+            editClientDisplays.selection = computerModel.plankClientDisplays(pcIndex)
             hostDisplayPolicy = computerModel.plankHostDisplayPolicy(pcIndex)
             editVideoSettings.load(originalCaptureSource, originalProfile,
                                    originalProfileBitratesKbps, [])
@@ -545,7 +546,8 @@ CenteredGridView {
                                                     editVirtualMode2.currentIndex,
                                                     editVideoSettings.videoProfile,
                                                     editVideoSettings.captureSource,
-                                                    editVideoSettings.officeBitratesKbps)) {
+                                                    editVideoSettings.officeBitratesKbps,
+                                                    editClientDisplays.selection)) {
                 errorDialog.text = qsTr("Unable to update the workstation bookmark. Check the address and ensure another bookmark is not already using it.")
                 errorDialog.open()
             }
@@ -650,6 +652,11 @@ CenteredGridView {
                     enabled: editBookmarkDialog.virtualModeSupported(modelData)
                     highlighted: editVirtualMode2.highlightedIndex === index
                 }
+            }
+
+            PlankClientDisplayBox {
+                id: editClientDisplays
+                Layout.fillWidth: true
             }
 
             Label {
