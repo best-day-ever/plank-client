@@ -351,6 +351,7 @@ HEADERS += \
     backend/hosttlsguard.h \
     backend/plankhttp.h \
     backend/brokersessionstore.h \
+    backend/brokersessionstate.h \
     backend/brokerdevicekey.h \
     backend/remotedisplaysetup.h \
     backend/remotestreamsetup.h \

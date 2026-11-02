@@ -567,24 +567,25 @@ void RemoteBroker::refreshHosts()
 
 void RemoteBroker::refreshHostsImpl(bool showBusy)
 {
-    if (!signedIn() || busy() || m_HostRefreshInFlight) return;
-    m_HostRefreshInFlight = true;
+    if (!signedIn() || busy()) return;
+    const auto refresh = m_Token->beginRefresh();
+    if (!refresh) return;
     if (showBusy) setBusy(tr("Loading workstations..."));
     const PlankBrokerClient::Config config = clientConfig();
     const auto token = m_Token;
     const quint64 generation = m_Generation;
     QPointer<RemoteBroker> self(this);
-    QThreadPool::globalInstance()->start([self, config, token, generation]() {
+    QThreadPool::globalInstance()->start([self, config, token, generation, refresh = *refresh]() {
         QVector<PlankBroker::Host> hosts;
         std::shared_ptr<PlankBrokerError> failure;
         try {
-            hosts = PlankBrokerClient(config).hosts(token->get());
+            hosts = PlankBrokerClient(config).hosts(token->getForRevision(refresh.authentication));
         } catch (const PlankBrokerError& error) {
             failure = std::make_shared<PlankBrokerError>(error);
         }
-        QMetaObject::invokeMethod(qApp, [self, generation, hosts, failure]() {
+        QMetaObject::invokeMethod(qApp, [self, token, generation, refresh, hosts, failure]() {
             if (!self) return;
-            self->m_HostRefreshInFlight = false;
+            if (!token->finishRefresh(refresh)) return;
             if (generation != self->m_Generation) return;
             if (failure) {
                 self->handleBrokerError(*failure, false);
@@ -1201,7 +1202,9 @@ Session* RemoteBroker::takeSession()
 void RemoteBroker::logout()
 {
     QString token = m_Token->get();
-    const PlankBrokerClient::Config config = clientConfig();
+    // Local sign-out clears shared auth state before the worker runs. Retain
+    // this token's proof requirement so a missing key cannot downgrade logout.
+    const PlankBrokerClient::Config config = clientConfig().withFrozenDeviceProofRequirement();
     signOutLocally();
     if (token.isEmpty()) return;
     QThreadPool::globalInstance()->start([config, token]() mutable {

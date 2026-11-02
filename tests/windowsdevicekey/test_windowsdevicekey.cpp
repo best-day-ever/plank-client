@@ -1,5 +1,6 @@
 #include "backend/brokerdevicekey.h"
 #include "backend/brokersessionstore.h"
+#include "backend/brokersessionstate.h"
 #include "backend/plankenrollment.h"
 
 #include <QtTest>
@@ -17,6 +18,7 @@
 #include <openssl/evp.h>
 #include <openssl/ec.h>
 #include <openssl/x509.h>
+#include <memory>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #include <ncrypt.h>
@@ -73,6 +75,46 @@ private slots:
         QCoreApplication::setApplicationName("Disposable");
         QStandardPaths::setTestModeEnabled(true);
     }
+
+    void logoutSnapshotRetainsBoundProofAfterSharedStateClears() {
+        auto shared = std::make_shared<BrokerSessionState>();
+        shared->set(QStringLiteral("bound-session-token"), true);
+        const auto live = BrokerDeviceKey::clientConfig("broker.example.invalid", 443, {QString(64, 'a')},
+                                [shared]() { return shared->proofRequired(); }, {});
+        // Exercise the actual production Config factory + logout snapshot,
+        // then clear precisely the shared state the live callback reads.
+        auto frozen = live.withFrozenDeviceProofRequirement();
+        const QString token = shared->get();
+        shared->clear();
+        QVERIFY(!live.deviceProofRequired());
+        QVERIFY(frozen.deviceProofRequired());
+        frozen.deviceSigner = [](const QByteArray&) { return Signature {Signature::NoKey, {}}; };
+        try {
+            PlankBrokerClient(frozen).logout(token);
+            QFAIL("Bound logout silently sent without a proof");
+        } catch (const PlankBrokerError& error) {
+            // A Network error would expose an unsigned request to the fake
+            // authority. The missing key must stop it before any network I/O.
+            QCOMPARE(error.kind(), PlankBrokerError::DeviceKeyUnavailable);
+        }
+        QVERIFY(!shared->hasToken()); // explicit local logout stays complete
+        shared->set(QStringLiteral("new-session-token"), false);
+        QVERIFY(frozen.deviceProofRequired()); // later auth cannot alter it
+        QVERIFY(!live.withFrozenDeviceProofRequirement().deviceProofRequired());
+    }
+
+#ifdef Q_OS_WIN
+    void actualClientConfigSupportsIpv4Broker() {
+        const auto config = BrokerDeviceKey::clientConfig(QStringLiteral("127.0.0.1"), 443,
+                                {QString(64, 'a')}, [] { return true; }, {});
+        QVERIFY(config.requireDeviceBinding);
+        QVERIFY(config.devicePublicKey);
+        QVERIFY(config.deviceSigner);
+        QVERIFY(config.deviceProofRequired());
+        // Factory inspection creates no key in this fixed authority's store.
+        // Native persistence/signing is exercised with disposable names below.
+    }
+#endif
 
     void wireEncodingIsCanonical() {
         QCOMPARE(BrokerDeviceKey::p256Spki(QByteArray(65, '\0')), QByteArray());

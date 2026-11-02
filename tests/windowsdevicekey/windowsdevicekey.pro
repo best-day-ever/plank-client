@@ -8,7 +8,8 @@ SOURCES += test_windowsdevicekey.cpp \
     ../../app/backend/plankpasskey.cpp \
     ../../app/backend/plankenrollment.cpp \
     ../../app/backend/plankbrokerclient.cpp
-HEADERS += ../../app/backend/brokerdevicekey.h ../../app/backend/brokersessionstore.h
+HEADERS += ../../app/backend/brokerdevicekey.h ../../app/backend/brokersessionstore.h \
+    ../../app/backend/brokersessionstate.h
 RESOURCES += ui.qrc
 INCLUDEPATH += ../../app ../../app/backend
 win32 {

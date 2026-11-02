@@ -15,6 +15,7 @@
 #include "clientdisplayprobe.h"
 #include "remotestreamsetup.h"
 #include "brokersessionstore.h"
+#include "brokersessionstate.h"
 #include <QTemporaryDir>
 #include <QNetworkProxy>
 #include <QNetworkAccessManager>
@@ -374,6 +375,8 @@ private slots:
     void leaseRenewalRejectsStaleReplies();
     void tlsKeepaliveExpiryContract();
     void tlsPreparationRenewsFirst();
+    void refreshTicketsSurviveAuthTransitions();
+    void sessionStateRejectsPreviousAuthentication();
 
     // Passkey (Touch ID) sign-in, section 13.3 / 13.4
     void parsesPasskeyChallenge();
@@ -1165,6 +1168,66 @@ void TestPlankBroker::tlsPreparationRenewsFirst()
     } catch (const PlankBrokerError& error) {
         QCOMPARE(error.kind(), PlankBrokerError::SessionExpired);
     }
+}
+
+void TestPlankBroker::refreshTicketsSurviveAuthTransitions()
+{
+    // Use the same shared state as RemoteBroker's worker and completion
+    // callbacks: a slow request must not block, populate, sign out, or clear
+    // an in-flight flag belonging to a later authentication.
+    BrokerSessionState state;
+    QVERIFY(!state.beginRefresh());
+    state.set(QStringLiteral("session-a"), true);
+    const auto old = state.beginRefresh();
+    QVERIFY(old);
+    QVERIFY(!state.beginRefresh());
+    state.clear(); // explicit sign-out while the old request is on the wire
+    QVERIFY(!state.beginRefresh());
+    state.set(QStringLiteral("session-b"), true);
+    const auto current = state.beginRefresh();
+    QVERIFY(current); // the prior request no longer blocks sign-in's refresh
+    QCOMPARE(state.getForRevision(current->authentication), QStringLiteral("session-b"));
+    QVERIFY(state.getForRevision(old->authentication).isEmpty());
+    QVERIFY(!state.finishRefresh(*old)); // old success or401 is abandoned
+    QVERIFY(!state.beginRefresh()); // cannot clear the current in-flight flag
+    QVERIFY(state.finishRefresh(*current));
+    const auto next = state.beginRefresh();
+    QVERIFY(next);
+    QVERIFY(!state.finishRefresh(*current)); // duplicate completion is stale
+    QVERIFY(!state.beginRefresh());
+    QVERIFY(state.finishRefresh(*next));
+    // A successful replacement authentication also resets ownership without
+    // requiring an intervening clear (the onboarding/adoptSession path).
+    const auto previous = state.beginRefresh();
+    QVERIFY(previous);
+    state.set(QStringLiteral("session-c"), true);
+    const auto adopted = state.beginRefresh();
+    QVERIFY(adopted);
+    QVERIFY(!state.finishRefresh(*previous));
+    QVERIFY(state.finishRefresh(*adopted));
+}
+
+void TestPlankBroker::sessionStateRejectsPreviousAuthentication()
+{
+    BrokerSessionState state;
+    state.set(QStringLiteral("session-a"), true);
+    const auto auth = state.revision();
+    const auto initial = state.beginLease(auth);
+    QVERIFY(state.currentLease(auth, initial));
+    state.cancelLease(); // closing a Session cancels its pending callbacks
+    QVERIFY(!state.currentLease(auth, initial));
+    const auto reconnect = state.beginLease(auth);
+    QVERIFY(state.currentLease(auth, reconnect));
+    state.clear(); // explicit logout forbids the old Session's re-admission
+    QVERIFY(state.getForRevision(auth).isEmpty());
+    QCOMPARE(state.beginLease(auth), quint64(0));
+    state.set(QStringLiteral("session-b"), true);
+    const auto currentAuth = state.revision();
+    const auto currentLease = state.beginLease(currentAuth);
+    QVERIFY(state.currentLease(currentAuth, currentLease));
+    QVERIFY(!state.currentLease(auth, reconnect));
+    QCOMPARE(state.beginLease(auth), quint64(0)); // cannot cancel the new grant
+    QVERIFY(state.currentLease(currentAuth, currentLease));
 }
 
 void TestPlankBroker::tlsPinnedRoundTrip()
@@ -2238,6 +2301,9 @@ void TestPlankBroker::tlsPasskeyRateLimitThrows()
 
 void TestPlankBroker::helperExitCodesMapToOutcomes()
 {
+#ifdef Q_OS_WIN
+    QSKIP("This fixture executes a POSIX shell helper; Windows uses the native CNG device-key suite.");
+#endif
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const PlankBroker::PasskeyRequest request = passkeyRequest();
@@ -2278,6 +2344,9 @@ void TestPlankBroker::helperExitCodesMapToOutcomes()
 
 void TestPlankBroker::helperListAndCreateParsing()
 {
+#ifdef Q_OS_WIN
+    QSKIP("This fixture executes a POSIX shell helper; Windows uses the native CNG device-key suite.");
+#endif
     const QString spki = QString::fromLatin1(QByteArray(91, '\x04').toBase64());
     const QString mapping = QStringLiteral("passkey:%1,%2").arg(PasskeyCredential, spki);
     PlankPasskeyHelper::CreatedKey created;
@@ -2617,6 +2686,9 @@ void TestPlankBroker::tlsDeviceBoundSessionRejectionSignsOut()
 
 void TestPlankBroker::helperDeviceKeyCommands()
 {
+#ifdef Q_OS_WIN
+    QSKIP("This fixture executes a POSIX shell helper; Windows uses the native CNG device-key suite.");
+#endif
     // parse
     QCOMPARE(PlankPasskeyHelper::parseDevicePublicKey(QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8() + "\n"),
              DeviceSpki);

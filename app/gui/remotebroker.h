@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backend/plankbroker.h"
+#include "backend/brokersessionstate.h"
 #include "backend/plankbrokerclient.h"
 #include "backend/plankpasskey.h"
 #include "backend/remotestreamsetup.h"
@@ -158,49 +159,7 @@ signals:
     void touchIdSetupCompleted();
 
 private:
-    // Shared with Session worker threads (re-admission) and keepalive tasks.
-    class SharedToken
-    {
-    public:
-        QString get() const { QMutexLocker lock(&m_Lock); return m_Token; }
-        void set(QString token, bool bound = false) {
-            QMutexLocker lock(&m_Lock);
-            m_Token = std::move(token);
-            m_Bound = bound;
-            ++m_Revision;
-            ++m_Lease;
-        }
-        void clear() {
-            QMutexLocker lock(&m_Lock);
-            m_Token.fill(QChar('\0'));
-            m_Token.clear();
-            m_Bound = false;
-            ++m_Revision;
-            ++m_Lease;
-        }
-        bool hasToken() const { QMutexLocker lock(&m_Lock); return !m_Token.isEmpty(); }
-        bool proofRequired() const { QMutexLocker lock(&m_Lock); return m_Bound; }
-        quint64 revision() const { QMutexLocker lock(&m_Lock); return m_Revision; }
-        quint64 beginLease(quint64 revision) {
-            QMutexLocker lock(&m_Lock);
-            return revision == m_Revision && !m_Token.isEmpty() ? ++m_Lease : 0;
-        }
-        bool currentLease(quint64 revision, quint64 lease) const {
-            QMutexLocker lock(&m_Lock);
-            return lease != 0 && revision == m_Revision && lease == m_Lease && !m_Token.isEmpty();
-        }
-        QString getForRevision(quint64 revision) const {
-            QMutexLocker lock(&m_Lock);
-            return revision == m_Revision ? m_Token : QString();
-        }
-        void cancelLease() { QMutexLocker lock(&m_Lock); ++m_Lease; }
-    private:
-        mutable QMutex m_Lock;
-        QString m_Token;
-        bool m_Bound = false;
-        quint64 m_Revision = 0;
-        quint64 m_Lease = 0;
-    };
+    using SharedToken = BrokerSessionState;
 
     PlankBrokerClient::Config clientConfig() const;
     QString passkeyRpId() const;
@@ -236,7 +195,6 @@ private:
     QString m_TouchIdSetupError;
     quint64 m_PasskeyGeneration = 0;
     QPointer<Session> m_PendingSession;
-    bool m_HostRefreshInFlight = false;
     // Brokered computers are never persisted; they must outlive their Session.
     QVector<NvComputer*> m_Computers;
 

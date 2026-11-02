@@ -138,8 +138,8 @@ PlankBrokerClient::Config clientConfig(const QString& host, quint16 port, const 
     config.pins = pins;
     config.deviceProofRequired = std::move(proofRequired);
     const auto deviceHost = host.trimmed().toLower();
-    if (!PlankBroker::isPasskeyRpId(deviceHost)) return config;
 #ifdef Q_OS_WIN
+    if (!PlankBroker::isEndpointName(deviceHost)) return config;
     Q_UNUSED(macHelper)
     const WindowsKey key(QStringLiteral("%1:%2").arg(deviceHost).arg(port));
     config.requireDeviceBinding = true;
@@ -150,6 +150,7 @@ PlankBrokerClient::Config clientConfig(const QString& host, quint16 port, const 
     };
     config.deviceSigner = [key](const QByteArray& message) { return key.sign(message); };
 #elif defined(Q_OS_MACOS)
+    if (!PlankBroker::isPasskeyRpId(deviceHost)) return config;
     const PlankPasskeyHelper helper(macHelper);
     if (helper.available()) {
         config.devicePublicKey = [helper, deviceHost]() { return helper.devicePublicKey(deviceHost); };

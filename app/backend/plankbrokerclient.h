@@ -76,6 +76,13 @@ public:
         DeviceSigner deviceSigner;
         std::function<bool()> deviceProofRequired;
         bool requireDeviceBinding = false;
+
+        Config withFrozenDeviceProofRequirement() const {
+            Config copy = *this;
+            const bool required = deviceProofRequired && deviceProofRequired();
+            copy.deviceProofRequired = [required]() { return required; };
+            return copy;
+        }
     };
 
     explicit PlankBrokerClient(Config config);

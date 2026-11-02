@@ -24,6 +24,7 @@ HEADERS += \
     ../../app/backend/remotestreamsetup.h \
     ../../app/backend/clientdisplayprobe.h \
     ../../app/backend/brokersessionstore.h \
+    ../../app/backend/brokersessionstate.h \
     ../../app/backend/plankpasskey.h \
     ../../app/backend/macpreviewlaunch.h \
     ../../app/backend/macmediafeatures.h \
