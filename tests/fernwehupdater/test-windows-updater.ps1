@@ -1,5 +1,6 @@
 # Run with Windows PowerShell 5.1. Generates unsigned MSI database fixtures;
-# validation-only mode never elevates, installs, deletes fixtures or launches UI.
+# Validation-only mode preserves fixtures. The install-path tests replace only
+# process launch with a native argv probe: no elevation or installation occurs.
 param([string]$Helper = (Join-Path $PSScriptRoot '../../app/backend/fernweh-install-update.ps1'))
 $ErrorActionPreference = 'Stop'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('fernweh-updater-test-' + [guid]::NewGuid().ToString('N'))
@@ -32,6 +33,42 @@ function Verify-Package([string]$path, [bool]$valid, [string]$hash = '', [long]$
     if (($LASTEXITCODE -eq 0) -ne $valid) { throw "Unexpected validation result for $(Split-Path -Leaf $path): $result" }
     if (-not (Test-Path -LiteralPath $path)) { throw 'Validation deleted its input.' }
 }
+function Verify-InstallerLaunch([string]$name, [string]$pathStyle) {
+    $package = Create-Package $name 'BDE fernweh' $upgrade '1.1.40'
+    $inputPath = $package
+    if ($pathStyle -eq 'forward') { $inputPath = $package.Replace('\', '/') }
+    if ($pathStyle -eq 'mixed') { $inputPath = $package.Replace('\' + $name, '/' + $name) }
+    $helperCopy = Join-Path $directory 'install-update.ps1'
+    Copy-Item -LiteralPath $Helper -Destination $helperCopy
+    $launches = [Collections.Generic.List[object]]::new()
+    # Exercise the complete production helper, including package validation and
+    # cleanup. Feed its actual ArgumentList through Windows process creation.
+    function Get-Process { param($Id, $ErrorAction) return $null }
+    function Start-Process {
+        param($FilePath, $ArgumentList, $Verb, [switch]$Wait, [switch]$PassThru)
+        $launches.Add([pscustomobject]@{
+            FilePath = $FilePath; Verb = $Verb; Wait = $Wait.IsPresent; PassThru = $PassThru.IsPresent
+        })
+        if ($FilePath -eq "$env:SystemRoot\System32\msiexec.exe") {
+            return Microsoft.PowerShell.Management\Start-Process -FilePath $probe -ArgumentList $ArgumentList -Wait -PassThru
+        }
+    }
+    & $helperCopy -Installer $inputPath -ExpectedHash (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant() `
+        -ExpectedSize (Get-Item -LiteralPath $package).Length -ExpectedVersion '1.1.040' -ParentProcessId 0 -Executable $probe
+    $received = @([IO.File]::ReadAllLines($env:FERNWEH_ARGV_PROBE) | ForEach-Object {
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($_))
+    })
+    $expected = @('/i', $package, '/passive', '/norestart', 'REBOOT=ReallySuppress')
+    if ($received.Count -ne $expected.Count) { throw "Installer received $($received.Count) arguments, expected $($expected.Count)." }
+    for ($index = 0; $index -lt $expected.Count; $index++) {
+        if ($received[$index] -cne $expected[$index]) { throw "Installer argument $index changed: [$($received[$index])] instead of [$($expected[$index])]." }
+    }
+    if ($launches.Count -ne 2 -or $launches[0].Verb -ne 'RunAs' -or
+        -not $launches[0].Wait -or -not $launches[0].PassThru -or
+        $launches[1].FilePath -ne $probe) { throw 'Installer elevation/wait or application relaunch contract changed.' }
+    if ((Test-Path -LiteralPath $package) -or (Test-Path -LiteralPath $helperCopy)) { throw 'Installer left its temporary files behind.' }
+}
+$previousProbeOutput = $env:FERNWEH_ARGV_PROBE
 try {
     $upgrade = '{F598C7E9-ECA2-432F-B0C0-41F9E1201F8F}'
     $good = Create-Package 'valid unsigned.msi' 'BDE fernweh' $upgrade '1.1.40'
@@ -45,7 +82,27 @@ try {
     [IO.File]::WriteAllText($invalid, 'not an MSI')
     Verify-Package $invalid $false
     Write-Output 'PASS: unsigned MSI identity, numeric version, tamper, size and malformed package validation (7 cases).'
+    $probe = Join-Path $directory 'argv-probe.exe'
+    $env:FERNWEH_ARGV_PROBE = Join-Path $directory 'argv.txt'
+    Add-Type -OutputAssembly $probe -OutputType ConsoleApplication -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+public static class ArgvProbe {
+    public static void Main(string[] args) {
+        File.WriteAllLines(Environment.GetEnvironmentVariable("FERNWEH_ARGV_PROBE"),
+            Array.ConvertAll(args, value => Convert.ToBase64String(Encoding.UTF8.GetBytes(value))));
+    }
+}
+'@
+    foreach ($pathStyle in @('native', 'forward', 'mixed')) {
+        Verify-InstallerLaunch 'update.msi' $pathStyle
+        Verify-InstallerLaunch 'update with spaces.msi' $pathStyle
+        Verify-InstallerLaunch ("artist's update & " + [char]0x00fc + '.msi') $pathStyle
+    }
+    Write-Output 'PASS: native installer argv, elevation request, wait, relaunch and cleanup (9 paths).'
 } finally {
+    $env:FERNWEH_ARGV_PROBE = $previousProbeOutput
     [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine)
     Get-ChildItem -LiteralPath $directory -File | Remove-Item
     Remove-Item -LiteralPath $directory

@@ -9,6 +9,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 try {
+    # Qt supplies forward-slash paths. MSI database inspection accepts them,
+    # but msiexec installation returns 1619 unless separators are native.
+    $Installer = [IO.Path]::GetFullPath($Installer.Replace('/', '\'))
     # The client only starts this helper once all streams have ended. Wait for
     # its normal process shutdown before asking Windows Installer to replace it.
     if (-not $ValidateOnly) {
