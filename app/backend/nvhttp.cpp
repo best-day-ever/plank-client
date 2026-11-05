@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "macsharedsession.h"
 #include "desktopstage.h"
 #include "hostrecovery.h"
 #include "plankbroker.h"
@@ -102,7 +103,7 @@ NvHTTP::NvHTTP(NvAddress address, QNetworkAccessManager* nam) :
 NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
     NvHTTP(computer->activeAddress, nam)
 {
-    setPlankSessionToken(computer->sessionToken, computer->sessionIdentityKey);
+    setPlankSessionToken(computer->sessionToken, computer->sessionIdentityKey, computer->plankSharedDesktop);
     setPinnedCertificateSha256(computer->brokerHostCertSha256);
 }
 
@@ -157,9 +158,10 @@ void NvHTTP::setTrustAddress(NvAddress address)
     m_TrustEndpoint = HostTrustStore::endpoint(url);
 }
 
-void NvHTTP::setPlankSessionToken(QString sessionToken, QByteArray identityKey)
+void NvHTTP::setPlankSessionToken(QString sessionToken, QByteArray identityKey, bool sharedDesktop)
 {
     m_MacMediaAgreement = {}; m_MacMediaCertificate.clear();
+    m_SharedDesktop = !sessionToken.isEmpty() && sharedDesktop;
     m_SessionToken = std::move(sessionToken);
     m_IdentityKey = std::move(identityKey);
 }
@@ -879,6 +881,8 @@ QString NvHTTP::authenticate(QString username, QString password, bool* greeterCo
         const QString state = result.value("state").toString();
         if (state == "authenticated") {
             m_MacMediaAgreement = {}; m_MacMediaCertificate.clear();
+            if (!PlankBroker::parseSharedDesktop(result, m_SharedDesktop))
+                throw GfeHttpResponseException(400, "Invalid shared desktop admission policy");
             m_SessionToken = result.value("session_token").toString();
             if (m_SessionToken.isEmpty()) {
                 throw GfeHttpResponseException(401, "Authentication returned no session token");
@@ -926,23 +930,22 @@ QString NvHTTP::authenticate(QString username, QString password, bool* greeterCo
     throw GfeHttpResponseException(400, "PAM conversation exceeded the round limit");
 }
 
-QString NvHTTP::authenticateGssapi(QString username, QString gssapiToken, bool* greeterConfirmed)
+QString NvHTTP::authenticateBroker(PlankBroker::Admission admission, bool* greeterConfirmed)
 {
     if (greeterConfirmed != nullptr) *greeterConfirmed = false;
-    SecureStringGuard tokenGuard(gssapiToken);
-    if (!isBrokered() || !m_SessionToken.isEmpty() || username.isEmpty() || gssapiToken.isEmpty()) {
+    SecureStringGuard tokenGuard(admission.token);
+    const auto request = PlankBroker::admissionRequest(admission);
+    if (!isBrokered() || !m_SessionToken.isEmpty() || request.isEmpty()) {
         throw GfeHttpResponseException(400, "Invalid PLANK brokered authentication state");
     }
 
     establishHostTrust(AuthenticationIntent::Recovery);
 
-    const QJsonObject result = postPlankJson("start", {
-        {"username", username},
-        {"gssapi_token", gssapiToken},
-    });
+    const QJsonObject result = postPlankJson("start", request);
     QString token;
     switch (PlankBroker::parseHostAdmission(result, token)) {
     case PlankBroker::AdmissionResult::Authenticated:
+        m_SharedDesktop = result.value("shared_desktop") == QJsonValue(true);
         m_SessionToken = token;
         if (greeterConfirmed != nullptr) {
             *greeterConfirmed = plankAuthenticatedGreeter(result);
@@ -1063,10 +1066,7 @@ NvOutputTopology NvHTTP::prepareMacDisplay(const QString& mode, const QString& e
     const auto object = requestPinnedMacJson(QStringLiteral("/plank/display"), request, pin);
     NvOutputTopology result;
     if (!NvOutputTopology::fromJson(object, result) ||
-            result.featureFlags != NvOutputTopology::FixedCaptureFlags ||
-            result.desktopWidth != size.width() || result.desktopHeight != size.height() ||
-            result.captureLogicalBounds.size() != QSizeF(size.width() / scale, size.height() / scale) ||
-            result.appleEncodingMode != encodingMode) {
+            !MacSharedSession::acceptsDisplay(result, size, scale, encodingMode, m_SharedDesktop)) {
         throw GfeHttpResponseException(400, "Mac desktop did not reach the requested resolution");
     }
     return result;

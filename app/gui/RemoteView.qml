@@ -332,9 +332,9 @@ Item {
     // say what they mean, and never repeat the state ("Offline · offline").
     function hostStatusText(host) {
         var parts = []
-        parts.push(!host.online ? qsTr("Offline") :
+        parts.push(!host.online ? qsTr("Offline") : host.sharedDesktop ? qsTr("Shared desktop") :
                    (host.busy || host.inUseBy !== "") ? qsTr("Busy") : qsTr("Online"))
-        if (host.inUseBy !== "") {
+        if (host.inUseBy !== "" && !host.sharedDesktop) {
             parts.push(qsTr("in use by %1").arg(host.inUseBy))
         }
         if (!host.connectable && host.reason !== "") {
@@ -676,7 +676,7 @@ Item {
                         height: 10
                         radius: 5
                         color: !modelData.online ? theme.textDisabled :
-                               (modelData.busy || modelData.inUseBy !== "" ? theme.warning : theme.success)
+                               (!modelData.sharedDesktop && (modelData.busy || modelData.inUseBy !== "") ? theme.warning : theme.success)
                         Layout.alignment: Qt.AlignVCenter
                     }
 

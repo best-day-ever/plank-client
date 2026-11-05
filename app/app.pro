@@ -347,6 +347,7 @@ HEADERS += \
     backend/nvcomputer.h \
     backend/planknetwork.h \
     backend/nvhttp.h \
+    backend/macsharedsession.h \
     backend/hosttruststore.h \
     backend/hosttlsguard.h \
     backend/plankhttp.h \

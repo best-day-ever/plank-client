@@ -598,6 +598,7 @@ void RemoteBroker::refreshHostsImpl(bool showBusy)
                 entry.insert(QStringLiteral("name"), host.name);
                 entry.insert(QStringLiteral("online"), host.online);
                 entry.insert(QStringLiteral("busy"), host.busy);
+                entry.insert(QStringLiteral("sharedDesktop"), host.sharedDesktop);
                 entry.insert(QStringLiteral("inUseBy"), host.inUseBy);
                 entry.insert(QStringLiteral("connectable"), host.connectable);
                 entry.insert(QStringLiteral("reason"), host.reason);
@@ -725,7 +726,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
         computer->brokerHostId = hostId;
     }
 
-    const QString token = http.authenticateGssapi(lease.username, lease.gssapiToken,
+    const QString token = http.authenticateBroker(lease.admission(),
                                                   &authenticatedGreeter);
     NvOutputTopology topology;
     bool topologySupported;
@@ -765,6 +766,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
         QWriteLocker lock(&computer->lock);
         computer->sessionToken = token;
         computer->sessionIdentityKey = http.hostIdentityKey();
+        computer->plankSharedDesktop = http.sharedDesktop();
         computer->authorizationState = NvComputer::AS_AUTHORIZED;
         if (topologySupported) {
             computer->outputTopology = topology;
@@ -1073,7 +1075,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
             } catch (const StreamSettingsRequired& required) {
                 streamProblem = required.reason;
             }
-            lease.gssapiToken.fill(QChar('\0'));
+            lease.clearAdmission();
         } catch (const PlankBrokerError& error) {
             brokerFailure = std::make_shared<PlankBrokerError>(error);
         } catch (const GfeHttpResponseException& error) {
@@ -1156,7 +1158,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
             };
             context->hostId = hostId;
             context->computer = computer;
-            session->setPlankBrokerAdmission([context](QString& username, QString& gssapiToken) {
+            session->setPlankBrokerAdmission([context](PlankBroker::Admission& admission) {
                 try {
                     const quint64 grant = context->beginLease();
                     const QString sessionToken = context->currentToken();
@@ -1172,9 +1174,8 @@ void RemoteBroker::connectToHost(const QString& hostId)
                         context->computer->manualAddress = leased;
                         context->computer->brokerHostCertSha256 = lease.hostCertSha256;
                     }
-                    username = lease.username;
-                    gssapiToken = lease.gssapiToken;
-                    lease.gssapiToken.fill(QChar('\0'));
+                    admission = lease.admission();
+                    lease.clearAdmission();
                 } catch (const PlankBrokerError& error) {
                     throwForSession(error);
                 }

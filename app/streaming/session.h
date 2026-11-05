@@ -158,7 +158,7 @@ public:
     // /plank/auth/start. Throws GfeHttpResponseException/QtNetworkReplyException.
     // Replaces password re-authentication for reconnects and display
     // transitions; tokens are one-use, so every re-auth goes back to the broker.
-    using PlankBrokerAdmission = std::function<void(QString& username, QString& gssapiToken)>;
+    using PlankBrokerAdmission = std::function<void(PlankBroker::Admission& admission)>;
     void setPlankBrokerAdmission(PlankBrokerAdmission admission);
     // A signed host admission that explicitly named the greeter permits a
     // bounded handoff retry even if the stream ends before its notice arrives.

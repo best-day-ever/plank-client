@@ -1,4 +1,5 @@
 #include "session.h"
+#include "backend/macsharedsession.h"
 #include "sessionguidispatch.h"
 #include "backend/collaboration.h"
 #include <QDeadlineTimer>
@@ -788,7 +789,7 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_Computer(computer),
       m_PlankVideoProfile(static_cast<StreamingPreferences::PlankVideoProfile>(
               qBound(static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444),
-                     computer->plankVideoProfile,
+                     MacSharedSession::videoProfile(computer->outputTopology, computer->plankVideoProfile, computer->plankSharedDesktop),
                      static_cast<int>(StreamingPreferences::PLANK_PROFILE_COUNT) - 1))),
       m_PlankCaptureSource(static_cast<StreamingPreferences::PlankCaptureSource>(
               qBound(static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT),
@@ -1897,9 +1898,8 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
 
     // Never reuse a broker token: each admission is a new broker connect,
     // which may also lease a different session port.
-    QString username;
-    QString gssapiToken;
-    m_PlankBrokerAdmission(username, gssapiToken);
+    PlankBroker::Admission admission;
+    m_PlankBrokerAdmission(admission);
     NvAddress address;
     QString pin;
     {
@@ -1909,7 +1909,7 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
     }
     http.setAddress(address);
     http.setPinnedCertificateSha256(pin);
-    return http.authenticateGssapi(username, gssapiToken, greeterConfirmed);
+    return http.authenticateBroker(std::move(admission), greeterConfirmed);
 }
 
 bool Session::initialize(IFFmpegRendererFactory* presenter)
@@ -4134,6 +4134,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                                 QWriteLocker lock(&m_Computer->lock);
                                 m_Computer->sessionToken = token;
                                 m_Computer->sessionIdentityKey = http->hostIdentityKey();
+                                m_Computer->plankSharedDesktop = http->sharedDesktop();
                                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             }
                             authenticationRefreshRequired = false;
@@ -5031,6 +5032,7 @@ bool Session::runPlankReconnect()
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->sessionToken = token;
                     m_Computer->sessionIdentityKey = http.hostIdentityKey();
+                    m_Computer->plankSharedDesktop = http.sharedDesktop();
                     m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 }
                 if (greeterConfirmed &&
@@ -5067,10 +5069,19 @@ bool Session::runPlankReconnect()
                     StreamingPreferences::plankAppleEncodingMode(m_PlankVideoProfile), desktopScale) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
+            if (macDesktop && http.sharedDesktop()) {
+                m_PlankVideoProfile = static_cast<StreamingPreferences::PlankVideoProfile>(
+                    MacSharedSession::videoProfile(topology, m_PlankVideoProfile, true));
+                const int format = m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444 ?
+                    VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_MAIN10;
+                m_SupportedVideoFormats = {format};
+                m_StreamConfig.supportedVideoFormats = format;
+            }
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
                 m_Computer->sessionIdentityKey = http.hostIdentityKey();
+                m_Computer->plankSharedDesktop = http.sharedDesktop();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;

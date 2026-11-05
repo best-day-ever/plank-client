@@ -826,6 +826,7 @@ private:
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
                 m_Computer->sessionIdentityKey = http.hostIdentityKey();
+                m_Computer->plankSharedDesktop = http.sharedDesktop();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
