@@ -5074,7 +5074,8 @@ bool Session::runPlankReconnect()
                     MacSharedSession::videoProfile(topology, m_PlankVideoProfile, true));
                 const int format = m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444 ?
                     VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_MAIN10;
-                m_SupportedVideoFormats = {format};
+                m_SupportedVideoFormats.clear();
+                m_SupportedVideoFormats.append(format);
                 m_StreamConfig.supportedVideoFormats = format;
             }
             {
