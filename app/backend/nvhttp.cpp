@@ -14,13 +14,11 @@
 #include <memory>
 
 #include <QDebug>
-#include <QDateTime>
 #include <QtNetwork/QNetworkReply>
 #include <QEventLoop>
 #include <QTimer>
 #include <QRegularExpression>
 #include <QXmlStreamReader>
-#include <QSslKey>
 #include <QSslCipher>
 #include <QImageReader>
 #include <QJsonArray>
@@ -47,18 +45,6 @@ public:
 private:
     QString& m_Value;
 };
-
-bool isPlankCertificate(const QSslCertificate& certificate)
-{
-    const auto alternativeNames = certificate.subjectAlternativeNames();
-    const QDateTime now = QDateTime::currentDateTimeUtc();
-    return !certificate.isNull() && certificate.isSelfSigned() &&
-            certificate.publicKey().algorithm() == QSsl::Rsa &&
-            certificate.publicKey().length() >= 3072 &&
-            !alternativeNames.values(QSsl::DnsEntry).isEmpty() &&
-            alternativeNames.values(QSsl::IpAddressEntry).isEmpty() &&
-            certificate.effectiveDate() <= now && certificate.expiryDate() > now;
-}
 
 QMetaObject::Connection rememberPlankTls(QNetworkAccessManager* manager, QObject* context)
 {
@@ -114,13 +100,13 @@ void NvHTTP::setPinnedCertificateSha256(QString certificateSha256)
     m_PinnedCertificateSha256 = std::move(certificateSha256);
 }
 
-bool NvHTTP::acceptsPlankCertificate(const QSslCertificate& certificate) const
+bool NvHTTP::acceptsPlankCertificate(const QList<QSslCertificate>& chain) const
 {
-    if (!isPlankCertificate(certificate)) {
+    if (HostTlsGuard::identityKey(chain).size() != 32) {
         return false;
     }
     return m_PinnedCertificateSha256.isEmpty() ||
-            PlankBroker::hostLeafMatches(certificate.toDer(), m_PinnedCertificateSha256);
+            PlankBroker::hostLeafMatches(chain.first().toDer(), m_PinnedCertificateSha256);
 }
 
 QMetaObject::Connection NvHTTP::enforcePinnedCertificate(QNetworkAccessManager* manager)
@@ -131,7 +117,7 @@ QMetaObject::Connection NvHTTP::enforcePinnedCertificate(QNetworkAccessManager* 
     // Re-check at handshake completion, before any request bytes (including
     // a bearer token) are written, even if the TLS stack raised no errors.
     return connect(manager, &QNetworkAccessManager::encrypted, this, [this](QNetworkReply* reply) {
-        if (!acceptsPlankCertificate(reply->sslConfiguration().peerCertificate())) {
+        if (!acceptsPlankCertificate(reply->sslConfiguration().peerCertificateChain())) {
             qWarning() << "Rejecting a brokered host certificate that does not match the broker pin";
             reply->setProperty("plankPinRejected", true);
             reply->abort();
@@ -682,11 +668,11 @@ void NvHTTP::checkTlsGuard(const HostTlsGuard& guard)
 
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
-    const QSslCertificate certificate = reply->sslConfiguration().peerCertificate();
-    if (!acceptsPlankCertificate(certificate)) return;
+    if (!acceptsPlankCertificate(reply->sslConfiguration().peerCertificateChain())) return;
     for (const QSslError& error : errors) {
         switch (error.error()) {
         case QSslError::SelfSignedCertificate:
+        case QSslError::SelfSignedCertificateInChain:
         case QSslError::CertificateUntrusted:
         case QSslError::UnableToGetLocalIssuerCertificate:
         case QSslError::UnableToVerifyFirstCertificate:
@@ -836,7 +822,7 @@ QJsonObject NvHTTP::postPlankJson(QString command, const QJsonObject& body, bool
         throw QtNetworkReplyException(error, message);
     }
     const QSslConfiguration negotiatedSsl = negotiatedPlankTls(reply.data());
-    if (!acceptsPlankCertificate(negotiatedSsl.peerCertificate()) ||
+    if (!acceptsPlankCertificate(negotiatedSsl.peerCertificateChain()) ||
             negotiatedSsl.sessionProtocol() != QSsl::TlsV1_3) {
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
                                       "PLANK TLS validation failed");
@@ -1311,7 +1297,7 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     const bool plankTls = baseUrl.scheme() == "https";
     const bool approvedCertificate = !plankTls ||
-            acceptsPlankCertificate(negotiatedPlankTls(reply.data()).peerCertificate());
+            acceptsPlankCertificate(negotiatedPlankTls(reply.data()).peerCertificateChain());
     const bool approvedProtocol = !plankTls ||
             negotiatedPlankTls(reply.data()).sessionProtocol() == QSsl::TlsV1_3;
     if (!approvedCertificate || !approvedProtocol) {

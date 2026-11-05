@@ -122,6 +122,11 @@ private:
         try {
             serverInfo = http.getServerInfo(NvHTTP::NvLogLevel::NVLL_NONE, true);
         } catch (const QtNetworkReplyException& error) {
+            // Report the first failure/online-to-offline transition, without
+            // filling the log on every background retry of an offline host.
+            if (m_Computer->state != NvComputer::CS_OFFLINE)
+                qWarning() << "Host availability check failed for" << m_Computer->name
+                           << error.getError() << error.getErrorText();
             if (sessionToken.isEmpty() || error.getError() != QNetworkReply::SslHandshakeFailedError) return false;
             // Keep an otherwise reachable replacement available for explicit
             // sign-in/consent, but never retry a bearer token to the new key.
@@ -135,6 +140,11 @@ private:
             http.setPlankSessionToken({}, {});
             try { serverInfo = http.getServerInfo(NvHTTP::NVLL_NONE, true); }
             catch (...) { return false; }
+        } catch (const GfeHttpResponseException& error) {
+            if (m_Computer->state != NvComputer::CS_OFFLINE)
+                qWarning() << "Host availability response rejected for" << m_Computer->name
+                           << "status" << error.getStatusCode();
+            return false;
         } catch (...) {
             return false;
         }

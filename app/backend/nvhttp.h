@@ -292,7 +292,7 @@ private:
                                  const QString& certificateSha256);
 
     NvAddress m_Address;
-    bool acceptsPlankCertificate(const QSslCertificate& certificate) const;
+    bool acceptsPlankCertificate(const QList<QSslCertificate>& chain) const;
     QMetaObject::Connection enforcePinnedCertificate(QNetworkAccessManager* manager);
     void handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
 
