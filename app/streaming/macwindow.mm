@@ -104,11 +104,12 @@ bool MacWindow::fullscreenTopInset(Uint32 displayId, int* top)
     @autoreleasepool {
         for (NSScreen* screen in NSScreen.screens) {
             if ([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue] == displayId) {
-                // visibleFrame also excludes the Dock/menu bar: that is NOT
-                // the native fullscreen viewport. Only reserve the camera area.
+                // Only its top edge contributes: subtracting visibleFrame's
+                // entire height would also reserve the Dock. On notched panels
+                // AppKit may place fullscreen below the camera safe area.
                 *top = MacDisplayGeometry::nativeFullscreenTopInset(
-                    static_cast<int>(std::ceil(screen.safeAreaInsets.top)),
-                    static_cast<int>(NSProcessInfo.processInfo.operatingSystemVersion.majorVersion));
+                    screen.safeAreaInsets.top,
+                    NSMaxY(screen.frame) - NSMaxY(screen.visibleFrame));
                 return true;
             }
         }
