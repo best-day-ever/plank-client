@@ -1044,6 +1044,9 @@ Flickable {
                         }
                     }
                     Component.onCompleted: {
+                        if (SystemProperties.automaticSessionRecovery) {
+                            unreachableActionListModel.setProperty(0, "text", qsTr("Keep waiting and reconnect automatically"))
+                        }
                         currentIndex = StreamingPreferences.plankUnreachableAction === StreamingPreferences.PLANK_UNREACHABLE_DISCONNECT ? 1 : 0
                     }
                     onActivated: {
@@ -1057,7 +1060,9 @@ Flickable {
                 }
 
                 PlankSettingHelp {
-                    text: qsTr("The stream window and toolbar remain responsive while BDE fernweh retries the host.")
+                    text: SystemProperties.automaticSessionRecovery ?
+                              qsTr("When keeping the session open, the timeout displays a status message without pausing reconnection. The message closes automatically when the session recovers. You can disconnect at any time.") :
+                              qsTr("The stream window and toolbar remain responsive while BDE fernweh retries the host.")
                 }
             }
         }
@@ -1584,7 +1589,7 @@ Flickable {
                     checked: StreamingPreferences.enableMdns
                     enabled: !StreamingPreferences.mdnsDiscoveryManaged
                     ToolTip.visible: hovered && StreamingPreferences.mdnsDiscoveryManaged
-                    ToolTip.text: qsTr("Managed by /etc/plank/client.conf")
+                    ToolTip.text: qsTr("Managed by %1").arg(StreamingPreferences.policyConfigPath)
                     onCheckedChanged: {
                         // This is called on init, so only do the work if we've
                         // actually changed the value.

@@ -595,6 +595,20 @@ void planArrangement(Plan& plan, const QVector<NvClientDisplay>& displays, int p
 
 } // namespace
 
+int legacyPrimaryOutput(const Plan& plan, bool supportsPrimarySelection)
+{
+    if (!supportsPrimarySelection || !plan.ok || !plan.legacy ||
+            plan.legacyHostLayout != NvOutputTopology::DualHorizontalHostLayout) return -1;
+    QVector<const Output*> included;
+    for (const auto& output : plan.outputs) if (output.included) included.append(&output);
+    if (included.size() != 2) return -1;
+    std::sort(included.begin(), included.end(), [](const Output* a, const Output* b) {
+        return a->position.x() < b->position.x();
+    });
+    for (int index = 0; index < included.size(); ++index) if (included.at(index)->primary) return index;
+    return -1;
+}
+
 PresentationTargets presentationTargets(const Plan& plan, const QVector<NvClientDisplay>& displays,
                                          bool supportsSeparateWindows)
 {

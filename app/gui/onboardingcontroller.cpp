@@ -258,7 +258,7 @@ void OnboardingController::apply(Outcome outcome)
     }
 
     if (outcome.signedIn()) {
-        if (m_Broker) m_Broker->adoptSession(outcome.sessionToken, outcome.username);
+        if (m_Broker) m_Broker->adoptSession(outcome.sessionToken, outcome.username, outcome.deviceBound);
         zero(outcome.sessionToken);
         qInfo() << "First sign-in finished; session device-bound:" << outcome.deviceBound;
         markCompleted();

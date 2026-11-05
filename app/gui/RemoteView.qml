@@ -33,17 +33,18 @@ Item {
         // Back from the first sign-in wizard without a session: continue
         // with the user name typed there.
         var prefill = Onboarding.takeSignInUsername()
+        usernameField.prefill(prefill)
         if (RemoteBroker.signedIn) {
             RemoteBroker.refreshHosts()
         } else if (prefill !== "") {
-            usernameField.text = prefill
             if (remoteView.passkeyReady) {
                 usernameField.forceActiveFocus()
             } else {
                 passwordField.forceActiveFocus()
             }
         } else {
-            usernameField.forceActiveFocus()
+            if (usernameField.text !== "") passwordField.forceActiveFocus()
+            else usernameField.forceActiveFocus()
         }
     }
 
@@ -87,6 +88,7 @@ Item {
         }
         function onStateChanged() {
             if (!RemoteBroker.signedIn && touchIdSetupDialog.visible) touchIdSetupDialog.close()
+            if (!RemoteBroker.signedIn) usernameField.prefill("")
         }
     }
 
@@ -330,9 +332,9 @@ Item {
     // say what they mean, and never repeat the state ("Offline · offline").
     function hostStatusText(host) {
         var parts = []
-        parts.push(!host.online ? qsTr("Offline") :
+        parts.push(!host.online ? qsTr("Offline") : host.sharedDesktop ? qsTr("Shared desktop") :
                    (host.busy || host.inUseBy !== "") ? qsTr("Busy") : qsTr("Online"))
-        if (host.inUseBy !== "") {
+        if (host.inUseBy !== "" && !host.sharedDesktop) {
             parts.push(qsTr("in use by %1").arg(host.inUseBy))
         }
         if (!host.connectable && host.reason !== "") {
@@ -412,8 +414,9 @@ Item {
                 color: theme.textSecondary
                 Layout.fillWidth: true
             }
-            PlankTextField {
+            BrokerUsernameField {
                 id: usernameField
+                rememberedUsername: RemoteBroker.rememberedUsername
                 Layout.fillWidth: true
                 Accessible.name: qsTr("Username")
                 enabled: !RemoteBroker.busy
@@ -474,7 +477,8 @@ Item {
             }
 
             Label {
-                visible: remoteView.errorText !== "" && !RemoteBroker.signedIn
+                visible: remoteView.errorText !== "" && !RemoteBroker.signedIn &&
+                         remoteView.errorText !== RemoteBroker.sessionNotice
                 text: remoteView.errorText
                 color: theme.danger
                 wrapMode: Text.Wrap
@@ -672,7 +676,7 @@ Item {
                         height: 10
                         radius: 5
                         color: !modelData.online ? theme.textDisabled :
-                               (modelData.busy || modelData.inUseBy !== "" ? theme.warning : theme.success)
+                               (!modelData.sharedDesktop && (modelData.busy || modelData.inUseBy !== "") ? theme.warning : theme.success)
                         Layout.alignment: Qt.AlignVCenter
                     }
 

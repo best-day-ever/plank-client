@@ -13,6 +13,7 @@
         <file>gui/DisplayAdvancedPage.qml</file>
         <file>gui/PlankCaptureSourceBox.qml</file>
         <file>gui/PlankVideoSettings.qml</file>
+        <file>gui/PlankClientDisplayBox.qml</file>
         <file>gui/SettingsView.qml</file>
         <file>gui/MacPermissionsDialog.qml</file>
         <file>gui/MacPermissionSetup.qml</file>
@@ -33,6 +34,8 @@
         <file>gui/CenteredGridView.qml</file>
         <file>gui/PlankTheme.qml</file>
         <file>gui/PlankVersionButton.qml</file>
+        <file>gui/PlankInternetStatus.qml</file>
+        <file>gui/PlankHostPolling.qml</file>
         <file>gui/PlankSection.qml</file>
         <file>gui/PlankSettingsGrid.qml</file>
         <file>gui/PlankSettingLabel.qml</file>
@@ -40,5 +43,7 @@
         <file>gui/PlankCheckBox.qml</file>
         <file>gui/PlankComboBox.qml</file>
         <file>gui/PlankTextField.qml</file>
+        <file>gui/BrokerUsernameField.qml</file>
+        <file>gui/BrokerSessionBanner.qml</file>
     </qresource>
 </RCC>

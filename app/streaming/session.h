@@ -20,6 +20,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/nvhttp.h"
 #include "backend/displayplanner.h"
+#include "backend/guidisplaysnapshot.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
@@ -39,6 +40,8 @@ class WindowsFileClipboard;
 #if defined(Q_OS_MACOS) && defined(PLANK_TRANSPORT)
 class MacFileClipboard;
 #endif
+class QtSessionRuntime;
+class QtSessionInput;
 #ifdef PLANK_TRANSPORT
 struct PlankTransportNativeEndpoint;
 #endif
@@ -136,6 +139,7 @@ class Session : public QObject
     friend class AsyncConnectionStartThread;
     friend class ExecThread;
     friend class PlankReconnectThread;
+    friend class QtSessionRuntime;
 
 public:
     explicit Session(NvComputer* computer, NvApp& app,
@@ -154,7 +158,7 @@ public:
     // /plank/auth/start. Throws GfeHttpResponseException/QtNetworkReplyException.
     // Replaces password re-authentication for reconnects and display
     // transitions; tokens are one-use, so every re-auth goes back to the broker.
-    using PlankBrokerAdmission = std::function<void(QString& username, QString& gssapiToken)>;
+    using PlankBrokerAdmission = std::function<void(PlankBroker::Admission& admission)>;
     void setPlankBrokerAdmission(PlankBrokerAdmission admission);
     // A signed host admission that explicitly named the greeter permits a
     // bounded handoff retry even if the stream ends before its notice arrives.
@@ -194,6 +198,11 @@ public:
     // Called by the decoder thread when the size of the decoded frames
     // changes; input is re-pointed at that size on the main thread.
     static void notifyDecodedFrameSize(int width, int height);
+    // Worker-to-UI requests. The Linux Qt owner receives queued
+    // signals; ordinary sessions keep their existing SDL event dispatch.
+    static void requestSessionQuit();
+    static void requestDecoderReset();
+    bool usesQtPresentation() const { return m_RendererFactory != nullptr; }
 
     void updateRenderedStats(float fps, float videoMbps)
     {
@@ -213,6 +222,11 @@ public:
     }
 
 signals:
+    void qtStatisticsUpdated(QString text);
+    void qtQuitRequested();
+    void qtDecoderResetRequested();
+    void qtReconnectRequested();
+    void qtReconnectStatusChanged(QString text, bool warning);
     void stageStarting(QString stage);
 
     void stageFailed(QString stage, int errorCode, QString failingPorts);
@@ -245,7 +259,7 @@ private:
 #endif
     void execInternal();
 
-    bool initialize();
+    bool initialize(IFFmpegRendererFactory* presenter = nullptr);
 
     bool startConnectionAsync(bool reconnecting = false,
                               bool takeOverActiveSession = false);
@@ -266,7 +280,7 @@ private:
     bool waitForPlankReconnectRequest(bool restartAuthenticationAfterWait = false);
 
     bool finishPlankReconnect(bool success,
-                                       const PlankReconnectState& state);
+                             const PlankReconnectState& state, bool* decoderNeedsReset = nullptr);
 
     void clearPlankReconnectCredentials();
     bool isPlankBrokered() const;
@@ -308,6 +322,7 @@ private:
                                           size_t payloadLength);
 #endif
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    void createClipboardSync();
     void startClipboardSync();
     void stopClipboardSync();
     void startClipboardPollTimer();
@@ -341,6 +356,7 @@ private:
     int getTargetDisplayIndex() const;
 
     bool snapshotClientDisplays();
+    QVector<NvClientDisplay> probeClientDisplays();
 
     void rebuildPresentationLayout();
 
@@ -413,7 +429,8 @@ private:
                        DecoderCaptureSource captureSource =
                            DecoderCaptureSource::Nvfbc8Bit,
                        DecoderEncoderBackend encoderBackend =
-                           DecoderEncoderBackend::SoftwareCuda);
+                           DecoderEncoderBackend::SoftwareCuda,
+                       IFFmpegRendererFactory* presenter = nullptr);
 
     bool isIdentityGbrEnabledForFormat(int videoFormat) const;
     DecoderCaptureSource decoderCaptureSource() const;
@@ -511,6 +528,8 @@ private:
     NvApp m_App;
     SDL_Window* m_Window;
     IVideoDecoder* m_VideoDecoder;
+    // Immutable during one active runtime, owned until all decoder workers exit.
+    IFFmpegRendererFactory* m_RendererFactory = nullptr;
     SDL_SpinLock m_DecoderLock;
     bool m_AudioDisabled;
     bool m_AudioMuted;
@@ -565,6 +584,9 @@ private:
         bool primary = false;
     };
     QVector<ClientDisplaySnapshot> m_ClientDisplays;
+    GuiDisplaySnapshot m_GuiDisplaySnapshot;
+    QVector<NvClientDisplay> m_ClientDisplayProbe;
+    QRect m_QtTargetDisplayBounds;
     // The plan's primary display: the stream window opens there.
     SDL_DisplayID m_PlannedPrimaryDisplay = 0;
     // Planned while the windows already exist (in-session reconnect): the
@@ -585,6 +607,9 @@ private:
     PlankPresentationLayout m_PresentationLayout;
     SdlInputHandler* m_InputHandler;
     PlankCallbackTarget<SdlInputHandler> m_InputCallbacks;
+#ifdef PLANK_QT_SESSION
+    PlankCallbackTarget<QtSessionInput> m_QtInputCallbacks;
+#endif
     void destroyInputHandler();
     int m_FlushingWindowEventsRef;
 
@@ -617,6 +642,9 @@ private:
 #else
     std::unique_ptr<MacFileClipboard> m_FileClipboard;
 #endif
+#endif
+#ifdef PLANK_QT_SESSION
+    std::atomic_bool m_QtClipboardFocused{false};
 #endif
 #endif
     std::atomic<float> m_CurrentRenderedFps;

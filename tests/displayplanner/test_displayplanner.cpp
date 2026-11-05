@@ -5,10 +5,17 @@
 #include "displayplanner.h"
 #include "displayprofile.h"
 #include "outputtopology.h"
+#include "guidisplaysnapshot.h"
 #include "streaming/plankpresentation.h"
+#include "streaming/sessionguidispatch.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QScopeGuard>
+#include <QPointer>
+#include <QTimer>
+#include <future>
+#include <thread>
 
 // Display setup: monitor identity, profiles and the layout planner.
 
@@ -86,6 +93,13 @@ class TestDisplayPlanner : public QObject
     Q_OBJECT
 
 private slots:
+    void sessionSnapshotPreservesProfilesAndRefreshes();
+    void sessionSnapshotCancellationWakesWaiter();
+    void guiDispatchProcessesSetupAndApply();
+    void guiDispatchDefersDeletionUntilJoined();
+    void guiDispatchWaitsForAsyncCleanupAfterJoin();
+    void guiDispatchKeepsEarlyReadySessionAliveAcrossGc();
+    void guiDispatchQuitCancelsOnce();
     void monitorKeysPreferTheUuid();
     void fingerprintIgnoresSizeAndPosition();
     void sessionUsesSavedWindowsMonitorChoice();
@@ -123,6 +137,7 @@ private slots:
     void honoursProfileChoices();
     void manualPlacement();
     void legacyHostFallback();
+    void legacyFallbackKeepsSelectedPrimary();
     void legacyPresentationUsesOneWindowPerSelectedMonitor();
     void arrangementPresentationBindsTheLiveDisplayOrder();
     void twoExternalDisplaysExcludeTheMacBookPanel();
@@ -953,6 +968,203 @@ void TestDisplayPlanner::twoExternalDisplaysExcludeTheMacBookPanel()
     QCOMPARE(targets.planIndices, QVector<int>({-1, 1, 2}));
     QCOMPARE(targets.primaryDisplay, 1);
     QCOMPARE(plan.includedCount(), 2);
+}
+
+void TestDisplayPlanner::guiDispatchProcessesSetupAndApply()
+{
+    QObject session, application;
+    int applied = 0;
+    SessionGuiDispatch guard(&session, &application, [] {});
+    bool setupOpen = false;
+    QTimer::singleShot(0, &session, [&] {
+        setupOpen = true;
+        QTimer::singleShot(0, &session, [&] { if (setupOpen) ++applied; });
+    });
+    for (int iteration = 0; iteration < 5 && !applied; ++iteration) SessionGuiDispatch::dispatch();
+    QVERIFY(setupOpen);
+    QCOMPARE(applied, 1);
+    guard.workerJoined();
+    guard.readyForDeletion();
+}
+
+void TestDisplayPlanner::guiDispatchDefersDeletionUntilJoined()
+{
+    QObject application;
+    QPointer<QObject> session = new QObject;
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::JavaScriptOwnership);
+    int cancelled = 0;
+    {
+        SessionGuiDispatch guard(session, &application, [&] { ++cancelled; });
+        QCOMPARE(QQmlEngine::objectOwnership(session), QQmlEngine::CppOwnership);
+        session->deleteLater();
+        QCoreApplication::sendPostedEvents(session, QEvent::DeferredDelete);
+        QVERIFY(session);
+        QCOMPARE(cancelled, 1);
+        guard.readyForDeletion();
+        guard.workerJoined();
+        // Scope exit represents the joined worker, after all dispatch stops.
+    }
+    QVERIFY(session);
+    QCoreApplication::sendPostedEvents(session, QEvent::MetaCall);
+    QVERIFY(session.isNull());
+}
+
+void TestDisplayPlanner::guiDispatchKeepsEarlyReadySessionAliveAcrossGc()
+{
+    QQmlEngine engine;
+    QObject application;
+    QPointer<QObject> session = new QObject;
+    engine.globalObject().setProperty("session", engine.newQObject(session));
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::JavaScriptOwnership);
+    {
+        SessionGuiDispatch guard(session, &application, [] {});
+        guard.readyForDeletion();
+        // Match StreamSegue's ready handler: drop the JS reference and gc.
+        engine.globalObject().deleteProperty("session");
+        engine.collectGarbage();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(session);
+        guard.workerJoined();
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(session.isNull());
+}
+
+void TestDisplayPlanner::guiDispatchQuitCancelsOnce()
+{
+    QObject session, application;
+    std::unique_ptr<QThread> worker(QThread::create([] {
+        // No SDL queue or event loop exists here: interruption alone must
+        // stop an otherwise healthy worker when a queued Quit is unavailable.
+        while (!QThread::currentThread()->isInterruptionRequested()) QThread::msleep(1);
+    }));
+    worker->start();
+    const auto stopWorker = qScopeGuard([&] { worker->requestInterruption(); worker->wait(); });
+    GuiDisplaySnapshot snapshot;
+    auto waiting = std::async(std::launch::async, [&] { return snapshot.request(); });
+    const auto cancelWait = qScopeGuard([&] { snapshot.cancel(); });
+    QTRY_VERIFY_WITH_TIMEOUT(snapshot.requested(), 1000);
+    int cancelled = 0;
+    SessionGuiDispatch guard(&session, &application, [&] {
+        ++cancelled;
+        worker->requestInterruption();
+        snapshot.cancel();
+    });
+    QEvent first(QEvent::Quit), second(QEvent::Quit);
+    QCoreApplication::sendEvent(&application, &first);
+    QCoreApplication::sendEvent(&application, &second);
+    QCOMPARE(cancelled, 1);
+    QVERIFY(waiting.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    QVERIFY(waiting.get().isEmpty());
+    QVERIFY(worker->wait(1000));
+    guard.workerJoined();
+    guard.readyForDeletion();
+}
+
+void TestDisplayPlanner::guiDispatchWaitsForAsyncCleanupAfterJoin()
+{
+    QObject application;
+    QPointer<QObject> session = new QObject;
+    QQmlEngine::setObjectOwnership(session, QQmlEngine::JavaScriptOwnership);
+    {
+        SessionGuiDispatch guard(session, &application, [] {});
+        session->deleteLater();
+        QCoreApplication::sendPostedEvents(session, QEvent::DeferredDelete);
+        guard.workerJoined();
+        // The SDL thread returned, but DeferredSessionCleanupTask is still
+        // dereferencing Session. Joining must not replay the parked deletion.
+        QVERIFY(!guard.complete());
+        SessionGuiDispatch::dispatch();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+        QVERIFY(session);
+        QCOMPARE(QQmlEngine::objectOwnership(session), QQmlEngine::CppOwnership);
+        bool cleanupUsedSession = false;
+        QTimer::singleShot(0, &application, [&] {
+            if (session) {
+                session->setObjectName("cleanup completed");
+                cleanupUsedSession = true;
+            }
+            guard.readyForDeletion();
+        });
+        while (!guard.complete()) SessionGuiDispatch::dispatch();
+        QVERIFY(cleanupUsedSession);
+        QVERIFY(session);
+    }
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    QVERIFY(session.isNull());
+}
+
+void TestDisplayPlanner::sessionSnapshotPreservesProfilesAndRefreshes()
+{
+    GuiDisplaySnapshot handoff;
+    QVector<NvClientDisplay> gui {
+        monitor("qt:vendor/model/left", QRect(-2560, 0, 2560, 1440), QSize(2560, 1440)),
+        monitor("qt:vendor/model/right", QRect(0, 0, 2560, 1440), QSize(2560, 1440))};
+    auto profile = DisplayPlanner::proposal(gui);
+    profile.choice(gui.first().key).on = false;
+    profile.primary = gui.last().key;
+    handoff.publish(gui);
+    const auto initial = handoff.current();
+    QVector<NvClientDisplay> session;
+    for (const auto& display : gui)
+        session.append(ClientDisplayProbe::forSessionDisplay(display.bounds, display.nativeSize, initial));
+    QCOMPARE(ClientDisplayProbe::fingerprint(session), ClientDisplayProbe::fingerprint(gui));
+    DisplayPlanner::HostInfo legacy;
+    legacy.known = true; legacy.platform = 1;
+    const auto plan = DisplayPlanner::plan(session, profile, legacy);
+    QVERIFY(plan.ok);
+    QVERIFY(!plan.outputs.first().included);
+    QVERIFY(plan.outputs.last().primary);
+
+    auto refreshed = std::async(std::launch::async, [&] { return handoff.request(); });
+    const auto cancelRefresh = qScopeGuard([&] { handoff.cancel(); });
+    QTRY_VERIFY_WITH_TIMEOUT(handoff.requested(), 1000);
+    // Hotplug replaces a monitor with another of the same pixel size. The
+    // refreshed immutable value carries its new identity, never the old one.
+    gui.last().key = "qt:vendor/model/replacement";
+    handoff.publish(gui);
+    QVERIFY(refreshed.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    const auto next = refreshed.get();
+    QCOMPARE(next.last().key, gui.last().key);
+    QCOMPARE(initial.last().key, QString("qt:vendor/model/right"));
+    QVERIFY(ClientDisplayProbe::fingerprint(next) != ClientDisplayProbe::fingerprint(initial));
+    QVERIFY(ClientDisplayProbe::forSessionDisplay(QRect(9000, 0, 1000, 1000), QSize(1000, 1000), next).key.isEmpty());
+}
+
+void TestDisplayPlanner::sessionSnapshotCancellationWakesWaiter()
+{
+    GuiDisplaySnapshot handoff;
+    auto waiting = std::async(std::launch::async, [&] { return handoff.request(); });
+    const auto cancelWait = qScopeGuard([&] { handoff.cancel(); });
+    QTRY_VERIFY_WITH_TIMEOUT(handoff.requested(), 1000);
+    handoff.cancel();
+    QVERIFY(waiting.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    QVERIFY(waiting.get().isEmpty());
+    QVERIFY(!handoff.requested());
+    QVERIFY(handoff.request().isEmpty());
+}
+
+void TestDisplayPlanner::legacyFallbackKeepsSelectedPrimary()
+{
+    QVector<NvClientDisplay> displays {
+        monitor("left", QRect(-2560, 0, 2560, 1440), QSize(2560, 1440)),
+        monitor("right", QRect(0, 0, 2560, 1440), QSize(2560, 1440))};
+    auto profile = DisplayPlanner::proposal(displays);
+    profile.primary = "right";
+    DisplayPlanner::HostInfo host;
+    host.known = true;
+    host.platform = 1;
+    auto plan = DisplayPlanner::plan(displays, profile, host);
+    QVERIFY(plan.ok);
+    QVERIFY(plan.legacy);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, true), 1);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, false), -1);
+    profile.primary = "left";
+    plan = DisplayPlanner::plan(displays, profile, host);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, true), 0);
+    profile.choice("left").on = false;
+    plan = DisplayPlanner::plan(displays, profile, host);
+    QCOMPARE(DisplayPlanner::legacyPrimaryOutput(plan, true), -1);
 }
 
 void TestDisplayPlanner::presentationHonoursSingleWindowAndSpacesLimits()

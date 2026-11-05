@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backend/plankbroker.h"
+#include "backend/brokersessionstate.h"
 #include "backend/plankbrokerclient.h"
 #include "backend/plankpasskey.h"
 #include "backend/remotestreamsetup.h"
@@ -20,7 +21,7 @@ class Session;
 class StreamingPreferences;
 
 // "Remote (broker)" mode controller exposed to QML as a singleton. Owns the
-// broker session token (in memory; on macOS also remembered in the Keychain,
+// broker session token (in memory and the Mac Keychain or Windows DPAPI,
 // never in the settings file), the host list, brokered
 // connects (bde-linux docs/plank-broker.md section 10.2) and the lease
 // keepalive while a brokered stream runs. On macOS it also drives Touch ID
@@ -34,6 +35,8 @@ class RemoteBroker : public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
     Q_PROPERTY(QString busyText READ busyText NOTIFY stateChanged)
     Q_PROPERTY(QString username READ username NOTIFY stateChanged)
+    Q_PROPERTY(QString rememberedUsername READ rememberedUsername NOTIFY stateChanged)
+    Q_PROPERTY(QString sessionNotice READ sessionNotice NOTIFY stateChanged)
     Q_PROPERTY(QVariantList hosts READ hosts NOTIFY hostsChanged)
     // Touch ID sign-in: helper present (macOS), local keys for the
     // configured relying party ({username, credentialId, mapping, created}),
@@ -114,7 +117,7 @@ public:
     }
     // Takes over a session the wizard obtained, exactly like a sign-in here
     // (Keychain, host list).
-    void adoptSession(QString token, const QString& confirmedUser);
+    void adoptSession(QString token, const QString& confirmedUser, bool deviceBound = false);
 
     QString brokerAddress() const;
     bool configured() const;
@@ -122,6 +125,10 @@ public:
     bool busy() const { return !m_BusyText.isEmpty(); }
     QString busyText() const { return m_BusyText; }
     QString username() const { return m_Username; }
+    QString rememberedUsername() const;
+    QString sessionNotice() const { return m_SessionNotice; }
+    void reportSessionNotice(const QString& text);
+    Q_INVOKABLE void dismissSessionNotice() { reportSessionNotice(QString()); }
     QVariantList hosts() const { return m_Hosts; }
     bool passkeySupported() const { return m_PasskeyHelper.available(); }
     QVariantList passkeys() const { return m_Passkeys; }
@@ -152,22 +159,11 @@ signals:
     void touchIdSetupCompleted();
 
 private:
-    // Shared with Session worker threads (re-admission) and keepalive tasks.
-    class SharedToken
-    {
-    public:
-        QString get() const { QMutexLocker lock(&m_Lock); return m_Token; }
-        void set(QString token) { QMutexLocker lock(&m_Lock); m_Token = std::move(token); }
-        void clear() { QMutexLocker lock(&m_Lock); m_Token.fill(QChar('\0')); m_Token.clear(); }
-        bool hasToken() const { QMutexLocker lock(&m_Lock); return !m_Token.isEmpty(); }
-    private:
-        mutable QMutex m_Lock;
-        QString m_Token;
-    };
+    using SharedToken = BrokerSessionState;
 
     PlankBrokerClient::Config clientConfig() const;
     QString passkeyRpId() const;
-    void finishSignIn(QString token, const QString& confirmedUser, bool offerTouchId = false);
+    void finishSignIn(QString token, const QString& confirmedUser, bool offerTouchId = false, bool deviceBound = false);
     void setBusy(const QString& text);
     void refreshHostsImpl(bool showBusy);
     void handleBrokerError(const PlankBrokerError& error, bool connecting);
@@ -177,7 +173,9 @@ private:
     bool bookmarkSeedFor(const QString& hostId, const QString& hostName, RemoteStreamSetup::Setup& seed) const;
     RemoteStreamSetup::Resolution resolveStreamSetup(const QString& hostId, int platform) const;
     QString hostNameFor(const QString& hostId) const;
-    void startKeepalive(const QString& hostId, Session* session);
+    void startKeepalive(const QString& hostId, quint64 authentication, quint64 grant,
+                        const QString& token, qint64 grantedAtMs, int expiresIn);
+    void attachKeepaliveSession(Session* session);
     void stopKeepalive();
     void scheduleKeepalive();
     void sendKeepalive();
@@ -186,6 +184,7 @@ private:
     QPointer<ComputerManager> m_ComputerManager;
     std::shared_ptr<SharedToken> m_Token;
     QString m_Username;
+    QString m_SessionNotice;
     QString m_BusyText;
     QVariantList m_Hosts;
     PlankPasskeyHelper m_PasskeyHelper;
@@ -196,14 +195,13 @@ private:
     QString m_TouchIdSetupError;
     quint64 m_PasskeyGeneration = 0;
     QPointer<Session> m_PendingSession;
-    bool m_HostRefreshInFlight = false;
     // Brokered computers are never persisted; they must outlive their Session.
     QVector<NvComputer*> m_Computers;
 
     QTimer m_KeepaliveTimer;
-    PlankBroker::KeepaliveSchedule m_KeepaliveSchedule;
+    PlankBroker::LeaseRenewal m_LeaseRenewal;
     QString m_KeepaliveHostId;
     QPointer<Session> m_KeepaliveSession;
-    bool m_KeepaliveInFlight = false;
+    Session* m_KeepaliveOwner = nullptr; // identity only; never dereferenced
     quint64 m_Generation = 0;
 };

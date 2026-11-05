@@ -55,6 +55,7 @@ struct MacKeyboardCapture::State
     std::function<bool()> ownsKeyboard;
     std::function<void()> releaseKeys;
     std::function<bool(const SDL_KeyboardEvent&)> sessionHotkey;
+    std::function<bool()> queueWake;
     std::function<bool()> isTrusted = [] { return AXIsProcessTrusted(); };
     CFMachPortRef tap = nullptr;
     CFRunLoopSourceRef source = nullptr;
@@ -116,9 +117,13 @@ struct MacKeyboardCapture::State
     {
         if (pending.size() == QueueLimit) return false;
         if (!wakeQueued) {
-            SDL_Event wake {};
-            wake.type = eventType;
-            if (!eventType || !SDL_PushEvent(&wake)) return false;
+            if (queueWake) {
+                if (!queueWake()) return false;
+            } else {
+                SDL_Event wake {};
+                wake.type = eventType;
+                if (!eventType || !SDL_PushEvent(&wake)) return false;
+            }
             wakeQueued = true;
         }
         SDL_KeyboardEvent key {};
@@ -337,6 +342,20 @@ bool MacKeyboardCapture::dispatch(const SDL_Event& event,
                                  const std::function<void(SDL_KeyboardEvent*)>& deliver)
 {
     if (!m_State->eventType || event.type != m_State->eventType) return false;
+    dispatchPending(deliver);
+    return true;
+}
+
+void MacKeyboardCapture::setQueueWake(std::function<bool()> wake)
+{
+    NSCAssert(NSThread.isMainThread, @"Keyboard capture is main-thread only");
+    NSCAssert(!m_State->active, @"Choose the dispatcher before enabling capture");
+    m_State->queueWake = std::move(wake);
+}
+
+void MacKeyboardCapture::dispatchPending(const std::function<void(SDL_KeyboardEvent*)>& deliver)
+{
+    NSCAssert(NSThread.isMainThread, @"Keyboard capture is main-thread only");
     m_State->wakeQueued = false;
     while (!m_State->pending.empty()) {
         if (!m_State->active || !m_State->ownsKeyboard()) { m_State->deactivate(); break; }
@@ -346,7 +365,6 @@ bool MacKeyboardCapture::dispatch(const SDL_Event& event,
         deliver(&key);
         m_State->dispatching = false;
     }
-    return true;
 }
 
 bool MacKeyboardCapture::suppressSdlKeyEvent() const

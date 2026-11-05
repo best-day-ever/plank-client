@@ -1,0 +1,6 @@
+<RCC><qresource prefix="/gui">
+<file alias="BrokerUsernameField.qml">../../app/gui/BrokerUsernameField.qml</file>
+<file alias="BrokerSessionBanner.qml">../../app/gui/BrokerSessionBanner.qml</file>
+<file alias="PlankTextField.qml">../../app/gui/PlankTextField.qml</file>
+<file alias="PlankTheme.qml">../../app/gui/PlankTheme.qml</file>
+</qresource></RCC>

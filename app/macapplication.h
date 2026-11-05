@@ -3,7 +3,7 @@
 #include <QEvent>
 #include <QGuiApplication>
 
-// macOS delivers native application Quit while SDL owns the main thread.
+// macOS delivers native application Quit during an active streaming session.
 // Keep Qt alive until every started session has released its native windows
 // and completed deferred transport cleanup. Disconnect is not application Quit.
 class MacApplication final : public QGuiApplication

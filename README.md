@@ -25,6 +25,20 @@ Wayland is the qualified Linux desktop path. One Mac Client package targets
 macOS 15 and newer, using SDK 27 or newer and runtime checks for newer APIs.
 This does not lower the separate macOS Host's minimum OS requirement.
 
+Starting with 1.2.00, the ordinary Ubuntu `plank-client` package uses Qt-owned
+session windows, input and presentation, with direct PipeWire audio playback.
+It upgrades the existing Client without changing its bookmarks, trust store,
+configuration or log locations. The separate experimental `plank-client-qt`
+package is retired; its test profile is not automatically copied over existing
+PLANK settings. Quit and remove that test package separately if it is installed.
+Main now also uses the shared Qt streaming window and controls on macOS, with
+native Metal presentation and the existing SDL/CoreAudio playback path. This
+integration requires installed session validation before release; pointer
+confinement and Mac webcam capture remain open parity work. The preceding
+released Mac frontend uses SDL/Metal. See the
+[integration plan](https://github.com/instinctual/plank/blob/main/docs/development/plans/macos-qt-session.plan)
+for scope and acceptance checks.
+
 Other platforms inherited from upstream are not qualified PLANK products.
 See the [platform and acceptance documentation](https://github.com/instinctual/plank/blob/main/docs/development/platforms.md)
 for the supported scope and remaining hardware tests.

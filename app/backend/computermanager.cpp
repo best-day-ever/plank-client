@@ -1,5 +1,6 @@
 #include "computermanager.h"
 #include "clientdisplayprobe.h"
+#include "clientdisplays.h"
 #include "nvhttp.h"
 #include "settings/plankclientpolicy.h"
 
@@ -121,6 +122,11 @@ private:
         try {
             serverInfo = http.getServerInfo(NvHTTP::NvLogLevel::NVLL_NONE, true);
         } catch (const QtNetworkReplyException& error) {
+            // Report the first failure/online-to-offline transition, without
+            // filling the log on every background retry of an offline host.
+            if (m_Computer->state != NvComputer::CS_OFFLINE)
+                qWarning() << "Host availability check failed for" << m_Computer->name
+                           << error.getError() << error.getErrorText();
             if (sessionToken.isEmpty() || error.getError() != QNetworkReply::SslHandshakeFailedError) return false;
             // Keep an otherwise reachable replacement available for explicit
             // sign-in/consent, but never retry a bearer token to the new key.
@@ -134,6 +140,11 @@ private:
             http.setPlankSessionToken({}, {});
             try { serverInfo = http.getServerInfo(NvHTTP::NVLL_NONE, true); }
             catch (...) { return false; }
+        } catch (const GfeHttpResponseException& error) {
+            if (m_Computer->state != NvComputer::CS_OFFLINE)
+                qWarning() << "Host availability response rejected for" << m_Computer->name
+                           << "status" << error.getStatusCode();
+            return false;
         } catch (...) {
             return false;
         }
@@ -825,6 +836,7 @@ private:
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
                 m_Computer->sessionIdentityKey = http.hostIdentityKey();
+                m_Computer->plankSharedDesktop = http.sharedDesktop();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;
@@ -865,6 +877,19 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
 {
     QString matchedMode;
     int matchedScale = 1;
+#ifdef PLANK_QT_SESSION
+    Q_ASSERT(QThread::currentThread() == qApp->thread());
+    const auto clientOutputs = ClientDisplays::snapshot();
+    ClientDisplays::Selection clientSelection;
+    {
+        QWriteLocker lock(&computer->lock);
+        clientSelection = ClientDisplays::resolve(computer->plankClientDisplays,
+                                                  clientOutputs, ClientDisplays::currentScreenName());
+        computer->plankSessionClientDisplays = clientSelection.names;
+        computer->plankSessionTargetDisplay = clientSelection.target;
+        computer->plankSessionDisplayNotice = clientSelection.notice;
+    }
+#endif
     bool matchMac;
     {
         QReadLocker lock(&computer->lock);
@@ -876,10 +901,26 @@ void ComputerManager::authenticateHost(NvComputer* computer, QString username,
         // current backing pixels AND logical size used by Session. Panel-native
         // pixels alone lose the user's Retina "Looks like" setting.
         Q_ASSERT(QThread::currentThread() == qApp->thread());
+#ifdef Q_OS_DARWIN
         // The display probe the dialogs and the Session use; in fullscreen
         // each display's viewport below the camera housing.
         const QVector<NvClientDisplay> displays = ClientDisplayProbe::macMatchDisplays(
                     ClientDisplayProbe::probe(), m_Prefs->windowMode != StreamingPreferences::WM_WINDOWED);
+#else
+        QVector<NvClientDisplay> displays;
+#if defined(PLANK_QT_SESSION)
+        for (const auto& output : clientOutputs) {
+            if (clientSelection.names.contains(output.name))
+                displays.append({output.bounds, output.pixels, {}, output.name == clientSelection.target});
+        }
+#else
+        for (QScreen* screen : QGuiApplication::screens()) {
+            const QRect geometry = screen->geometry();
+            const qreal ratio = screen->devicePixelRatio();
+            displays.append({geometry, QSize(qRound(geometry.width() * ratio), qRound(geometry.height() * ratio))});
+        }
+#endif
+#endif
         QString error;
         matchedMode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &matchedScale);
         if (matchedMode.isEmpty()) {
@@ -1027,7 +1068,8 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                          int virtualMode2Choice,
                                          int scalingChoice, int videoProfile,
                                          int captureSource,
-                                         QVariantList profileBitrates)
+                                         QVariantList profileBitrates,
+                                         QString clientDisplays)
 {
     NvAddress manualAddress;
     const QString hostLayout = captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayoutChoice != 0 ?
@@ -1036,7 +1078,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
     const QString virtualMode2 = virtualModeFromChoice(virtualMode2Choice);
     const QString scalingMode = scalingFromChoice(scalingChoice);
     QVector<int> profileBitratesKbps;
-    if (parseManualAddress(address, manualAddress) &&
+    if (ClientDisplays::validChoice(clientDisplays) && parseManualAddress(address, manualAddress) &&
             !hostLayout.isEmpty() && !virtualMode1.isEmpty() &&
             !virtualMode2.isEmpty() &&
             !scalingMode.isEmpty() &&
@@ -1066,6 +1108,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
                                           captureSource,
                                           profileBitratesKbps);
                 bookmark->plankScalingMode = scalingMode;
+                bookmark->plankClientDisplays = clientDisplays;
                 bookmark->plankHostLayout = hostLayout;
                 bookmark->plankVirtualMode1 = virtualMode1;
                 bookmark->plankVirtualMode2 = virtualMode2;
@@ -1077,6 +1120,7 @@ void ComputerManager::addNewHostManually(QString address, QString nickname,
         {
             QWriteLocker bookmarkLock(&bookmark->lock);
             bookmark->plankScalingMode = scalingMode;
+            bookmark->plankClientDisplays = clientDisplays;
             bookmark->plankHostLayout = hostLayout;
             bookmark->plankVirtualMode1 = virtualMode1;
             bookmark->plankVirtualMode2 = virtualMode2;
@@ -1113,7 +1157,8 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                          QString hostLayout, QString virtualMode1,
                                          QString virtualMode2,
                                          int videoProfile, int captureSource,
-                                         const QVariantList& profileBitrates)
+                                         const QVariantList& profileBitrates,
+                                         const QString& clientDisplays)
 {
     NvAddress manualAddress;
     QVector<int> profileBitratesKbps;
@@ -1121,7 +1166,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
     if (captureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT && hostLayout != NvOutputTopology::MatchClientHostLayout) {
         hostLayout = QStringLiteral("fixed");
     }
-    if (computer == nullptr || nickname.isEmpty() ||
+    if (computer == nullptr || nickname.isEmpty() || !ClientDisplays::validChoice(clientDisplays) ||
             !StreamingPreferences::isPlankProfileValidForCaptureSource(
                 videoProfile, captureSource) ||
             !parseProfileBitrates(profileBitrates, false,
@@ -1174,7 +1219,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                            hostLayout,
                                            virtualMode1, virtualMode2,
                                            videoProfile, captureSource,
-                                           profileBitratesKbps);
+                                           profileBitratesKbps, clientDisplays);
             m_KnownHosts.remove(oldUuid);
             m_KnownHosts[computer->uuid] = computer;
             if (pollingEntry != nullptr) {
@@ -1195,7 +1240,7 @@ bool ComputerManager::editManualBookmark(NvComputer* computer, QString address,
                                        hostLayout,
                                        virtualMode1, virtualMode2, videoProfile,
                                        captureSource,
-                                       profileBitratesKbps);
+                                       profileBitratesKbps, clientDisplays);
     }
 
     handleComputerStateChanged(computer);

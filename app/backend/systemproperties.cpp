@@ -1,12 +1,18 @@
 #include "systemproperties.h"
 #include "utils.h"
+#include "clientdisplays.h"
 
 #include <QGuiApplication>
 #include <QFile>
 #include <QLibraryInfo>
+#include <QScreen>
+#include <QSysInfo>
+#include <QThread>
 
+#ifndef PLANK_QT_SESSION
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
+#endif
 
 #ifndef PLANK_VERSION_STR
 #define PLANK_VERSION_STR "development"
@@ -62,11 +68,26 @@ SystemProperties::SystemProperties()
         friendlyNativeArchName = nativeArch.toUpper();
     }
 
-    // Assume we can probably launch a browser if we're in a GUI environment
-
+#ifdef PLANK_QT_SESSION
+    const auto observe = [this](QScreen* screen) {
+        connect(screen, &QScreen::geometryChanged, this, &SystemProperties::clientDisplaysChanged);
+    };
+    for (auto* screen : QGuiApplication::screens()) observe(screen);
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this, observe](QScreen* screen) {
+        observe(screen); emit clientDisplaysChanged();
+    });
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, &SystemProperties::clientDisplaysChanged);
+    // The exact-profile decoder is qualified on the actual Qt session surface.
+    // A temporary SDL window would probe a different GPU/context and reintroduce
+    // the independent SDL Wayland connection this frontend deliberately avoids.
+    hardwareCapabilityKnown = false;
+    maximumResolution = QSize(8192, 8192);
+    refreshDisplays();
+#else
     // Populate data that requires talking to SDL. We do it all in one shot
     // and cache the results to speed up future queries on this data.
     querySdlVideoInfo();
+#endif
 
     Q_ASSERT(!monitorRefreshRates.isEmpty());
     Q_ASSERT(!monitorNativeResolutions.isEmpty());
@@ -78,6 +99,11 @@ QString SystemProperties::plankChangelog() const
     // Release notes travel with the installed Client; no network or Host lookup.
     QFile notes(QStringLiteral(":/res/changelog.md"));
     return notes.open(QIODevice::ReadOnly) ? QString::fromUtf8(notes.readAll()) : QString();
+}
+
+QVariantList SystemProperties::clientDisplayChoices(const QString& saved) const
+{
+    return ClientDisplays::choices(saved);
 }
 
 QRect SystemProperties::getNativeResolution(int displayIndex)
@@ -98,6 +124,7 @@ int SystemProperties::getRefreshRate(int displayIndex)
     return monitorRefreshRates.value(displayIndex);
 }
 
+#ifndef PLANK_QT_SESSION
 class QuerySdlVideoThread : public QThread
 {
 public:
@@ -180,9 +207,13 @@ public:
 
     SystemProperties* m_Me;
 };
+#endif
 
 void SystemProperties::refreshDisplays()
 {
+#ifdef PLANK_QT_SESSION
+    refreshDisplaysInternal();
+#else
     if (WMUtils::isRunningX11() || WMUtils::isRunningWayland()) {
         // Use a separate thread to temporarily initialize SDL
         // video to avoid stomping on Qt's X11 and OGL state.
@@ -193,10 +224,25 @@ void SystemProperties::refreshDisplays()
     else {
         refreshDisplaysInternal();
     }
+#endif
 }
 
 void SystemProperties::refreshDisplaysInternal()
 {
+#ifdef PLANK_QT_SESSION
+    Q_ASSERT(QThread::currentThread() == qGuiApp->thread());
+    monitorNativeResolutions.clear();
+    monitorSafeAreaResolutions.clear();
+    monitorRefreshRates.clear();
+    for (auto* screen : QGuiApplication::screens()) {
+        const auto scale = screen->devicePixelRatio();
+        monitorNativeResolutions.append(QRect(QPoint(), screen->geometry().size() * scale));
+        monitorSafeAreaResolutions.append(QRect(QPoint(), screen->availableGeometry().size() * scale));
+        const auto refresh = screen->refreshRate();
+        monitorRefreshRates.append(refresh >= 58 && refresh <= 62 ? 60 :
+                                   refresh >= 28 && refresh <= 32 ? 30 : qRound(refresh));
+    }
+#else
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL_InitSubSystem(SDL_INIT_VIDEO) failed: %s",
@@ -250,4 +296,5 @@ void SystemProperties::refreshDisplaysInternal()
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
+#endif
 }

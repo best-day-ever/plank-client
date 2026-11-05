@@ -9,9 +9,16 @@ import DisplaySetup 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import FernwehUpdater 1.0
+import RemoteBroker 1.0
 
 ApplicationWindow {
-    property bool pollingActive: false
+    property alias pollingActive: hostPolling.pollingActive
+    PlankHostPolling {
+        id: hostPolling
+        manager: ComputerManager
+        windowVisible: window.visible
+        windowActive: window.active
+    }
 
     Timer {
         interval: 6 * 60 * 60 * 1000
@@ -21,7 +28,7 @@ ApplicationWindow {
     }
 
     id: window
-    title: qsTr("BDE fernweh")
+    title: Qt.application.displayName
     width: 1280
     height: 1200
     minimumHeight: 900
@@ -51,7 +58,7 @@ ApplicationWindow {
         if (SystemProperties.isWow64) {
             wow64Dialog.open()
         }
-        else if (!SystemProperties.hasHardwareAcceleration) {
+        else if (SystemProperties.hardwareCapabilityKnown && !SystemProperties.hasHardwareAcceleration) {
             if (SystemProperties.isRunningXWayland) {
                 xWaylandDialog.open()
             }
@@ -131,6 +138,17 @@ ApplicationWindow {
     }
 
     // Screens changed (dock, undock, a lid opened) while no stream runs.
+    BrokerSessionBanner {
+        z: 20
+        message: RemoteBroker.sessionNotice
+        width: Math.min(760, parent.width - 40)
+        height: implicitHeight
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 12
+        onDismissed: RemoteBroker.dismissSessionNotice()
+    }
+
     Rectangle {
         id: displayBanner
         readonly property bool streaming: qmltypeof(stackView.currentItem, "StreamSegue")
@@ -184,62 +202,6 @@ ApplicationWindow {
         }
     }
 
-    // This timer keeps us polling for 5 minutes of inactivity
-    // to allow the user to work with Moonlight on a second display
-    // while dealing with configuration issues. This will ensure
-    // machines come online even if the input focus isn't on Moonlight.
-    Timer {
-        id: inactivityTimer
-        interval: 5 * 60000
-        onTriggered: {
-            if (!active && pollingActive) {
-                ComputerManager.stopPollingAsync()
-                pollingActive = false
-            }
-        }
-    }
-
-    onVisibleChanged: {
-        // When we become invisible while streaming is going on,
-        // stop polling immediately.
-        if (!visible) {
-            inactivityTimer.stop()
-
-            if (pollingActive) {
-                ComputerManager.stopPollingAsync()
-                pollingActive = false
-            }
-        }
-        else if (active) {
-            // When we become visible and active again, start polling
-            inactivityTimer.stop()
-
-            // Restart polling if it was stopped
-            if (!pollingActive) {
-                ComputerManager.startPolling()
-                pollingActive = true
-            }
-        }
-    }
-
-    onActiveChanged: {
-        if (active) {
-            // Stop the inactivity timer
-            inactivityTimer.stop()
-
-            // Restart polling if it was stopped
-            if (!pollingActive) {
-                ComputerManager.startPolling()
-                pollingActive = true
-            }
-        }
-        else {
-            // Start the inactivity timer to stop polling
-            // if focus does not return within a few minutes.
-            inactivityTimer.restart()
-        }
-    }
-
     // Workaround for lack of instanceof in Qt 5.9.
     //
     // Based on https://stackoverflow.com/questions/13923794/how-to-do-a-is-a-typeof-or-instanceof-in-qml
@@ -287,7 +249,9 @@ ApplicationWindow {
 
         Label {
             id: titleLabel
-            visible: toolBar.width > 700
+            // Center only when neither side's controls would overlap the title.
+            visible: toolBar.width > 2 * Math.max(titleRowLabel.x,
+                         toolBar.width - titleRowLabel.x - titleRowLabel.width) + implicitWidth + 24
             anchors.fill: parent
             text: stackView.currentItem ? stackView.currentItem.objectName : ""
             color: theme.textPrimary
@@ -362,6 +326,10 @@ ApplicationWindow {
                 // the remaining space in the RowLayout. To "hide" it, we
                 // just set the text to empty string.
                 text: !titleLabel.visible && stackView.currentItem ? stackView.currentItem.objectName : ""
+            }
+
+            PlankInternetStatus {
+                monitor: internetConnectivity
             }
 
             NavigableToolButton {
@@ -572,7 +540,8 @@ ApplicationWindow {
             addHostLayout.currentIndex = 0
             addVirtualMode1.currentIndex = 9
             addVirtualMode2.currentIndex = 1
-            addScalingChoice.currentIndex = 1
+            addScalingChoice.currentIndex = 0
+            addClientDisplays.selection = "current"
         }
 
         onAccepted: {
@@ -585,7 +554,8 @@ ApplicationWindow {
                                                    addScalingChoice.currentIndex,
                                                    addVideoSettings.videoProfile,
                                                    addVideoSettings.captureSource,
-                                                   addVideoSettings.officeBitratesKbps)
+                                                   addVideoSettings.officeBitratesKbps,
+                                                   addClientDisplays.selection)
             }
         }
 
@@ -715,6 +685,11 @@ ApplicationWindow {
                 }
             }
 
+            PlankClientDisplayBox {
+                id: addClientDisplays
+                Layout.fillWidth: true
+            }
+
             Label {
                 Layout.topMargin: 10
                 text: qsTr("Scaling")
@@ -724,7 +699,7 @@ ApplicationWindow {
             PlankComboBox {
                 id: addScalingChoice
                 Layout.fillWidth: true
-                currentIndex: 1
+                currentIndex: 0
                 model: [qsTr("Native (1:1 pixels)"), qsTr("Scaled-Span")]
             }
 

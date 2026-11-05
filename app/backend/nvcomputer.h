@@ -57,7 +57,8 @@ public:
                          QString hostLayout, QString virtualMode1,
                          QString virtualMode2,
                          int videoProfile, int captureSource,
-                         const QVector<int>& profileBitratesKbps);
+                         const QVector<int>& profileBitratesKbps,
+                         const QString& clientDisplays = QStringLiteral("current"));
 
     bool
     update(const NvComputer& that, NvAddress expectedAddress = NvAddress());
@@ -131,6 +132,8 @@ public:
     QString sessionToken;
     // In-memory only; bind the bearer token to the authenticated Host identity.
     QByteArray sessionIdentityKey;
+    // Authenticated session policy only; never learned from discovery or saved.
+    bool plankSharedDesktop = false;
     int plankTopologyVersion = 0;
     int plankFeatureFlags = 0;
     // Encoding modes the host advertises (PlankEncodingModes); empty when
@@ -141,6 +144,11 @@ public:
     // to this host must present exactly this leaf (section 10.2).
     QString brokerHostCertSha256;
     QString brokerHostId;
+    // GUI-thread snapshot taken before authentication/display preparation.
+    // Kept separate from discovery and from session-only presentation overrides.
+    QStringList plankSessionClientDisplays;
+    QString plankSessionTargetDisplay;
+    QString plankSessionDisplayNotice;
 
     // Persisted traits
     NvAddress localAddress;
@@ -152,6 +160,7 @@ public:
     QString uuid;
     QVector<NvApp> appList;
     QString plankScalingMode;
+    QString plankClientDisplays = QStringLiteral("current");
     QString plankHostLayout;
     QString plankVirtualMode1;
     QString plankVirtualMode2;

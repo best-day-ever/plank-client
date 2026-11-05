@@ -20,6 +20,10 @@ public:
     bool dispatch(const SDL_Event& event,
                   const std::function<void(SDL_KeyboardEvent*)>& deliver);
     bool suppressSdlKeyEvent() const;
+    // Qt owns its event loop while streaming. Reuse the bounded native tap
+    // queue, but wake Qt directly rather than polling SDL's event queue.
+    void setQueueWake(std::function<bool()> wake);
+    void dispatchPending(const std::function<void(SDL_KeyboardEvent*)>& deliver);
 
     MacKeyboardCapture(const MacKeyboardCapture&) = delete;
     MacKeyboardCapture& operator=(const MacKeyboardCapture&) = delete;

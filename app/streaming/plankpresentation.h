@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <QPointF>
 #include <QRect>
 #include <QRectF>
@@ -123,6 +125,16 @@ struct PlankPresentationSlice
 class PlankPresentation
 {
 public:
+    // Commit the selected monitor independently of whether it owns the only
+    // window or the primary of several. Failed placement keeps the live id.
+    static bool placePrimaryDisplay(quint32& current, quint32 selected,
+                                    const std::function<bool(quint32)>& place)
+    {
+        if (selected == 0 || selected == current) return true;
+        if (!place(selected)) return false;
+        current = selected;
+        return true;
+    }
     static QRect windowedOutputRect(const QRect& usableBounds, const QSize& sourceSize);
     // Captured drags stay relative to the window where the button went
     // down, even after crossing into another presentation window. Return

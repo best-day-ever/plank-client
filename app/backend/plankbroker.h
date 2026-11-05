@@ -23,6 +23,8 @@
 #include <QUrl>
 #include <QVector>
 #include <QtGlobal>
+#include <limits>
+#include <optional>
 
 namespace PlankBroker
 {
@@ -271,6 +273,7 @@ struct Host {
     QString name;
     bool online = false;
     bool busy = false;
+    bool sharedDesktop = false;
     QString inUseBy;
     bool connectable = false;
     QString reason;
@@ -279,6 +282,13 @@ struct Host {
 // Route of a brokered connect: Relay = endpoint:port is a broker lease,
 // Direct = endpoint:port is the workstation itself (client on the office LAN).
 enum class Route { Relay, Direct };
+enum class AdmissionMethod { Gssapi, BrokerCapability };
+
+struct Admission {
+    AdmissionMethod method = AdmissionMethod::Gssapi;
+    QString username;
+    QString token;
+};
 
 struct Lease {
     Route route = Route::Relay;
@@ -287,6 +297,16 @@ struct Lease {
     QString hostCertSha256;
     QString username;
     QString gssapiToken;
+    AdmissionMethod authMethod = AdmissionMethod::Gssapi;
+    QString brokerToken;
+    QString localUsername;
+    Admission admission() const {
+        return {authMethod, username, authMethod == AdmissionMethod::Gssapi ? gssapiToken : brokerToken};
+    }
+    void clearAdmission() {
+        gssapiToken.fill(QChar('\0')); gssapiToken.clear();
+        brokerToken.fill(QChar('\0')); brokerToken.clear();
+    }
     int expiresIn = DefaultLeaseSeconds;
 };
 
@@ -620,11 +640,13 @@ inline bool parseHosts(const QByteArray& body, QVector<Host>& hosts)
         const QJsonValue name = entry.value(QStringLiteral("name"));
         const QJsonValue online = entry.value(QStringLiteral("online"));
         const QJsonValue busy = entry.value(QStringLiteral("busy"));
+        const QJsonValue shared = entry.value(QStringLiteral("shared_desktop"));
         const QJsonValue inUseBy = entry.value(QStringLiteral("in_use_by"));
         const QJsonValue connectable = entry.value(QStringLiteral("connectable"));
         const QJsonValue reason = entry.value(QStringLiteral("reason"));
         if (!isHostId(host.id) || !online.isBool() || !connectable.isBool() ||
                 !(busy.isBool() || busy.isNull() || busy.isUndefined()) ||
+                !(shared.isBool() || shared.isUndefined()) ||
                 !(name.isString() || name.isUndefined() || name.isNull()) ||
                 !(inUseBy.isString() || inUseBy.isNull() || inUseBy.isUndefined()) ||
                 !(reason.isString() || reason.isNull() || reason.isUndefined())) {
@@ -634,6 +656,7 @@ inline bool parseHosts(const QByteArray& body, QVector<Host>& hosts)
         if (host.name.isEmpty()) host.name = host.id;
         host.online = online.toBool();
         host.busy = busy.toBool();
+        host.sharedDesktop = shared.toBool();
         host.inUseBy = inUseBy.toString();
         host.connectable = connectable.toBool();
         host.reason = reason.toString();
@@ -647,6 +670,55 @@ inline bool parseHosts(const QByteArray& body, QVector<Host>& hosts)
     return true;
 }
 
+inline bool parseLeaseSeconds(const QJsonValue& value, int& seconds)
+{
+    if (!value.isDouble() || value.toDouble() < 1 ||
+            value.toDouble() > (std::numeric_limits<int>::max)() ||
+            value.toDouble() != static_cast<double>(value.toInt())) return false;
+    seconds = value.toInt();
+    return true;
+}
+
+inline bool parseKeepalive(const QByteArray& body, int& expiresIn)
+{
+    expiresIn = 0;
+    QJsonObject object;
+    return parseObject(body, object) && object.value(QStringLiteral("state")) == QJsonValue(QStringLiteral("ok")) &&
+            parseLeaseSeconds(object.value(QStringLiteral("expires_in")), expiresIn);
+}
+
+// A capability is opaque to the Client: only the Host verifies its signature,
+// audience, lifetime and replay nonce. Reject malformed wire encodings here.
+inline bool validBrokerCapability(const QString& token)
+{
+    if (token.size() > 8192) return false;
+    const auto parts = token.split(QLatin1Char('.'));
+    if (parts.size() != 3 || parts[0] != QLatin1String("v1")) return false;
+    for (int index = 1; index < parts.size(); ++index) {
+        const auto encoded = parts[index].toLatin1();
+        const auto decoded = QByteArray::fromBase64Encoding(encoded,
+            QByteArray::Base64UrlEncoding | QByteArray::AbortOnBase64DecodingErrors);
+        if (!decoded || decoded.decoded.isEmpty() ||
+            decoded.decoded.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals) != encoded)
+            return false;
+    }
+    return true;
+}
+
+inline QJsonObject admissionRequest(const Admission& admission)
+{
+    if (!isPrintableAscii(admission.username, 255)) return {};
+    if (admission.method == AdmissionMethod::BrokerCapability) {
+        if (!validBrokerCapability(admission.token)) return {};
+        return {{"username", admission.username}, {"broker_token", admission.token}};
+    }
+    if (admission.method != AdmissionMethod::Gssapi || admission.token.isEmpty() ||
+        admission.token.size() > MaximumGssapiTokenLength) return {};
+    const auto decoded = QByteArray::fromBase64Encoding(admission.token.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    if (!decoded || decoded.decoded.isEmpty()) return {};
+    return {{"username", admission.username}, {"gssapi_token", admission.token}};
+}
+
 inline bool parseLease(const QByteArray& body, Lease& lease)
 {
     lease = Lease();
@@ -658,6 +730,18 @@ inline bool parseLease(const QByteArray& body, Lease& lease)
     parsed.hostCertSha256 = object.value(QStringLiteral("host_cert_sha256")).toString();
     parsed.username = object.value(QStringLiteral("username")).toString();
     parsed.gssapiToken = object.value(QStringLiteral("gssapi_token")).toString();
+    const auto method = object.value(QStringLiteral("auth_method"));
+    const auto brokerToken = object.value(QStringLiteral("broker_token"));
+    const auto localUsername = object.value(QStringLiteral("local_username"));
+    if (method == QJsonValue(QStringLiteral("broker_capability"))) {
+        parsed.authMethod = AdmissionMethod::BrokerCapability;
+        parsed.brokerToken = brokerToken.toString();
+        parsed.localUsername = localUsername.toString();
+        if (!object.value(QStringLiteral("gssapi_token")).isString() || !parsed.gssapiToken.isEmpty() ||
+            !validBrokerCapability(parsed.brokerToken) || !isPrintableAscii(parsed.localUsername, 255)) return false;
+    } else if (method.isUndefined() || method == QJsonValue(QStringLiteral("gssapi"))) {
+        if (!brokerToken.isUndefined() || !localUsername.isUndefined()) return false;
+    } else return false;
     const QJsonValue expires = object.value(QStringLiteral("expires_in"));
     // Brokers before the direct route omit "route": everything was relayed.
     const QJsonValue route = object.value(QStringLiteral("route"));
@@ -671,15 +755,11 @@ inline bool parseLease(const QByteArray& body, Lease& lease)
             port.toInt() < 1 || port.toInt() > 65535 ||
             !isCanonicalSha256Hex(parsed.hostCertSha256) ||
             !isPrintableAscii(parsed.username, 255) ||
-            parsed.gssapiToken.isEmpty() || parsed.gssapiToken.size() > MaximumGssapiTokenLength ||
-            (!expires.isUndefined() && (!expires.isDouble() || expires.toDouble() < 1))) {
+            admissionRequest(parsed.admission()).isEmpty() ||
+            (!expires.isUndefined() && !parseLeaseSeconds(expires, parsed.expiresIn))) {
         return false;
     }
-    const QByteArray encoded = parsed.gssapiToken.toLatin1();
-    const auto decoded = QByteArray::fromBase64Encoding(encoded, QByteArray::AbortOnBase64DecodingErrors);
-    if (!decoded || decoded.decoded.isEmpty()) return false;
     parsed.port = static_cast<quint16>(port.toInt());
-    if (!expires.isUndefined()) parsed.expiresIn = expires.toInt();
     lease = parsed;
     return true;
 }
@@ -804,9 +884,20 @@ inline bool resolveTransportTarget(const QString& brokerPin, quint16 controlPort
 // answered: brokered mode must not fall back to a password conversation.
 enum class AdmissionResult { Authenticated, Denied, Busy, Malformed };
 
+inline bool parseSharedDesktop(const QJsonObject& reply, bool& shared)
+{
+    shared = false;
+    const auto value = reply.value(QStringLiteral("shared_desktop"));
+    if (!value.isUndefined() && !value.isBool()) return false;
+    shared = value.toBool();
+    return true;
+}
+
 inline AdmissionResult parseHostAdmission(const QJsonObject& reply, QString& sessionToken)
 {
     sessionToken.clear();
+    bool shared = false;
+    if (!parseSharedDesktop(reply, shared)) return AdmissionResult::Malformed;
     const QString state = reply.value(QStringLiteral("state")).toString();
     if (state == QLatin1String("authenticated")) {
         const QString token = reply.value(QStringLiteral("session_token")).toString();
@@ -820,43 +911,111 @@ inline AdmissionResult parseHostAdmission(const QJsonObject& reply, QString& ses
 }
 
 // ---------------------------------------------------------------------------
-// Keepalive (section 10.2 step 4: at least every 60 s while streaming)
+// Renew the actual granted lease, including time spent preparing a stream.
 // ---------------------------------------------------------------------------
 
 class KeepaliveSchedule
 {
 public:
-    static constexpr qint64 IntervalMs = 30000;   // regular cadence (30-45 s window)
-    static constexpr qint64 RetryMs = 10000;      // after a transient failure
-    static constexpr qint64 LeaseWindowMs = 60000;
+    static constexpr qint64 IntervalMs = 30000;
+    static constexpr qint64 RetryMs = 10000;
     static constexpr qint64 SafetyMarginMs = 5000;
 
-    void start(qint64 nowMs) { m_LastSuccessMs = nowMs; m_Failures = 0; m_Active = true; }
+    void start(qint64 grantedAtMs, int expiresIn) { m_Active = true; recordSuccess(grantedAtMs, expiresIn); }
     void stop() { m_Active = false; }
     bool active() const { return m_Active; }
     int failures() const { return m_Failures; }
 
-    void recordSuccess(qint64 nowMs) { m_LastSuccessMs = nowMs; m_Failures = 0; }
-    void recordFailure() { ++m_Failures; }
+    void recordSuccess(qint64 grantedAtMs, int expiresIn)
+    {
+        m_LastSuccessMs = grantedAtMs;
+        m_LeaseWindowMs = qMax<qint64>(0, expiresIn) * 1000;
+        m_Failures = 0;
+    }
+    void recordFailure(qint64 nowMs) { ++m_Failures; m_RetryAtMs = nowMs + RetryMs; }
 
     // Delay until the next keepalive, or -1 once the lease must be assumed
     // lost (no success within the lease window) or the schedule is stopped.
     qint64 nextDelayMs(qint64 nowMs) const
     {
         if (!m_Active) return -1;
-        const qint64 deadline = m_LastSuccessMs + LeaseWindowMs - SafetyMarginMs;
+        const qint64 margin = qMin(SafetyMarginMs, m_LeaseWindowMs / 6);
+        const qint64 deadline = m_LastSuccessMs + m_LeaseWindowMs - margin;
+        if (nowMs >= deadline) return -1;
         if (m_Failures == 0) {
-            return qMax<qint64>(0, qMin(m_LastSuccessMs + IntervalMs, deadline) - nowMs);
+            const qint64 interval = qMin(IntervalMs, m_LeaseWindowMs / 3);
+            return qMax<qint64>(0, qMin(m_LastSuccessMs + interval, deadline) - nowMs);
         }
-        const qint64 remaining = deadline - nowMs;
-        if (remaining <= 0) return -1;
-        return qMin(RetryMs, remaining);
+        return qMax<qint64>(0, qMin(m_RetryAtMs, deadline) - nowMs);
     }
 
 private:
     qint64 m_LastSuccessMs = 0;
+    qint64 m_LeaseWindowMs = 0;
+    qint64 m_RetryAtMs = 0;
     int m_Failures = 0;
     bool m_Active = false;
+};
+
+// One state machine is used by the Qt timer and deterministic network tests.
+// A reply owns exactly one grant and authentication, even when reconnecting to
+// the same host. In-flight work from a replaced grant cannot reset its timer or
+// report a terminal authentication error against the replacement.
+class LeaseRenewal
+{
+public:
+    struct Request {
+        quint64 grant = 0;
+        quint64 authentication = 0;
+        QString hostId;
+        QString token;
+        qint64 startedMs = 0;
+        quint64 attempt = 0;
+    };
+
+    void start(quint64 grant, quint64 authentication, const QString& hostId,
+               const QString& token, qint64 grantedAtMs, int expiresIn)
+    {
+        stop();
+        m_Identity = {grant, authentication, hostId, token, grantedAtMs};
+        m_Schedule.start(grantedAtMs, expiresIn);
+    }
+    void stop()
+    {
+        m_Schedule.stop();
+        m_InFlight = false;
+        m_Identity.token.fill(QChar('\0'));
+        m_Identity = Request();
+    }
+    bool active() const { return m_Schedule.active(); }
+    quint64 grant() const { return m_Identity.grant; }
+    quint64 authentication() const { return m_Identity.authentication; }
+    const QString& hostId() const { return m_Identity.hostId; }
+    qint64 nextDelayMs(qint64 nowMs) const { return m_Schedule.nextDelayMs(nowMs); }
+    std::optional<Request> beginRequest(qint64 nowMs)
+    {
+        if (m_InFlight || nextDelayMs(nowMs) != 0) return std::nullopt;
+        m_InFlight = true;
+        Request request = m_Identity;
+        request.startedMs = nowMs;
+        request.attempt = ++m_Attempt;
+        return request;
+    }
+    bool recordResult(const Request& request, qint64 nowMs, int expiresIn)
+    {
+        if (!active() || !m_InFlight || request.grant != m_Identity.grant ||
+                request.authentication != m_Identity.authentication || request.hostId != m_Identity.hostId ||
+                request.token != m_Identity.token || request.attempt != m_Attempt) return false;
+        m_InFlight = false;
+        if (expiresIn > 0) m_Schedule.recordSuccess(request.startedMs, expiresIn);
+        else m_Schedule.recordFailure(nowMs);
+        return true;
+    }
+private:
+    Request m_Identity;
+    KeepaliveSchedule m_Schedule;
+    bool m_InFlight = false;
+    quint64 m_Attempt = 0;
 };
 
 } // namespace PlankBroker

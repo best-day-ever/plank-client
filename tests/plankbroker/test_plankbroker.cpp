@@ -15,6 +15,7 @@
 #include "clientdisplayprobe.h"
 #include "remotestreamsetup.h"
 #include "brokersessionstore.h"
+#include "brokersessionstate.h"
 #include <QTemporaryDir>
 #include <QNetworkProxy>
 #include <QNetworkAccessManager>
@@ -24,6 +25,7 @@
 #include "plankbrokerclient.h"
 #include "plankpasskey.h"
 #include "macpreviewlaunch.h"
+#include "macsharedsession.h"
 #include "outputtopology.h"
 #include "plankenrollment.h"
 #include "onboardingstate.h"
@@ -328,7 +330,14 @@ private slots:
     void answersPrompts();
     void parsesHosts();
     void rejectsMalformedHosts();
+    void sharedHostListIsAdvisory();
     void parsesLease();
+    void parsesSharedMacAdmission();
+    void rejectsMixedOrMalformedAdmission();
+    void sharedMacDisplayKeepsActiveTopology();
+    void remoteMacMatchClientPreservesPixelsScaleAndReconnectPolicy();
+    void remoteMacMatchClientRejectsUnsupportedDisplays();
+    void remoteMacMatchClientJoinsExistingSharedDesktop();
     void rejectsMalformedLeases();
     void parsesLeaseRoute();
     void classifiesBearerStatus();
@@ -370,6 +379,12 @@ private slots:
     // Keepalive
     void keepaliveCadence();
     void keepaliveRetriesThenGivesUp();
+    void leaseRenewalDuringPreparation();
+    void leaseRenewalRejectsStaleReplies();
+    void tlsKeepaliveExpiryContract();
+    void tlsPreparationRenewsFirst();
+    void refreshTicketsSurviveAuthTransitions();
+    void sessionStateRejectsPreviousAuthentication();
 
     // Passkey (Touch ID) sign-in, section 13.3 / 13.4
     void parsesPasskeyChallenge();
@@ -735,6 +750,23 @@ void TestPlankBroker::rejectsMalformedHosts()
     }
 }
 
+void TestPlankBroker::sharedHostListIsAdvisory()
+{
+    QJsonObject entry {{"id", "mac.example.org"}, {"online", true}, {"busy", true},
+                      {"connectable", true}, {"shared_desktop", true}};
+    QVector<PlankBroker::Host> hosts;
+    auto encode = [&]() { return QJsonDocument(QJsonObject {{"hosts", QJsonArray {entry}}}).toJson(); };
+    QVERIFY(PlankBroker::parseHosts(encode(), hosts));
+    QVERIFY(hosts.first().sharedDesktop);
+    QVERIFY(hosts.first().busy);
+    QVERIFY(hosts.first().connectable);
+    entry["shared_desktop"] = "true";
+    QVERIFY(!PlankBroker::parseHosts(encode(), hosts));
+    entry.remove("shared_desktop");
+    QVERIFY(PlankBroker::parseHosts(encode(), hosts));
+    QVERIFY(!hosts.first().sharedDesktop);
+}
+
 void TestPlankBroker::parsesLease()
 {
     PlankBroker::Lease lease;
@@ -747,6 +779,166 @@ void TestPlankBroker::parsesLease()
     QCOMPARE(lease.username, QStringLiteral("anna"));
     QCOMPARE(lease.gssapiToken, QStringLiteral("YIIBAgYJKoZIhvcSAQICAQBuggE="));
     QCOMPARE(lease.expiresIn, 30);
+}
+
+void TestPlankBroker::parsesSharedMacAdmission()
+{
+    const QString capability = QStringLiteral("v1.eyJ2IjoxfQ.YWJj");
+    QJsonObject body {{"endpoint", "relay.example.org"}, {"port", 29042},
+        {"host_cert_sha256", HostPin}, {"username", "artist"}, {"expires_in", 30},
+        {"auth_method", "broker_capability"}, {"broker_token", capability},
+        {"local_username", "shared-user"}, {"gssapi_token", ""}};
+    PlankBroker::Lease lease;
+    QVERIFY(PlankBroker::parseLease(QJsonDocument(body).toJson(), lease));
+    QCOMPARE(lease.authMethod, PlankBroker::AdmissionMethod::BrokerCapability);
+    QCOMPARE(lease.localUsername, QStringLiteral("shared-user"));
+    const auto request = PlankBroker::admissionRequest(lease.admission());
+    QCOMPARE(request, (QJsonObject {{"username", "artist"}, {"broker_token", capability}}));
+    QVERIFY(!request.contains("password"));
+    QVERIFY(!request.contains("local_username"));
+    lease.clearAdmission();
+    QVERIFY(lease.brokerToken.isEmpty());
+    QVERIFY(PlankBroker::admissionRequest(lease.admission()).isEmpty());
+
+    body.remove("broker_token"); body.remove("local_username");
+    body["auth_method"] = "gssapi"; body["gssapi_token"] = "YWJj";
+    QVERIFY(PlankBroker::parseLease(QJsonDocument(body).toJson(), lease));
+    QCOMPARE(PlankBroker::admissionRequest(lease.admission()),
+             (QJsonObject {{"username", "artist"}, {"gssapi_token", "YWJj"}}));
+}
+
+void TestPlankBroker::rejectsMixedOrMalformedAdmission()
+{
+    const QString capability = QStringLiteral("v1.eyJ2IjoxfQ.YWJj");
+    const QJsonObject good {{"endpoint", "relay.example.org"}, {"port", 29042},
+        {"host_cert_sha256", HostPin}, {"username", "artist"}, {"expires_in", 30},
+        {"auth_method", "broker_capability"}, {"broker_token", capability},
+        {"local_username", "shared-user"}, {"gssapi_token", ""}};
+    const QList<QPair<QString, QJsonValue>> mutations {
+        {"auth_method", "unknown"}, {"auth_method", "gssapi"}, {"auth_method", QJsonValue::Null},
+        {"broker_token", "v1..YWJj"}, {"broker_token", QStringLiteral("v2.") + capability.section('.', 1, 2)},
+        {"broker_token", QString(capability).replace(QStringLiteral("fQ."), QStringLiteral("fQ==."))}, {"broker_token", "v1.!.YWJj"},
+        {"broker_token", QString(8193, 'x')}, {"broker_token", 42},
+        {"local_username", ""}, {"local_username", "shared user"},
+        {"gssapi_token", "YWJj"}, {"gssapi_token", QJsonValue::Null},
+    };
+    PlankBroker::Lease lease;
+    for (const auto& mutation : mutations) {
+        auto body = good; body[mutation.first] = mutation.second;
+        QVERIFY2(!PlankBroker::parseLease(QJsonDocument(body).toJson(), lease), qPrintable(mutation.first));
+        QVERIFY(lease.brokerToken.isEmpty());
+        QCOMPARE(lease.port, quint16(0));
+    }
+    auto body = good; body.remove("auth_method");
+    QVERIFY(!PlankBroker::parseLease(QJsonDocument(body).toJson(), lease));
+    bool shared = true;
+    QVERIFY(PlankBroker::parseSharedDesktop({}, shared)); QVERIFY(!shared);
+    QVERIFY(PlankBroker::parseSharedDesktop({{"shared_desktop", true}}, shared)); QVERIFY(shared);
+    QString session;
+    QCOMPARE(PlankBroker::parseHostAdmission({{"state", "authenticated"},
+        {"session_token", "test-token"}, {"shared_desktop", "true"}}, session),
+        PlankBroker::AdmissionResult::Malformed);
+    QVERIFY(session.isEmpty());
+}
+
+void TestPlankBroker::sharedMacDisplayKeepsActiveTopology()
+{
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(fixedCaptureTopology(), topology));
+    const auto before = topology.toJson();
+    const QSize requested(2560, 1440);
+    const QString otherProfile = QStringLiteral("hevc-10-444-videotoolbox");
+    QVERIFY(!MacSharedSession::acceptsDisplay(topology, requested, 1, otherProfile, false));
+    QVERIFY(MacSharedSession::acceptsDisplay(topology, requested, 1, otherProfile, true));
+    QCOMPARE(MacSharedSession::videoProfile(topology,
+        StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444, true),
+        int(StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+    QCOMPARE(MacSharedSession::videoProfile(topology,
+        StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444, false),
+        int(StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444));
+    QCOMPARE(topology.toJson(), before);
+    QVERIFY(MacSharedSession::acceptsDisplay(topology,
+        QSize(topology.desktopWidth, topology.desktopHeight), 2, topology.appleEncodingMode, false));
+    QVERIFY(!MacSharedSession::acceptsDisplay({}, requested, 1, otherProfile, true));
+    QVERIFY(!MacSharedSession::acceptsDisplay(topology, requested, 0, otherProfile, true));
+}
+
+void TestPlankBroker::remoteMacMatchClientPreservesPixelsScaleAndReconnectPolicy()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    setup.virtualMode1 = QStringLiteral("1920x1080");
+    const NvClientDisplay retina {QRect(0, 0, 1800, 1168), QSize(3024, 1964), QSize(3600, 2336),
+                                 QSize(3600, 2250)};
+    QString reason;
+    const auto windowed = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({retina}, false), &reason);
+    QCOMPARE(windowed.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(windowed.mode, QStringLiteral("3600x2336"));
+    QCOMPARE(windowed.scale, 2);
+    QVERIFY(reason.isEmpty());
+    const auto fullscreen = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({retina}, true), &reason);
+    QCOMPARE(fullscreen.mode, QStringLiteral("3600x2250"));
+    QCOMPARE(fullscreen.scale, 2);
+    QCOMPARE(fullscreen.hostLayout, QStringLiteral("match-client"));
+    // A later connect/reconnect keeps the policy, not the first resolved mode.
+    const auto reconnected = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({{QRect(0, 0, 1920, 1200), QSize(3024, 1964), QSize(1920, 1200)}}, true));
+    QCOMPARE(reconnected.mode, QStringLiteral("1920x1200"));
+    QCOMPARE(reconnected.scale, 1);
+    QCOMPARE(reconnected.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(setup.virtualMode1, QStringLiteral("1920x1080"));
+    // A manual layout continues to request the saved dimensions at 1x.
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::SingleHostLayout);
+    const auto manual = RemoteDisplaySetup::prepareMac(setup, {retina});
+    QCOMPARE(manual.hostLayout, QStringLiteral("fixed"));
+    QCOMPARE(manual.mode, QStringLiteral("1920x1080"));
+    QCOMPARE(manual.scale, 1);
+}
+
+void TestPlankBroker::remoteMacMatchClientRejectsUnsupportedDisplays()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    QString reason;
+    QVERIFY(RemoteDisplaySetup::prepareMac(setup, {}, &reason).mode.isEmpty());
+    QVERIFY(!reason.isEmpty());
+    const QVector<NvClientDisplay> mixed {
+        {QRect(0, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)},
+        {QRect(1920, 0, 1920, 1080), QSize(1920, 1080), QSize(1920, 1080)}};
+    QVERIFY(RemoteDisplaySetup::prepareMac(setup, mixed, &reason).mode.isEmpty());
+    QVERIFY(reason.contains(QStringLiteral("same 1x or 2x")));
+    const auto twoRetina = RemoteDisplaySetup::prepareMac(setup, {
+        {QRect(0, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)},
+        {QRect(1920, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)}}, &reason);
+    QCOMPARE(twoRetina.mode, QStringLiteral("7680x2160"));
+    QCOMPARE(twoRetina.scale, 2);
+    QVERIFY(reason.isEmpty());
+}
+
+void TestPlankBroker::remoteMacMatchClientJoinsExistingSharedDesktop()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    const auto requested = RemoteDisplaySetup::prepareMac(setup, {
+        {QRect(0, 0, 1800, 1125), QSize(3600, 2250), QSize(3600, 2250)}});
+    const auto size = NvOutputTopology::macDisplayModeSize(requested.mode);
+    auto json = fixedCaptureTopology();
+    auto capture = json["capture"].toObject();
+    capture["width"] = 1920;
+    capture["height"] = 1080;
+    capture["logical_bounds"] = QJsonObject{{"x", 0}, {"y", 0}, {"width", 1920}, {"height", 1080}};
+    json["capture"] = capture;
+    NvOutputTopology existing;
+    QVERIFY(NvOutputTopology::fromJson(json, existing));
+    const auto before = existing.toJson();
+    // The Session's Match Client gate uses the same validated topology policy
+    // as HTTP preparation: shared viewers join the existing canvas unchanged.
+    QVERIFY(MacSharedSession::acceptsDisplay(existing, size, requested.scale, existing.appleEncodingMode, true));
+    QVERIFY(!MacSharedSession::acceptsDisplay(existing, size, requested.scale, existing.appleEncodingMode, false));
+    QCOMPARE(existing.toJson(), before);
+    QCOMPARE(requested.hostLayout, QStringLiteral("match-client"));
 }
 
 void TestPlankBroker::rejectsMalformedLeases()
@@ -768,6 +960,8 @@ void TestPlankBroker::rejectsMalformedLeases()
         {QStringLiteral("remote.bde.run"), QStringLiteral("")},
         {QStringLiteral("\"anna\""), QStringLiteral("\"\"")},
         {QStringLiteral("\"expires_in\":30"), QStringLiteral("\"expires_in\":0")},
+        {QStringLiteral("\"expires_in\":30"), QStringLiteral("\"expires_in\":30.5")},
+        {QStringLiteral("\"expires_in\":30"), QStringLiteral("\"expires_in\":2147483648")},
     };
     for (const auto& mutation : mutations) {
         QString body = good;
@@ -973,35 +1167,252 @@ void TestPlankBroker::brokeredMacLaunchIgnoresUdpPort()
 void TestPlankBroker::keepaliveCadence()
 {
     PlankBroker::KeepaliveSchedule schedule;
-    QCOMPARE(schedule.nextDelayMs(0), qint64(-1)); // not started
-    schedule.start(1000);
+    QCOMPARE(schedule.nextDelayMs(0), qint64(-1));
+    schedule.start(1000, 30);
     QVERIFY(schedule.active());
-    const qint64 first = schedule.nextDelayMs(1000);
-    QVERIFY(first >= 30000 && first <= 45000);
-    QVERIFY(first + PlankBroker::KeepaliveSchedule::SafetyMarginMs < PlankBroker::KeepaliveSchedule::LeaseWindowMs);
-    QCOMPARE(schedule.nextDelayMs(21000), first - 20000);
-    QCOMPARE(schedule.nextDelayMs(40000), qint64(0)); // overdue: send now
-    schedule.recordSuccess(40000);
-    QCOMPARE(schedule.nextDelayMs(40000), first);
+    QCOMPARE(schedule.nextDelayMs(1000), qint64(10000));
+    QCOMPARE(schedule.nextDelayMs(9000), qint64(2000));
+    QCOMPARE(schedule.nextDelayMs(11000), qint64(0));
+    // A timer racing the initial deadline must fail closed, even without a
+    // preceding network failure. It cannot renew an already abandoned lease.
+    QCOMPARE(schedule.nextDelayMs(26000), qint64(-1));
+    schedule.recordSuccess(11000, 90);
+    QCOMPARE(schedule.nextDelayMs(11000), qint64(30000));
+    QCOMPARE(schedule.nextDelayMs(41000), qint64(0));
+    QCOMPARE(schedule.nextDelayMs(95999), qint64(0));
+    QCOMPARE(schedule.nextDelayMs(96000), qint64(-1));
+    schedule.start(100000, 3); // configured short leases also renew inside TTL
+    QCOMPARE(schedule.nextDelayMs(100000), qint64(1000));
     schedule.stop();
-    QCOMPARE(schedule.nextDelayMs(40000), qint64(-1));
+    QCOMPARE(schedule.nextDelayMs(100000), qint64(-1));
 }
 
 void TestPlankBroker::keepaliveRetriesThenGivesUp()
 {
     PlankBroker::KeepaliveSchedule schedule;
-    schedule.start(0);
-    schedule.recordFailure(); // at t=30 s
-    QCOMPARE(schedule.nextDelayMs(30000), PlankBroker::KeepaliveSchedule::RetryMs);
-    schedule.recordFailure(); // t=40 s
-    QCOMPARE(schedule.nextDelayMs(40000), PlankBroker::KeepaliveSchedule::RetryMs);
-    schedule.recordFailure(); // t=50 s: only 5 s left before the safety margin
-    QCOMPARE(schedule.nextDelayMs(50000), qint64(5000));
-    QCOMPARE(schedule.nextDelayMs(55000), qint64(-1)); // lease must be assumed lost
-    QCOMPARE(schedule.failures(), 3);
-    schedule.recordSuccess(54000); // a late success restores the cadence
+    schedule.start(0, 30);
+    schedule.recordFailure(11000);
+    QCOMPARE(schedule.nextDelayMs(11000), qint64(10000));
+    QCOMPARE(schedule.nextDelayMs(21000), qint64(0));
+    schedule.recordFailure(22000);
+    QCOMPARE(schedule.nextDelayMs(22000), qint64(3000));
+    QCOMPARE(schedule.nextDelayMs(25000), qint64(-1));
+    QCOMPARE(schedule.failures(), 2);
+    schedule.recordSuccess(21000, 90);
     QCOMPARE(schedule.failures(), 0);
-    QCOMPARE(schedule.nextDelayMs(54000), PlankBroker::KeepaliveSchedule::IntervalMs);
+    QCOMPARE(schedule.nextDelayMs(22000), qint64(29000));
+    // Renewed grants really last90s: do not invent the old60s deadline.
+    schedule.recordFailure(51000);
+    QCOMPARE(schedule.nextDelayMs(90000), qint64(0));
+    QCOMPARE(schedule.nextDelayMs(106000), qint64(-1));
+}
+
+void TestPlankBroker::leaseRenewalDuringPreparation()
+{
+    // Fake clock and network use the same grant/response state machine as the
+    // real Qt timer. Workstation preparation remains pending until t=55s.
+    qint64 now = 0;
+    qint64 brokerDeadline = 30000;
+    PlankBroker::LeaseRenewal renewal;
+    renewal.start(1, 7, QStringLiteral("ws01.example.test"), QStringLiteral("session-a"), now, 30);
+    now = 9999;
+    QVERIFY(!renewal.beginRequest(now));
+    now = 10000;
+    const auto first = renewal.beginRequest(now);
+    QVERIFY(first);
+    QVERIFY(now < brokerDeadline);
+    QVERIFY(!renewal.beginRequest(now)); // one in flight
+    // The fake broker renews at receipt. Reply transit consumes some TTL.
+    brokerDeadline = now + 90000;
+    now = 11000;
+    QVERIFY(renewal.recordResult(*first, now, 90));
+    QCOMPARE(renewal.nextDelayMs(now), qint64(29000));
+    now = 35000;
+    QVERIFY(renewal.active());
+    QVERIFY(now < brokerDeadline); // initial grant would have expired by now
+    now = 40000;
+    const auto second = renewal.beginRequest(now);
+    QVERIFY(second);
+    brokerDeadline = now + 90000;
+    now = 41000;
+    QVERIFY(renewal.recordResult(*second, now, 90));
+    now = 55000; // attach the prepared Session without restarting the grant
+    QCOMPARE(renewal.nextDelayMs(now), qint64(15000));
+    QVERIFY(now < brokerDeadline);
+    renewal.stop(); // cancellation while preparing or closing the Session
+    QVERIFY(!renewal.beginRequest(70000));
+    QVERIFY(!renewal.recordResult(*second, 70000, 90));
+    renewal.start(2, 7, first->hostId, first->token, 100000, 30);
+    QVERIFY(!renewal.beginRequest(125000)); // initial timer/deadline race
+}
+
+void TestPlankBroker::leaseRenewalRejectsStaleReplies()
+{
+    PlankBroker::LeaseRenewal renewal;
+    const QString host = QStringLiteral("ws01.example.test");
+    const QString token = QStringLiteral("session-a");
+    renewal.start(1, 7, host, token, 0, 30);
+    const auto failed = renewal.beginRequest(10000);
+    QVERIFY(failed);
+    QVERIFY(renewal.recordResult(*failed, 11000, 0)); // retryable network failure
+    QVERIFY(!renewal.beginRequest(20000));
+    const auto retry = renewal.beginRequest(21000);
+    QVERIFY(retry);
+    QVERIFY(!renewal.recordResult(*failed, 22000, 0)); // duplicate old completion
+    QVERIFY(renewal.recordResult(*retry, 22000, 90));
+
+    const auto old = renewal.beginRequest(51000);
+    QVERIFY(old);
+    // Same host and same authentication: a reconnect still owns a new grant.
+    renewal.start(2, 7, host, token, 52000, 30);
+    const auto current = renewal.beginRequest(62000);
+    QVERIFY(current);
+    QVERIFY(!renewal.recordResult(*old, 63000, 0)); // stale401 cannot sign out
+    QVERIFY(!renewal.beginRequest(63000)); // nor clear the new in-flight flag
+    QVERIFY(renewal.recordResult(*current, 64000, 90));
+    QCOMPARE(renewal.nextDelayMs(64000), qint64(28000));
+
+    const auto previousAuth = renewal.beginRequest(92000);
+    QVERIFY(previousAuth);
+    renewal.stop();
+    renewal.start(3, 8, host, QStringLiteral("session-b"), 93000, 30);
+    QVERIFY(!renewal.recordResult(*previousAuth, 94000, 0));
+    QCOMPARE(renewal.nextDelayMs(94000), qint64(9000));
+    auto forged = *previousAuth;
+    forged.grant = 3;
+    const auto newAuth = renewal.beginRequest(103000);
+    QVERIFY(newAuth);
+    QVERIFY(!renewal.recordResult(forged, 104000, 90));
+    QVERIFY(renewal.recordResult(*newAuth, 104000, 90));
+}
+
+void TestPlankBroker::tlsKeepaliveExpiryContract()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    server.body = R"({"state":"ok","expires_in":90})";
+    QCOMPARE(client.keepalive(QStringLiteral("session-token"), QStringLiteral("ws01.example.test")), 90);
+    QVERIFY(server.request.startsWith("POST /v1/hosts/ws01.example.test/keepalive HTTP/1.1"));
+    const QList<QByteArray> invalid {
+        R"({"state":"ok"})", R"({"state":"ok","expires_in":0})",
+        R"({"state":"ok","expires_in":-1})", R"({"state":"ok","expires_in":90.5})",
+        R"({"state":"ok","expires_in":"90"})", R"({"state":"ok","expires_in":2147483648})",
+        R"({"state":"denied","expires_in":90})", QByteArray("not json")
+    };
+    for (const auto& body : invalid) {
+        server.body = body;
+        try {
+            client.keepalive(QStringLiteral("session-token"), QStringLiteral("ws01.example.test"));
+            QFAIL("Malformed renewal accepted");
+        } catch (const PlankBrokerError& error) {
+            QCOMPARE(error.kind(), PlankBrokerError::Protocol);
+        }
+    }
+}
+
+void TestPlankBroker::tlsPreparationRenewsFirst()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    const QByteArray lease = QStringLiteral(R"({"route":"relay","endpoint":"127.0.0.1","port":29001,
+        "host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj","expires_in":30})").arg(HostPin).toUtf8();
+    const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
+    server.queue("200 OK", lease);
+    server.queue("200 OK", R"({"state":"ok","expires_in":90})");
+    // This is the operation used by both initial preparation and Session
+    // re-admission. It cannot return a lease for probing before requesting its
+    // first renewal, even if no GUI event-loop callback has run in between.
+    const auto connection = client.connectAndRenew(QStringLiteral("session-a"), QStringLiteral("ws01.example.test"));
+    QCOMPARE(connection.lease.expiresIn, 30);
+    QCOMPARE(connection.expiresIn, 90);
+    QCOMPARE(connection.renewalFailure, -1);
+    QCOMPARE(server.requestLog.size(), 2);
+    QVERIFY(server.requestLog.at(0).startsWith("POST /v1/hosts/ws01.example.test/connect HTTP/1.1"));
+    QVERIFY(server.requestLog.at(1).startsWith("POST /v1/hosts/ws01.example.test/keepalive HTTP/1.1"));
+    PlankBroker::LeaseRenewal renewal;
+    renewal.start(1, 7, QStringLiteral("ws01.example.test"), QStringLiteral("session-a"), 0, connection.expiresIn);
+    // Slow preparation/GUI setup passes the original30s deadline safely.
+    QVERIFY(renewal.beginRequest(35000));
+    QVERIFY(renewal.active());
+
+    server.queue("200 OK", lease);
+    server.queue("429 Too Many Requests", R"({"retry_after":1})");
+    const auto transient = client.connectAndRenew(QStringLiteral("session-a"), QStringLiteral("ws01.example.test"));
+    QCOMPARE(transient.expiresIn, 30); // never assume a failed renewal granted90
+    QCOMPARE(transient.renewalFailure, int(PlankBrokerError::RateLimited));
+    renewal.start(2, 7, QStringLiteral("ws01.example.test"), QStringLiteral("session-a"), 40000, transient.expiresIn);
+    QVERIFY(renewal.beginRequest(50000));
+    QCOMPARE(renewal.nextDelayMs(65000), qint64(-1));
+
+    server.queue("200 OK", lease);
+    server.queue("401 Unauthorized", R"({"error":"expired"})");
+    try {
+        client.connectAndRenew(QStringLiteral("session-a"), QStringLiteral("ws01.example.test"));
+        QFAIL("Terminal initial renewal returned a usable lease");
+    } catch (const PlankBrokerError& error) {
+        QCOMPARE(error.kind(), PlankBrokerError::SessionExpired);
+    }
+}
+
+void TestPlankBroker::refreshTicketsSurviveAuthTransitions()
+{
+    // Use the same shared state as RemoteBroker's worker and completion
+    // callbacks: a slow request must not block, populate, sign out, or clear
+    // an in-flight flag belonging to a later authentication.
+    BrokerSessionState state;
+    QVERIFY(!state.beginRefresh());
+    state.set(QStringLiteral("session-a"), true);
+    const auto old = state.beginRefresh();
+    QVERIFY(old);
+    QVERIFY(!state.beginRefresh());
+    state.clear(); // explicit sign-out while the old request is on the wire
+    QVERIFY(!state.beginRefresh());
+    state.set(QStringLiteral("session-b"), true);
+    const auto current = state.beginRefresh();
+    QVERIFY(current); // the prior request no longer blocks sign-in's refresh
+    QCOMPARE(state.getForRevision(current->authentication), QStringLiteral("session-b"));
+    QVERIFY(state.getForRevision(old->authentication).isEmpty());
+    QVERIFY(!state.finishRefresh(*old)); // old success or401 is abandoned
+    QVERIFY(!state.beginRefresh()); // cannot clear the current in-flight flag
+    QVERIFY(state.finishRefresh(*current));
+    const auto next = state.beginRefresh();
+    QVERIFY(next);
+    QVERIFY(!state.finishRefresh(*current)); // duplicate completion is stale
+    QVERIFY(!state.beginRefresh());
+    QVERIFY(state.finishRefresh(*next));
+    // A successful replacement authentication also resets ownership without
+    // requiring an intervening clear (the onboarding/adoptSession path).
+    const auto previous = state.beginRefresh();
+    QVERIFY(previous);
+    state.set(QStringLiteral("session-c"), true);
+    const auto adopted = state.beginRefresh();
+    QVERIFY(adopted);
+    QVERIFY(!state.finishRefresh(*previous));
+    QVERIFY(state.finishRefresh(*adopted));
+}
+
+void TestPlankBroker::sessionStateRejectsPreviousAuthentication()
+{
+    BrokerSessionState state;
+    state.set(QStringLiteral("session-a"), true);
+    const auto auth = state.revision();
+    const auto initial = state.beginLease(auth);
+    QVERIFY(state.currentLease(auth, initial));
+    state.cancelLease(); // closing a Session cancels its pending callbacks
+    QVERIFY(!state.currentLease(auth, initial));
+    const auto reconnect = state.beginLease(auth);
+    QVERIFY(state.currentLease(auth, reconnect));
+    state.clear(); // explicit logout forbids the old Session's re-admission
+    QVERIFY(state.getForRevision(auth).isEmpty());
+    QCOMPARE(state.beginLease(auth), quint64(0));
+    state.set(QStringLiteral("session-b"), true);
+    const auto currentAuth = state.revision();
+    const auto currentLease = state.beginLease(currentAuth);
+    QVERIFY(state.currentLease(currentAuth, currentLease));
+    QVERIFY(!state.currentLease(auth, reconnect));
+    QCOMPARE(state.beginLease(auth), quint64(0)); // cannot cancel the new grant
+    QVERIFY(state.currentLease(currentAuth, currentLease));
 }
 
 void TestPlankBroker::tlsPinnedRoundTrip()
@@ -1192,7 +1603,7 @@ void TestPlankBroker::brokerSessionStoreEncodesOnlyUserAndToken()
     const QString token = QStringLiteral("aB3-_xYz0123456789aB3-_xYz0123456789aB3-_xY");
     const QByteArray encoded = BrokerSessionStore::encode(QStringLiteral("finn"), token);
     const QJsonObject object = QJsonDocument::fromJson(encoded).object();
-    QCOMPARE(object.keys(), QStringList({QStringLiteral("token"), QStringLiteral("user"), QStringLiteral("v")}));
+    QCOMPARE(object.keys(), QStringList({QStringLiteral("device_bound"), QStringLiteral("token"), QStringLiteral("user"), QStringLiteral("v")}));
     BrokerSessionStore::Saved saved;
     QVERIFY(BrokerSessionStore::decode(encoded, saved));
     QCOMPARE(saved.username, QStringLiteral("finn"));
@@ -2075,6 +2486,9 @@ void TestPlankBroker::tlsPasskeyRateLimitThrows()
 
 void TestPlankBroker::helperExitCodesMapToOutcomes()
 {
+#ifdef Q_OS_WIN
+    QSKIP("This fixture executes a POSIX shell helper; Windows uses the native CNG device-key suite.");
+#endif
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const PlankBroker::PasskeyRequest request = passkeyRequest();
@@ -2115,6 +2529,9 @@ void TestPlankBroker::helperExitCodesMapToOutcomes()
 
 void TestPlankBroker::helperListAndCreateParsing()
 {
+#ifdef Q_OS_WIN
+    QSKIP("This fixture executes a POSIX shell helper; Windows uses the native CNG device-key suite.");
+#endif
     const QString spki = QString::fromLatin1(QByteArray(91, '\x04').toBase64());
     const QString mapping = QStringLiteral("passkey:%1,%2").arg(PasskeyCredential, spki);
     PlankPasskeyHelper::CreatedKey created;
@@ -2325,7 +2742,7 @@ void TestPlankBroker::tlsBearerCallsCarryDeviceProof()
     server.queue("200 OK", QStringLiteral(R"({"route":"relay","endpoint":"127.0.0.1","port":29001,)"
                                           R"("host_cert_sha256":"%1","username":"anna","gssapi_token":"YWJj",)"
                                           R"("expires_in":30})").arg(HostPin).toUtf8());
-    server.queue("200 OK", R"({"state":"ok"})");
+    server.queue("200 OK", R"({"state":"ok","expires_in":90})");
     server.queue("200 OK", R"({"state":"ok"})");
     PlankBrokerClient::Config config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
     QList<QByteArray> signedMessages;
@@ -2380,7 +2797,7 @@ void TestPlankBroker::tlsBearerCallsWithoutSignerAreUnchanged()
     TestBrokerServer server(QSsl::TlsV1_3OrLater);
     QVERIFY(server.listen());
     server.queue("200 OK", R"({"hosts":[]})");
-    server.queue("200 OK", R"({"state":"ok"})");
+    server.queue("200 OK", R"({"state":"ok","expires_in":90})");
     server.queue("200 OK", R"({"state":"ok"})");
     const PlankBrokerClient client(localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)}));
     QVERIFY(client.hosts(QStringLiteral("t")).isEmpty());
@@ -2426,7 +2843,7 @@ void TestPlankBroker::tlsDeviceSigningFailureSendsNoProof()
             PlankBrokerClient(config).hosts(QStringLiteral("t"));
             QFAIL("a failed device signature must not send the request");
         } catch (const PlankBrokerError& error) {
-            QCOMPARE(error.kind(), PlankBrokerError::Network);
+            QCOMPARE(error.kind(), PlankBrokerError::DeviceKeyUnavailable);
         }
         QCoreApplication::processEvents();
         QVERIFY(server.requestLog.isEmpty());
@@ -2454,6 +2871,9 @@ void TestPlankBroker::tlsDeviceBoundSessionRejectionSignsOut()
 
 void TestPlankBroker::helperDeviceKeyCommands()
 {
+#ifdef Q_OS_WIN
+    QSKIP("This fixture executes a POSIX shell helper; Windows uses the native CNG device-key suite.");
+#endif
     // parse
     QCOMPARE(PlankPasskeyHelper::parseDevicePublicKey(QStringLiteral(R"({"public_key":"%1"})").arg(DeviceSpki).toUtf8() + "\n"),
              DeviceSpki);

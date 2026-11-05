@@ -40,6 +40,7 @@ private slots:
     void matchesMacClientCanvas();
     void matchesRetinaClientCanvas();
     void matchesMacFullscreenViewport();
+    void matchesMacFullscreenTopExclusion();
     void matchesMultipleNativeFullscreenViewports();
     void buildsMacDisplayRequest();
     void computesClientMatchTarget();
@@ -61,17 +62,31 @@ void TestOutputTopology::advertisesOnlyImplementedClipboardSupport()
                             NvOutputTopology::ClipboardSyncFeature;
     const auto files = NvOutputTopology::SupportedFeatureFlags &
                        NvOutputTopology::ClipboardFilesFeature;
-#ifdef Q_OS_MACOS
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     QCOMPARE(negotiated, NvOutputTopology::ClipboardSyncFeature);
     QCOMPARE(files, NvOutputTopology::ClipboardFilesFeature);
 #else
     QCOMPARE(negotiated, 0);
     QCOMPARE(files, 0);
 #endif
+    // Exercise the same authenticated-topology intersection that Session sends
+    // in its launch request. Native clipboard helpers alone cannot enable it.
+    const int clipboardFeatures = NvOutputTopology::ClipboardSyncFeature |
+            NvOutputTopology::ClipboardFilesFeature;
+    const int descriptionFeatures = NvOutputTopology::OutputTopologyFeature |
+            NvOutputTopology::SelectedOutputFeature | NvOutputTopology::UnifiedAbsoluteInputFeature;
+    NvOutputTopology topology;
+    topology.schemaVersion = NvOutputTopology::ProtocolVersion;
+    topology.featureFlags = descriptionFeatures | clipboardFeatures;
+    const int launch = topology.launchFeatureFlags(descriptionFeatures | clipboardFeatures);
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    QCOMPARE(launch & clipboardFeatures, clipboardFeatures);
+#else
+    QCOMPARE(launch & clipboardFeatures, 0);
+#endif
     // A host without the feature cannot enable it on any client platform.
-    QCOMPARE(NvOutputTopology::SupportedFeatureFlags &
-             ~NvOutputTopology::ClipboardSyncFeature &
-             NvOutputTopology::ClipboardSyncFeature, 0);
+    topology.featureFlags = descriptionFeatures;
+    QCOMPARE(topology.launchFeatureFlags(descriptionFeatures | clipboardFeatures) & clipboardFeatures, 0);
 }
 
 void TestOutputTopology::matchesMacFullscreenViewport()
@@ -91,6 +106,43 @@ void TestOutputTopology::matchesMacFullscreenViewport()
         const auto request = NvOutputTopology::macDisplayRequest(
             QStringLiteral("3420x%1").arg(pixelHeight), "hevc-10-444-videotoolbox", scale);
         QVERIFY(!request.isEmpty());
+    }
+}
+
+void TestOutputTopology::matchesMacFullscreenTopExclusion()
+{
+    struct Viewport {
+        int width, height;
+        double cameraInset, screenTop, visibleTop;
+        int expectedHeight;
+    };
+    const Viewport cases[] = {
+        // The Dock reserves 56 points at the bottom; its top is not subtracted.
+        {1800, 1169, 38, 1169, 56 + 1074, 1130},
+        // Standard Retina viewport and the larger desktop top reservation.
+        {1512, 982, 32, 982, 945, 945},
+        {1710, 1107, 38, 1107, 1064, 1064},
+        // Round the complete top reservation once, including fractional modes.
+        {1800, 1169, 37.2, 1169, 1130.75, 1130},
+        {1800, 1169, 38.5, 1169, 1130.75, 1130},
+        // A hidden menu bar must never expose pixels inside the camera area.
+        {1800, 1169, 38, 1169, 1169, 1131},
+        // No notch: ordinary desktop menu/Dock exclusions do not limit fullscreen.
+        {1920, 1080, 0, 1080, 1056, 1080},
+    };
+    for (const auto& viewport : cases) {
+        const int top = MacDisplayGeometry::nativeFullscreenTopInset(
+            viewport.cameraInset, viewport.screenTop - viewport.visibleTop);
+        int height = viewport.height, pixels = height * 2;
+        QVERIFY(MacDisplayGeometry::insetTop(viewport.width, height, viewport.width * 2, pixels, top));
+        QCOMPARE(height, viewport.expectedHeight);
+        QCOMPARE(pixels, viewport.expectedHeight * 2);
+        int scale = 0;
+        const QVector<NvClientDisplay> displays = {{QRect(0, top, viewport.width, height),
+            QSize(viewport.width * 2, pixels), QSize(viewport.width * 2, pixels)}};
+        QCOMPARE(NvOutputTopology::resolveMacClientDisplayMode(displays, nullptr, &scale),
+                 QStringLiteral("%1x%2").arg(viewport.width * 2).arg(pixels));
+        QCOMPARE(scale, 2);
     }
 }
 
