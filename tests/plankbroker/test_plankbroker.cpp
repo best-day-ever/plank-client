@@ -335,6 +335,9 @@ private slots:
     void parsesSharedMacAdmission();
     void rejectsMixedOrMalformedAdmission();
     void sharedMacDisplayKeepsActiveTopology();
+    void remoteMacMatchClientPreservesPixelsScaleAndReconnectPolicy();
+    void remoteMacMatchClientRejectsUnsupportedDisplays();
+    void remoteMacMatchClientJoinsExistingSharedDesktop();
     void rejectsMalformedLeases();
     void parsesLeaseRoute();
     void classifiesBearerStatus();
@@ -858,6 +861,84 @@ void TestPlankBroker::sharedMacDisplayKeepsActiveTopology()
         QSize(topology.desktopWidth, topology.desktopHeight), 2, topology.appleEncodingMode, false));
     QVERIFY(!MacSharedSession::acceptsDisplay({}, requested, 1, otherProfile, true));
     QVERIFY(!MacSharedSession::acceptsDisplay(topology, requested, 0, otherProfile, true));
+}
+
+void TestPlankBroker::remoteMacMatchClientPreservesPixelsScaleAndReconnectPolicy()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    setup.virtualMode1 = QStringLiteral("1920x1080");
+    const NvClientDisplay retina {QRect(0, 0, 1800, 1168), QSize(3024, 1964), QSize(3600, 2336),
+                                 QSize(3600, 2250)};
+    QString reason;
+    const auto windowed = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({retina}, false), &reason);
+    QCOMPARE(windowed.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(windowed.mode, QStringLiteral("3600x2336"));
+    QCOMPARE(windowed.scale, 2);
+    QVERIFY(reason.isEmpty());
+    const auto fullscreen = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({retina}, true), &reason);
+    QCOMPARE(fullscreen.mode, QStringLiteral("3600x2250"));
+    QCOMPARE(fullscreen.scale, 2);
+    QCOMPARE(fullscreen.hostLayout, QStringLiteral("match-client"));
+    // A later connect/reconnect keeps the policy, not the first resolved mode.
+    const auto reconnected = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({{QRect(0, 0, 1920, 1200), QSize(3024, 1964), QSize(1920, 1200)}}, true));
+    QCOMPARE(reconnected.mode, QStringLiteral("1920x1200"));
+    QCOMPARE(reconnected.scale, 1);
+    QCOMPARE(reconnected.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(setup.virtualMode1, QStringLiteral("1920x1080"));
+    // A manual layout continues to request the saved dimensions at 1x.
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::SingleHostLayout);
+    const auto manual = RemoteDisplaySetup::prepareMac(setup, {retina});
+    QCOMPARE(manual.hostLayout, QStringLiteral("fixed"));
+    QCOMPARE(manual.mode, QStringLiteral("1920x1080"));
+    QCOMPARE(manual.scale, 1);
+}
+
+void TestPlankBroker::remoteMacMatchClientRejectsUnsupportedDisplays()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    QString reason;
+    QVERIFY(RemoteDisplaySetup::prepareMac(setup, {}, &reason).mode.isEmpty());
+    QVERIFY(!reason.isEmpty());
+    const QVector<NvClientDisplay> mixed {
+        {QRect(0, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)},
+        {QRect(1920, 0, 1920, 1080), QSize(1920, 1080), QSize(1920, 1080)}};
+    QVERIFY(RemoteDisplaySetup::prepareMac(setup, mixed, &reason).mode.isEmpty());
+    QVERIFY(reason.contains(QStringLiteral("same 1x or 2x")));
+    const auto twoRetina = RemoteDisplaySetup::prepareMac(setup, {
+        {QRect(0, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)},
+        {QRect(1920, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)}}, &reason);
+    QCOMPARE(twoRetina.mode, QStringLiteral("7680x2160"));
+    QCOMPARE(twoRetina.scale, 2);
+    QVERIFY(reason.isEmpty());
+}
+
+void TestPlankBroker::remoteMacMatchClientJoinsExistingSharedDesktop()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    const auto requested = RemoteDisplaySetup::prepareMac(setup, {
+        {QRect(0, 0, 1800, 1125), QSize(3600, 2250), QSize(3600, 2250)}});
+    const auto size = NvOutputTopology::macDisplayModeSize(requested.mode);
+    auto json = fixedCaptureTopology();
+    auto capture = json["capture"].toObject();
+    capture["width"] = 1920;
+    capture["height"] = 1080;
+    capture["logical_bounds"] = QJsonObject{{"x", 0}, {"y", 0}, {"width", 1920}, {"height", 1080}};
+    json["capture"] = capture;
+    NvOutputTopology existing;
+    QVERIFY(NvOutputTopology::fromJson(json, existing));
+    const auto before = existing.toJson();
+    // The Session's Match Client gate uses the same validated topology policy
+    // as HTTP preparation: shared viewers join the existing canvas unchanged.
+    QVERIFY(MacSharedSession::acceptsDisplay(existing, size, requested.scale, existing.appleEncodingMode, true));
+    QVERIFY(!MacSharedSession::acceptsDisplay(existing, size, requested.scale, existing.appleEncodingMode, false));
+    QCOMPARE(existing.toJson(), before);
+    QCOMPARE(requested.hostLayout, QStringLiteral("match-client"));
 }
 
 void TestPlankBroker::rejectsMalformedLeases()

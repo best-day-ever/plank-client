@@ -30,6 +30,31 @@ struct Setup
     QString scalingMode;
 };
 
+// Resolve from an immutable GUI-thread snapshot. Retain Match Client as the
+// session policy so reconnects resolve the current displays again; only manual
+// layouts use the stored first virtual mode at 1x on fixed-capture Mac Hosts.
+struct MacPreparation
+{
+    QString hostLayout;
+    QString mode;
+    int scale = 1;
+};
+
+inline MacPreparation prepareMac(const Setup& setup, const QVector<NvClientDisplay>& displays,
+                                 QString* reason = nullptr)
+{
+    if (reason) reason->clear();
+    MacPreparation result;
+    if (setup.hostLayout == QLatin1String(NvOutputTopology::MatchClientHostLayout)) {
+        result.hostLayout = setup.hostLayout;
+        result.mode = NvOutputTopology::resolveMacClientDisplayMode(displays, reason, &result.scale);
+    } else {
+        result.hostLayout = QStringLiteral("fixed");
+        result.mode = setup.virtualMode1;
+    }
+    return result;
+}
+
 inline QString layoutForChoice(int choice)
 {
     switch (choice) {
