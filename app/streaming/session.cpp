@@ -3176,8 +3176,7 @@ bool Session::configurePlankHostLayout()
     QString scalingMode;
     QString virtualMode1;
     QString virtualMode2;
-    QSize authenticatedDesktopSize;
-    QSizeF authenticatedLogicalSize;
+    bool sharedMacDesktop = false;
     bool hostRejectsRequestedLayout = false;
     bool virtualPrimary = false;
     int hostFeatureFlags = 0;
@@ -3200,9 +3199,7 @@ bool Session::configurePlankHostLayout()
         scalingMode = m_Computer->plankScalingMode;
         virtualMode1 = m_Computer->plankVirtualMode1;
         virtualMode2 = m_Computer->plankVirtualMode2;
-        authenticatedDesktopSize = QSize(m_Computer->outputTopology.desktopWidth,
-                                         m_Computer->outputTopology.desktopHeight);
-        authenticatedLogicalSize = m_Computer->outputTopology.captureLogicalBounds.size();
+        sharedMacDesktop = m_Computer->plankSharedDesktop;
         virtualPrimary = m_Computer->outputTopology.startupLayoutKind == NvOutputTopology::SingleHostLayout &&
             (m_Computer->outputTopology.featureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature);
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
@@ -3252,9 +3249,9 @@ bool Session::configurePlankHostLayout()
         if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
             int scale = 1;
             const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &scale);
-            if (mode.isEmpty() || NvOutputTopology::macDisplayModeSize(mode) !=
-                    authenticatedDesktopSize || authenticatedLogicalSize !=
-                    QSizeF(authenticatedDesktopSize.width() / scale, authenticatedDesktopSize.height() / scale)) {
+            if (mode.isEmpty() || !MacSharedSession::acceptsDisplay(topologySnapshot,
+                    NvOutputTopology::macDisplayModeSize(mode), scale,
+                    topologySnapshot.appleEncodingMode, sharedMacDesktop)) {
                 emit displayLaunchError(mode.isEmpty() ? error : tr("Client displays changed during connection. Please reconnect to match the current display resolution."));
                 return false;
             }

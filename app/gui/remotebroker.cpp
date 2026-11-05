@@ -661,6 +661,10 @@ struct StreamSettingsRequired {
     QString reason;
 };
 
+struct DisplaySettingsRequired {
+    QString reason;
+};
+
 // Worker thread: section 10.2 steps 1-2 plus the ordinary pre-launch
 // preparation (topology, app list). The returned computer is authorized with
 // a one-use host token and pinned to the broker-supplied leaf. capabilities
@@ -668,6 +672,7 @@ struct StreamSettingsRequired {
 NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QString& hostId,
                                     const QString& hostName, const StreamInputs& stream,
                                     const RemoteDisplaySetup::Setup& display,
+                                    const QVector<NvClientDisplay>& macDisplays,
                                     RemoteStreamSetup::Capabilities& capabilities,
                                     bool& authenticatedGreeter)
 {
@@ -684,6 +689,13 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
     capabilities.platform = macHost ? RemoteStreamSetup::MacPlatform : RemoteStreamSetup::LinuxPlatform;
     capabilities.featureFlags = probed.plankFeatureFlags;
     capabilities.encodingModes = probed.plankEncodingModes;
+
+    RemoteDisplaySetup::MacPreparation macPreparation;
+    if (macHost) {
+        QString reason;
+        macPreparation = RemoteDisplaySetup::prepareMac(display, macDisplays, &reason);
+        if (macPreparation.mode.isEmpty()) throw DisplaySettingsRequired { reason };
+    }
 
     const RemoteStreamSetup::Resolution resolution = RemoteStreamSetup::resolve(
                 stream.host, stream.seeded ? &stream.seed : nullptr, stream.defaults, capabilities.platform);
@@ -713,9 +725,7 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
             computer->plankVirtualMode2 = display.virtualMode2;
         }
         if (macHost) {
-            // Match Client needs a GUI-thread display snapshot; remote Mac
-            // hosts use virtual display 1 as their fixed desktop instead.
-            computer->plankHostLayout = QStringLiteral("fixed");
+            computer->plankHostLayout = macPreparation.hostLayout;
         }
     }
     computer->update(probed);
@@ -730,18 +740,16 @@ NvComputer* prepareBrokeredComputer(const PlankBroker::Lease& lease, const QStri
                                                   &authenticatedGreeter);
     NvOutputTopology topology;
     bool topologySupported;
-    QString desktopMode;
     QString appleEncodingMode;
     {
         QReadLocker lock(&computer->lock);
         topologySupported = NvOutputTopology::supportsDescription(
                     computer->plankTopologyVersion, computer->plankFeatureFlags);
-        desktopMode = computer->plankVirtualMode1;
         appleEncodingMode = StreamingPreferences::plankAppleEncodingMode(computer->plankVideoProfile);
     }
     if (topologySupported) {
         if (macHost) {
-            topology = http.prepareMacDisplay(desktopMode, appleEncodingMode, 1);
+            topology = http.prepareMacDisplay(macPreparation.mode, appleEncodingMode, macPreparation.scale);
         } else {
             QElapsedTimer readiness;
             readiness.start();
@@ -974,31 +982,41 @@ void RemoteBroker::resetRemoteStreamDefaults()
 
 void RemoteBroker::connectToHost(const QString& hostId)
 {
+    Q_ASSERT(QThread::currentThread() == qApp->thread());
     if (!signedIn() || busy() || !PlankBroker::isHostId(hostId)) return;
     const QString hostName = hostNameFor(hostId);
     QSettings settings;
     const QStringList modes = hostVirtualModes(settings, hostId);
     const QVector<NvClientDisplay> displays = ClientDisplayProbe::probe();
+#ifdef Q_OS_DARWIN
+    const QVector<NvClientDisplay> macDisplays = ClientDisplayProbe::macMatchDisplays(
+                displays, m_Preferences->windowMode != StreamingPreferences::WM_WINDOWED);
+#else
+    const QVector<NvClientDisplay> macDisplays = displays;
+#endif
     const QString fingerprint = ClientDisplayProbe::fingerprint(displays);
     const RemoteStreamSetup::Capabilities cached = RemoteStreamSetup::loadCapabilities(settings, hostId);
     const bool macHost = cached.known && cached.platform == RemoteStreamSetup::MacPlatform;
     const DisplayProfile::Resolved profile = DisplayProfile::resolveForHost(settings, hostId, fingerprint);
     RemoteDisplaySetup::Setup display;
     if (macHost || profile.source == DisplayProfile::Resolved::Legacy) {
-        // A fixed layout (older workstations, remote Macs): the settings
-        // saved for this workstation, as before display profiles.
+        // Older workstations and Mac Hosts use their per-workstation choice.
         display = RemoteDisplaySetup::load(settings, hostId);
         if (!display.configured) {
             emit displaySetupRequired(hostId, hostName, QString());
             return;
         }
         QString matchReason;
-        if (!RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display, displays, &matchReason, modes)) {
+        const bool matchingMac = macHost && display.hostLayout == QLatin1String(NvOutputTopology::MatchClientHostLayout);
+        const bool matchValid = matchingMac ?
+                    !RemoteDisplaySetup::prepareMac(display, macDisplays, &matchReason).mode.isEmpty() :
+                    RemoteDisplaySetup::refreshMatchedModes(settings, hostId, display, displays, &matchReason, modes);
+        if (!matchValid) {
             // Screens changed since the setup was saved (e.g. a third monitor).
             emit displaySetupRequired(hostId, hostName, matchReason);
             return;
         }
-        const QString unsupported = RemoteDisplaySetup::unsupportedModeReason(display, modes);
+        const QString unsupported = matchingMac ? QString() : RemoteDisplaySetup::unsupportedModeReason(display, modes);
         if (!unsupported.isEmpty()) {
             // A saved virtual mode this workstation refused on its last connect.
             emit displaySetupRequired(hostId, hostName, unsupported);
@@ -1015,8 +1033,8 @@ void RemoteBroker::connectToHost(const QString& hostId)
                                        DisplayPlanner::proposal(displays));
             settings.sync();
         }
-        // Match client: the Session plans it from the display profile. A
-        // Mac workstation seen for the first time takes mode 1 as its desktop.
+        // Linux uses the display profile; a newly discovered Mac uses the same
+        // immutable client snapshot for its exact desktop pixels and scale.
         display = RemoteDisplaySetup::proposal(displays, modes);
         display.configured = true;
         display.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
@@ -1042,11 +1060,12 @@ void RemoteBroker::connectToHost(const QString& hostId)
     const quint64 grant = token->beginLease(authentication);
     QPointer<RemoteBroker> self(this);
     QThreadPool::globalInstance()->start([self, config, token, generation, authentication, grant,
-                                         hostId, hostName, stream, display]() {
+                                         hostId, hostName, stream, display, macDisplays]() {
         NvComputer* computer = nullptr;
         std::shared_ptr<PlankBrokerError> brokerFailure;
         QString hostFailure;
         QString streamProblem;
+        QString displayProblem;
         RemoteStreamSetup::Capabilities capabilities;
         bool authenticatedGreeter = false;
         try {
@@ -1070,10 +1089,12 @@ void RemoteBroker::connectToHost(const QString& hostId)
             qInfo() << "Remote access route to" << hostId << ":"
                     << (lease.route == PlankBroker::Route::Direct ? "direct" : "relay");
             try {
-                computer = prepareBrokeredComputer(lease, hostId, hostName, stream, display,
+                computer = prepareBrokeredComputer(lease, hostId, hostName, stream, display, macDisplays,
                                                    capabilities, authenticatedGreeter);
             } catch (const StreamSettingsRequired& required) {
                 streamProblem = required.reason;
+            } catch (const DisplaySettingsRequired& required) {
+                displayProblem = required.reason;
             }
             lease.clearAdmission();
         } catch (const PlankBrokerError& error) {
@@ -1091,7 +1112,7 @@ void RemoteBroker::connectToHost(const QString& hostId)
         }
         QMetaObject::invokeMethod(qApp, [self, generation, authentication, grant, hostId, hostName, computer,
                                          authenticatedGreeter,
-                                         brokerFailure, hostFailure, streamProblem, capabilities]() {
+                                         brokerFailure, hostFailure, streamProblem, displayProblem, capabilities]() {
             if (capabilities.known) {
                 // Kept for the settings dialog and the next connect's check.
                 QSettings settings;
@@ -1112,6 +1133,12 @@ void RemoteBroker::connectToHost(const QString& hostId)
                 // The lease is abandoned; a retry is a fresh broker connect.
                 self->setBusy(QString());
                 emit self->streamSetupRequired(hostId, hostName, streamProblem);
+                return;
+            }
+            if (!displayProblem.isEmpty()) {
+                self->stopKeepalive();
+                self->setBusy(QString());
+                emit self->displaySetupRequired(hostId, hostName, displayProblem);
                 return;
             }
             if (computer == nullptr) {
