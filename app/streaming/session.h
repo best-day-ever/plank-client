@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QJsonObject>
+
 #include <QSemaphore>
 #include <QSize>
 #include <QStringList>
@@ -208,7 +210,19 @@ public:
     {
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
         m_CurrentVideoMbps.store(videoMbps, std::memory_order_relaxed);
+        m_LastDiagnosticStats.store(SDL_GetTicks(), std::memory_order_relaxed);
     }
+
+    quint32 diagnosticReceivedAgeMs() const {
+#ifdef PLANK_TRANSPORT
+        return quint32(qMin<Uint64>(60000, SDL_GetTicks()-m_LastPlankVideoReceived.load()));
+#else
+        return 60000;
+#endif
+    }
+    quint32 diagnosticStatisticsAgeMs() const { return quint32(qMin<Uint64>(60000, SDL_GetTicks()-m_LastDiagnosticStats.load())); }
+    float diagnosticRenderedFps() const { return m_CurrentRenderedFps.load(std::memory_order_relaxed); }
+    float diagnosticVideoMbps() const { return m_CurrentVideoMbps.load(std::memory_order_relaxed); }
 
     VideoFecLossPercent currentVideoFecLoss() const
     {
@@ -232,6 +246,8 @@ signals:
     void stageFailed(QString stage, int errorCode, QString failingPorts);
 
     void connectionStarted();
+    void diagnosticConnectionLost(int code);
+    void diagnosticStreamParameters(QJsonObject parameters);
 
     void sessionCleanupWaitChanged(bool waiting, QString text);
 
@@ -647,6 +663,7 @@ private:
     std::atomic_bool m_QtClipboardFocused{false};
 #endif
 #endif
+    std::atomic<Uint64> m_LastDiagnosticStats{0};
     std::atomic<float> m_CurrentRenderedFps;
     std::atomic<float> m_CurrentVideoMbps;
     VideoFecLossPercent m_CurrentVideoFecLoss;

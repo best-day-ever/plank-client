@@ -87,6 +87,7 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
                                                        const QString& sessionToken) const
 {
     checkConfigured();
+    if (m_Config.cancelled && m_Config.cancelled()) throw PlankBrokerError(PlankBrokerError::Network);
     if (!sessionToken.isEmpty() &&
             !PlankBroker::isPrintableAscii(sessionToken, PlankBroker::MaximumTokenLength)) {
         throw PlankBrokerError(PlankBrokerError::SessionExpired);
@@ -99,6 +100,7 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
     url.setPath(path, QUrl::StrictMode);
 
     QNetworkRequest request(url);
+    if (path == QLatin1String("/v1/diagnostics")) request.setPriority(QNetworkRequest::LowPriority);
     QSslConfiguration ssl = QSslConfiguration::defaultConfiguration();
     ssl.setProtocol(QSsl::TlsV1_3OrLater);
     // No WebPKI: with no trust anchors every handshake reports errors, and
@@ -169,6 +171,7 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
         }
     });
 
+    if (m_Config.cancelled && m_Config.cancelled()) throw PlankBrokerError(PlankBrokerError::Network);
     QNetworkReply* rawReply = body != nullptr ?
                 manager.sendCustomRequest(request, method, payload) :
                 manager.sendCustomRequest(request, method);
@@ -193,7 +196,16 @@ PlankBrokerClient::Response PlankBrokerClient::request(const QByteArray& method,
     const bool authentication = path.startsWith(QLatin1String("/v1/auth/"));
     const bool enrollment = path.startsWith(QLatin1String("/v1/enroll/")) ||
                             path == QLatin1String("/v1/passkeys/setup");
-    QTimer::singleShot(enrollment ? EnrollmentTimeoutMs :
+    QTimer cancelTimer;
+    if (m_Config.cancelled) {
+        cancelTimer.setInterval(50);
+        QObject::connect(&cancelTimer, &QTimer::timeout, &loop, [&]() {
+            if (m_Config.cancelled()) { reply->abort(); loop.quit(); }
+        });
+        cancelTimer.start();
+    }
+    QTimer::singleShot(m_Config.requestTimeoutMs > 0 ? m_Config.requestTimeoutMs :
+                       enrollment ? EnrollmentTimeoutMs :
                        authentication ? AuthenticationTimeoutMs : RequestTimeoutMs,
                        &loop, &QEventLoop::quit);
     if (!reply->isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
@@ -576,4 +588,11 @@ void PlankBrokerClient::skipPasskeySetup(const QString& sessionToken) const
     Response response = request("POST", QStringLiteral("/v1/passkeys/setup/skip"), nullptr, sessionToken);
     throwForBearerStatus(response.status, response.body);
     response.body.fill('\0');
+}
+
+int PlankBrokerClient::submitDiagnostics(const QString& sessionToken, const QJsonObject& report) const
+{
+    if (sessionToken.isEmpty()) return 401;
+    if (QJsonDocument(report).toJson(QJsonDocument::Compact).size() > 64 * 1024) return 413;
+    return request("POST", QStringLiteral("/v1/diagnostics"), &report, sessionToken).status;
 }

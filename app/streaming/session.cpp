@@ -175,6 +175,7 @@ void Session::clStageFailed(int stage, int errorCode)
 
 void Session::clConnectionTerminated(int errorCode)
 {
+    if (s_ActiveSession != nullptr && errorCode != 0) emit s_ActiveSession->diagnosticConnectionLost(errorCode);
     if (static_cast<std::uint32_t>(errorCode) ==
             PLANK_TRANSPORT_TERMINATION_SESSION_TAKEN_OVER) {
         s_ActiveSession->m_CanReconnect.store(false);
@@ -4536,6 +4537,9 @@ bool Session::startConnectionAsync(bool reconnecting,
     }
 
     updateCollaborationIndicator();
+    emit diagnosticStreamParameters(QJsonObject{{"profile",int(m_PlankVideoProfile)},
+        {"capture",int(m_PlankCaptureSource)},{"width",m_StreamConfig.width},
+        {"height",m_StreamConfig.height},{"fps",m_StreamConfig.fps},{"bitrate_kbps",m_StreamConfig.bitrate}});
     emit connectionStarted();
     return true;
 }

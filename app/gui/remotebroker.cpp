@@ -1,3 +1,4 @@
+#include "backend/betadiagnostics.h"
 #include "remotebroker.h"
 
 #include "backend/brokersessionstore.h"
@@ -82,6 +83,14 @@ RemoteBroker::RemoteBroker(StreamingPreferences* preferences, QObject* parent)
       m_Preferences(preferences),
       m_Token(std::make_shared<SharedToken>())
 {
+    m_Diagnostics = new BetaDiagnostics(BetaDiagnostics::defaultDirectory(),this);
+    m_DiagnosticSampleTimer.setInterval(5000);
+    connect(&m_DiagnosticSampleTimer,&QTimer::timeout,this,[this] {
+        if (m_KeepaliveSession) m_Diagnostics->sample(m_KeepaliveSession->diagnosticRenderedFps(),
+                m_KeepaliveSession->diagnosticVideoMbps(),m_KeepaliveSession->currentNetworkRttMs(),
+                m_KeepaliveSession->diagnosticReceivedAgeMs(),m_KeepaliveSession->diagnosticStatisticsAgeMs());
+    });
+    connect(m_Preferences,&StreamingPreferences::brokerChanged,this,&RemoteBroker::configureDiagnostics);
     monotonicClock();
     m_KeepaliveTimer.setSingleShot(true);
     connect(&m_KeepaliveTimer, &QTimer::timeout, this, &RemoteBroker::sendKeepalive);
@@ -121,6 +130,7 @@ void RemoteBroker::initialize(ComputerManager* computerManager)
             m_Token->set(saved.token, saved.deviceBound);
             saved.token.fill(QChar('\0'));
             m_Username = saved.username;
+            configureDiagnostics();
             emit stateChanged();
         }
     }
@@ -177,6 +187,7 @@ void RemoteBroker::signOutLocally(const QString& message)
     m_Token->clear();
     BrokerSessionStore::clear(brokerAddress());
     m_Username.clear();
+    configureDiagnostics();
     m_Hosts.clear();
     m_BusyText.clear();
     if (!message.isEmpty()) m_SessionNotice = message;
@@ -315,6 +326,7 @@ void RemoteBroker::finishSignIn(QString token, const QString& confirmedUser, boo
         OnboardingState::recordBrokerSignIn(settings);
     }
     m_Username = confirmedUser;
+    configureDiagnostics();
     setBusy(QString());
     emit stateChanged();
     refreshHosts();
@@ -1235,6 +1247,14 @@ void RemoteBroker::attachKeepaliveSession(Session* session)
 {
     // Attaching the prepared Session must not restart the lease clock. The
     // initial grant is already being renewed while its workstation is probed.
+    m_Diagnostics->begin();
+    connect(session,&Session::diagnosticStreamParameters,m_Diagnostics,&BetaDiagnostics::setStreamParameters);
+    connect(session,&Session::connectionStarted,this,[this] {
+        m_Diagnostics->recordEvent("connected"); m_DiagnosticSampleTimer.start();
+    });
+    connect(session,&Session::stageFailed,this,[this](const QString&,int code,const QString&) { m_Diagnostics->recordEvent("stage_failed",code); });
+    connect(session,&Session::displayLaunchError,this,[this] { m_Diagnostics->recordEvent("display_failed"); });
+    connect(session,&Session::diagnosticConnectionLost,this,[this](int code) { m_Diagnostics->recordEvent("connection_lost",code); });
     m_KeepaliveSession = session;
     m_KeepaliveOwner = session;
     connect(session, &Session::connectionStarted, this, [this, session]() {
@@ -1246,6 +1266,8 @@ void RemoteBroker::attachKeepaliveSession(Session* session)
     });
     auto stopForSession = [this, session]() {
         if (m_KeepaliveOwner == session) {
+            m_DiagnosticSampleTimer.stop();
+            m_Diagnostics->finish();
             stopKeepalive();
             refreshHosts();
             QTimer::singleShot(6000, this, [this]() {
@@ -1351,5 +1373,30 @@ void RemoteBroker::sendKeepalive()
                 self->reportSessionNotice(PlankBrokerError(PlankBrokerError::DeviceKeyUnavailable).userMessage());
             self->scheduleKeepalive();
         }, Qt::QueuedConnection);
+    });
+}
+
+QObject* RemoteBroker::betaDiagnostics() const { return m_Diagnostics; }
+void RemoteBroker::configureDiagnostics()
+{
+    if (!configured() || !signedIn()) { m_Diagnostics->setAccount(QString(),{}); return; }
+    auto pins = PlankBroker::normalizePins(m_Preferences->brokerPins); pins.sort();
+    const QString identity = brokerAddress().toLower()+"\n"+pins.join(",")+"\n"+m_Username;
+    QSettings settings;
+    if (m_Diagnostics->enabled() && !settings.value("betaDiagnosticsNoticeShown",false).toBool()) {
+        const QString notice = tr("Beta diagnostics are enabled: session events, performance summaries and display/HDR settings are sent to your remote access administrator after disconnecting. You can turn this off in Settings.");
+        reportSessionNotice(m_SessionNotice.isEmpty() ? notice : m_SessionNotice+"\n"+notice);
+        settings.setValue("betaDiagnosticsNoticeShown",true);
+    }
+    const auto token = m_Token;
+    const auto revision = token->revision();
+    const auto config = clientConfig().withFrozenDeviceProofRequirement();
+    m_Diagnostics->setAccount(identity,[token,revision,config](const QJsonObject& report,const std::shared_ptr<std::atomic_bool>& cancelled) {
+        auto lowPriority = config;
+        lowPriority.cancelled = [cancelled] { return cancelled->load(); };
+        lowPriority.requestTimeoutMs = 3000;
+        const auto current = token->getForRevision(revision);
+        if (current.isEmpty() || cancelled->load()) return 0;
+        return PlankBrokerClient(lowPriority).submitDiagnostics(current,report);
     });
 }
