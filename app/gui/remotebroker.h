@@ -63,6 +63,7 @@ public:
     Q_INVOKABLE void setUpTouchIdAfterSignIn();
     Q_INVOKABLE void skipTouchIdAfterSignIn();
     Q_INVOKABLE void refreshHosts();
+    Q_INVOKABLE void refreshHostsQuietly() { refreshHostsImpl(false); }
     // Connects with the display setup for the current screens (DisplayProfile:
     // this workstation's own, else the global one). Screens without one emit
     // displaySetupRequired with reason "new-screens" (unless the suggested
@@ -179,6 +180,7 @@ private:
     void stopKeepalive();
     void scheduleKeepalive();
     void sendKeepalive();
+    void sendPresence(bool connected);
 
     StreamingPreferences* m_Preferences;
     QPointer<ComputerManager> m_ComputerManager;
@@ -199,6 +201,9 @@ private:
     QVector<NvComputer*> m_Computers;
 
     QTimer m_KeepaliveTimer;
+    QTimer m_PresenceTimer;
+    QString m_PresenceId;
+    quint64 m_PresenceSequence = 0;
     PlankBroker::LeaseRenewal m_LeaseRenewal;
     QString m_KeepaliveHostId;
     QPointer<Session> m_KeepaliveSession;

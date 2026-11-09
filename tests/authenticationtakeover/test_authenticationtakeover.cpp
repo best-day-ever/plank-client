@@ -18,6 +18,64 @@ private slots:
         QQuickStyle::setStyle("Material");
     }
 
+    void connectedWorkstationCard()
+    {
+        QQmlEngine engine;
+        QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+        QQmlComponent component(&engine);
+        component.setData(R"(
+            import QtQuick 2.15
+            import QtQuick.Controls 2.15
+            import QtQuick.Controls.Material 2.15
+            import "qrc:/gui"
+            ApplicationWindow {
+                width: 700; height: 180; visible: true; color: fixtureTheme.canvas
+                PlankTheme { id: fixtureTheme }
+                Material.theme: Material.Dark
+                Material.background: fixtureTheme.canvas
+                Material.foreground: fixtureTheme.textPrimary
+                Material.primary: fixtureTheme.chrome
+                Material.accent: fixtureTheme.accent
+                RemoteWorkstationCard {
+                    objectName: "card"
+                    x: 16; y: 16; width: parent.width - 32
+                    host: ({name: "workstation-01", online: true, busy: true,
+                        inUseBy: "", connectable: true,
+                        connectedUsers: ["artist.one", "artist.two", "support.engineer", "another.artist", "supervisor"]})
+                    statusText: "Busy"
+                }
+            }
+        )", QUrl("qrc:/presence-test.qml"));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow*>(root.data());
+        QVERIFY(window && QTest::qWaitForWindowExposed(window));
+        auto *card = root->findChild<QQuickItem*>("card");
+        auto *people = root->findChild<QQuickItem*>("connectedPeople");
+        auto *button = root->findChild<QQuickItem*>("connectButton");
+        QVERIFY(card && people && button);
+        QTRY_VERIFY(people->height() > 20); // All names wrap inside the row.
+        QVERIFY(people->property("text").toString().contains("supervisor"));
+        QVERIFY(people->mapToItem(card, QPointF(0, people->height())).y() <= card->height());
+        const QString capture = qEnvironmentVariable("PLANK_PRESENCE_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(window->grabWindow().save(capture));
+        QSignalSpy connectClick(card, SIGNAL(connectRequested()));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+            button->mapToScene(QPointF(button->width()/2, button->height()/2)).toPoint());
+        QCOMPARE(connectClick.size(), 1);
+        card->setProperty("busy", true);
+        QVERIFY(!button->isEnabled());
+        card->setProperty("busy", false);
+        QVariantMap host{{"name", "workstation-01"}, {"inUseBy", ""}, {"busy", false}};
+        host["connectedUsers"] = QStringList();
+        host["online"] = false;
+        host["connectable"] = false;
+        card->setProperty("host", host);
+        QTRY_VERIFY(!people->isVisible());
+        QVERIFY(!button->isEnabled());
+        QVERIFY(warnings.isEmpty());
+    }
+
     void strictConflict()
     {
         const QString id = QStringLiteral("11111111-2222-4333-8444-555555555555");
