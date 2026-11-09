@@ -37,6 +37,68 @@ private slots:
         }
     }
 
+    void displayTransitionReauthenticatesUntilReplacementIsReady()
+    {
+        PlankDisplayTransitionPolicy transition(120000);
+        QVERIFY(!transition.needsAuthentication());
+        QVERIFY(!transition.retryAuthentication(503, 500));
+
+        // Launch returned425, then the old worker's bearer returned401.
+        transition.authenticationLost(1000);
+        QVERIFY(transition.needsAuthentication());
+        // A fresh broker admission can see offline/busy/rate-limit responses
+        // while GDM and the new worker start. None requires a manual connect.
+        for (int status : {401, 409, 425, 429, 500, 502, 503, 504}) {
+            QVERIFY(transition.retryAuthentication(status, 1500));
+        }
+        transition.authenticated();
+        QVERIFY(!transition.needsAuthentication());
+        QVERIFY(!transition.retryAuthentication(503, 2000));
+        QVERIFY(!transition.expired(2000)); // Continue topology/launch in this attempt.
+    }
+
+    void displayTransitionDenialsHaveOneNonSlidingGrace()
+    {
+        PlankDisplayTransitionPolicy transition(120000);
+        transition.authenticationLost(1000);
+        QVERIFY(transition.retryAuthentication(401, 15999));
+        QVERIFY(!transition.retryAuthentication(401, 16000));
+        // Even a second worker change cannot extend denial retries.
+        transition.authenticated();
+        transition.authenticationLost(17000);
+        QVERIFY(!transition.retryAuthentication(401, 17000));
+        QVERIFY(transition.retryAuthentication(503, 17000));
+        // Ownership/authorization failures are terminal throughout the grace.
+        for (int status : {400, 403, 404, 423}) {
+            QVERIFY(!transition.retryAuthentication(status, 1500));
+        }
+        QVERIFY(PlankReconnectPolicy::terminalStatus(401, true));
+    }
+
+    void displayTransitionDeadlineIncludesRequestTime_data()
+    {
+        QTest::addColumn<qulonglong>("maximumWaitMs");
+        QTest::newRow("legacy-layout") << qulonglong(45000);
+        QTest::newRow("arrangement") << qulonglong(120000);
+    }
+
+    void displayTransitionDeadlineIncludesRequestTime()
+    {
+        QFETCH(qulonglong, maximumWaitMs);
+        PlankDisplayTransitionPolicy transition(maximumWaitMs);
+        transition.authenticationLost(maximumWaitMs - 1000);
+        QVERIFY(transition.retryAuthentication(401, maximumWaitMs - 1));
+        QVERIFY(!transition.expired(maximumWaitMs - 1));
+        // Time supplied by a monotonic clock includes slow HTTP requests,
+        // not just the half-second polling sleeps.
+        for (qulonglong elapsed : {maximumWaitMs, maximumWaitMs + 15000}) {
+            QVERIFY(transition.expired(elapsed));
+            for (int status : {401, 409, 425, 429, 503}) {
+                QVERIFY(!transition.retryAuthentication(status, elapsed));
+            }
+        }
+    }
+
     void automaticRecoveryDoesNotPauseForTheNotice()
     {
         PlankReconnectPolicy policy;
