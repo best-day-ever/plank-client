@@ -1,6 +1,7 @@
 #include "session.h"
 #include "sessionguidispatch.h"
 #include "backend/collaboration.h"
+#include "planksharinghud.h"
 #include <QDeadlineTimer>
 #include "streaming/clientframeflowtrace.h"
 #include "backend/hostrecovery.h"
@@ -2627,10 +2628,17 @@ void Session::updateCollaborationIndicator()
 {
     if (!isCollaborator()) return;
     const bool viewOnly = m_CollaborationPermission.load() == PlankCollaboration::View;
-    const QByteArray text = (viewOnly ? tr("Sharing %1’s desktop · View only") :
-        tr("Sharing %1’s desktop · Keyboard and mouse control")).arg(m_CollaborationOwner).toUtf8();
+    const QByteArray text = (viewOnly ? tr("Sharing with %1 - View only") :
+        tr("Sharing with %1 - Keyboard and mouse control")).arg(m_CollaborationOwner).toUtf8();
     m_OverlayManager.updateOverlayText(Overlay::OverlayCollaboration, text.constData());
     m_OverlayManager.setOverlayState(Overlay::OverlayCollaboration, true);
+    const QImage hud = plankSharingHud(QString::fromUtf8(text), viewOnly);
+    SDL_Surface* image = SDL_CreateSurfaceFrom(hud.width(), hud.height(), SDL_PIXELFORMAT_ARGB8888,
+                                              const_cast<uchar*>(hud.constBits()), hud.bytesPerLine());
+    if (image != nullptr) {
+        m_OverlayManager.updateOverlaySurface(Overlay::OverlayCollaboration, SDL_DuplicateSurface(image));
+        SDL_DestroySurface(image);
+    }
     for (int index = 0; index < m_CollaborationOutputs.size(); ++index) {
         SDL_Window* window = index == 0 ? m_Window : m_SecondaryWindows.value(index - 1, nullptr);
         if (window == nullptr) continue;
@@ -4613,8 +4621,14 @@ bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startA
     };
     try {
         const QDeadlineTimer deadline(120000);
+        bool firstPoll = true;
         while (!deadline.hasExpired()) {
-            for (int delay = 0; delay < 1000 && !m_ConnectionStartCancelled.load(); delay += 50) SDL_Delay(50);
+            // Automatically authorized joins can be ready in the request
+            // response round trip. Poll immediately, then at a bounded 4 Hz.
+            if (!firstPoll) {
+                for (int delay = 0; delay < 250 && !m_ConnectionStartCancelled.load(); delay += 50) SDL_Delay(50);
+            }
+            firstPoll = false;
             if (m_ConnectionStartCancelled.load()) { cancel(); finish(); return false; }
             // Status retains this authentication; only a successful launch
             // consumes it. Never replay a broker's one-use GSSAPI admission.

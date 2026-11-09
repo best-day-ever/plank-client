@@ -174,6 +174,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
 
     SDL_MouseMotionEvent motion = *event;
     if (batchPendingEvents) PlankMouseMotion::coalescePending(motion);
+    if (motion.xrel == 0 && motion.yrel == 0) return;
     // Keep SDL's fractional point coordinates for Retina input.
     float x = motion.x, y = motion.y;
 
@@ -185,6 +186,12 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     // or transferring native capture/focus between them.
     routePresentationPointer(window, x, y);
 
+    // Remember only deliberate local motion. Host position notifications never
+    // manufacture input or take the local compositor pointer away from us.
+    m_LastLocalPointer = QPointF(x, y);
+    m_LastLocalPointerWindow = SDL_GetWindowID(window);
+    m_LastLocalPointerMotion = SDL_GetTicks();
+    hideSharedPointer();
     const bool mouseInVideoRegion = isMouseInVideoRegion(
                 x, y, SDL_GetWindowID(window));
 
@@ -315,6 +322,9 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
         return;
     }
 
+    // Scroll packets carry no position. Make idle handoff target the point
+    // under this participant's pointer, just like a button press.
+    if (!sendAbsoluteMousePosition(window, event->mouse_x, event->mouse_y, false)) return;
     if (event->y != 0.0f) {
 #ifdef Q_OS_DARWIN
         // HACK: Clamp the scroll values on macOS to prevent OS scroll acceleration

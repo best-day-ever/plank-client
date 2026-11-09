@@ -161,6 +161,7 @@ QSize SdlInputHandler::streamDimensions() const
 
 SdlInputHandler::~SdlInputHandler()
 {
+    hideSharedPointer();
 #ifdef Q_OS_MACOS
     m_MacKeyboardCapture.reset();
     m_MacQuitShortcut.reset();
@@ -322,6 +323,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
 void SdlInputHandler::setPresentationLayout(
         const PlankPresentationLayout& layout)
 {
+    hideSharedPointer();
     m_PresentationLayout = layout;
     if (m_PresentationLayout.outputs.isEmpty() && m_Window != nullptr) {
         int width = 0;
@@ -514,6 +516,7 @@ void SdlInputHandler::applyPendingRemoteCursorPosition()
     m_AppliedRemoteCursorPosition = position;
     m_AppliedRemoteCursorPositionValid = true;
     m_AppliedRemoteCursorPositionSequence = position.sequence;
+    updateSharedPointer();
     SDL_Window* targetWindow = nullptr;
     int x = 0;
     int y = 0;
@@ -613,6 +616,7 @@ void SdlInputHandler::notifyMouseLeave()
 
 void SdlInputHandler::notifyFocusLost()
 {
+    hideSharedPointer();
     m_SessionHotkeys.releaseKeys();
 #ifdef Q_OS_MACOS
     m_MacKeyboardCapture->refresh();
@@ -762,6 +766,7 @@ void SdlInputHandler::resetRemoteCursorPositionEpoch()
     // handoff, so discard the old worker's high-water mark once its transport
     // has stopped or the new worker's positions will be rejected until its
     // counter catches up.
+    hideSharedPointer();
     m_RemoteCursorMailbox.resetPositionEpoch();
 
     m_AppliedRemoteCursorPosition = {};
@@ -1138,6 +1143,7 @@ void SdlInputHandler::reconcileWaylandTabletCursorOutputs()
 
 void SdlInputHandler::updateTabletCursorVisibility()
 {
+    updateSharedPointer();
     reconcileWaylandTabletCursorOutputs();
 
     SDL_Window* positionWindow = nullptr;
@@ -1156,7 +1162,7 @@ void SdlInputHandler::updateTabletCursorVisibility()
     for (const auto& output : m_PresentationLayout.outputs) {
         if (output.window != positionWindow) MacWindow::hideTabletCursor(output.window);
     }
-    if (positionWindow && m_AppliedRemoteCursorValid) {
+    if (positionWindow && m_AppliedRemoteCursorValid && (m_TabletCursorActive || m_SharedPointerTarget != positionWindow)) {
         const auto& image = m_AppliedRemoteCursor;
         MacWindow::tabletCursor(positionWindow, image.pixels.data(), image.width, image.height,
             image.hotspotX, image.hotspotY, image.generation, x, y, visible);
@@ -1307,3 +1313,65 @@ void SdlInputHandler::handlePenAxisEvent(SDL_PenAxisEvent* event)
 }
 
 #endif // Q_OS_MACOS || Q_OS_WIN
+
+void SdlInputHandler::hideSharedPointer()
+{
+#ifdef Q_OS_MACOS
+    if (m_SharedPointerTargetId && SDL_GetWindowFromID(m_SharedPointerTargetId) == m_SharedPointerTarget)
+        MacWindow::hideTabletCursor(m_SharedPointerTarget);
+#endif
+    if (m_SharedPointerWindow) m_SharedPointerWindow->hide();
+    if (m_SharedWaylandPointer) {
+        m_SharedWaylandPointer->setVisible(false);
+        m_SharedWaylandPointer->dispatchPending();
+    }
+    m_SharedPointerTarget = nullptr;
+    m_SharedPointerTargetId = 0;
+}
+
+void SdlInputHandler::updateSharedPointer()
+{
+    SDL_Window* window = nullptr;
+    int x = 0, y = 0;
+    bool focused = false;
+    for (const auto& output : m_PresentationLayout.outputs) {
+#ifdef Q_OS_MACOS
+        focused |= MacWindow::hasKeyboardFocus(output.window);
+#else
+        focused |= (SDL_GetWindowFlags(output.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+#endif
+    }
+    if (!m_AppliedRemoteCursorPositionValid ||
+            !mapRemoteCursorPositionToWindow(m_AppliedRemoteCursorPosition, window, x, y) ||
+            !plankSharedPointerVisible(focused, m_TabletCursorActive, m_RemoteCursorVisible,
+                m_ViewOnly, window && SDL_GetWindowID(window) == m_LastLocalPointerWindow,
+                QPointF(x, y), m_LastLocalPointer, SDL_GetTicks() - m_LastLocalPointerMotion) ||
+            (SDL_GetWindowFlags(window) & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED))) {
+        hideSharedPointer();
+        return;
+    }
+    if (m_SharedPointerTarget != window) hideSharedPointer();
+    static const QImage image = plankSharedPointerImage();
+#ifdef Q_OS_MACOS
+    MacWindow::tabletCursor(window, image.constBits(), image.width(), image.height(),
+                           1, 1, UINT64_MAX, x, y, true);
+#else
+    if (qstrcmp(SDL_GetCurrentVideoDriver(), "wayland") == 0) {
+        if (!m_SharedWaylandPointer || !m_SharedWaylandPointer->isAttachedTo(window)) {
+            m_SharedWaylandPointer = PlankWaylandCursor::create(window);
+            if (!m_SharedWaylandPointer) return;
+            m_SharedWaylandPointer->setImage(image, 1, 1);
+        }
+        m_SharedWaylandPointer->setPosition(x, y);
+        m_SharedWaylandPointer->setVisible(true);
+        m_SharedWaylandPointer->dispatchPending();
+    } else {
+        int left = 0, top = 0;
+        if (!SDL_GetWindowPosition(window, &left, &top)) return;
+        if (!m_SharedPointerWindow) m_SharedPointerWindow = std::make_unique<PlankSharedPointerOverlay>();
+        m_SharedPointerWindow->present(QPoint(left + x - 1, top + y - 1), true);
+    }
+#endif
+    m_SharedPointerTarget = window;
+    m_SharedPointerTargetId = SDL_GetWindowID(window);
+}

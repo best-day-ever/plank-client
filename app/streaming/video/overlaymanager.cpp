@@ -157,7 +157,7 @@ void OverlayManager::notifyOverlayUpdated(OverlayType type)
         return;
     }
 
-    if (type == OverlayType::OverlayToolbar) {
+    if (type == OverlayType::OverlayToolbar || type == OverlayType::OverlayCollaboration) {
         m_Renderer->notifyOverlayUpdated(type);
         return;
     }
