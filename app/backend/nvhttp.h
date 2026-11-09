@@ -6,6 +6,7 @@
 #include "desktopstage.h"
 #include "macpreviewlaunch.h"
 #include "hosttlsguard.h"
+#include "plankbroker.h"
 
 #include <Limelight.h>
 
@@ -178,7 +179,7 @@ public:
 
     void setAddress(NvAddress address);
 
-    void setPlankSessionToken(QString sessionToken, QByteArray identityKey);
+    void setPlankSessionToken(QString sessionToken, QByteArray identityKey, bool sharedDesktop = false);
     void setTrustAddress(NvAddress address);
     QByteArray hostIdentityKey() const { return m_IdentityKey; }
     void setTrustPrompt(std::function<bool(const HostIdentityChangedException&)> prompt) {
@@ -199,9 +200,10 @@ public:
     enum class AuthenticationIntent { ExplicitConnection, Recovery };
     QString authenticate(QString username, QString password, bool* greeterConfirmed = nullptr,
                          AuthenticationIntent intent = AuthenticationIntent::ExplicitConnection);
-    // Brokered admission: /plank/auth/start with a one-use GSSAPI token minted
-    // by the broker. Never answers a password challenge.
-    QString authenticateGssapi(QString username, QString gssapiToken, bool* greeterConfirmed = nullptr);
+    // Brokered admission: explicit GSSAPI or shared-Mac capability.
+    // Never answers a password challenge or distributes the local password.
+    QString authenticateBroker(PlankBroker::Admission admission, bool* greeterConfirmed = nullptr);
+    bool sharedDesktop() const { return m_SharedDesktop; }
     bool probeWorkerReplacement(const QString& instance, const QString& certificateSha256);
     QString workerInstance() const { return m_WorkerInstance; }
     // Owner and sign-out offer from the last refused launch or resume.
@@ -290,13 +292,14 @@ private:
                                  const QString& certificateSha256);
 
     NvAddress m_Address;
-    bool acceptsPlankCertificate(const QSslCertificate& certificate) const;
+    bool acceptsPlankCertificate(const QList<QSslCertificate>& chain) const;
     QMetaObject::Connection enforcePinnedCertificate(QNetworkAccessManager* manager);
     void handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
 
     QNetworkAccessManager* m_Nam;
     QString m_PinnedCertificateSha256;
     QString m_SessionToken;
+    bool m_SharedDesktop = false;
     QString m_WorkerInstance;
     QString m_CollaborationGrant;
     QString m_CollaborationPermission;

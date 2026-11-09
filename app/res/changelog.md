@@ -1,8 +1,9 @@
-## 1.2.21 — Shared sessions and connection recovery
+## 1.2.22 — Shared sessions and connection recovery
 
 - Keep connections to several workstations open at once. Choose New connection in the launcher or session toolbar, then select another workstation in its own Fernweh window. Remembered sign-in is reused; closing a connection leaves the others running.
 - Wait for all workstation sessions to end and other Fernweh windows to close before installing an application update.
 
+- Connect to configured shared Mac desktops through the broker, preserving their active screen layout and individually authenticated access.
 - Show the connected people on each workstation and the active desktop pointer during shared control.
 - Recover temporary connection failures while the workstation switches from sign-in to the desktop.
 - Include bounded beta diagnostics when enabled by the administrator.

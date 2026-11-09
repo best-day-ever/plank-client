@@ -132,6 +132,8 @@ public:
     QString sessionToken;
     // In-memory only; bind the bearer token to the authenticated Host identity.
     QByteArray sessionIdentityKey;
+    // Authenticated session policy only; never learned from discovery or saved.
+    bool plankSharedDesktop = false;
     int plankTopologyVersion = 0;
     int plankFeatureFlags = 0;
     // Encoding modes the host advertises (PlankEncodingModes); empty when
