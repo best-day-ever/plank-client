@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+
 namespace MacDisplayGeometry {
 // Each presentation window uses native fullscreen, including mixed-DPI
 // multi-display sessions. Match Client must use the same camera-safe viewport.
@@ -9,14 +12,16 @@ inline bool useNativeFullscreen(int connectedDisplayCount)
     return connectedDisplayCount > 0;
 }
 
-// AppKit 15 reserves five additional logical points below the camera when
-// placing a native fullscreen window. NSScreen.safeAreaInsets omits this
-// margin (38-point inset, but 43-point fullscreen exclusion on a scaled panel).
-// Keep this measured compatibility correction scoped to macOS 15; do not
-// change newer systems without measuring their settled native window bounds.
-inline int nativeFullscreenTopInset(int cameraInset, int osMajor)
+// A notched screen's fullscreen top exclusion can extend below its camera
+// safe area. Use AppKit's measured top-edge reservation, not an OS-version
+// margin. visibleFrame's bottom/side exclusions (the Dock) do not participate.
+// Non-notched fullscreen windows still use the complete panel, even when the
+// desktop's visibleFrame reserves a menu bar.
+inline int nativeFullscreenTopInset(double cameraInset, double reservedTop)
 {
-    return cameraInset > 0 && osMajor == 15 ? cameraInset + 5 : cameraInset;
+    if (!std::isfinite(cameraInset) || cameraInset <= 0) return 0;
+    if (!std::isfinite(reservedTop)) reservedTop = 0;
+    return static_cast<int>(std::ceil(std::max(cameraInset, reservedTop)));
 }
 
 // Match the native fullscreen viewport without changing Retina density.

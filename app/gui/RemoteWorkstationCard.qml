@@ -28,7 +28,7 @@ Rectangle {
         Rectangle {
             width: 10; height: 10; radius: 5
             color: !card.host.online ? theme.textDisabled :
-                   (card.host.busy || card.people.length > 0 || card.host.inUseBy !== "" ? theme.warning : theme.success)
+                   (!card.host.sharedDesktop && (card.host.busy || card.people.length > 0 || card.host.inUseBy !== "") ? theme.warning : theme.success)
             Layout.alignment: Qt.AlignVCenter
         }
         ColumnLayout {

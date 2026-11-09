@@ -12,7 +12,13 @@ import FernwehUpdater 1.0
 import RemoteBroker 1.0
 
 ApplicationWindow {
-    property bool pollingActive: false
+    property alias pollingActive: hostPolling.pollingActive
+    PlankHostPolling {
+        id: hostPolling
+        manager: ComputerManager
+        windowVisible: window.visible
+        windowActive: window.active
+    }
 
     function openNewConnection() {
         if (!SystemProperties.openNewConnection()) newConnectionError.open()
@@ -209,62 +215,6 @@ ApplicationWindow {
                 flat: true
                 onClicked: DisplaySetup.dismissBanner()
             }
-        }
-    }
-
-    // This timer keeps us polling for 5 minutes of inactivity
-    // to allow the user to work with Moonlight on a second display
-    // while dealing with configuration issues. This will ensure
-    // machines come online even if the input focus isn't on Moonlight.
-    Timer {
-        id: inactivityTimer
-        interval: 5 * 60000
-        onTriggered: {
-            if (!active && pollingActive) {
-                ComputerManager.stopPollingAsync()
-                pollingActive = false
-            }
-        }
-    }
-
-    onVisibleChanged: {
-        // When we become invisible while streaming is going on,
-        // stop polling immediately.
-        if (!visible) {
-            inactivityTimer.stop()
-
-            if (pollingActive) {
-                ComputerManager.stopPollingAsync()
-                pollingActive = false
-            }
-        }
-        else if (active) {
-            // When we become visible and active again, start polling
-            inactivityTimer.stop()
-
-            // Restart polling if it was stopped
-            if (!pollingActive) {
-                ComputerManager.startPolling()
-                pollingActive = true
-            }
-        }
-    }
-
-    onActiveChanged: {
-        if (active) {
-            // Stop the inactivity timer
-            inactivityTimer.stop()
-
-            // Restart polling if it was stopped
-            if (!pollingActive) {
-                ComputerManager.startPolling()
-                pollingActive = true
-            }
-        }
-        else {
-            // Start the inactivity timer to stop polling
-            // if focus does not return within a few minutes.
-            inactivityTimer.restart()
         }
     }
 

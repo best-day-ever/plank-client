@@ -338,9 +338,9 @@ Item {
     // say what they mean, and never repeat the state ("Offline · offline").
     function hostStatusText(host) {
         var parts = []
-        parts.push(!host.online ? qsTr("Offline") :
+        parts.push(!host.online ? qsTr("Offline") : host.sharedDesktop ? qsTr("Shared desktop") :
                    (host.busy || host.inUseBy !== "" || (host.connectedUsers || []).length > 0) ? qsTr("Busy") : qsTr("Online"))
-        if (host.inUseBy !== "") {
+        if (host.inUseBy !== "" && !host.sharedDesktop) {
             parts.push(qsTr("in use by %1").arg(host.inUseBy))
         }
         if (!host.connectable && host.reason !== "") {

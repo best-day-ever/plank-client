@@ -1,4 +1,6 @@
 #include "../../app/backend/hosttlsguard.h"
+#include "../../app/backend/nvhttp.h"
+#include <QCryptographicHash>
 #include <QFile>
 #include <QProcess>
 #include <QSslKey>
@@ -17,6 +19,7 @@ public:
     QByteArray received;
     QList<QSslSocket*> sockets;
     int connections = 0;
+    bool plankHttp = false;
     ~Server() override { for (auto* socket : sockets) { socket->disconnect(this); socket->abort(); } }
     void incomingConnection(qintptr descriptor) override
     {
@@ -29,7 +32,24 @@ public:
         socket->setProtocol(QSsl::TlsV1_3);
         socket->setPeerVerifyMode(QSslSocket::VerifyNone);
         connect(socket, &QSslSocket::readyRead, this, [this, socket] {
-            received += socket->readAll();
+            const auto bytes = socket->readAll();
+            received += bytes;
+            const auto request = socket->property("request").toByteArray() + bytes;
+            socket->setProperty("request", request);
+            if (plankHttp) {
+                const int end = request.indexOf("\r\n\r\n");
+                if (end < 0) return;
+                const bool get = request.startsWith("GET /serverinfo ");
+                const bool auth = request.startsWith("POST /plank/auth/start ");
+                if (!get && (!auth || !request.endsWith('}'))) return;
+                const QByteArray body = get ?
+                    QByteArray("<root status_code=\"200\"><PlankAuth>1</PlankAuth></root>") :
+                    QByteArray("{\"state\":\"authenticated\",\"session_token\":\"synthetic-session\",\"shared_desktop\":true}");
+                socket->write("HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(body.size()) +
+                              "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+                return;
+            }
             if (received.endsWith("synthetic-credential"))
                 socket->write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok");
         });
@@ -85,6 +105,56 @@ class HostTlsGuardTest : public QObject
         return guard.checked() && reply->error() == QNetworkReply::NoError && reply->readAll() == "ok";
     }
 private slots:
+    void clientDiscoveryAcceptsValidatedChain_data()
+    {
+        QTest::addColumn<bool>("worker");
+        QTest::newRow("linux-machine") << false;
+        QTest::newRow("mac-worker") << true;
+    }
+    void clientDiscoveryAcceptsValidatedChain()
+    {
+        QFETCH(bool, worker);
+        Server server;
+        server.plankHttp = true;
+        server.chain = worker ? QList<QSslCertificate>{cert("worker"), cert("machine")} :
+                               QList<QSslCertificate>{cert("machine")};
+        server.key = key(worker ? "worker" : "machine");
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        NvHTTP http(NvAddress(QStringLiteral("127.0.0.1"), server.serverPort()));
+        QCOMPARE(NvHTTP::getXmlString(http.getServerInfo(NvHTTP::NVLL_VERBOSE, true), "PlankAuth"), "1");
+    }
+    void brokeredClientAcceptsOnlyPinnedValidChain_data()
+    {
+        QTest::addColumn<bool>("correctPin");
+        QTest::addColumn<bool>("correctAuthority");
+        QTest::newRow("mac-worker") << true << true;
+        QTest::newRow("wrong-leaf-pin") << false << true;
+        QTest::newRow("forged-authority") << true << false;
+    }
+    void brokeredClientAcceptsOnlyPinnedValidChain()
+    {
+        QFETCH(bool, correctPin);
+        QFETCH(bool, correctAuthority);
+        Server server;
+        server.plankHttp = true;
+        server.chain = {cert("worker"), cert(correctAuthority ? "machine" : "stranger")};
+        server.key = key("worker");
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        NvHTTP http(NvAddress(QStringLiteral("127.0.0.1"), server.serverPort()));
+        http.setPinnedCertificateSha256(QString::fromLatin1(
+            cert(correctPin ? "worker" : "stranger").digest(QCryptographicHash::Sha256).toHex()));
+        PlankBroker::Admission admission;
+        admission.method = PlankBroker::AdmissionMethod::Gssapi;
+        admission.username = QStringLiteral("test-user");
+        admission.token = QString::fromLatin1(QByteArray("synthetic-credential").toBase64());
+        if (correctPin && correctAuthority) {
+            QCOMPARE(http.authenticateBroker(admission), "synthetic-session");
+            QVERIFY(server.received.contains("POST /plank/auth/start "));
+        } else {
+            QVERIFY_THROWS_EXCEPTION(QtNetworkReplyException, http.authenticateBroker(admission));
+            QVERIFY(server.received.isEmpty());
+        }
+    }
     void failuresBeforeTlsRemainTransportErrors_data()
     {
         QTest::addColumn<int>("kind");

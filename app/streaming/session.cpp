@@ -1,4 +1,5 @@
 #include "session.h"
+#include "backend/macsharedsession.h"
 #include "sessionguidispatch.h"
 #include "backend/collaboration.h"
 #include "planksharinghud.h"
@@ -799,7 +800,7 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_Computer(computer),
       m_PlankVideoProfile(static_cast<StreamingPreferences::PlankVideoProfile>(
               qBound(static_cast<int>(StreamingPreferences::PLANK_PROFILE_H264_10BIT_444),
-                     computer->plankVideoProfile,
+                     MacSharedSession::videoProfile(computer->outputTopology, computer->plankVideoProfile, computer->plankSharedDesktop),
                      static_cast<int>(StreamingPreferences::PLANK_PROFILE_COUNT) - 1))),
       m_PlankCaptureSource(static_cast<StreamingPreferences::PlankCaptureSource>(
               qBound(static_cast<int>(StreamingPreferences::PLANK_CAPTURE_NVFBC_8BIT),
@@ -1908,9 +1909,8 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
 
     // Never reuse a broker token: each admission is a new broker connect,
     // which may also lease a different session port.
-    QString username;
-    QString gssapiToken;
-    m_PlankBrokerAdmission(username, gssapiToken);
+    PlankBroker::Admission admission;
+    m_PlankBrokerAdmission(admission);
     NvAddress address;
     QString pin;
     {
@@ -1920,7 +1920,7 @@ QString Session::authenticatePlank(NvHTTP& http, bool* greeterConfirmed)
     }
     http.setAddress(address);
     http.setPinnedCertificateSha256(pin);
-    return http.authenticateGssapi(username, gssapiToken, greeterConfirmed);
+    return http.authenticateBroker(std::move(admission), greeterConfirmed);
 }
 
 bool Session::initialize(IFFmpegRendererFactory* presenter)
@@ -3194,8 +3194,7 @@ bool Session::configurePlankHostLayout()
     QString scalingMode;
     QString virtualMode1;
     QString virtualMode2;
-    QSize authenticatedDesktopSize;
-    QSizeF authenticatedLogicalSize;
+    bool sharedMacDesktop = false;
     bool hostRejectsRequestedLayout = false;
     bool virtualPrimary = false;
     int hostFeatureFlags = 0;
@@ -3218,9 +3217,7 @@ bool Session::configurePlankHostLayout()
         scalingMode = m_Computer->plankScalingMode;
         virtualMode1 = m_Computer->plankVirtualMode1;
         virtualMode2 = m_Computer->plankVirtualMode2;
-        authenticatedDesktopSize = QSize(m_Computer->outputTopology.desktopWidth,
-                                         m_Computer->outputTopology.desktopHeight);
-        authenticatedLogicalSize = m_Computer->outputTopology.captureLogicalBounds.size();
+        sharedMacDesktop = m_Computer->plankSharedDesktop;
         virtualPrimary = m_Computer->outputTopology.startupLayoutKind == NvOutputTopology::SingleHostLayout &&
             (m_Computer->outputTopology.featureFlags & NvOutputTopology::VirtualPrimaryConnectorFeature);
         const bool hostPolicyKnown = m_Computer->outputTopology.displayPolicyKnown();
@@ -3270,9 +3267,9 @@ bool Session::configurePlankHostLayout()
         if (m_PlankCaptureSource == StreamingPreferences::PLANK_CAPTURE_SCREENCAPTUREKIT) {
             int scale = 1;
             const QString mode = NvOutputTopology::resolveMacClientDisplayMode(displays, &error, &scale);
-            if (mode.isEmpty() || NvOutputTopology::macDisplayModeSize(mode) !=
-                    authenticatedDesktopSize || authenticatedLogicalSize !=
-                    QSizeF(authenticatedDesktopSize.width() / scale, authenticatedDesktopSize.height() / scale)) {
+            if (mode.isEmpty() || !MacSharedSession::acceptsDisplay(topologySnapshot,
+                    NvOutputTopology::macDisplayModeSize(mode), scale,
+                    topologySnapshot.appleEncodingMode, sharedMacDesktop)) {
                 emit displayLaunchError(mode.isEmpty() ? error : tr("Client displays changed during connection. Please reconnect to match the current display resolution."));
                 return false;
             }
@@ -4153,6 +4150,7 @@ bool Session::startConnectionAsync(bool reconnecting,
                                 QWriteLocker lock(&m_Computer->lock);
                                 m_Computer->sessionToken = token;
                                 m_Computer->sessionIdentityKey = http->hostIdentityKey();
+                                m_Computer->plankSharedDesktop = http->sharedDesktop();
                                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             }
                             transition.authenticated();
@@ -5069,6 +5067,7 @@ bool Session::runPlankReconnect()
                     QWriteLocker lock(&m_Computer->lock);
                     m_Computer->sessionToken = token;
                     m_Computer->sessionIdentityKey = http.hostIdentityKey();
+                    m_Computer->plankSharedDesktop = http.sharedDesktop();
                     m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 }
                 if (greeterConfirmed &&
@@ -5105,10 +5104,20 @@ bool Session::runPlankReconnect()
                     StreamingPreferences::plankAppleEncodingMode(m_PlankVideoProfile), desktopScale) : http.getOutputTopology();
             }
             const QVector<NvApp> apps = http.getAppList();
+            if (macDesktop && http.sharedDesktop()) {
+                m_PlankVideoProfile = static_cast<StreamingPreferences::PlankVideoProfile>(
+                    MacSharedSession::videoProfile(topology, m_PlankVideoProfile, true));
+                const int format = m_PlankVideoProfile == StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444 ?
+                    VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_MAIN10;
+                m_SupportedVideoFormats.clear();
+                m_SupportedVideoFormats.append(format);
+                m_StreamConfig.supportedVideoFormats = format;
+            }
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->sessionToken = token;
                 m_Computer->sessionIdentityKey = http.hostIdentityKey();
+                m_Computer->plankSharedDesktop = http.sharedDesktop();
                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                 if (topologySupported) {
                     m_Computer->outputTopology = topology;

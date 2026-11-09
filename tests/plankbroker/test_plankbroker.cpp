@@ -25,6 +25,7 @@
 #include "plankbrokerclient.h"
 #include "plankpasskey.h"
 #include "macpreviewlaunch.h"
+#include "macsharedsession.h"
 #include "outputtopology.h"
 #include "plankenrollment.h"
 #include "onboardingstate.h"
@@ -329,7 +330,14 @@ private slots:
     void answersPrompts();
     void parsesHosts();
     void rejectsMalformedHosts();
+    void sharedHostListIsAdvisory();
     void parsesLease();
+    void parsesSharedMacAdmission();
+    void rejectsMixedOrMalformedAdmission();
+    void sharedMacDisplayKeepsActiveTopology();
+    void remoteMacMatchClientPreservesPixelsScaleAndReconnectPolicy();
+    void remoteMacMatchClientRejectsUnsupportedDisplays();
+    void remoteMacMatchClientJoinsExistingSharedDesktop();
     void rejectsMalformedLeases();
     void parsesLeaseRoute();
     void classifiesBearerStatus();
@@ -750,6 +758,23 @@ void TestPlankBroker::rejectsMalformedHosts()
     }
 }
 
+void TestPlankBroker::sharedHostListIsAdvisory()
+{
+    QJsonObject entry {{"id", "mac.example.org"}, {"online", true}, {"busy", true},
+                      {"connectable", true}, {"shared_desktop", true}};
+    QVector<PlankBroker::Host> hosts;
+    auto encode = [&]() { return QJsonDocument(QJsonObject {{"hosts", QJsonArray {entry}}}).toJson(); };
+    QVERIFY(PlankBroker::parseHosts(encode(), hosts));
+    QVERIFY(hosts.first().sharedDesktop);
+    QVERIFY(hosts.first().busy);
+    QVERIFY(hosts.first().connectable);
+    entry["shared_desktop"] = "true";
+    QVERIFY(!PlankBroker::parseHosts(encode(), hosts));
+    entry.remove("shared_desktop");
+    QVERIFY(PlankBroker::parseHosts(encode(), hosts));
+    QVERIFY(!hosts.first().sharedDesktop);
+}
+
 void TestPlankBroker::parsesLease()
 {
     PlankBroker::Lease lease;
@@ -762,6 +787,166 @@ void TestPlankBroker::parsesLease()
     QCOMPARE(lease.username, QStringLiteral("anna"));
     QCOMPARE(lease.gssapiToken, QStringLiteral("YIIBAgYJKoZIhvcSAQICAQBuggE="));
     QCOMPARE(lease.expiresIn, 30);
+}
+
+void TestPlankBroker::parsesSharedMacAdmission()
+{
+    const QString capability = QStringLiteral("v1.eyJ2IjoxfQ.YWJj");
+    QJsonObject body {{"endpoint", "relay.example.org"}, {"port", 29042},
+        {"host_cert_sha256", HostPin}, {"username", "artist"}, {"expires_in", 30},
+        {"auth_method", "broker_capability"}, {"broker_token", capability},
+        {"local_username", "shared-user"}, {"gssapi_token", ""}};
+    PlankBroker::Lease lease;
+    QVERIFY(PlankBroker::parseLease(QJsonDocument(body).toJson(), lease));
+    QCOMPARE(lease.authMethod, PlankBroker::AdmissionMethod::BrokerCapability);
+    QCOMPARE(lease.localUsername, QStringLiteral("shared-user"));
+    const auto request = PlankBroker::admissionRequest(lease.admission());
+    QCOMPARE(request, (QJsonObject {{"username", "artist"}, {"broker_token", capability}}));
+    QVERIFY(!request.contains("password"));
+    QVERIFY(!request.contains("local_username"));
+    lease.clearAdmission();
+    QVERIFY(lease.brokerToken.isEmpty());
+    QVERIFY(PlankBroker::admissionRequest(lease.admission()).isEmpty());
+
+    body.remove("broker_token"); body.remove("local_username");
+    body["auth_method"] = "gssapi"; body["gssapi_token"] = "YWJj";
+    QVERIFY(PlankBroker::parseLease(QJsonDocument(body).toJson(), lease));
+    QCOMPARE(PlankBroker::admissionRequest(lease.admission()),
+             (QJsonObject {{"username", "artist"}, {"gssapi_token", "YWJj"}}));
+}
+
+void TestPlankBroker::rejectsMixedOrMalformedAdmission()
+{
+    const QString capability = QStringLiteral("v1.eyJ2IjoxfQ.YWJj");
+    const QJsonObject good {{"endpoint", "relay.example.org"}, {"port", 29042},
+        {"host_cert_sha256", HostPin}, {"username", "artist"}, {"expires_in", 30},
+        {"auth_method", "broker_capability"}, {"broker_token", capability},
+        {"local_username", "shared-user"}, {"gssapi_token", ""}};
+    const QList<QPair<QString, QJsonValue>> mutations {
+        {"auth_method", "unknown"}, {"auth_method", "gssapi"}, {"auth_method", QJsonValue::Null},
+        {"broker_token", "v1..YWJj"}, {"broker_token", QStringLiteral("v2.") + capability.section('.', 1, 2)},
+        {"broker_token", QString(capability).replace(QStringLiteral("fQ."), QStringLiteral("fQ==."))}, {"broker_token", "v1.!.YWJj"},
+        {"broker_token", QString(8193, 'x')}, {"broker_token", 42},
+        {"local_username", ""}, {"local_username", "shared user"},
+        {"gssapi_token", "YWJj"}, {"gssapi_token", QJsonValue::Null},
+    };
+    PlankBroker::Lease lease;
+    for (const auto& mutation : mutations) {
+        auto body = good; body[mutation.first] = mutation.second;
+        QVERIFY2(!PlankBroker::parseLease(QJsonDocument(body).toJson(), lease), qPrintable(mutation.first));
+        QVERIFY(lease.brokerToken.isEmpty());
+        QCOMPARE(lease.port, quint16(0));
+    }
+    auto body = good; body.remove("auth_method");
+    QVERIFY(!PlankBroker::parseLease(QJsonDocument(body).toJson(), lease));
+    bool shared = true;
+    QVERIFY(PlankBroker::parseSharedDesktop({}, shared)); QVERIFY(!shared);
+    QVERIFY(PlankBroker::parseSharedDesktop({{"shared_desktop", true}}, shared)); QVERIFY(shared);
+    QString session;
+    QCOMPARE(PlankBroker::parseHostAdmission({{"state", "authenticated"},
+        {"session_token", "test-token"}, {"shared_desktop", "true"}}, session),
+        PlankBroker::AdmissionResult::Malformed);
+    QVERIFY(session.isEmpty());
+}
+
+void TestPlankBroker::sharedMacDisplayKeepsActiveTopology()
+{
+    NvOutputTopology topology;
+    QVERIFY(NvOutputTopology::fromJson(fixedCaptureTopology(), topology));
+    const auto before = topology.toJson();
+    const QSize requested(2560, 1440);
+    const QString otherProfile = QStringLiteral("hevc-10-444-videotoolbox");
+    QVERIFY(!MacSharedSession::acceptsDisplay(topology, requested, 1, otherProfile, false));
+    QVERIFY(MacSharedSession::acceptsDisplay(topology, requested, 1, otherProfile, true));
+    QCOMPARE(MacSharedSession::videoProfile(topology,
+        StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444, true),
+        int(StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_420));
+    QCOMPARE(MacSharedSession::videoProfile(topology,
+        StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444, false),
+        int(StreamingPreferences::PLANK_PROFILE_APPLE_HEVC_10BIT_444));
+    QCOMPARE(topology.toJson(), before);
+    QVERIFY(MacSharedSession::acceptsDisplay(topology,
+        QSize(topology.desktopWidth, topology.desktopHeight), 2, topology.appleEncodingMode, false));
+    QVERIFY(!MacSharedSession::acceptsDisplay({}, requested, 1, otherProfile, true));
+    QVERIFY(!MacSharedSession::acceptsDisplay(topology, requested, 0, otherProfile, true));
+}
+
+void TestPlankBroker::remoteMacMatchClientPreservesPixelsScaleAndReconnectPolicy()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    setup.virtualMode1 = QStringLiteral("1920x1080");
+    const NvClientDisplay retina {QRect(0, 0, 1800, 1168), QSize(3024, 1964), QSize(3600, 2336),
+                                 QSize(3600, 2250)};
+    QString reason;
+    const auto windowed = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({retina}, false), &reason);
+    QCOMPARE(windowed.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(windowed.mode, QStringLiteral("3600x2336"));
+    QCOMPARE(windowed.scale, 2);
+    QVERIFY(reason.isEmpty());
+    const auto fullscreen = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({retina}, true), &reason);
+    QCOMPARE(fullscreen.mode, QStringLiteral("3600x2250"));
+    QCOMPARE(fullscreen.scale, 2);
+    QCOMPARE(fullscreen.hostLayout, QStringLiteral("match-client"));
+    // A later connect/reconnect keeps the policy, not the first resolved mode.
+    const auto reconnected = RemoteDisplaySetup::prepareMac(setup,
+                ClientDisplayProbe::macMatchDisplays({{QRect(0, 0, 1920, 1200), QSize(3024, 1964), QSize(1920, 1200)}}, true));
+    QCOMPARE(reconnected.mode, QStringLiteral("1920x1200"));
+    QCOMPARE(reconnected.scale, 1);
+    QCOMPARE(reconnected.hostLayout, QStringLiteral("match-client"));
+    QCOMPARE(setup.virtualMode1, QStringLiteral("1920x1080"));
+    // A manual layout continues to request the saved dimensions at 1x.
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::SingleHostLayout);
+    const auto manual = RemoteDisplaySetup::prepareMac(setup, {retina});
+    QCOMPARE(manual.hostLayout, QStringLiteral("fixed"));
+    QCOMPARE(manual.mode, QStringLiteral("1920x1080"));
+    QCOMPARE(manual.scale, 1);
+}
+
+void TestPlankBroker::remoteMacMatchClientRejectsUnsupportedDisplays()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    QString reason;
+    QVERIFY(RemoteDisplaySetup::prepareMac(setup, {}, &reason).mode.isEmpty());
+    QVERIFY(!reason.isEmpty());
+    const QVector<NvClientDisplay> mixed {
+        {QRect(0, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)},
+        {QRect(1920, 0, 1920, 1080), QSize(1920, 1080), QSize(1920, 1080)}};
+    QVERIFY(RemoteDisplaySetup::prepareMac(setup, mixed, &reason).mode.isEmpty());
+    QVERIFY(reason.contains(QStringLiteral("same 1x or 2x")));
+    const auto twoRetina = RemoteDisplaySetup::prepareMac(setup, {
+        {QRect(0, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)},
+        {QRect(1920, 0, 1920, 1080), QSize(3840, 2160), QSize(3840, 2160)}}, &reason);
+    QCOMPARE(twoRetina.mode, QStringLiteral("7680x2160"));
+    QCOMPARE(twoRetina.scale, 2);
+    QVERIFY(reason.isEmpty());
+}
+
+void TestPlankBroker::remoteMacMatchClientJoinsExistingSharedDesktop()
+{
+    RemoteDisplaySetup::Setup setup;
+    setup.hostLayout = QString::fromLatin1(NvOutputTopology::MatchClientHostLayout);
+    const auto requested = RemoteDisplaySetup::prepareMac(setup, {
+        {QRect(0, 0, 1800, 1125), QSize(3600, 2250), QSize(3600, 2250)}});
+    const auto size = NvOutputTopology::macDisplayModeSize(requested.mode);
+    auto json = fixedCaptureTopology();
+    auto capture = json["capture"].toObject();
+    capture["width"] = 1920;
+    capture["height"] = 1080;
+    capture["logical_bounds"] = QJsonObject{{"x", 0}, {"y", 0}, {"width", 1920}, {"height", 1080}};
+    json["capture"] = capture;
+    NvOutputTopology existing;
+    QVERIFY(NvOutputTopology::fromJson(json, existing));
+    const auto before = existing.toJson();
+    // The Session's Match Client gate uses the same validated topology policy
+    // as HTTP preparation: shared viewers join the existing canvas unchanged.
+    QVERIFY(MacSharedSession::acceptsDisplay(existing, size, requested.scale, existing.appleEncodingMode, true));
+    QVERIFY(!MacSharedSession::acceptsDisplay(existing, size, requested.scale, existing.appleEncodingMode, false));
+    QCOMPARE(existing.toJson(), before);
+    QCOMPARE(requested.hostLayout, QStringLiteral("match-client"));
 }
 
 void TestPlankBroker::rejectsMalformedLeases()

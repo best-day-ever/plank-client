@@ -110,6 +110,7 @@ bool NvComputer::updateManualBookmark(NvAddress address, QString nickname,
         appList.clear();
         outputTopology = NvOutputTopology();
         sessionToken.clear();
+        plankSharedDesktop = false;
         authorizationState = AS_UNKNOWN;
         state = CS_UNKNOWN;
         currentGameId = 0;
@@ -258,6 +259,7 @@ NvComputer::NvComputer(QSettings& settings, const PlankClientPolicy& policy)
     this->plankFeatureFlags = 0;
     this->plankEncodingModes.clear();
     this->sessionToken.clear();
+    this->plankSharedDesktop = false;
 }
 
 void NvComputer::serialize(QSettings& settings, bool serializeApps,
