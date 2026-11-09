@@ -406,6 +406,7 @@ private slots:
     void tlsStartOmitsUnusableDeviceKey();
     void tlsPasskeySignInSendsDeviceKey();
     void tlsBearerCallsCarryDeviceProof();
+    void tlsDiagnosticsAreSignedBoundedCancellableAndAdvisory();
     void tlsPresenceCarriesIdentityAndSignedBody();
     void tlsBearerCallsWithoutSignerAreUnchanged();
     void tlsDeviceSigningFailureSendsNoProof();
@@ -2612,6 +2613,42 @@ void TestPlankBroker::tlsBearerCallsCarryDeviceProof()
         QCOMPARE(signedMessages.at(i), PlankBroker::deviceProofMessage(request.method, request.target, seconds,
                                                                         token, request.body));
     }
+}
+
+void TestPlankBroker::tlsDiagnosticsAreSignedBoundedCancellableAndAdvisory()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("202 Accepted", R"({"state":"accepted"})");
+    server.queue("429 Too Many Requests", "{}");
+    server.queue("401 Unauthorized", "{}");
+    auto config=localConfig(server.port(),{QString::fromLatin1(EcSpkiSha256)});
+    QList<QByteArray> messages;
+    config.deviceProofRequired=[] { return true; };
+    config.deviceSigner=[&](const QByteArray& message) {
+        messages.append(message);
+        return PlankBrokerClient::DeviceSignature{PlankBrokerClient::DeviceSignature::Signed,fakeDeviceSignature(messages.size())};
+    };
+    const QJsonObject body{{"schema",1},{"report_id","0123456789abcdef0123456789abcdef"}};
+    const QString token="diagnostic-session";
+    const PlankBrokerClient client(config);
+    QCOMPARE(client.submitDiagnostics(token,body),202);
+    QCOMPARE(client.submitDiagnostics(token,body),429);
+    QCOMPARE(client.submitDiagnostics(token,body),401);
+    QCOMPARE(client.submitDiagnostics(QString(),body),401);
+    QCOMPARE(client.submitDiagnostics(token,QJsonObject{{"oversized",QString(65536,'x')}}),413);
+    QCOMPARE(server.requestLog.size(),3);
+    for (int i=0;i<3;++i) {
+        const auto received=parseRecordedRequest(server.requestLog[i]);
+        QCOMPARE(received.target,QByteArray("/v1/diagnostics"));
+        QCOMPARE(QJsonDocument::fromJson(received.body).object(),body);
+        QCOMPARE(messages[i],PlankBroker::deviceProofMessage("POST",received.target,
+            received.headers.value("x-plank-device-time").toLongLong(),token,received.body));
+    }
+    config.cancelled=[] { return true; };
+    try { PlankBrokerClient(config).submitDiagnostics(token,body); QFAIL("cancelled diagnostic must not send"); }
+    catch (const PlankBrokerError& e) { QCOMPARE(e.kind(),PlankBrokerError::Network); }
+    QCOMPARE(server.requestLog.size(),3);
 }
 
 void TestPlankBroker::tlsPresenceCarriesIdentityAndSignedBody()

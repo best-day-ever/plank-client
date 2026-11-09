@@ -15,6 +15,7 @@
 
 #include <memory>
 
+class BetaDiagnostics;
 class ComputerManager;
 class NvComputer;
 class Session;
@@ -29,6 +30,7 @@ class StreamingPreferences;
 class RemoteBroker : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(QObject* betaDiagnostics READ betaDiagnostics CONSTANT)
     Q_PROPERTY(QString brokerAddress READ brokerAddress NOTIFY configurationChanged)
     Q_PROPERTY(bool configured READ configured NOTIFY configurationChanged)
     Q_PROPERTY(bool signedIn READ signedIn NOTIFY stateChanged)
@@ -120,6 +122,7 @@ public:
     // (Keychain, host list).
     void adoptSession(QString token, const QString& confirmedUser, bool deviceBound = false);
 
+    QObject* betaDiagnostics() const;
     QString brokerAddress() const;
     bool configured() const;
     bool signedIn() const { return !m_Username.isEmpty() && m_Token->hasToken(); }
@@ -181,7 +184,10 @@ private:
     void scheduleKeepalive();
     void sendKeepalive();
     void sendPresence(bool connected);
+    void configureDiagnostics();
 
+    BetaDiagnostics* m_Diagnostics;
+    QTimer m_DiagnosticSampleTimer;
     StreamingPreferences* m_Preferences;
     QPointer<ComputerManager> m_ComputerManager;
     std::shared_ptr<SharedToken> m_Token;

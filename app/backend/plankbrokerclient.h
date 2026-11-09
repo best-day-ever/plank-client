@@ -76,6 +76,9 @@ public:
         DeviceSigner deviceSigner;
         std::function<bool()> deviceProofRequired;
         bool requireDeviceBinding = false;
+        // Optional low-priority diagnostics cancellation; never changes auth calls.
+        std::function<bool()> cancelled;
+        int requestTimeoutMs = 0;
 
         Config withFrozenDeviceProofRequirement() const {
             Config copy = *this;
@@ -150,6 +153,8 @@ public:
     int keepalive(const QString& sessionToken, const QString& hostId) const;
     void presence(const QString& sessionToken, const QString& hostId, const QString& connectionId,
                   quint64 sequence, bool connected) const;
+    // Status is advisory and never signs the user out.
+    int submitDiagnostics(const QString& sessionToken, const QJsonObject& report) const;
     void logout(const QString& sessionToken) const;
     // A fresh password + OTP session may register one key with the user's
     // own IPA rights. The broker holds the proven password only briefly;

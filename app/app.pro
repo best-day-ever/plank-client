@@ -293,6 +293,7 @@ SOURCES += \
     backend/relaywakeclient.cpp \
     backend/plankbrokerclient.cpp \
     backend/fernwehupdater.cpp \
+    backend/betadiagnostics.cpp \
     backend/plankenrollment.cpp \
     backend/plankpasskey.cpp \
     backend/qrencoder.cpp \
@@ -362,6 +363,7 @@ HEADERS += \
     backend/plankbroker.h \
     backend/plankbrokerclient.h \
     backend/fernwehupdater.h \
+    backend/betadiagnostics.h \
     backend/fernwehupdatepolicy.h \
     backend/plankenrollment.h \
     backend/plankpasskey.h \

@@ -1577,6 +1577,19 @@ Flickable {
                     }
                 }
 
+                PlankSettingLabel { text: qsTr("Send beta diagnostics automatically") }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    PlankCheckBox {
+                        checked: RemoteBroker.betaDiagnostics.enabled
+                        Accessible.name: qsTr("Send beta diagnostics automatically")
+                        onToggled: RemoteBroker.betaDiagnostics.enabled = checked
+                    }
+                    PlankSettingHelp {
+                        text: qsTr("During beta, Fernweh sends session events, performance summaries and display/HDR settings to your remote access administrator after disconnecting. Screen contents, audio, clipboard and ordinary text logs stay on this computer. Turning this off also deletes queued reports.")
+                    }
+                }
+
                 PlankSettingLabel {
                     text: qsTr("Automatically find workstations on the local network")
                 }
