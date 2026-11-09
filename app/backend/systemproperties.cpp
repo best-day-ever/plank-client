@@ -1,4 +1,5 @@
 #include "systemproperties.h"
+#include "clientinstances.h"
 #include "utils.h"
 #include "clientdisplays.h"
 
@@ -297,4 +298,9 @@ void SystemProperties::refreshDisplaysInternal()
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 #endif
+}
+
+bool SystemProperties::openNewConnection()
+{
+    return ClientInstances::get().openNewConnection();
 }

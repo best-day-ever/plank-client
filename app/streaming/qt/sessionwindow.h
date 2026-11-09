@@ -93,6 +93,7 @@ public:
     Q_INVOKABLE void toggleFullscreen();
     Q_INVOKABLE void fullscreenDisplays(bool span) { cancelInput(); emit fullscreenDisplaysRequested(span); }
     Q_INVOKABLE void minimize();
+    Q_INVOKABLE void openNewConnection();
     Q_INVOKABLE void disconnectSession();
     Q_INVOKABLE void toggleMicrophone() { emit microphoneRequested(); }
     Q_INVOKABLE void toggleCamera() { emit cameraRequested(); }
@@ -110,6 +111,7 @@ signals:
     void displayMenuChanged();
     void fullscreenDisplaysRequested(bool span);
     void minimizeRequested();
+    void newConnectionRequested();
     void microphoneRequested();
     void cameraRequested();
     void toolbarChanged();

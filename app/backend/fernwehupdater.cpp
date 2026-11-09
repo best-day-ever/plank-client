@@ -1,4 +1,5 @@
 #include "fernwehupdater.h"
+#include "clientinstances.h"
 #include "fernwehupdatepolicy.h"
 #include "streaming/session.h"
 #include <QTimer>
@@ -102,6 +103,7 @@ void FernwehUpdater::install()
     script = QDir(QCoreApplication::applicationDirPath())
                  .filePath(QStringLiteral("../Resources/fernweh-install-update.sh"));
     if (!QFileInfo::exists(script)) {
+        ClientInstances::get().endUpdate();
         m_Status = tr("The updater is missing from this app.");
         emit changed();
         return;
@@ -135,11 +137,13 @@ void FernwehUpdater::install()
             if (!error.isEmpty()) {
                 self->m_Status = error;
                 self->m_Busy = false;
+                ClientInstances::get().endUpdate();
                 emit self->changed();
                 return;
             }
             // A stream may have started while the background download ran.
-            if (Session::get() != nullptr) {
+            if (Session::get() != nullptr || ClientInstances::get().hasOtherInstances()) {
+                ClientInstances::get().endUpdate();
                 QFile::remove(file);
                 QDir().rmdir(QFileInfo(file).absolutePath());
                 self->m_Busy = false;
@@ -169,6 +173,7 @@ void FernwehUpdater::install()
                 QDir().rmdir(QFileInfo(file).absolutePath());
                 self->m_Status = self->tr("Could not start the installer.");
                 self->m_Busy = false;
+                ClientInstances::get().endUpdate();
                 emit self->changed();
             } else {
                 QCoreApplication::quit();
@@ -179,9 +184,10 @@ void FernwehUpdater::install()
 
 bool FernwehUpdater::waitForStreams()
 {
-    if (Session::get() == nullptr) return false;
+    if (Session::get() == nullptr && ClientInstances::get().beginUpdate()) return false;
+    ClientInstances::get().endUpdate();
     m_Busy = true;
-    m_Status = tr("The update will install after your workstation session ends.");
+    m_Status = tr("The update will install after all workstation sessions end and other Fernweh windows close.");
     emit changed();
     QTimer::singleShot(1000, this, [this]() {
         m_Busy = false;

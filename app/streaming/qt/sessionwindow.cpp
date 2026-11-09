@@ -577,3 +577,9 @@ bool QtSessionWindow::mapPointer(QPointF logical, QPointF& stream, bool drag) co
     if (drag && m_DragMapper) return m_DragMapper(logical, stream);
     return m_Geometry.toStream(logical, stream, drag);
 }
+
+void QtSessionWindow::openNewConnection()
+{
+    cancelInput();
+    emit newConnectionRequested();
+}

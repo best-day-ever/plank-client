@@ -14,6 +14,22 @@ import RemoteBroker 1.0
 ApplicationWindow {
     property bool pollingActive: false
 
+    function openNewConnection() {
+        if (!SystemProperties.openNewConnection()) newConnectionError.open()
+    }
+
+    NavigableMessageDialog {
+        id: newConnectionError
+        title: qsTr("New connection")
+        text: qsTr("Could not open another Fernweh window. Wait for any application update to finish, then try again.")
+        standardButtons: Dialog.Ok
+    }
+
+    Shortcut {
+        sequence: StandardKey.New
+        onActivated: window.openNewConnection()
+    }
+
     Timer {
         interval: 6 * 60 * 60 * 1000
         running: FernwehUpdater.supported
@@ -334,6 +350,11 @@ ApplicationWindow {
                 Keys.onDownPressed: {
                     stackView.currentItem.forceActiveFocus(Qt.TabFocus)
                 }
+            }
+
+            Button {
+                text: qsTr("New connection")
+                onClicked: window.openNewConnection()
             }
 
             Label {

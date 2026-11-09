@@ -256,6 +256,9 @@ void QtSessionRuntime::start(QWindow* launcher)
         connect(&surface, &QtSessionWindow::cameraRequested, this, [this] {
             m_Session->m_CameraRequested.store(!m_Session->m_CameraRequested.load());
         });
+        connect(&surface, &QtSessionWindow::newConnectionRequested, this, [this] {
+            m_Session->openNewConnection();
+        });
         connect(&surface, &QtSessionWindow::disconnectRequested, this, &QtSessionRuntime::stop);
         connect(&surface, &QtSessionWindow::fullscreenRequested, this, &QtSessionRuntime::toggleFullscreen);
         connect(&surface, &QtSessionWindow::fullscreenDisplaysRequested, this, [this, owner = shell.get()](bool span) {

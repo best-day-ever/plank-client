@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Keep connections to several workstations open at once. Choose New connection in the launcher or session toolbar, then select another workstation in its own Fernweh window. Remembered sign-in is reused; closing a connection leaves the others running.
+- Wait for all workstation sessions to end and other Fernweh windows to close before installing an application update.
+
 - Rename the shared-desktop action to “Join session” and clarify the joining messages without implying that owner approval is always required. Workstation access and collaboration permissions still apply.
 
 ## 1.2.14 — Windows clipboard and connection improvements

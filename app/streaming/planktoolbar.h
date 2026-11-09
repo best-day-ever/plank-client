@@ -35,6 +35,7 @@ public:
         ToggleMicrophone,
         ToggleCamera,
         SendFiles,
+        NewConnection,
     };
 
     PlankToolbar(SDL_Window* window,
@@ -81,6 +82,7 @@ private:
         Microphone,
         Camera,
         Files,
+        NewConnection,
         Fullscreen,
         Minimize,
         Disconnect,
@@ -119,6 +121,7 @@ private:
     bool sliderContains(int x, int y) const;
     bool handleContains(int x, int y) const;
     bool pinContains(int x, int y) const;
+    bool newConnectionContains(int x, int y) const;
     bool filesContains(int x, int y) const;
     bool cameraContains(int x, int y) const;
     bool microphoneContains(int x, int y) const;
