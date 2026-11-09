@@ -90,6 +90,7 @@ using PlatformFileClipboard = MacFileClipboard;
 
 #include <QtEndian>
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QThreadPool>
 #include <QImage>
 #include <QGuiApplication>
@@ -4122,20 +4123,21 @@ bool Session::startConnectionAsync(bool reconnecting,
                             tr("Applying workstation display layout..."));
                 qInfo() << "PLANK host display transition started; waiting up to"
                         << MaximumWaitMs << "ms";
-                bool authenticationRefreshRequired = false;
+                PlankDisplayTransitionPolicy transition(MaximumWaitMs);
+                QElapsedTimer transitionTimer;
+                transitionTimer.start();
 
-                for (int elapsedMs = 0;
-                     elapsedMs < MaximumWaitMs && !started;
-                     elapsedMs += RetryIntervalMs) {
+                while (!transition.expired(transitionTimer.elapsed()) && !started) {
                     for (int delayMs = 0;
                          delayMs < RetryIntervalMs;
                          delayMs += CancellationPollMs) {
                         if (m_ConnectionStartCancelled.load()) break;
                         SDL_Delay(CancellationPollMs);
                     }
-                    if (m_ConnectionStartCancelled.load()) break;
+                    if (m_ConnectionStartCancelled.load() ||
+                            transition.expired(transitionTimer.elapsed())) break;
 
-                    if (authenticationRefreshRequired) {
+                    if (transition.needsAuthentication()) {
                         try {
                             {
                                 QWriteLocker lock(&m_Computer->lock);
@@ -4153,9 +4155,15 @@ bool Session::startConnectionAsync(bool reconnecting,
                                 m_Computer->sessionIdentityKey = http->hostIdentityKey();
                                 m_Computer->authorizationState = NvComputer::AS_AUTHORIZED;
                             }
-                            authenticationRefreshRequired = false;
+                            transition.authenticated();
                             qInfo() << "PLANK authenticated to the replacement display worker";
                         } catch (const GfeHttpResponseException& retryError) {
+                            if (transition.retryAuthentication(retryError.getStatusCode(),
+                                                               transitionTimer.elapsed())) {
+                                qInfo() << "PLANK replacement display worker admission is not ready:"
+                                        << retryError.toQString();
+                                continue;
+                            }
                             if (reconnecting && PlankReconnectPolicy::terminalStatus(
                                     retryError.getStatusCode(), true,
                                     SDL_GetTicks() < m_DesktopHandoffRetryDeadline.load()))
@@ -4169,6 +4177,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                         }
                     }
 
+                    if (m_ConnectionStartCancelled.load() ||
+                            transition.expired(transitionTimer.elapsed())) break;
                     try {
                         const NvOutputTopology topology = http->getOutputTopology();
                         {
@@ -4207,6 +4217,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                                     << topology.arrangementRequest << topology.arrangementState;
                             continue;
                         }
+                        if (m_ConnectionStartCancelled.load() ||
+                                transition.expired(transitionTimer.elapsed())) break;
                         startApp();
                         started = true;
                     } catch (const GfeHttpResponseException& retryError) {
@@ -4233,8 +4245,8 @@ bool Session::startConnectionAsync(bool reconnecting,
                             throw;
                         }
                         if (retryError.getStatusCode() == 401) {
-                            authenticationRefreshRequired = true;
-                            qInfo() << "PLANK display worker changed; authentication will be refreshed once";
+                            transition.authenticationLost(transitionTimer.elapsed());
+                            qInfo() << "PLANK display worker changed; refreshing authentication within the layout deadline";
                             continue;
                         }
                         if (retryError.getStatusCode() != 409 &&
