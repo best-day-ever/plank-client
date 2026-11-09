@@ -45,7 +45,7 @@ NavigableDialog {
         }
         Button {
             objectName: "requestCollaboration"
-            text: qsTr("Request to join")
+            text: qsTr("Join session")
             highlighted: true
             flat: false
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole

@@ -1,3 +1,7 @@
+## Unreleased
+
+- Rename the shared-desktop action to “Join session” and clarify the joining messages without implying that owner approval is always required. Workstation access and collaboration permissions still apply.
+
 ## 1.2.14 — Windows clipboard and connection improvements
 
 - Enable Windows text copy/paste and file transfer with Linux workstations when your account has the corresponding permissions.
