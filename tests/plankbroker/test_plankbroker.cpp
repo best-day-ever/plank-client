@@ -406,6 +406,7 @@ private slots:
     void tlsStartOmitsUnusableDeviceKey();
     void tlsPasskeySignInSendsDeviceKey();
     void tlsBearerCallsCarryDeviceProof();
+    void tlsPresenceCarriesIdentityAndSignedBody();
     void tlsBearerCallsWithoutSignerAreUnchanged();
     void tlsDeviceSigningFailureSendsNoProof();
     void tlsDeviceBoundSessionRejectionSignsOut();
@@ -702,7 +703,7 @@ void TestPlankBroker::parsesHosts()
 {
     QVector<PlankBroker::Host> hosts;
     QVERIFY(PlankBroker::parseHosts(json(R"({"hosts":[
-        {"id":"ws01.example.test","name":"ws01","online":true,"busy":true,"in_use_by":null,"connectable":true,"reason":null},
+        {"id":"ws01.example.test","name":"ws01","online":true,"busy":true,"in_use_by":null,"connected_users":["anna","bob","anna"],"connectable":true,"reason":null},
         {"id":"ws02.example.test","name":"ws02","online":true,"in_use_by":"bob","connectable":false,"reason":"in use"},
         {"id":"ws03.example.test","online":false,"connectable":false,"reason":"offline"}]})"), hosts));
     QCOMPARE(hosts.size(), 3);
@@ -710,6 +711,7 @@ void TestPlankBroker::parsesHosts()
     QCOMPARE(hosts.at(0).name, QStringLiteral("ws01"));
     QVERIFY(hosts.at(0).online);
     QVERIFY(hosts.at(0).busy);
+    QCOMPARE(hosts.at(0).connectedUsers, QStringList({"anna", "bob"}));
     QVERIFY(hosts.at(0).inUseBy.isEmpty());
     QVERIFY(hosts.at(0).connectable);
     QCOMPARE(hosts.at(1).inUseBy, QStringLiteral("bob"));
@@ -717,6 +719,7 @@ void TestPlankBroker::parsesHosts()
     QVERIFY(!hosts.at(1).connectable);
     QCOMPARE(hosts.at(2).name, QStringLiteral("ws03.example.test")); // falls back to id
     QVERIFY(!hosts.at(2).online);
+    QVERIFY(hosts.at(2).connectedUsers.isEmpty());
     QVERIFY(!hosts.at(2).busy); // older brokers omit the advisory field
     QVERIFY(PlankBroker::parseHosts(json(R"({"hosts":[]})"), hosts));
     QVERIFY(hosts.isEmpty());
@@ -734,6 +737,10 @@ void TestPlankBroker::rejectsMalformedHosts()
         R"({"hosts":[{"id":"../etc","online":true,"connectable":true}]})",
         R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"in_use_by":42}]})",
         R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"busy":"yes"}]})",
+        R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"connected_users":"anna"}]})",
+        R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"connected_users":[7]}]})",
+        R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"connected_users":[""]}]})",
+        R"({"hosts":[{"id":"ws01","online":true,"connectable":true,"connected_users":["anna\nadmin"]}]})",
         R"({"hosts":[{"id":"ws01","online":true,"connectable":true}, 7]})",
     };
     for (const char* body : malformed) {
@@ -2604,6 +2611,39 @@ void TestPlankBroker::tlsBearerCallsCarryDeviceProof()
         QCOMPARE(signedMessages.at(i), canonical);
         QCOMPARE(signedMessages.at(i), PlankBroker::deviceProofMessage(request.method, request.target, seconds,
                                                                         token, request.body));
+    }
+}
+
+void TestPlankBroker::tlsPresenceCarriesIdentityAndSignedBody()
+{
+    TestBrokerServer server(QSsl::TlsV1_3OrLater);
+    QVERIFY(server.listen());
+    server.queue("200 OK", R"({"state":"ok"})");
+    server.queue("200 OK", R"({"state":"ok"})");
+    server.queue("404 Not Found", ""); // Older broker: presence is optional.
+    auto config = localConfig(server.port(), {QString::fromLatin1(EcSpkiSha256)});
+    QList<QByteArray> messages;
+    config.deviceSigner = [&](const QByteArray& message) {
+        messages.append(message);
+        return PlankBrokerClient::DeviceSignature {PlankBrokerClient::DeviceSignature::Signed, fakeDeviceSignature(messages.size())};
+    };
+    const PlankBrokerClient client(config);
+    const QString token = QStringLiteral("bound-session-token");
+    const QString id(32, QLatin1Char('a'));
+    client.presence(token, "ws01.example.test", id, 1, true);
+    client.presence(token, "ws01.example.test", id, 2, false);
+    client.presence(token, "ws01.example.test", id, 3, true);
+    QCOMPARE(server.requestLog.size(), 3);
+    for (int i = 0; i < 3; ++i) {
+        const auto request = parseRecordedRequest(server.requestLog.at(i));
+        QCOMPARE(request.target, QByteArray("/v1/hosts/ws01.example.test/presence"));
+        const auto body = QJsonDocument::fromJson(request.body).object();
+        QCOMPARE(body.value("connection_id").toString(), id);
+        QCOMPARE(body.value("sequence").toInt(), i + 1);
+        QCOMPARE(body.value("connected").toBool(), i != 1);
+        QVERIFY(!body.contains("username"));
+        QCOMPARE(messages.at(i), PlankBroker::deviceProofMessage(request.method, request.target,
+                 request.headers.value("x-plank-device-time").toLongLong(), token, request.body));
     }
 }
 
