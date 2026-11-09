@@ -6,6 +6,7 @@
 #include "streaming/plankembeddedcursor.h"
 #include "streaming/planksessionhotkeys.h"
 #include "remotecursor.h"
+#include "streaming/planksharedpointer.h"
 #ifdef Q_OS_MACOS
 #include "macrawwacomfocus.h"
 #endif
@@ -199,6 +200,15 @@ private:
     };
     std::vector<WaylandTabletCursorOutput> m_WaylandTabletCursorOutputs;
 
+    std::unique_ptr<PlankSharedPointerOverlay> m_SharedPointerWindow;
+    std::unique_ptr<PlankWaylandCursor> m_SharedWaylandPointer;
+    SDL_Window* m_SharedPointerTarget = nullptr;
+    Uint32 m_SharedPointerTargetId = 0;
+    QPointF m_LastLocalPointer;
+    Uint32 m_LastLocalPointerWindow = 0;
+    Uint64 m_LastLocalPointerMotion = 0;
+    void updateSharedPointer();
+    void hideSharedPointer();
     void setCursorVisible(bool visible);
     void activateCompositorCursor();
     PlankWaylandCursor* ensureWaylandTabletCursorAttached(

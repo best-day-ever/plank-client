@@ -1,4 +1,6 @@
 #include "../../app/backend/collaboration.h"
+#include "../../app/streaming/planksharinghud.h"
+#include "../../app/streaming/planksharedpointer.h"
 #include "../../app/streaming/plankpresentation.h"
 #include <QSignalSpy>
 #include <QQmlComponent>
@@ -19,6 +21,45 @@ class CollaborationTest : public QObject
     }
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+    void remotePointerNeverTakesLocalInput() {
+        const QPointF local(20, 30), remote(200, 100);
+        QVERIFY(plankSharedPointerVisible(true, false, true, false, true, remote, local, 120));
+        QVERIFY(!plankSharedPointerVisible(true, false, true, false, true, remote, local, 119));
+        QVERIFY(!plankSharedPointerVisible(true, false, true, false, true, local, local, 1000));
+        QVERIFY(!plankSharedPointerVisible(false, false, true, true, false, remote, local, 1000));
+        QVERIFY(!plankSharedPointerVisible(true, true, true, true, false, remote, local, 1000));
+        QVERIFY(!plankSharedPointerVisible(true, false, false, true, false, remote, local, 1000));
+        QVERIFY(plankSharedPointerVisible(true, false, true, true, true, local, local, 0));
+        PlankSharedPointerWindow pointer;
+        QVERIFY(pointer.flags().testFlag(Qt::WindowTransparentForInput));
+        QVERIFY(pointer.flags().testFlag(Qt::WindowDoesNotAcceptFocus));
+        const auto image = plankSharedPointerImage();
+        QVERIFY(!image.isNull());
+        QVERIFY(qAlpha(image.pixel(6, 10)) > 0);
+        const QString screenshot = qEnvironmentVariable("PLANK_SHARED_POINTER_SCREENSHOT");
+        if (!screenshot.isEmpty()) QVERIFY(image.save(screenshot));
+    }
+    void queuedPointerCannotSurviveTeardown() {
+        {
+            PlankSharedPointerOverlay overlay;
+            for (int i = 0; i < 1000; ++i) overlay.present(QPoint(i, i), true);
+            overlay.hide();
+        }
+        QCoreApplication::processEvents();
+        for (const auto* window : QGuiApplication::allWindows())
+            QVERIFY(window->objectName() != QStringLiteral("plankSharedPointer"));
+    }
+    void sharingHudRendersUnicodeAndBoundsLongNames() {
+        const auto image = plankSharingHud(QString::fromUtf8("Sharing with O’Connor · Über - View only"), true);
+        QVERIFY(!image.isNull());
+        QVERIFY(image.width() > 100 && image.width() <= 642);
+        QVERIFY(image.height() >= 32);
+        QVERIFY(qAlpha(image.pixel(image.width() / 2, image.height() / 2)) > 0);
+        const auto longName = plankSharingHud(QString(2000, QChar(0x00e4)), false);
+        QVERIFY(longName.width() <= 642);
+        const QString screenshot = qEnvironmentVariable("PLANK_SHARING_HUD_SCREENSHOT");
+        if (!screenshot.isEmpty()) QVERIFY(image.save(screenshot));
+    }
     void joiningRunningDesktopIsFreshLaunch() {
         QCOMPARE(PlankCollaboration::launchVerb(true, true), QString("launch"));
         QCOMPARE(PlankCollaboration::launchVerb(true, false), QString("launch"));
