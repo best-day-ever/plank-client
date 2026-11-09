@@ -148,6 +148,8 @@ public:
     // setup briefly blocks dispatching the subsequent Qt timer.
     RenewingLease connectAndRenew(const QString& sessionToken, const QString& hostId) const;
     int keepalive(const QString& sessionToken, const QString& hostId) const;
+    void presence(const QString& sessionToken, const QString& hostId, const QString& connectionId,
+                  quint64 sequence, bool connected) const;
     void logout(const QString& sessionToken) const;
     // A fresh password + OTP session may register one key with the user's
     // own IPA rights. The broker holds the proven password only briefly;

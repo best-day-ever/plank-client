@@ -533,6 +533,21 @@ int PlankBrokerClient::keepalive(const QString& sessionToken, const QString& hos
     return expiresIn;
 }
 
+void PlankBrokerClient::presence(const QString& sessionToken, const QString& hostId,
+                                 const QString& connectionId, quint64 sequence, bool connected) const
+{
+    if (sessionToken.isEmpty()) throw PlankBrokerError(PlankBrokerError::SessionExpired);
+    if (!PlankBroker::isHostId(hostId)) throw PlankBrokerError(PlankBrokerError::Denied);
+    const QJsonObject body{{QStringLiteral("connection_id"), connectionId},
+                           {QStringLiteral("sequence"), static_cast<qint64>(sequence)},
+                           {QStringLiteral("connected"), connected}};
+    const Response response = request("POST", PlankBroker::hostActionPath(hostId, QStringLiteral("presence")),
+                                      &body, sessionToken);
+    // Older brokers have no presence endpoint. Streaming remains independent.
+    if (response.status == 404) return;
+    throwForBearerStatus(response.status, response.body);
+}
+
 void PlankBrokerClient::logout(const QString& sessionToken) const
 {
     if (sessionToken.isEmpty()) return;

@@ -24,6 +24,12 @@ Item {
     property string errorText: ""
     // Set after a Touch ID fallback or by "Use password instead".
     property bool usePassword: false
+    Timer {
+        interval: 5000
+        repeat: true
+        running: remoteView.visible && RemoteBroker.signedIn
+        onTriggered: RemoteBroker.refreshHostsQuietly()
+    }
     readonly property bool passkeyReady: !usePassword &&
         RemoteBroker.passkeyUsers.indexOf(usernameField.text.trim().toLowerCase()) >= 0
 
@@ -333,7 +339,7 @@ Item {
     function hostStatusText(host) {
         var parts = []
         parts.push(!host.online ? qsTr("Offline") :
-                   (host.busy || host.inUseBy !== "") ? qsTr("Busy") : qsTr("Online"))
+                   (host.busy || host.inUseBy !== "" || (host.connectedUsers || []).length > 0) ? qsTr("Busy") : qsTr("Online"))
         if (host.inUseBy !== "") {
             parts.push(qsTr("in use by %1").arg(host.inUseBy))
         }
@@ -657,65 +663,15 @@ Item {
             spacing: 8
             model: RemoteBroker.hosts
 
-            delegate: Rectangle {
+            delegate: RemoteWorkstationCard {
                 width: hostList.width
-                height: 68
-                radius: theme.radiusMedium
-                color: theme.surface
-                border.width: 1
-                border.color: theme.borderSubtle
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    spacing: theme.spaceMedium
-
-                    Rectangle {
-                        width: 10
-                        height: 10
-                        radius: 5
-                        color: !modelData.online ? theme.textDisabled :
-                               (modelData.busy || modelData.inUseBy !== "" ? theme.warning : theme.success)
-                        Layout.alignment: Qt.AlignVCenter
-                    }
-
-                    ColumnLayout {
-                        spacing: 2
-                        Layout.fillWidth: true
-                        Label {
-                            text: modelData.name
-                            color: theme.textPrimary
-                            font.pointSize: 12
-                            font.weight: Font.Medium
-                            elide: Label.ElideRight
-                            Layout.fillWidth: true
-                        }
-                        Label {
-                            text: remoteView.hostStatusText(modelData)
-                            color: theme.textSecondary
-                            font.pointSize: 10
-                            elide: Label.ElideRight
-                            Layout.fillWidth: true
-                        }
-                    }
-
-                    Button {
-                        text: qsTr("Settings…")
-                        flat: true
-                        enabled: !RemoteBroker.busy
-                        onClicked: displaySetupDialog.openFor(modelData.id, modelData.name, false, "")
-                    }
-
-                    Button {
-                        text: qsTr("Connect")
-                        highlighted: modelData.connectable
-                        enabled: modelData.connectable && !RemoteBroker.busy
-                        onClicked: {
-                            remoteView.errorText = ""
-                            RemoteBroker.connectToHost(modelData.id)
-                        }
-                    }
+                host: modelData
+                statusText: remoteView.hostStatusText(modelData)
+                busy: RemoteBroker.busy
+                onSettingsRequested: displaySetupDialog.openFor(modelData.id, modelData.name, false, "")
+                onConnectRequested: {
+                    remoteView.errorText = ""
+                    RemoteBroker.connectToHost(modelData.id)
                 }
             }
         }

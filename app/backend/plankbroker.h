@@ -274,6 +274,7 @@ struct Host {
     bool online = false;
     bool busy = false;
     QString inUseBy;
+    QStringList connectedUsers;
     bool connectable = false;
     QString reason;
 };
@@ -623,12 +624,14 @@ inline bool parseHosts(const QByteArray& body, QVector<Host>& hosts)
         const QJsonValue online = entry.value(QStringLiteral("online"));
         const QJsonValue busy = entry.value(QStringLiteral("busy"));
         const QJsonValue inUseBy = entry.value(QStringLiteral("in_use_by"));
+        const QJsonValue connectedUsers = entry.value(QStringLiteral("connected_users"));
         const QJsonValue connectable = entry.value(QStringLiteral("connectable"));
         const QJsonValue reason = entry.value(QStringLiteral("reason"));
         if (!isHostId(host.id) || !online.isBool() || !connectable.isBool() ||
                 !(busy.isBool() || busy.isNull() || busy.isUndefined()) ||
                 !(name.isString() || name.isUndefined() || name.isNull()) ||
                 !(inUseBy.isString() || inUseBy.isNull() || inUseBy.isUndefined()) ||
+                !(connectedUsers.isArray() || connectedUsers.isUndefined()) ||
                 !(reason.isString() || reason.isNull() || reason.isUndefined())) {
             return false;
         }
@@ -637,6 +640,11 @@ inline bool parseHosts(const QByteArray& body, QVector<Host>& hosts)
         host.online = online.toBool();
         host.busy = busy.toBool();
         host.inUseBy = inUseBy.toString();
+        if (connectedUsers.toArray().size() > 4096) return false;
+        for (const auto& user : connectedUsers.toArray()) {
+            if (!user.isString() || user.toString().isEmpty() || !isDisplayText(user.toString(), 255)) return false;
+            if (!host.connectedUsers.contains(user.toString())) host.connectedUsers.append(user.toString());
+        }
         host.connectable = connectable.toBool();
         host.reason = reason.toString();
         if (!isDisplayText(host.name, 253) || !isDisplayText(host.inUseBy, 255) ||

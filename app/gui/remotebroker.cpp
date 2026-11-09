@@ -21,6 +21,7 @@
 #include <QJsonDocument>
 #include <QSettings>
 #include <QElapsedTimer>
+#include <QUuid>
 #include <QQmlEngine>
 #include <QThreadPool>
 #include <QThread>
@@ -84,6 +85,8 @@ RemoteBroker::RemoteBroker(StreamingPreferences* preferences, QObject* parent)
     monotonicClock();
     m_KeepaliveTimer.setSingleShot(true);
     connect(&m_KeepaliveTimer, &QTimer::timeout, this, &RemoteBroker::sendKeepalive);
+    m_PresenceTimer.setInterval(15000);
+    connect(&m_PresenceTimer, &QTimer::timeout, this, [this]() { sendPresence(true); });
     connect(m_Preferences, &StreamingPreferences::brokerChanged,
             this, &RemoteBroker::configurationChanged);
     connect(m_Preferences, &StreamingPreferences::brokerChanged,
@@ -598,6 +601,7 @@ void RemoteBroker::refreshHostsImpl(bool showBusy)
                 entry.insert(QStringLiteral("name"), host.name);
                 entry.insert(QStringLiteral("online"), host.online);
                 entry.insert(QStringLiteral("busy"), host.busy);
+                entry.insert(QStringLiteral("connectedUsers"), host.connectedUsers);
                 entry.insert(QStringLiteral("inUseBy"), host.inUseBy);
                 entry.insert(QStringLiteral("connectable"), host.connectable);
                 entry.insert(QStringLiteral("reason"), host.reason);
@@ -1233,6 +1237,13 @@ void RemoteBroker::attachKeepaliveSession(Session* session)
     // initial grant is already being renewed while its workstation is probed.
     m_KeepaliveSession = session;
     m_KeepaliveOwner = session;
+    connect(session, &Session::connectionStarted, this, [this, session]() {
+        if (m_KeepaliveOwner != session || !m_PresenceId.isEmpty()) return;
+        m_PresenceId = QUuid::createUuid().toString(QUuid::Id128);
+        m_PresenceSequence = 0;
+        sendPresence(true);
+        m_PresenceTimer.start();
+    });
     auto stopForSession = [this, session]() {
         if (m_KeepaliveOwner == session) {
             stopKeepalive();
@@ -1251,12 +1262,34 @@ void RemoteBroker::attachKeepaliveSession(Session* session)
 
 void RemoteBroker::stopKeepalive()
 {
+    m_PresenceTimer.stop();
+    sendPresence(false);
+    m_PresenceId.clear();
     m_Token->cancelLease();
     m_KeepaliveTimer.stop();
     m_LeaseRenewal.stop();
     m_KeepaliveHostId.clear();
     m_KeepaliveSession.clear();
     m_KeepaliveOwner = nullptr;
+}
+
+void RemoteBroker::sendPresence(bool connected)
+{
+    if (m_PresenceId.isEmpty() || m_KeepaliveHostId.isEmpty()) return;
+    const QString token = m_Token->getForRevision(m_LeaseRenewal.authentication());
+    if (token.isEmpty()) return;
+    const auto config = clientConfig().withFrozenDeviceProofRequirement();
+    const QString host = m_KeepaliveHostId;
+    const QString id = m_PresenceId;
+    const quint64 sequence = ++m_PresenceSequence;
+    QThreadPool::globalInstance()->start([config, token, host, id, sequence, connected]() {
+        try {
+            PlankBrokerClient(config).presence(token, host, id, sequence, connected);
+        } catch (const PlankBrokerError&) {
+            // Advisory presence expires automatically after lost heartbeats.
+            // It must never interrupt streaming or transport lease renewal.
+        }
+    });
 }
 
 void RemoteBroker::scheduleKeepalive()
