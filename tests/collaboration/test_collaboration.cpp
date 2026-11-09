@@ -36,6 +36,8 @@ private slots:
         const auto image = plankSharedPointerImage();
         QVERIFY(!image.isNull());
         QVERIFY(qAlpha(image.pixel(6, 10)) > 0);
+        const QString screenshot = qEnvironmentVariable("PLANK_SHARED_POINTER_SCREENSHOT");
+        if (!screenshot.isEmpty()) QVERIFY(image.save(screenshot));
     }
     void queuedPointerCannotSurviveTeardown() {
         {
