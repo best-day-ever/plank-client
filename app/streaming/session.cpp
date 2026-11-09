@@ -2654,7 +2654,7 @@ bool Session::createCollaborationWindows()
             [this](const NvOutput& output) { return output.id != m_CollaborationOutputId; }), m_CollaborationOutputs.end());
     }
     if (m_CollaborationOutputs.isEmpty()) {
-        emit displayLaunchError(tr("The owner's captured display is no longer available. Request to join again."));
+        emit displayLaunchError(tr("The owner's captured display is no longer available. Join the session again."));
         return false;
     }
     std::stable_sort(m_CollaborationOutputs.begin(), m_CollaborationOutputs.end(),
@@ -4591,7 +4591,7 @@ bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startA
         throw GfeHttpResponseException(400, "Host did not accept the collaboration request");
     }
     m_WaitingForSessionCleanup.store(true);
-    emit sessionCleanupWaitChanged(true, tr("Waiting for %1 to allow collaboration…").arg(owner));
+    emit sessionCleanupWaitChanged(true, tr("Joining %1's session…").arg(owner));
     const auto finish = [this]() {
         m_WaitingForSessionCleanup.store(false);
         emit sessionCleanupWaitChanged(false, QString());
@@ -4613,7 +4613,7 @@ bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startA
                 finish();
                 emit displayLaunchError(reply.state == PlankCollaboration::Denied ?
                     tr("The desktop owner declined your collaboration request.") :
-                    tr("The collaboration request expired or was cancelled. Connect again to request access."));
+                    tr("The collaboration request expired or was cancelled. Connect again to join the session."));
                 return false;
             }
             NvOutputTopology topology;
@@ -4628,7 +4628,7 @@ bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startA
                     (reply.capture.value(QStringLiteral("capture_source")).toString() != source ||
                      reply.capture.value(QStringLiteral("encoder_backend")).toString() != backend)) {
                 cancel(); finish();
-                emit displayLaunchError(tr("The shared desktop uses capture %1 with %2. Select matching capture and encoder settings, then request to join again.")
+                emit displayLaunchError(tr("The shared desktop uses capture %1 with %2. Select matching capture and encoder settings, then join the session again.")
                     .arg(reply.capture.value(QStringLiteral("capture_source")).toString(),
                          reply.capture.value(QStringLiteral("encoder_backend")).toString()));
                 return false;
@@ -4658,7 +4658,7 @@ bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startA
             return true;
         }
         cancel(); finish();
-        emit displayLaunchError(tr("The desktop owner did not respond. Connect again to request collaboration."));
+        emit displayLaunchError(tr("The session could not be joined in time. Connect again to join the session."));
         return false;
     } catch (...) {
         cancel(); finish();
@@ -4705,7 +4705,7 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
         m_ActiveSessionTakeoverDecision.store(0);
         m_WaitingForActiveSessionTakeoverDecision.store(true);
         emit desktopCollaborationRequested(
-            tr("%1 is using %2. Request permission to join their desktop for remote support? They can allow viewing or interaction. Their display layout stays unchanged.")
+            tr("%1 is using %2. Join their current session to view or interact with their desktop. Their display layout stays unchanged.")
                 .arg(conflict.owner, hostName), conflict.state == PlankDesktopSignOut::State::Available);
         const int choice = waitForPlankDecisionChoice();
         if (choice == 2) {

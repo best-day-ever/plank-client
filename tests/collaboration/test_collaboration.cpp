@@ -138,7 +138,7 @@ private slots:
         QVERIFY(dialog);
         auto* quickWindow = qobject_cast<QQuickWindow*>(window.data());
         QVERIFY(quickWindow && QTest::qWaitForWindowExposed(quickWindow));
-        dialog->setProperty("text", "The desktop owner is using this workstation. Request permission to join their desktop for remote support? They can allow viewing or interaction. Their display layout stays unchanged.");
+        dialog->setProperty("text", "The desktop owner is using this workstation. Join their current session to view or interact with their desktop. Their display layout stays unchanged.");
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
         QTRY_VERIFY(dialog->property("opened").toBool());
         auto* explanation = dialog->findChild<QObject*>("collaborationExplanation");
