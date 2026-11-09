@@ -10,6 +10,7 @@
 #include "streaming/avsynccontroller.h"
 #include "streaming/plankdisplaymode.h"
 #include "streaming/planktoolbar.h"
+#include "backend/clientinstances.h"
 #include "streaming/planksessionevents.h"
 #include "streaming/input/plankmousemotion.h"
 #include "streaming/streamutils.h"
@@ -260,6 +261,13 @@ void Session::clConnectionTerminated(int errorCode)
 
     // Push a quit event to the main loop
     requestSessionQuit();
+}
+
+void Session::openNewConnection()
+{
+    if (!ClientInstances::get().openNewConnection()) {
+        emit displayLaunchWarning(tr("Could not open another Fernweh window. Wait for any application update to finish, then try again."));
+    }
 }
 
 void Session::requestSessionQuit()
@@ -5971,6 +5979,7 @@ void Session::execInternal()
                 m_CameraRequested.store(!m_CameraRequested.load());
             if (action == PlankToolbar::Action::ToggleMicrophone)
                 m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
+            if (action == PlankToolbar::Action::NewConnection) openNewConnection();
             if (action == PlankToolbar::Action::Disconnect) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK toolbar disconnect requested");
@@ -6122,6 +6131,7 @@ void Session::execInternal()
                         m_CameraRequested.store(!m_CameraRequested.load());
                     if (action == PlankToolbar::Action::ToggleMicrophone)
                         m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
+                    if (action == PlankToolbar::Action::NewConnection) openNewConnection();
                     if (action == PlankToolbar::Action::Disconnect) {
                         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                     "PLANK toolbar disconnect requested during reconnect");
@@ -6626,6 +6636,10 @@ void Session::execInternal()
                 }
                 if (action == PlankToolbar::Action::ToggleMicrophone) {
                     m_MicrophoneRequested.store(!m_MicrophoneRequested.load());
+                    break;
+                }
+                if (action == PlankToolbar::Action::NewConnection) {
+                    openNewConnection();
                     break;
                 }
                 if (action == PlankToolbar::Action::Disconnect) {

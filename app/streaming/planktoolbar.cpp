@@ -30,6 +30,7 @@ constexpr int MicrophoneWidth = 34;
 constexpr int ScreensPromptHeight = 36;
 constexpr int CameraWidth = 34;
 constexpr int FilesWidth = 55;
+constexpr int NewConnectionWidth = 105;
 constexpr int FileStatusHeight = 28;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
@@ -111,7 +112,7 @@ PlankToolbar::PlankToolbar(
       m_PixelDensity(1.0f),
       m_EncoderTargetWidth(PlankToolbarStats::encoderTargetWidth(
               BitrateMinimumKbps, BitrateMaximumKbps, BitrateStepKbps)),
-      m_Width(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+      m_Width(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth + NewConnectionWidth +
               PlankToolbarStats::WindowControlsWidth),
       m_ToolbarLeft(-1),
       m_ToolbarDragOffsetX(0),
@@ -384,7 +385,7 @@ void PlankToolbar::notifyWindowChanged()
                 SDL_GetWindowPixelDensity(m_Window),
                 m_WindowWidth, m_WindowHeight,
                 m_WindowPixelWidth, m_WindowPixelHeight);
-    m_Width = std::min(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth +
+    m_Width = std::min(PlankToolbarStats::EncoderTargetLeft + m_EncoderTargetWidth + NewConnectionWidth +
                       (m_MicrophoneSupported ? MicrophoneWidth : 0) +
                       (m_CameraSupported ? CameraWidth : 0) +
                       (m_FilesSupported ? FilesWidth : 0) +
@@ -657,6 +658,9 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
             break;
         case Control::Minimize:
             action = Action::Minimize;
+            break;
+        case Control::NewConnection:
+            action = Action::NewConnection;
             break;
         case Control::Disconnect:
             action = Action::Disconnect;
@@ -962,6 +966,20 @@ void PlankToolbar::redraw()
     painter.setPen(Qt::NoPen);
     painter.setBrush(m_BitrateSupported ? QColor(243, 246, 250) : QColor(112, 120, 130));
     painter.drawEllipse(QPointF(thumbX, trackY), 5, 5);
+
+    const int connectionRight = m_Width - 105 -
+            (m_MicrophoneSupported ? MicrophoneWidth : 0) -
+            (m_CameraSupported ? CameraWidth : 0) -
+            (m_FilesSupported ? FilesWidth : 0);
+    painter.setPen(QPen(QColor(104, 116, 131), 1));
+    painter.setBrush(newConnectionContains(m_PointerX, m_PointerY) ?
+                     QColor(68, 78, 90) : QColor(48, 57, 68));
+    painter.drawRoundedRect(QRectF(connectionRight - NewConnectionWidth + 3, 6,
+                                  NewConnectionWidth - 6, 27), 4, 4);
+    painter.setPen(QColor(235, 239, 244));
+    painter.setFont(labelFont);
+    painter.drawText(QRectF(connectionRight - NewConnectionWidth, 6, NewConnectionWidth, 27),
+                     Qt::AlignCenter, "New connection");
 
     const QPointF fullscreenCenter(m_Width - 88.0, 19.0);
     if (m_MicrophoneSupported) {
@@ -1574,6 +1592,15 @@ void PlankToolbar::setFileTransferState(bool supported, const QString& status)
     redraw();
 }
 
+bool PlankToolbar::newConnectionContains(int x, int y) const
+{
+    const int right = toolbarLeft() + m_Width - 105 -
+            (m_MicrophoneSupported ? MicrophoneWidth : 0) -
+            (m_CameraSupported ? CameraWidth : 0) -
+            (m_FilesSupported ? FilesWidth : 0);
+    return x >= right - NewConnectionWidth && x < right && y >= 2 && y <= 37;
+}
+
 bool PlankToolbar::filesContains(int x, int y) const
 {
     const int right = toolbarLeft() + m_Width - 105 -
@@ -1632,6 +1659,7 @@ PlankToolbar::Control PlankToolbar::controlAt(int x, int y) const
     if (fullscreenContains(x, y)) {
         return Control::Fullscreen;
     }
+    if (newConnectionContains(x, y)) return Control::NewConnection;
     if (filesContains(x, y)) return Control::Files;
     if (cameraContains(x, y)) return Control::Camera;
     if (microphoneContains(x, y)) return Control::Microphone;
@@ -1660,7 +1688,7 @@ int PlankToolbar::sliderLeft() const
 int PlankToolbar::sliderRight() const
 {
     return toolbarLeft() + std::max(PlankToolbarStats::EncoderTargetLeft,
-                                   m_Width - PlankToolbarStats::WindowControlsWidth -
+                                   m_Width - PlankToolbarStats::WindowControlsWidth - NewConnectionWidth -
                                    (m_MicrophoneSupported ? MicrophoneWidth : 0) -
                                    (m_CameraSupported ? CameraWidth : 0) -
                                    (m_FilesSupported ? FilesWidth : 0));

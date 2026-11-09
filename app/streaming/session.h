@@ -660,6 +660,7 @@ private:
     std::atomic<std::uint64_t> m_DecodedFrameSize {0};
 
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
+    void openNewConnection();
     static Session* s_ActiveSession;
     static QSemaphore s_ActiveSessionSemaphore;
 };

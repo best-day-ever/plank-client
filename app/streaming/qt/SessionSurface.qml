@@ -298,6 +298,14 @@ Item {
                     onClicked: sessionWindow.minimize()
                 }
                 ToolButton {
+                    objectName: "newConnectionButton"
+                    iconName: "newConnectionIcon"
+                    iconSource: "icons/new-connection.svg"
+                    ToolTip.text: "Connect to another workstation"
+                    onClicked: sessionWindow.openNewConnection()
+                }
+
+                ToolButton {
                     objectName: "disconnectButton"
                     iconName: "disconnectIcon"
                     iconSource: "icons/close.svg"

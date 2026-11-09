@@ -98,6 +98,17 @@ private slots:
         QCOMPARE(toggles.count(), 1);
         QCOMPARE(buttons.count(), 2);
 
+        auto* newConnection = scene.rootObject()->findChild<QQuickItem*>("newConnectionButton");
+        QVERIFY(newConnection);
+        QSignalSpy newWindows(&scene, &QtSessionWindow::newConnectionRequested);
+        QSignalSpy disconnects(&scene, &QtSessionWindow::disconnectRequested);
+        const auto newPoint = newConnection->mapToScene(newConnection->boundingRect().center());
+        pointer(scene, QEvent::MouseButtonPress, newPoint, Qt::LeftButton);
+        pointer(scene, QEvent::MouseButtonRelease, newPoint, Qt::LeftButton);
+        QCOMPARE(newWindows.count(), 1);
+        QCOMPARE(disconnects.count(), 0);
+        QCOMPARE(buttons.count(), 2); // New connection is a local control.
+
         const QPointingDevice pen(QStringLiteral("test pen"), 1, QInputDevice::DeviceType::Stylus,
             QPointingDevice::PointerType::Pen, QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1, 3);
         const auto tablet = [&](QEvent::Type type, QPointF position, bool down) {

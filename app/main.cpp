@@ -27,6 +27,7 @@
 #include <QTimer>
 #include "clientidentity.h"
 #include "backend/internetconnectivity.h"
+#include "backend/clientinstances.h"
 
 #ifdef Q_OS_UNIX
 #include <sys/socket.h>
@@ -493,7 +494,8 @@ int main(int argc, char *argv[])
                                     .arg(QCoreApplication::applicationPid());
 #else
     logNamePattern = "PLANK-*.log";
-    const QString logFileName = QString("PLANK-%1.log").arg(QDateTime::currentSecsSinceEpoch());
+    const QString logFileName = QString("PLANK-%1-%2.log").arg(QDateTime::currentMSecsSinceEpoch())
+            .arg(QCoreApplication::applicationPid());
 #endif
 
 #ifdef Q_OS_WIN32
@@ -951,6 +953,11 @@ int main(int argc, char *argv[])
     // Match the PLANK desktop entry so Wayland and X11 shells group
     // both the Qt launcher and SDL stream window under the packaged identity.
     app.setDesktopFileName(PlankClientIdentity::desktopId);
+
+    if (!ClientInstances::get().registerInstance()) {
+        qCritical() << "Could not open a client window while the application is updating or its instance registry is unavailable.";
+        return 11;
+    }
 
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");

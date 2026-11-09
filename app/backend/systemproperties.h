@@ -29,6 +29,7 @@ public:
     Q_PROPERTY(bool automaticSessionRecovery READ automaticSessionRecovery CONSTANT)
     Q_PROPERTY(bool clientDisplaySelectionAvailable READ clientDisplaySelectionAvailable CONSTANT)
 
+    Q_INVOKABLE bool openNewConnection();
     Q_INVOKABLE void refreshDisplays();
     Q_INVOKABLE QRect getNativeResolution(int displayIndex);
     Q_INVOKABLE QRect getSafeAreaResolution(int displayIndex);
