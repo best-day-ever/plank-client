@@ -22,6 +22,7 @@ struct PlankDesktopSignOut
 
     State state = State::None;
     QString owner;
+    bool collaborationAvailable = false;
 
     // The owner is echoed back verbatim in plankSignOutOwner, so reject
     // anything that is not a plausible single account name.
@@ -35,7 +36,8 @@ struct PlankDesktopSignOut
     }
 
     static PlankDesktopSignOut fromResponse(int statusCode, const QString& owner,
-                                            const QString& signOut)
+                                            const QString& signOut,
+                                            const QString& collaboration = {})
     {
         PlankDesktopSignOut result;
         if (!validOwner(owner)) return result;
@@ -49,6 +51,9 @@ struct PlankDesktopSignOut
             return result;
         }
         result.owner = owner;
+        // A feature flag advertises protocol support, not an unlocked desktop.
+        // Missing/invalid hints must not offer a join that the Host will refuse.
+        result.collaborationAvailable = statusCode == 409 && collaboration == QStringLiteral("1");
         return result;
     }
 

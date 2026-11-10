@@ -4616,7 +4616,18 @@ int Session::waitForPlankDecisionChoice()
 
 bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner)
 {
-    const PlankCollaboration request = PlankCollaboration::parse(http.requestCollaboration());
+    QJsonObject response;
+    try {
+        response = http.requestCollaboration();
+    } catch (const GfeHttpResponseException& error) {
+        // The owner may lock/sign out between the launch refusal and the join.
+        // Preserve the refusal; never unlock somebody else's desktop or retry
+        // it as a fresh credential challenge.
+        if (error.getStatusCode() != 403 && error.getStatusCode() != 409) throw;
+        emit displayLaunchError(tr("%1's desktop is locked or no longer available for sharing. Ask them to reconnect and unlock it, then join again.").arg(owner));
+        return false;
+    }
+    const PlankCollaboration request = PlankCollaboration::parse(response);
     if (request.state != PlankCollaboration::Pending) {
         throw GfeHttpResponseException(400, "Host did not accept the collaboration request");
     }
@@ -4736,6 +4747,7 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
 
     if (!reconnecting && hasPlankCredentials() &&
             (m_Computer->plankFeatureFlags & NvOutputTopology::CollaborationFeature) &&
+            conflict.collaborationAvailable &&
             (conflict.state == PlankDesktopSignOut::State::Available ||
              conflict.state == PlankDesktopSignOut::State::Connected)) {
         m_ActiveSessionTakeoverDecision.store(0);
