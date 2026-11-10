@@ -4,9 +4,10 @@
 param(
     [Parameter(Mandatory=$true)][string]$Package,
     [Parameter(Mandatory=$true)][string]$QtFixture,
-    [string]$Helper = (Join-Path $PSScriptRoot '../../app/backend/fernweh-install-update.ps1')
+    [string]$Helper
 )
 $ErrorActionPreference = 'Stop'
+if (-not $Helper) { $Helper = Join-Path $PSScriptRoot '../../app/backend/fernweh-install-update.ps1' }
 $directory = Join-Path ([IO.Path]::GetTempPath()) ('fernweh-msi-service-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($directory)
 $stagedPackage = $null
