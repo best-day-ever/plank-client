@@ -203,6 +203,13 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(cancel, "clicked"));
         QCOMPARE(chosen.size(), 2);
         QCOMPARE(chosen[1][0].toInt(), -1);
+        dialog->setProperty("unlockRequired", true);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(join->property("text").toString(), QString("Unlock and join"));
+        QVERIFY(QMetaObject::invokeMethod(join, "clicked"));
+        QCOMPARE(chosen.size(), 3);
+        QCOMPARE(chosen[2][0].toInt(), 2);
     }
 };
 QTEST_MAIN(CollaborationTest)

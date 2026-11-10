@@ -4614,17 +4614,20 @@ int Session::waitForPlankDecisionChoice()
     return m_ConnectionStartCancelled.load() ? -1 : decision;
 }
 
-bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner)
+bool Session::joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner,
+                               const QString& unlockGeneration)
 {
     QJsonObject response;
     try {
-        response = http.requestCollaboration();
+        response = unlockGeneration.isEmpty() ? http.requestCollaboration() : http.requestCollaboration(owner, unlockGeneration);
     } catch (const GfeHttpResponseException& error) {
         // The owner may lock/sign out between the launch refusal and the join.
         // Preserve the refusal; never unlock somebody else's desktop or retry
         // it as a fresh credential challenge.
         if (error.getStatusCode() != 403 && error.getStatusCode() != 409) throw;
-        emit displayLaunchError(tr("%1's desktop is locked or no longer available for sharing. Ask them to reconnect and unlock it, then join again.").arg(owner));
+        emit displayLaunchError((unlockGeneration.isEmpty() ?
+            tr("%1's desktop is locked or no longer available for sharing. Ask them to reconnect and unlock it, then join again.") :
+            tr("%1's desktop could not be unlocked. The desktop or your support access may have changed. Connect again to refresh the available actions.")).arg(owner));
         return false;
     }
     const PlankCollaboration request = PlankCollaboration::parse(response);
@@ -4747,17 +4750,21 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
 
     if (!reconnecting && hasPlankCredentials() &&
             (m_Computer->plankFeatureFlags & NvOutputTopology::CollaborationFeature) &&
-            conflict.collaborationAvailable &&
+            (conflict.collaborationAvailable || conflict.supportUnlockAvailable) &&
             (conflict.state == PlankDesktopSignOut::State::Available ||
              conflict.state == PlankDesktopSignOut::State::Connected)) {
         m_ActiveSessionTakeoverDecision.store(0);
         m_WaitingForActiveSessionTakeoverDecision.store(true);
         emit desktopCollaborationRequested(
-            tr("%1 is using %2. Join their current session to view or interact with their desktop. Their display layout stays unchanged.")
-                .arg(conflict.owner, hostName), conflict.state == PlankDesktopSignOut::State::Available);
+            (conflict.supportUnlockAvailable ?
+             tr("%1's desktop on %2 is locked. Your support access allows you to unlock it and join without closing their applications. Their display layout stays unchanged.") :
+             tr("%1 is using %2. Join their current session to view or interact with their desktop. Their display layout stays unchanged."))
+                .arg(conflict.owner, hostName), conflict.state == PlankDesktopSignOut::State::Available,
+                conflict.supportUnlockAvailable);
         const int choice = waitForPlankDecisionChoice();
         if (choice == 2) {
-            const bool joined = joinPlankDesktop(*http, startApp, conflict.owner);
+            const bool joined = joinPlankDesktop(*http, startApp, conflict.owner,
+                conflict.supportUnlockAvailable ? conflict.desktopGeneration : QString());
             if (!joined) clearSessionToken();
             return joined;
         }

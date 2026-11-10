@@ -212,7 +212,7 @@ public:
     // (400 or 409 with the display arrangement extension), else empty.
     QString displayArrangementError() const { return m_DisplayArrangementError; }
     NvOutputTopology getOutputTopology(QString* certificateSha256 = nullptr);
-    QJsonObject requestCollaboration();
+    QJsonObject requestCollaboration(const QString& owner = {}, const QString& generation = {});
     QJsonObject collaborationStatus(const QString& requestId);
     void cancelCollaboration(const QString& requestId);
     void setCollaborationGrant(QString grant) { m_CollaborationGrant = std::move(grant); }

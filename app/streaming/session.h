@@ -254,7 +254,7 @@ signals:
     void activeSessionTakeoverRequested(QString text);
 
     void desktopSignOutRequested(QString text);
-    void desktopCollaborationRequested(QString text, bool signOutAvailable);
+    void desktopCollaborationRequested(QString text, bool signOutAvailable, bool unlockRequired);
 
     void displayLaunchError(QString text);
 
@@ -304,7 +304,8 @@ private:
     QString authenticatePlank(NvHTTP& http, bool* greeterConfirmed);
     bool waitForPlankDecision();
     int waitForPlankDecisionChoice();
-    bool joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner);
+    bool joinPlankDesktop(NvHTTP& http, const std::function<void()>& startApp, const QString& owner,
+                          const QString& unlockGeneration = {});
     bool createCollaborationWindows();
     void rebuildCollaborationPresentation();
     void updateCollaborationIndicator();

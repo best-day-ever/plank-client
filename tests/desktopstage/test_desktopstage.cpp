@@ -246,6 +246,26 @@ private slots:
         QVERIFY(!PlankDesktopSignOut::fromResponse(403, "alice", "available", "1").collaborationAvailable);
         QVERIFY(!PlankDesktopSignOut::fromResponse(409, "", "available", "1").collaborationAvailable);
     }
+
+    void supportUnlockRequiresAnExplicitOfferAndCanonicalGeneration()
+    {
+        const auto reply = [](const QString& unlock, const QString& generation) {
+            return PlankDesktopSignOut::fromResponse(409, "alice", "available", "0", unlock, generation);
+        };
+        QVERIFY(reply("1", "7").supportUnlockAvailable);
+        QCOMPARE(reply("1", "7").desktopGeneration, QString("7"));
+        QVERIFY(reply("1", "18446744073709551615").supportUnlockAvailable);
+        for (const QString& generation : {QString(), QStringLiteral("0"), QStringLiteral("01"),
+              QStringLiteral("-1"), QStringLiteral("+1"), QStringLiteral(" 7"),
+              QStringLiteral("18446744073709551616"), QStringLiteral("7\n")}) {
+            QVERIFY(!reply("1", generation).supportUnlockAvailable);
+        }
+        for (const QString& unlock : {QString(), QStringLiteral("0"), QStringLiteral("true")})
+            QVERIFY(!reply(unlock, "7").supportUnlockAvailable);
+        QVERIFY(!PlankDesktopSignOut::fromResponse(409, "alice", "available", "1", "1", "7").supportUnlockAvailable);
+        QVERIFY(!PlankDesktopSignOut::fromResponse(503, "alice", "started", "0", "1", "7").supportUnlockAvailable);
+        QVERIFY(!PlankDesktopSignOut::fromResponse(409, "", "available", "0", "1", "7").supportUnlockAvailable);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestDesktopStage)

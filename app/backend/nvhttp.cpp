@@ -385,7 +385,9 @@ NvHTTP::startApp(QString verb,
                         (int)xmlReader.attributes().value("status_code").toUInt(),
                         getXmlString(response, "PlankDesktopOwner"),
                         getXmlString(response, "PlankDesktopSignOut"),
-                        getXmlString(response, "PlankCollaborationAvailable"));
+                        getXmlString(response, "PlankCollaborationAvailable"),
+                        getXmlString(response, "PlankDesktopUnlockAvailable"),
+                        getXmlString(response, "PlankDesktopGeneration"));
         }
     }
 
@@ -744,8 +746,15 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
     return ret;
 }
 
-QJsonObject NvHTTP::requestCollaboration()
+QJsonObject NvHTTP::requestCollaboration(const QString& owner, const QString& generation)
 {
+    if (!owner.isEmpty() || !generation.isEmpty()) {
+        if (!PlankDesktopSignOut::validOwner(owner) || generation.isEmpty())
+            throw GfeHttpResponseException(400, "Invalid support unlock target");
+        return postPlankJson(QStringLiteral("request"), {
+            {QStringLiteral("unlock_desktop"), true}, {QStringLiteral("owner"), owner},
+            {QStringLiteral("generation"), generation}}, true);
+    }
     return postPlankJson(QStringLiteral("request"), {}, true);
 }
 
