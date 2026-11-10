@@ -100,6 +100,7 @@ public:
     bool handleRemoteCursorPosition(const unsigned char* data, unsigned int length);
 
     void applyPendingRemoteCursor();
+    void refreshRemoteCursorScale(SDL_Window* window);
 
     void applyPendingRemoteCursorPosition();
 
@@ -188,6 +189,7 @@ private:
     RemoteCursorState m_AppliedRemoteCursor;
     bool m_AppliedRemoteCursorValid = false;
     SDL_Cursor* m_RemoteCursor = nullptr;
+    QSize m_RemoteCursorLogicalSize;
 
     RemoteCursorPosition m_AppliedRemoteCursorPosition;
     std::uint64_t m_AppliedRemoteCursorPositionSequence = 0;

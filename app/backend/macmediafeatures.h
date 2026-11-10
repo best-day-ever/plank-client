@@ -10,7 +10,7 @@
 namespace MacMediaFeatures {
 inline QString transport() { return QStringLiteral("plank-native/2"); }
 inline QJsonArray required() { return {"desktop", "audio", "input"}; }
-inline QStringList names() { return {"desktop", "audio", "input", "clipboard", "microphone", "camera"}; }
+inline QStringList names() { return {"desktop", "audio", "input", "clipboard", "microphone", "camera", "cursor"}; }
 inline bool cameraSupported()
 {
 #if defined(Q_OS_LINUX)
@@ -27,6 +27,7 @@ inline bool encodingSupported(const QString& mode)
 inline QJsonObject profile(const QString& name, const QString& mode)
 {
     if (name == QLatin1String("desktop")) return {{"schema_version", 1}, {"encoding_mode", mode}};
+    if (name == QLatin1String("cursor")) return {{"schema_version", 1}, {"mode", "local-shape"}, {"wire", "plcr/1"}};
     if (name == QLatin1String("audio")) return {{"schema_version", 1}, {"codec", "opus"},
         {"sample_rate", 48000}, {"channels", 2}, {"packet_duration_ms", 5}};
     if (name == QLatin1String("input")) return {{"schema_version", 1}, {"keyboard", true},
@@ -119,7 +120,8 @@ inline Agreement legacy(int schema, const QString& mode)
     if (schema < 4 || schema > 6 || !encodingSupported(mode)) return {};
     Agreement result {schema, mode, {}};
     for (const auto& name : names()) {
-        const bool enabled = (name != QLatin1String("clipboard") || NvOutputTopology::PlatformClipboardSyncFeature) &&
+        const bool enabled = name != QLatin1String("cursor") &&
+            (name != QLatin1String("clipboard") || NvOutputTopology::PlatformClipboardSyncFeature) &&
             (name != QLatin1String("microphone") || schema >= 5) &&
             (name != QLatin1String("camera") || (schema >= 6 && cameraSupported()));
         result.features.insert(name, enabled ? QJsonValue(profile(name, mode)) : QJsonValue(QJsonValue::Null));

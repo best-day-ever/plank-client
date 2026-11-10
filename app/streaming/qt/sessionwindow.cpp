@@ -108,7 +108,8 @@ void QtSessionWindow::setPresentation(const QtSessionGeometry& geometry)
     releaseRemoteInput();
     m_Geometry = geometry.valid() && geometry.logicalSize == size() ? geometry : QtSessionGeometry{};
     emit presentationChanged();
-    updateTabletCursor();
+    updateRemoteCursor();
+    updateCursor();
 }
 
 void QtSessionWindow::setRemoteInputEnabled(bool enabled)
@@ -132,8 +133,7 @@ void QtSessionWindow::setCursorShape(QImage image, QPoint hotspot, bool visible)
     m_CursorHotspot = hotspot;
     m_HostCursorVisible = visible;
     if (m_TabletCursor) m_TabletCursor->setImage(m_CursorImage);
-    if (m_CursorImage.isNull()) m_RemoteCursor = QCursor(Qt::ArrowCursor);
-    else m_RemoteCursor = QCursor(QPixmap::fromImage(m_CursorImage), hotspot.x(), hotspot.y());
+    updateRemoteCursor();
     updateCursor();
 }
 void QtSessionWindow::setHostCursorPosition(QPointF position)
@@ -302,6 +302,19 @@ void QtSessionWindow::observePointer(const QPointF& position)
     else if (!m_RevealTimer.isActive()) m_RevealTimer.start();
     scheduleHide();
     updateCursor();
+}
+
+void QtSessionWindow::updateRemoteCursor()
+{
+    if (!m_CursorImage.isNull() && m_Geometry.valid()) {
+        const qreal sx = m_Geometry.destinationPixels.width() / m_Geometry.sourcePixels.width() * width() / m_Geometry.drawableSize.width();
+        const qreal sy = m_Geometry.destinationPixels.height() / m_Geometry.sourcePixels.height() * height() / m_Geometry.drawableSize.height();
+        const QSize size(qMax(1, qRound(m_CursorImage.width() * sx)), qMax(1, qRound(m_CursorImage.height() * sy)));
+        const QPoint hotspot(qBound(0, qRound(m_CursorHotspot.x() * sx), size.width() - 1),
+                             qBound(0, qRound(m_CursorHotspot.y() * sy), size.height() - 1));
+        m_RemoteCursor = QCursor(QPixmap::fromImage(m_CursorImage.scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)),
+                                 hotspot.x(), hotspot.y());
+    } else if (m_CursorImage.isNull()) m_RemoteCursor = QCursor(Qt::ArrowCursor);
 }
 
 void QtSessionWindow::updateCursor()

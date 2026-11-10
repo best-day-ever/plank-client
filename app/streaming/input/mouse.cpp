@@ -225,6 +225,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event,
     }
 
     m_MouseWasInVideoRegion = mouseInVideoRegion;
+    refreshRemoteCursorScale(window);
     followPointerFocus(window, motion.state);
 }
 
