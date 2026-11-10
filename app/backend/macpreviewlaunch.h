@@ -136,6 +136,7 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
     if (localCursor) reply.configuration.hostFeatureFlags |= LI_FF_LOCAL_CURSOR;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
     reply.configuration.serviceFlags = PLANK_NATIVE_SERVICE_AUDIO | PLANK_NATIVE_SERVICE_INPUT;
+    if (localCursor) reply.configuration.serviceFlags |= PLANK_NATIVE_SERVICE_LOCAL_CURSOR;
     reply.configuration.audioPacketDurationMs = 5;
     reply.configuration.opusConfiguration.sampleRate = 48000;
     reply.configuration.opusConfiguration.channelCount = 2;
