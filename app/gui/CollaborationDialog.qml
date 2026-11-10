@@ -10,6 +10,7 @@ NavigableDialog {
     focus: true
     property string text
     property bool signOutAvailable: false
+    property bool unlockRequired: false
     signal chosen(int choice)
 
     PlankTheme { id: collaborationTheme }
@@ -45,7 +46,7 @@ NavigableDialog {
         }
         Button {
             objectName: "requestCollaboration"
-            text: qsTr("Join session")
+            text: dialog.unlockRequired ? qsTr("Unlock and join") : qsTr("Join session")
             highlighted: true
             flat: false
             DialogButtonBox.buttonRole: DialogButtonBox.ActionRole

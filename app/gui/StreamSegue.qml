@@ -60,10 +60,11 @@ Item {
         desktopSignOutDialog.open()
     }
 
-    function desktopCollaborationRequested(text, signOutAvailable)
+    function desktopCollaborationRequested(text, signOutAvailable, unlockRequired)
     {
         desktopCollaborationDialog.text = text
         desktopCollaborationDialog.signOutAvailable = signOutAvailable
+        desktopCollaborationDialog.unlockRequired = unlockRequired
         desktopCollaborationDialog.open()
     }
 
