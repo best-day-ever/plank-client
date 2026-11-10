@@ -4791,11 +4791,16 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
             qInfo() << "PLANK workstation desktop belongs to another account";
             return false;
 
-        case Step::Confirm:
+        case Step::Confirm: {
             m_ActiveSessionTakeoverDecision.store(0);
             m_WaitingForActiveSessionTakeoverDecision.store(true);
+            const bool sharingUnavailable =
+                    (m_Computer->plankFeatureFlags & NvOutputTopology::CollaborationFeature) &&
+                    !conflict.collaborationAvailable;
             emit desktopSignOutRequested(
-                        tr("%1 is signed in on %2 but not connected. Sign %1 out and open your desktop? Anything unsaved in %1's session will be lost.")
+                        (sharingUnavailable ?
+                         tr("%1's desktop on %2 is locked or unavailable for sharing. To join, ask %1 to reconnect and unlock it. Sign %1 out and open your own desktop instead? Anything unsaved in %1's session will be lost.") :
+                         tr("%1 is signed in on %2 but not connected. Sign %1 out and open your desktop? Anything unsaved in %1's session will be lost."))
                             .arg(conflict.owner, hostName));
             if (!waitForPlankDecision()) {
                 qInfo() << "PLANK desktop sign-out was cancelled";
@@ -4819,6 +4824,7 @@ bool Session::resolvePlankDesktopConflict(std::unique_ptr<NvHTTP>& http,
                 throw;
             }
             continue;
+        }
 
         case Step::AwaitGreeter: {
             constexpr int RetryIntervalMs = 2000;
