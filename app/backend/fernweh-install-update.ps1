@@ -8,6 +8,7 @@ param(
     [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
+$installerLog = $null
 try {
     # Qt supplies forward-slash paths. MSI database inspection accepts them,
     # but msiexec installation returns 1619 unless separators are native.
@@ -45,10 +46,29 @@ try {
     $database = $null
     $engine = $null
     if ($ValidateOnly) { exit 0 }
+    # QTemporaryDir deliberately creates an owner-only Windows DACL. MSI runs
+    # in the SYSTEM service, and UAC can use a different administrator account.
+    # Both need to traverse the directory and read the MSI, even though our
+    # current-user integrity and database checks above succeeded. Grant only
+    # read/execute to these well-known SIDs; never grant Everyone or write access.
+    foreach ($path in @((Split-Path -Parent $Installer), $Installer)) {
+        $acl = Get-Acl -LiteralPath $path
+        foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+            $identity = [Security.Principal.SecurityIdentifier]::new($sid)
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+                $identity, [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+                [Security.AccessControl.AccessControlType]::Allow)
+            [void]$acl.AddAccessRule($rule)
+        }
+        Set-Acl -LiteralPath $path -AclObject $acl
+    }
+    $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BDE fernweh\updater'
+    [void][IO.Directory]::CreateDirectory($logDirectory)
+    $installerLog = Join-Path $logDirectory ('install-' + [guid]::NewGuid().ToString('N') + '.log')
     # ALPHA releases may be unsigned. Trust comes from the pinned broker HTTPS
     # connection, the exact SHA-256/size and the package identity above. Standard
     # Windows elevation remains in place; no silent privilege bypass is used.
-    $arguments = '/i "' + $Installer + '" /passive /norestart REBOOT=ReallySuppress'
+    $arguments = '/i "' + $Installer + '" /passive /norestart REBOOT=ReallySuppress /L*V "' + $installerLog + '"'
     $process = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList $arguments -Verb RunAs -Wait -PassThru
     if ($process.ExitCode -notin @(0, 1641, 3010)) {
         if ($process.ExitCode -eq 1602) { throw 'The update was cancelled. Your current installation and settings are still available.' }
@@ -57,8 +77,12 @@ try {
 } catch {
     if ($ValidateOnly) { Write-Output $_.Exception.Message; exit 1 }
     Add-Type -AssemblyName System.Windows.Forms
+    $message = $_.Exception.Message
+    if ($installerLog -and (Test-Path -LiteralPath $installerLog)) {
+        $message += "`r`n`r`nInstaller log: $installerLog"
+    }
     [void][System.Windows.Forms.MessageBox]::Show(
-        $_.Exception.Message, 'BDE fernweh update', 'OK', 'Error')
+        $message, 'BDE fernweh update', 'OK', 'Error')
 } finally {
     if ($database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
     if ($engine) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($engine) }

@@ -50,6 +50,19 @@ function Verify-InstallerLaunch([string]$name, [string]$pathStyle) {
             FilePath = $FilePath; Verb = $Verb; Wait = $Wait.IsPresent; PassThru = $PassThru.IsPresent
         })
         if ($FilePath -eq "$env:SystemRoot\System32\msiexec.exe") {
+            # Assert access at the service boundary, before the helper cleans up.
+            foreach ($item in @((Split-Path -Parent $package), $package)) {
+                $rules = (Get-Acl -LiteralPath $item).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+                foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+                    $read = @($rules | Where-Object {
+                        $_.IdentityReference.Value -eq $sid -and
+                        $_.AccessControlType -eq 'Allow' -and
+                        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadAndExecute) -eq
+                            [Security.AccessControl.FileSystemRights]::ReadAndExecute
+                    })
+                    if (-not $read.Count) { throw "Installer service cannot read $item as $sid" }
+                }
+            }
             return Microsoft.PowerShell.Management\Start-Process -FilePath $probe -ArgumentList $ArgumentList -Wait -PassThru
         }
     }
@@ -58,7 +71,11 @@ function Verify-InstallerLaunch([string]$name, [string]$pathStyle) {
     $received = @([IO.File]::ReadAllLines($env:FERNWEH_ARGV_PROBE) | ForEach-Object {
         [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($_))
     })
-    $expected = @('/i', $package, '/passive', '/norestart', 'REBOOT=ReallySuppress')
+    $expected = @('/i', $package, '/passive', '/norestart', 'REBOOT=ReallySuppress', '/L*V', $received[-1])
+    if ((Split-Path -Leaf $received[-1]) -notmatch '^install-[a-f0-9]{32}\.log$' -or
+        (Split-Path -Parent $received[-1]) -cne (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BDE fernweh\updater')) {
+        throw 'Installer diagnostic log is not in the persistent per-user update directory.'
+    }
     if ($received.Count -ne $expected.Count) { throw "Installer received $($received.Count) arguments, expected $($expected.Count)." }
     for ($index = 0; $index -lt $expected.Count; $index++) {
         if ($received[$index] -cne $expected[$index]) { throw "Installer argument $index changed: [$($received[$index])] instead of [$($expected[$index])]." }
