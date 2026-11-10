@@ -232,6 +232,20 @@ private slots:
         QVERIFY(!PlankDesktopSignOut::stillSigningOut(reply(409, "alice", "available"), none));
         QVERIFY(!PlankDesktopSignOut::stillSigningOut({}, alice));
     }
+
+    void joinRequiresAnExplicitAvailableDesktop()
+    {
+        for (const QString& offer : {QStringLiteral("available"), QStringLiteral("connected")}) {
+            QVERIFY(PlankDesktopSignOut::fromResponse(409, "alice", offer, "1").collaborationAvailable);
+            for (const QString& hint : {QString(), QStringLiteral("0"), QStringLiteral("true"),
+                                       QStringLiteral("01"), QStringLiteral(" 1")}) {
+                QVERIFY(!PlankDesktopSignOut::fromResponse(409, "alice", offer, hint).collaborationAvailable);
+            }
+        }
+        QVERIFY(!PlankDesktopSignOut::fromResponse(503, "alice", "started", "1").collaborationAvailable);
+        QVERIFY(!PlankDesktopSignOut::fromResponse(403, "alice", "available", "1").collaborationAvailable);
+        QVERIFY(!PlankDesktopSignOut::fromResponse(409, "", "available", "1").collaborationAvailable);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestDesktopStage)

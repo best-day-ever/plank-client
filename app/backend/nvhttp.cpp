@@ -384,7 +384,8 @@ NvHTTP::startApp(QString verb,
             m_DesktopSignOut = PlankDesktopSignOut::fromResponse(
                         (int)xmlReader.attributes().value("status_code").toUInt(),
                         getXmlString(response, "PlankDesktopOwner"),
-                        getXmlString(response, "PlankDesktopSignOut"));
+                        getXmlString(response, "PlankDesktopSignOut"),
+                        getXmlString(response, "PlankCollaborationAvailable"));
         }
     }
 
