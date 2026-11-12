@@ -52,7 +52,18 @@ try {
     # current-user integrity and database checks above succeeded. Grant only
     # read/execute to these well-known SIDs; never grant Everyone or write access.
     foreach ($path in @((Split-Path -Parent $Installer), $Installer)) {
-        $acl = Get-Acl -LiteralPath $path
+        # Windows PowerShell's Set-Acl writes the entire security descriptor.
+        # Its non-elevated fallback translates owner/group SIDs into account
+        # names and can fail before UAC, including with an unmapped group SID.
+        # Read and persist only the DACL through .NET: ownership, group and
+        # auditing remain untouched and no account-name lookup is needed.
+        $directory = [IO.Directory]::Exists($path)
+        $section = [Security.AccessControl.AccessControlSections]::Access
+        if ($directory) {
+            $acl = [IO.Directory]::GetAccessControl($path, $section)
+        } else {
+            $acl = [IO.File]::GetAccessControl($path, $section)
+        }
         foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
             $identity = [Security.Principal.SecurityIdentifier]::new($sid)
             $rule = [Security.AccessControl.FileSystemAccessRule]::new(
@@ -60,7 +71,11 @@ try {
                 [Security.AccessControl.AccessControlType]::Allow)
             [void]$acl.AddAccessRule($rule)
         }
-        Set-Acl -LiteralPath $path -AclObject $acl
+        if ($directory) {
+            [IO.Directory]::SetAccessControl($path, $acl)
+        } else {
+            [IO.File]::SetAccessControl($path, $acl)
+        }
     }
     $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BDE fernweh\updater'
     [void][IO.Directory]::CreateDirectory($logDirectory)
