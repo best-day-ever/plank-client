@@ -128,6 +128,7 @@ QJsonObject BetaDiagnostics::report(const QString& id, const QJsonArray& display
 void BetaDiagnostics::begin() {
     m_Cancel->store(true); // Cancels any idle upload before stream preparation.
     m_Active = true; m_Failed = false; m_StallReported = false;
+    m_StatisticsObserved = false;
     if (!m_Enabled || m_Identity.isEmpty() || !m_Sender) return;
     m_Report = report(QUuid::createUuid().toString(QUuid::Id128), displays());
     m_ActiveLock = std::make_shared<QLockFile>(QDir(m_Directory).filePath(m_Report.value("report_id").toString()+".lock"));
@@ -138,6 +139,10 @@ void BetaDiagnostics::begin() {
 void BetaDiagnostics::recordEvent(const QString& kind, int code) {
     static const QStringList allowed {"prepared","connected","stage_failed","display_failed","connection_lost","finished","suspected_stall"};
     if (m_Report.isEmpty() || !allowed.contains(kind)) return;
+    if (kind == "connected") {
+        m_StatisticsObserved = false;
+        m_StallReported = false;
+    }
     QJsonArray events = m_Report.value("events").toArray();
     if (events.size() >= 32) events.removeAt(0);
     events.append(QJsonObject{{"elapsed_ms",m_Elapsed.elapsed()},{"kind",kind},{"code",code}});
@@ -153,7 +158,11 @@ void BetaDiagnostics::sample(float fps, float videoMbps, quint32 rttMs, quint32 
                               {"video_kbps",bounded(videoMbps*1000,10000000)},{"rtt_ms",int(qMin(rttMs,60000u))},
                               {"received_age_ms",int(qMin(receivedAgeMs,60000u))},{"statistics_age_ms",int(qMin(statisticsAgeMs,60000u))}});
     m_Report.insert("samples",samples);
-    const bool stalled = receivedAgeMs < 5000 && statisticsAgeMs > 10000;
+    // Statistics do not exist during negotiation/decoder initialization. A
+    // first frame followed by a stale uptime-derived age is not a steady-state
+    // stall. Arm only after this connection has actually produced statistics.
+    if (receivedAgeMs < 5000 && statisticsAgeMs < 5000) m_StatisticsObserved = true;
+    const bool stalled = m_StatisticsObserved && receivedAgeMs < 5000 && statisticsAgeMs > 10000;
     if (stalled && !m_StallReported) recordEvent("suspected_stall");
     m_StallReported = stalled;
 }

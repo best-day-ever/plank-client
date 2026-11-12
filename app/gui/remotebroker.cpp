@@ -86,9 +86,12 @@ RemoteBroker::RemoteBroker(StreamingPreferences* preferences, QObject* parent)
     m_Diagnostics = new BetaDiagnostics(BetaDiagnostics::defaultDirectory(),this);
     m_DiagnosticSampleTimer.setInterval(5000);
     connect(&m_DiagnosticSampleTimer,&QTimer::timeout,this,[this] {
-        if (m_KeepaliveSession) m_Diagnostics->sample(m_KeepaliveSession->diagnosticRenderedFps(),
+        if (m_KeepaliveSession) {
+            m_KeepaliveSession->logDiagnosticVideoPipeline();
+            m_Diagnostics->sample(m_KeepaliveSession->diagnosticRenderedFps(),
                 m_KeepaliveSession->diagnosticVideoMbps(),m_KeepaliveSession->currentNetworkRttMs(),
                 m_KeepaliveSession->diagnosticReceivedAgeMs(),m_KeepaliveSession->diagnosticStatisticsAgeMs());
+        }
     });
     connect(m_Preferences,&StreamingPreferences::brokerChanged,this,&RemoteBroker::configureDiagnostics);
     monotonicClock();

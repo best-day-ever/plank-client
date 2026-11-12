@@ -64,7 +64,7 @@ private:
 
     void recordFrameDrop(DropReason reason, AVFrame* frame, int queueDepth, int targetDepth);
 
-    void dropFrameForEnqueue(QQueue<AVFrame*>& queue);
+    AVFrame* dropFrameForEnqueue(QQueue<AVFrame*>& queue);
 
     QQueue<AVFrame*> m_RenderQueue;
     QQueue<AVFrame*> m_PacingQueue;

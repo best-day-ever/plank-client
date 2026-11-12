@@ -215,12 +215,17 @@ public:
 
     quint32 diagnosticReceivedAgeMs() const {
 #ifdef PLANK_TRANSPORT
-        return quint32(qMin<Uint64>(60000, SDL_GetTicks()-m_LastPlankVideoReceived.load()));
+        const auto last = m_LastPlankVideoReceived.load();
+        return last == 0 ? 60000 : quint32(qMin<Uint64>(60000, SDL_GetTicks()-last));
 #else
         return 60000;
 #endif
     }
-    quint32 diagnosticStatisticsAgeMs() const { return quint32(qMin<Uint64>(60000, SDL_GetTicks()-m_LastDiagnosticStats.load())); }
+    void logDiagnosticVideoPipeline() const;
+    quint32 diagnosticStatisticsAgeMs() const {
+        const auto last = m_LastDiagnosticStats.load();
+        return last == 0 ? 60000 : quint32(qMin<Uint64>(60000, SDL_GetTicks()-last));
+    }
     float diagnosticRenderedFps() const { return m_CurrentRenderedFps.load(std::memory_order_relaxed); }
     float diagnosticVideoMbps() const { return m_CurrentVideoMbps.load(std::memory_order_relaxed); }
 

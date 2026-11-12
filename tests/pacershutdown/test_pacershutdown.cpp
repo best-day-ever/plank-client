@@ -7,6 +7,7 @@
 
 #include "streaming/streamutils.h"
 #include "streaming/avsynccontroller.h"
+#include "streaming/videopipelineprogress.h"
 #include "streaming/video/ffmpeg-renderers/pacer/pacer.h"
 
 // The only platform query in Pacer::initialize(). No display server is needed.
@@ -114,6 +115,7 @@ private slots:
         SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_ERROR);
     }
     void cleanupTestCase() { SDL_Quit(); }
+    void init() { PlankVideoPipeline::reset(); }
     void uninitializedCleanup();
     void mainThreadCleanup();
     void videoClockSurvivesRenderer_data();
@@ -124,6 +126,9 @@ private slots:
     void waitBoundary_data();
     void waitBoundary();
     void asyncVsyncShutdown();
+    void releaseCallbacksOutsideQueueLock_data();
+    void releaseCallbacksOutsideQueueLock();
+    void stoppedPacerRejectsSubmission();
 
 private:
     static void waitForStop(Pacer* pacer) {
@@ -262,6 +267,9 @@ void TestPacerShutdown::stopDuringRender()
     QVERIFY(pacer->initialize(nullptr, 60, false));
     pacer->submitFrame(frameWithReleaseCounter(releases));
     acquire(renderer.renderEntered);
+    QCOMPARE(PlankVideoPipeline::read(PlankVideoPipeline::renderOperation, SDL_GetTicks()).stage,
+             PlankVideoPipeline::Stage::RenderFrame);
+    QCOMPARE(PlankVideoPipeline::rendererReturns.load(), uint64_t(0));
     pacer->submitFrame(frameWithReleaseCounter(releases));
     Pacer* stopping = pacer.release();
     std::thread shutdown([&] { delete stopping; });
@@ -269,6 +277,7 @@ void TestPacerShutdown::stopDuringRender()
     renderer.renderRelease.release();
     shutdown.join();
     QCOMPARE(renderer.renders, 1);
+    QCOMPARE(PlankVideoPipeline::rendererReturns.load(), uint64_t(1));
     QCOMPARE(renderer.cleanups, 1);
     QCOMPARE(renderer.cleanupThread, renderer.renderThread);
     QCOMPARE(releases.load(), 2);
@@ -349,6 +358,68 @@ void TestPacerShutdown::asyncVsyncShutdown()
         pacer.reset();
         QCOMPARE(renderer.cleanups, 1);
     }
+}
+
+void TestPacerShutdown::releaseCallbacksOutsideQueueLock_data()
+{
+    QTest::addColumn<bool>("pacing");
+    QTest::newRow("render-queue") << false;
+    QTest::newRow("pacing-queue") << true;
+}
+
+void TestPacerShutdown::releaseCallbacksOutsideQueueLock()
+{
+    QFETCH(bool, pacing);
+    VIDEO_STATS stats {};
+    Renderer renderer;
+    renderer.threaded = false;
+    QSemaphore entered;
+    struct Releases { QMutex* queue = nullptr; int count = 0; bool locked = false; } releases;
+    Pacer pacer(&renderer, &stats);
+    QVERIFY(pacer.initialize(nullptr, 60, false));
+    if (pacing) pacer.m_VsyncSource = new AsyncVsync(entered);
+    releases.queue = &pacer.m_FrameQueueLock;
+    for (int i = 0; i < 5; ++i) {
+        AVFrame* frame = av_frame_alloc();
+        QVERIFY(frame);
+        frame->buf[0] = av_buffer_create(static_cast<uint8_t*>(av_malloc(1)), 1,
+            [](void* opaque, uint8_t* data) {
+                auto& state = *static_cast<Releases*>(opaque);
+                ++state.count;
+                // Hardware buffer release may need a device lock also used by
+                // a decoder submitting to this queue. Check actual lock scope.
+                if (state.queue->tryLock()) state.queue->unlock();
+                else state.locked = true;
+                av_free(data);
+            }, &releases, 0);
+        QVERIFY(frame->buf[0]);
+        frame->pkt_dts = SDL_GetTicks();
+        pacer.submitFrame(frame);
+    }
+    QCOMPARE(releases.count, 1); // Overflow retains the bounded four frames.
+    QCOMPARE(stats.queueOverflowDroppedFrames, uint32_t(1));
+    QVERIFY(!releases.locked);
+    pacer.discardQueuedFrames();
+    QCOMPARE(releases.count, 5);
+    QVERIFY(!releases.locked);
+    QVERIFY(pacer.m_RenderQueue.isEmpty());
+    QVERIFY(pacer.m_PacingQueue.isEmpty());
+    SDL_FlushEvent(SDL_EVENT_USER);
+}
+
+void TestPacerShutdown::stoppedPacerRejectsSubmission()
+{
+    VIDEO_STATS stats {};
+    Renderer renderer;
+    renderer.threaded = false;
+    Pacer pacer(&renderer, &stats);
+    QVERIFY(pacer.initialize(nullptr, 60, false));
+    std::atomic<int> releases {0};
+    pacer.m_Stopping = true;
+    pacer.submitFrame(frameWithReleaseCounter(releases));
+    QCOMPARE(releases.load(), 1);
+    QVERIFY(pacer.m_RenderQueue.isEmpty());
+    QVERIFY(pacer.m_PacingQueue.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestPacerShutdown)

@@ -1,6 +1,7 @@
 #include "pacer.h"
 #include "streaming/avsynccontroller.h"
 #include "streaming/streamutils.h"
+#include "streaming/videopipelineprogress.h"
 
 #ifdef Q_OS_WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -144,17 +145,24 @@ Pacer::~Pacer()
 
 void Pacer::discardQueuedFrames()
 {
-    QMutexLocker lock(&m_FrameQueueLock);
-    while (!m_RenderQueue.isEmpty()) {
-        AVFrame* frame = m_RenderQueue.dequeue();
+    QQueue<AVFrame*> renderFrames, pacingFrames;
+    {
+        QMutexLocker lock(&m_FrameQueueLock);
+        renderFrames.swap(m_RenderQueue);
+        pacingFrames.swap(m_PacingQueue);
+        m_PacingQueueHistory.clear();
+        m_RenderQueueHistory.clear();
+    }
+    // Releasing a hardware frame can enter a decoder/device lock. Never hold
+    // the queue lock across those callbacks; the decoder also submits here.
+    while (!renderFrames.isEmpty()) {
+        AVFrame* frame = renderFrames.dequeue();
         av_frame_free(&frame);
     }
-    while (!m_PacingQueue.isEmpty()) {
-        AVFrame* frame = m_PacingQueue.dequeue();
+    while (!pacingFrames.isEmpty()) {
+        AVFrame* frame = pacingFrames.dequeue();
         av_frame_free(&frame);
     }
-    m_PacingQueueHistory.clear();
-    m_RenderQueueHistory.clear();
 }
 
 void Pacer::renderOnMainThread()
@@ -221,12 +229,16 @@ int Pacer::renderThread(void* context)
     while (!me->m_Stopping) {
         // Wait for the renderer to be ready for the next frame
         const uint64_t waitStarted = ClientFrameFlowTrace::nowNs();
+        PlankVideoPipeline::record(PlankVideoPipeline::renderOperation,
+                                  PlankVideoPipeline::Stage::WaitRenderer, SDL_GetTicks());
         me->m_VsyncRenderer->waitToRender();
         me->m_FrameFlowTrace.record(ClientFrameFlowTrace::GpuWait, -1, -1, -1, 0, -1,
                                    ClientFrameFlowTrace::nowNs() - waitStarted);
 
         // Acquire the frame queue lock to protect the queue and
         // the not empty condition
+        PlankVideoPipeline::record(PlankVideoPipeline::renderOperation,
+                                  PlankVideoPipeline::Stage::WaitRenderQueue, SDL_GetTicks());
         me->m_FrameQueueLock.lock();
 
         // Wait for a frame to be ready to render
@@ -255,12 +267,13 @@ int Pacer::renderThread(void* context)
 
 void Pacer::enqueueFrameForRenderingAndUnlock(AVFrame *frame)
 {
-    dropFrameForEnqueue(m_RenderQueue);
+    AVFrame* dropped = dropFrameForEnqueue(m_RenderQueue);
     m_RenderQueue.enqueue(frame);
     m_FrameFlowTrace.record(ClientFrameFlowTrace::Enqueue, frameFlowPtsUs(frame),
                            -1, -1, 0, m_RenderQueue.count());
 
     m_FrameQueueLock.unlock();
+    av_frame_free(&dropped);
 
     if (m_RenderThread != nullptr) {
         m_RenderQueueNotEmpty.wakeOne();
@@ -430,7 +443,12 @@ void Pacer::renderFrame(AVFrame* frame)
     // Render it
     const uint64_t renderStarted = ClientFrameFlowTrace::nowNs();
     m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderBegin, tracePresentationTimeUs);
+    PlankVideoPipeline::record(PlankVideoPipeline::renderOperation,
+                              PlankVideoPipeline::Stage::RenderFrame, SDL_GetTicks());
     m_VsyncRenderer->renderFrame(frame);
+    PlankVideoPipeline::record(PlankVideoPipeline::renderOperation,
+                              PlankVideoPipeline::Stage::RenderReturned, SDL_GetTicks());
+    PlankVideoPipeline::rendererReturns.fetch_add(1, std::memory_order_relaxed);
     m_FrameFlowTrace.record(ClientFrameFlowTrace::RenderEnd, tracePresentationTimeUs,
                            -1, -1, 0, -1, ClientFrameFlowTrace::nowNs() - renderStarted);
     Uint32 afterRender = SDL_GetTicks();
@@ -535,14 +553,15 @@ void Pacer::recordFrameDrop(DropReason reason, AVFrame* frame, int queueDepth, i
                 m_VideoStats->pacerDroppedFrames);
 }
 
-void Pacer::dropFrameForEnqueue(QQueue<AVFrame*>& queue)
+AVFrame* Pacer::dropFrameForEnqueue(QQueue<AVFrame*>& queue)
 {
     SDL_assert(queue.size() <= MAX_QUEUED_FRAMES);
     if (queue.size() == MAX_QUEUED_FRAMES) {
         AVFrame* frame = queue.dequeue();
         recordFrameDrop(DropReason::QueueOverflow, frame, queue.size() + 1, MAX_QUEUED_FRAMES);
-        av_frame_free(&frame);
+        return frame;
     }
+    return nullptr;
 }
 
 void Pacer::submitFrame(AVFrame* frame)
@@ -552,10 +571,16 @@ void Pacer::submitFrame(AVFrame* frame)
 
     // Queue the frame and possibly wake up the render thread
     m_FrameQueueLock.lock();
+    if (m_Stopping) {
+        m_FrameQueueLock.unlock();
+        av_frame_free(&frame);
+        return;
+    }
     if (m_VsyncSource != nullptr) {
-        dropFrameForEnqueue(m_PacingQueue);
+        AVFrame* dropped = dropFrameForEnqueue(m_PacingQueue);
         m_PacingQueue.enqueue(frame);
         m_FrameQueueLock.unlock();
+        av_frame_free(&dropped);
         m_PacingQueueNotEmpty.wakeOne();
     }
     else {

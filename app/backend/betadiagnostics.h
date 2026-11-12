@@ -45,6 +45,7 @@ private:
     QString m_Directory, m_Identity;
     Sender m_Sender;
     bool m_Enabled = true, m_Active = false, m_Busy = false, m_Failed = false, m_StallReported = false;
+    bool m_StatisticsObserved = false;
     struct PendingWrite { QJsonObject envelope; std::shared_ptr<QLockFile> lock; };
     QJsonObject m_Report;
     QList<PendingWrite> m_Pending;

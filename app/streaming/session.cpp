@@ -1,4 +1,5 @@
 #include "session.h"
+#include "videopipelineprogress.h"
 #include "backend/macsharedsession.h"
 #include "sessionguidispatch.h"
 #include "backend/collaboration.h"
@@ -1261,6 +1262,25 @@ void Session::stopPlankTransportDataPlane()
 #endif
 }
 
+void Session::logDiagnosticVideoPipeline() const
+{
+    if (m_Reconnecting.load() || m_ReconnectRequested.load() ||
+            m_LastDiagnosticStats.load() == 0 || diagnosticReceivedAgeMs() >= 5000 ||
+            diagnosticStatisticsAgeMs() <= 10000) return;
+    const auto now = SDL_GetTicks();
+    const auto decode = PlankVideoPipeline::read(PlankVideoPipeline::decodeOperation, now);
+    const auto render = PlankVideoPipeline::read(PlankVideoPipeline::renderOperation, now);
+    // Called by the existing five-second diagnostics timer. No decoder, queue
+    // or GPU locks, and no pointer to an object that reset may be destroying.
+    qWarning() << "Client video pipeline stalled-statistics snapshot: decode="
+               << PlankVideoPipeline::name(decode.stage) << "decode-age-ms=" << decode.ageMs
+               << "decoded-frames=" << PlankVideoPipeline::decodedFrames.load(std::memory_order_relaxed)
+               << "render=" << PlankVideoPipeline::name(render.stage) << "render-age-ms=" << render.ageMs
+               << "renderer-returns=" << PlankVideoPipeline::rendererReturns.load(std::memory_order_relaxed)
+               << "received-age-ms=" << diagnosticReceivedAgeMs()
+               << "statistics-age-ms=" << diagnosticStatisticsAgeMs();
+}
+
 #ifdef PLANK_TRANSPORT
 void Session::startPlankTransportMediaReceivers()
 {
@@ -1277,6 +1297,9 @@ void Session::startPlankTransportMediaReceivers()
     }
     m_CurrentNetworkRttMs.store(0, std::memory_order_relaxed);
     m_LastPlankVideoReceived.store(0);
+    m_LastDiagnosticStats.store(0);
+    m_CurrentRenderedFps.store(0, std::memory_order_relaxed);
+    m_CurrentVideoMbps.store(0, std::memory_order_relaxed);
     m_PlankTransportReceiversStopping.store(false);
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
     startClipboardSync();
