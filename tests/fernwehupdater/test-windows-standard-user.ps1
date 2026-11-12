@@ -31,6 +31,18 @@ try {
         if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $stagedPackage)) { throw 'Qt download fixture failed.' }
         $paths = @((Split-Path -Parent $stagedPackage), $stagedPackage)
         $identities = @{}
+        function Unrelated-Rules($descriptor) {
+            # Qt may grant Everyone/the primary group metadata-only access.
+            # Preserve those existing entries exactly; do not mistake them
+            # for new access granted by this update.
+            return (@($descriptor.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+                Where-Object { $_.IdentityReference.Value -notin @('S-1-5-18', 'S-1-5-32-544') } |
+                ForEach-Object {
+                    '{0}|{1}|{2}|{3}|{4}|{5}' -f $_.IdentityReference.Value,
+                        $_.AccessControlType, [long]$_.FileSystemRights, $_.IsInherited,
+                        $_.InheritanceFlags, $_.PropagationFlags
+                } | Sort-Object) -join "`n")
+        }
         foreach ($path in $paths) {
             $acl = Get-Acl -LiteralPath $path
             if ($unmappedGroup) {
@@ -48,7 +60,8 @@ try {
             $identities[$path] = @(
                 $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value,
                 $acl.GetGroup([Security.Principal.SecurityIdentifier]).Value,
-                $acl.AreAccessRulesProtected
+                $acl.AreAccessRulesProtected,
+                (Unrelated-Rules $acl)
             )
         }
         $helperCopy = Join-Path (Split-Path -Parent $stagedPackage) 'install-update.ps1'
@@ -79,10 +92,9 @@ try {
                         }
                     }
                 }
-                $unexpected = @($rules | Where-Object {
-                    $_.IdentityReference.Value -notin @($identities[$path][0], 'S-1-5-18', 'S-1-5-32-544')
-                })
-                if ($unexpected.Count) { throw 'The update broadened access to an unrelated identity.' }
+                if ((Unrelated-Rules $acl) -cne $identities[$path][3]) {
+                    throw 'The update changed access for an unrelated identity.'
+                }
             }
             $boundary.reached++
             # Only process launch is replaced. The separate MSI service gate
