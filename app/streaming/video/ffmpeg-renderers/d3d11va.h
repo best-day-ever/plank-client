@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer.h"
+#include "dxgipresentation.h"
 
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
@@ -80,6 +81,7 @@ private:
     AVColorTransferCharacteristic m_LastColorTrc;
 
     bool m_AllowTearing;
+    DxgiPresentation m_Presentation;
 
     std::array<Microsoft::WRL::ComPtr<ID3D11PixelShader>, PixelShaders::_COUNT> m_VideoPixelShaders;
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_VideoVertexBuffer;
