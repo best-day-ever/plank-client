@@ -106,6 +106,8 @@ try {
     $result.error_type = $_.Exception.GetType().FullName
 } finally {
     if ($stagedPackage) { Remove-Item -LiteralPath (Split-Path -Parent $stagedPackage) -Recurse -ErrorAction SilentlyContinue }
-    $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultFile
+    $temporaryResult = $ResultFile + '.tmp'
+    $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporaryResult
+    Move-Item -LiteralPath $temporaryResult -Destination $ResultFile
 }
 if (-not $result.passed) { exit 1 }
