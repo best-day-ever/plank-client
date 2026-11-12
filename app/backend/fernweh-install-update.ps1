@@ -52,7 +52,18 @@ try {
     # current-user integrity and database checks above succeeded. Grant only
     # read/execute to these well-known SIDs; never grant Everyone or write access.
     foreach ($path in @((Split-Path -Parent $Installer), $Installer)) {
-        $acl = Get-Acl -LiteralPath $path
+        # Windows PowerShell's Set-Acl writes the entire security descriptor.
+        # Its non-elevated fallback translates owner/group SIDs into account
+        # names and can fail before UAC, including with an unmapped group SID.
+        # Read and persist only the DACL through .NET: ownership, group and
+        # auditing remain untouched and no account-name lookup is needed.
+        $directory = [IO.Directory]::Exists($path)
+        $section = [Security.AccessControl.AccessControlSections]::Access
+        if ($directory) {
+            $acl = [IO.Directory]::GetAccessControl($path, $section)
+        } else {
+            $acl = [IO.File]::GetAccessControl($path, $section)
+        }
         foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
             $identity = [Security.Principal.SecurityIdentifier]::new($sid)
             $rule = [Security.AccessControl.FileSystemAccessRule]::new(
@@ -60,7 +71,11 @@ try {
                 [Security.AccessControl.AccessControlType]::Allow)
             [void]$acl.AddAccessRule($rule)
         }
-        Set-Acl -LiteralPath $path -AclObject $acl
+        if ($directory) {
+            [IO.Directory]::SetAccessControl($path, $acl)
+        } else {
+            [IO.File]::SetAccessControl($path, $acl)
+        }
     }
     $logDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BDE fernweh\updater'
     [void][IO.Directory]::CreateDirectory($logDirectory)
@@ -76,8 +91,21 @@ try {
     }
 } catch {
     if ($ValidateOnly) { Write-Output $_.Exception.Message; exit 1 }
+    # Pre-elevation failures have no Windows Installer log yet. Keep their
+    # exception and stage location locally so a dialog is not the only evidence.
+    $failure = $_
+    $failureLog = $null
+    try {
+        $failureDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BDE fernweh\updater'
+        [void][IO.Directory]::CreateDirectory($failureDirectory)
+        $failureLog = Join-Path $failureDirectory ('helper-' + [guid]::NewGuid().ToString('N') + '.log')
+        [IO.File]::WriteAllText($failureLog,
+            $failure.Exception.ToString() + "`r`n" + $failure.ScriptStackTrace,
+            [Text.UTF8Encoding]::new($false))
+    } catch { $failureLog = $null }
     Add-Type -AssemblyName System.Windows.Forms
-    $message = $_.Exception.Message
+    $message = $failure.Exception.Message
+    if ($failureLog) { $message += "`r`n`r`nUpdater log: $failureLog" }
     if ($installerLog -and (Test-Path -LiteralPath $installerLog)) {
         $message += "`r`n`r`nInstaller log: $installerLog"
     }
