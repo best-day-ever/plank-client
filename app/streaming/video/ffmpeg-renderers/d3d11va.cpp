@@ -599,6 +599,7 @@ bool D3D11VARenderer::prepareDecoderContextInGetFormat(AVCodecContext *context, 
 
 void D3D11VARenderer::renderFrame(AVFrame* frame)
 {
+    m_LastPresentationAccepted = false;
     // Acquire the context lock for rendering to prevent concurrent
     // access from inside FFmpeg's decoding code
     lockContext(this);
@@ -653,6 +654,7 @@ void D3D11VARenderer::renderFrame(AVFrame* frame)
     // occluded window simply drops this presentation; the next frame retries.
     const auto presentation = m_Presentation.submit(m_AllowTearing,
         [this](UINT interval, UINT flags) { return m_SwapChain->Present(interval, flags); });
+    m_LastPresentationAccepted = presentation == DxgiPresentation::Accepted;
 
     // Release the context lock
     unlockContext(this);

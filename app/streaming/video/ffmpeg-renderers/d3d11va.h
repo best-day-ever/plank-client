@@ -22,6 +22,7 @@ public:
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override;
     virtual bool prepareDecoderContextInGetFormat(AVCodecContext* context, AVPixelFormat pixelFormat) override;
     virtual void renderFrame(AVFrame* frame) override;
+    virtual bool lastRenderAccepted() const override { return m_LastPresentationAccepted; }
     virtual void notifyOverlayUpdated(Overlay::OverlayType) override;
     virtual int getRendererAttributes() override;
     virtual int getDecoderCapabilities() override;
@@ -82,6 +83,7 @@ private:
 
     bool m_AllowTearing;
     DxgiPresentation m_Presentation;
+    bool m_LastPresentationAccepted = false;
 
     std::array<Microsoft::WRL::ComPtr<ID3D11PixelShader>, PixelShaders::_COUNT> m_VideoPixelShaders;
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_VideoVertexBuffer;
