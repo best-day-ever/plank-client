@@ -41,6 +41,7 @@ signals:
     void workFinished();
 private:
     void dispatchWrite();
+    void completeWork();
     QJsonObject snapshot() const;
     QString m_Directory, m_Identity;
     Sender m_Sender;

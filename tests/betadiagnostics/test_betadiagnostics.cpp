@@ -64,6 +64,28 @@ private slots:
         d.tryUpload(); QTRY_VERIFY(done.size()>=3); QCOMPARE(calls.load(),0);
         QCOMPARE(QDir(dir.path()).entryList({"*.json"},QDir::Files).size(),1);
     }
+    void completionPublishesOwnerStateBeforeObserversRun() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path());
+        std::atomic_int completed{0}, uploads{0};
+        std::atomic_bool wrongThread{false};
+        d.setAccount("account",[&](const auto&,const auto&) { ++uploads; return 202; });
+        connect(&d,&BetaDiagnostics::workFinished,&d,[&] {
+            if (QThread::currentThread() != d.thread()) {
+                wrongThread = true;
+                return; // Never call the collector from an invalid thread.
+            }
+            // Preparation and final checkpoint have both completed. The
+            // observer must be able to start the next operation immediately,
+            // without waiting for the separate 15-second idle-upload timer.
+            if (++completed == 2) d.tryUpload();
+        },Qt::DirectConnection);
+        d.begin(); d.finish();
+        QTRY_VERIFY(wrongThread.load() || completed.load() >= 3);
+        QVERIFY(!wrongThread.load());
+        QCOMPARE(completed.load(),3);
+        QCOMPARE(uploads.load(),1);
+        QVERIFY(QDir(dir.path()).entryList({"*.json"},QDir::Files).isEmpty());
+    }
     void checkpointSurvivesInterruptedProcess() {
         QTemporaryDir dir;
         { BetaDiagnostics d(dir.path()); QSignalSpy done(&d,&BetaDiagnostics::workFinished); d.setAccount("account",[](const auto&,const auto&) { return 503; }); d.begin(); QTRY_VERIFY(done.size()>=1); }

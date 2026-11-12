@@ -77,10 +77,6 @@ BetaDiagnostics::BetaDiagnostics(QString directory, QObject* parent) : QObject(p
     connect(&m_Checkpoint, &QTimer::timeout, this, &BetaDiagnostics::checkpoint);
     m_Upload.setInterval(15 * 60 * 1000);
     connect(&m_Upload, &QTimer::timeout, this, &BetaDiagnostics::tryUpload);
-    connect(this, &BetaDiagnostics::workFinished, this, [this] {
-        m_Busy = false;
-        if (!m_Pending.isEmpty()) dispatchWrite();
-    });
     m_Upload.start();
 }
 BetaDiagnostics::~BetaDiagnostics() {
@@ -203,8 +199,19 @@ void BetaDiagnostics::dispatchWrite() {
             save(directory,pending.envelope);
         }
         if (pending.lock && pending.envelope.value("report").toObject().value("outcome") != "interrupted") pending.lock->unlock();
-        if (self) emit self->workFinished();
+        if (self) QMetaObject::invokeMethod(self, [self] {
+            if (self) self->completeWork();
+        }, Qt::QueuedConnection);
     });
+}
+void BetaDiagnostics::completeWork() {
+    Q_ASSERT(QThread::currentThread() == thread());
+    m_Busy = false;
+    if (!m_Pending.isEmpty()) dispatchWrite();
+    // Publish completion only after the owner has transitioned its state.
+    // A direct observer may immediately schedule an upload or another write.
+    // Emitting from the worker let it observe completion while m_Busy was true.
+    emit workFinished();
 }
 void BetaDiagnostics::finish() {
     if (!m_Active) return;
@@ -239,7 +246,9 @@ void BetaDiagnostics::tryUpload() {
             // including 401/429. No recursion and no authentication mutation.
             break;
         }
-        if (self) emit self->workFinished();
+        if (self) QMetaObject::invokeMethod(self, [self] {
+            if (self) self->completeWork();
+        }, Qt::QueuedConnection);
     });
 }
 QJsonArray BetaDiagnostics::displays() {
