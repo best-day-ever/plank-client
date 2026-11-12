@@ -84,7 +84,7 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
                       : object.value("udp_port") != QJsonValue(approvedControlPort)) ||
             object.value("max_udp_payload_size") != QJsonValue(udpPayloadSize) ||
             object.value("capture") != topology.toJson().value("capture")) return false;
-    bool clipboard = false, microphone = false, camera = false;
+    bool clipboard = false, microphone = false, camera = false, localCursor = false;
     if (agreement.launchSchema == 7) {
         if (object.value("transport") != MacMediaFeatures::transport() ||
             !MacMediaFeatures::validRequired(object.value("required_features")) ||
@@ -101,6 +101,7 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
         clipboard = features.value("clipboard").isObject();
         microphone = features.value("microphone").isObject();
         camera = features.value("camera").isObject();
+        localCursor = features.value("cursor").isObject();
     } else {
         const auto services = object.value("services").toObject();
         if (!services.value("clipboard").isBool() || !services.value("microphone").isBool()) return false;
@@ -132,8 +133,10 @@ inline bool parseReply(const QJsonObject& object, const NvOutputTopology& topolo
                 VIDEO_FORMAT_H265_REXT10_444 : VIDEO_FORMAT_H265_MAIN10;
     // Schema 2 explicitly supports normalized pen and PLD1 bitrate updates.
     reply.configuration.hostFeatureFlags = LI_FF_DYNAMIC_VIDEO_BITRATE | LI_FF_ENCODER_TARGET_ACK | LI_FF_PEN_TOUCH_EVENTS;
+    if (localCursor) reply.configuration.hostFeatureFlags |= LI_FF_LOCAL_CURSOR;
     reply.configuration.sessionPort = static_cast<uint32_t>(approvedControlPort);
     reply.configuration.serviceFlags = PLANK_NATIVE_SERVICE_AUDIO | PLANK_NATIVE_SERVICE_INPUT;
+    if (localCursor) reply.configuration.serviceFlags |= PLANK_NATIVE_SERVICE_LOCAL_CURSOR;
     reply.configuration.audioPacketDurationMs = 5;
     reply.configuration.opusConfiguration.sampleRate = 48000;
     reply.configuration.opusConfiguration.channelCount = 2;

@@ -433,41 +433,13 @@ void SdlInputHandler::applyPendingRemoteCursor()
     if (!pending) return;
     auto cursor = std::move(*pending);
 
-    SDL_Surface* surface = SDL_CreateSurfaceFrom(
-                static_cast<int>(cursor.width),
-                static_cast<int>(cursor.height),
-                SDL_PIXELFORMAT_ARGB8888,
-                cursor.pixels.data(),
-                static_cast<int>(cursor.width * 4U));
-    if (surface == nullptr) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Failed to create PLANK cursor surface: %s",
-                    SDL_GetError());
-        return;
-    }
-
-    SDL_Cursor* replacement = SDL_CreateColorCursor(
-                surface,
-                static_cast<int>(cursor.hotspotX),
-                static_cast<int>(cursor.hotspotY));
-    SDL_DestroySurface(surface);
-    if (replacement == nullptr) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT,
-                    "Failed to create PLANK compositor cursor: %s",
-                    SDL_GetError());
-        return;
-    }
-
     const bool firstCursor = m_RemoteCursor == nullptr;
-    SDL_SetCursor(replacement);
-    if (m_RemoteCursor != nullptr) {
-        SDL_DestroyCursor(m_RemoteCursor);
-    }
-    m_RemoteCursor = replacement;
-    m_RemoteCursorVisible =
-            (cursor.flags & PLANK_CURSOR_FLAG_VISIBLE) != 0;
     m_AppliedRemoteCursor = cursor;
     m_AppliedRemoteCursorValid = true;
+    m_RemoteCursorLogicalSize = {};
+    refreshRemoteCursorScale(SDL_GetMouseFocus());
+    m_RemoteCursorVisible =
+            (cursor.flags & PLANK_CURSOR_FLAG_VISIBLE) != 0;
     reconcileWaylandTabletCursorOutputs();
     const QImage cursorImage(
                 m_AppliedRemoteCursor.pixels.data(),
@@ -500,6 +472,51 @@ void SdlInputHandler::applyPendingRemoteCursor()
                      cursor.width, cursor.height, cursor.hotspotX, cursor.hotspotY,
                      m_RemoteCursorVisible ? 1 : 0);
     }
+}
+
+void SdlInputHandler::refreshRemoteCursorScale(SDL_Window* window)
+{
+    if (!m_AppliedRemoteCursorValid) return;
+    if (!presentationOutput(window)) window = m_Window;
+    PlankOutputGeometry geometry;
+    if (!window || !outputGeometry(window, geometry)) return;
+    const auto& image = m_AppliedRemoteCursor;
+    double sx = 1, sy = 1;
+#ifdef Q_OS_MACOS
+    const auto* output = presentationOutput(window);
+    if (output && output->sourceRect.isValid()) {
+        int dw = 0, dh = 0;
+        SDL_GetWindowSizeInPixels(window, &dw, &dh);
+        const auto fit = PlankPresentation::aspectFitRect(output->sourceRect.size().toSize(), QRect(0, 0, dw, dh));
+        if (dw <= 0 || dh <= 0) return;
+        sx = fit.width() / output->sourceRect.width() * geometry.windowSize.width() / dw;
+        sy = fit.height() / output->sourceRect.height() * geometry.windowSize.height() / dh;
+    } else {
+        const QSize stream = streamDimensions();
+        const QRect video = PlankPresentation::videoRect(stream, geometry.canvasSize);
+        if (stream.isEmpty() || video.isEmpty()) return;
+        sx = double(video.width()) / stream.width() * geometry.windowSize.width() / geometry.canvasRect.width();
+        sy = double(video.height()) / stream.height() * geometry.windowSize.height() / geometry.canvasRect.height();
+    }
+#endif
+    const QSize logicalSize(qBound(1, qRound(image.width * sx), 512), qBound(1, qRound(image.height * sy), 512));
+    if (m_RemoteCursor && logicalSize == m_RemoteCursorLogicalSize) return;
+    SDL_Surface* original = SDL_CreateSurfaceFrom(int(image.width), int(image.height), SDL_PIXELFORMAT_ARGB8888,
+        const_cast<unsigned char*>(image.pixels.data()), int(image.width * 4));
+    if (!original) return;
+    SDL_Surface* base = SDL_ScaleSurface(original, logicalSize.width(), logicalSize.height(), SDL_SCALEMODE_LINEAR);
+    if (!base) { SDL_DestroySurface(original); return; }
+    // Cocoa consumes the base size as logical points and the original as a
+    // high-density representation. Preserve sharp cursor pixels on Retina.
+    if (logicalSize != QSize(int(image.width), int(image.height))) SDL_AddSurfaceAlternateImage(base, original);
+    const int hx = qBound(0, qRound(image.hotspotX * sx), logicalSize.width() - 1);
+    const int hy = qBound(0, qRound(image.hotspotY * sy), logicalSize.height() - 1);
+    SDL_Cursor* replacement = SDL_CreateColorCursor(base, hx, hy);
+    SDL_DestroySurface(base); SDL_DestroySurface(original);
+    if (!replacement) return;
+    SDL_SetCursor(replacement);
+    if (m_RemoteCursor) SDL_DestroyCursor(m_RemoteCursor);
+    m_RemoteCursor = replacement; m_RemoteCursorLogicalSize = logicalSize;
 }
 
 bool SdlInputHandler::handleRemoteCursorPosition(const unsigned char* data, unsigned int length)

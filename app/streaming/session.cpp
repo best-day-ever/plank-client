@@ -6350,6 +6350,7 @@ void Session::execInternal()
 
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            if (m_InputHandler) m_InputHandler->refreshRemoteCursorScale(windowForEvent(event.window.windowID));
             if (m_PlankToolbar) {
                 m_PlankToolbar->notifyWindowChanged();
             }

@@ -33,6 +33,30 @@ class MacQtSessionTest final : public QObject
 {
     Q_OBJECT
 private slots:
+    void localCursorTracksPresentationScaleAndVisibility()
+    {
+        QWindow host; host.resize(1440, 900);
+        Control control(&host);
+        QtSessionWindow scene(&host, &control); scene.resize(host.size());
+        scene.setRemoteInputEnabled(true);
+        scene.setPresentation({QSize(2880, 1800), QRectF(0, 0, 2880, 1800),
+            QRectF(0, 0, 2880, 1800), QSize(2880, 1800), host.size()});
+        QImage image(64, 48, QImage::Format_ARGB32_Premultiplied); image.fill(Qt::red);
+        scene.setCursorShape(image, {8, 10}, true);
+        pointer(scene, QEvent::MouseMove, {720, 450}, Qt::NoButton);
+        QCOMPARE(host.cursor().pixmap().size(), QSize(32, 24));
+        QCOMPARE(host.cursor().hotSpot(), QPoint(4, 5));
+        scene.setCursorShape(image, {8, 10}, false);
+        QCOMPARE(host.cursor().shape(), Qt::BlankCursor);
+        scene.setCursorShape(image, {8, 10}, true);
+        QCOMPARE(host.cursor().pixmap().size(), QSize(32, 24));
+        scene.setPresentation({QSize(2880, 1800), QRectF(0, 0, 2880, 1800),
+            QRectF(720, 450, 1440, 900), QSize(2880, 1800), host.size()});
+        QCOMPARE(host.cursor().pixmap().size(), QSize(16, 12));
+        QCOMPARE(host.cursor().hotSpot(), QPoint(2, 3));
+        scene.setRemoteInputEnabled(false);
+        QCOMPARE(host.cursor().shape(), Qt::ArrowCursor);
+    }
     void physicalMacKeysAndShortcuts()
     {
         QCOMPARE(qtRemoteKey(0).vk, 0x41); // A has a valid zero Cocoa code.

@@ -148,6 +148,7 @@ private:
     void observePointer(const QPointF& position);
     void setToolbarVisible(bool visible);
     void updateCursor();
+    void updateRemoteCursor();
     void updateTabletCursor();
     void scheduleHide();
     void releaseRemoteInput();
