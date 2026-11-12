@@ -91,8 +91,21 @@ try {
     }
 } catch {
     if ($ValidateOnly) { Write-Output $_.Exception.Message; exit 1 }
+    # Pre-elevation failures have no Windows Installer log yet. Keep their
+    # exception and stage location locally so a dialog is not the only evidence.
+    $failure = $_
+    $failureLog = $null
+    try {
+        $failureDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BDE fernweh\updater'
+        [void][IO.Directory]::CreateDirectory($failureDirectory)
+        $failureLog = Join-Path $failureDirectory ('helper-' + [guid]::NewGuid().ToString('N') + '.log')
+        [IO.File]::WriteAllText($failureLog,
+            $failure.Exception.ToString() + "`r`n" + $failure.ScriptStackTrace,
+            [Text.UTF8Encoding]::new($false))
+    } catch { $failureLog = $null }
     Add-Type -AssemblyName System.Windows.Forms
-    $message = $_.Exception.Message
+    $message = $failure.Exception.Message
+    if ($failureLog) { $message += "`r`n`r`nUpdater log: $failureLog" }
     if ($installerLog -and (Test-Path -LiteralPath $installerLog)) {
         $message += "`r`n`r`nInstaller log: $installerLog"
     }
