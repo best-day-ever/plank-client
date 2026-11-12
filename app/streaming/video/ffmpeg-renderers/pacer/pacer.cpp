@@ -429,7 +429,6 @@ void Pacer::renderFrame(AVFrame* frame)
     // Count time spent in Pacer's queues
     Uint32 beforeRender = SDL_GetTicks();
     const uint32_t queueLatencyMs = beforeRender - frame->pkt_dts;
-    m_VideoStats->totalPacerTime += queueLatencyMs;
     m_QueueLatencyHistogram[std::min<uint32_t>(
         queueLatencyMs,
         m_QueueLatencyHistogram.size() - 1)]++;
@@ -455,12 +454,17 @@ void Pacer::renderFrame(AVFrame* frame)
     Uint32 afterRender = SDL_GetTicks();
 
     const uint32_t rendererCallLatencyMs = afterRender - beforeRender;
-    m_VideoStats->totalRenderTime += rendererCallLatencyMs;
     m_RendererCallLatencyHistogram[std::min<uint32_t>(
         rendererCallLatencyMs,
         m_RendererCallLatencyHistogram.size() - 1)]++;
     m_MaxRendererCallLatencyMs = std::max(m_MaxRendererCallLatencyMs, rendererCallLatencyMs);
-    if (renderAccepted) m_VideoStats->renderedFrames++;
+    if (renderAccepted) {
+        m_VideoStats->renderedFrames++;
+        // These averages use renderedFrames as their denominator. Histograms
+        // above still retain latency for every attempted renderer call.
+        m_VideoStats->totalPacerTime += queueLatencyMs;
+        m_VideoStats->totalRenderTime += rendererCallLatencyMs;
+    }
 
     if (renderAccepted && presentationTimeMs >= 0) {
         PlankAvSync::publishVideoClock(presentationTimeMs, afterRender);
