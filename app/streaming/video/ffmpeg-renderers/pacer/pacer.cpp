@@ -446,6 +446,7 @@ void Pacer::renderFrame(AVFrame* frame)
     PlankVideoPipeline::record(PlankVideoPipeline::renderOperation,
                               PlankVideoPipeline::Stage::RenderFrame, SDL_GetTicks());
     m_VsyncRenderer->renderFrame(frame);
+    const bool renderAccepted = m_VsyncRenderer->lastRenderAccepted();
     PlankVideoPipeline::record(PlankVideoPipeline::renderOperation,
                               PlankVideoPipeline::Stage::RenderReturned, SDL_GetTicks());
     PlankVideoPipeline::rendererReturns.fetch_add(1, std::memory_order_relaxed);
@@ -459,13 +460,13 @@ void Pacer::renderFrame(AVFrame* frame)
         rendererCallLatencyMs,
         m_RendererCallLatencyHistogram.size() - 1)]++;
     m_MaxRendererCallLatencyMs = std::max(m_MaxRendererCallLatencyMs, rendererCallLatencyMs);
-    m_VideoStats->renderedFrames++;
+    if (renderAccepted) m_VideoStats->renderedFrames++;
 
-    if (presentationTimeMs >= 0) {
+    if (renderAccepted && presentationTimeMs >= 0) {
         PlankAvSync::publishVideoClock(presentationTimeMs, afterRender);
     }
 
-    if (m_AvSyncTelemetryEnabled && presentationTimeMs >= 0 &&
+    if (renderAccepted && m_AvSyncTelemetryEnabled && presentationTimeMs >= 0 &&
             (m_LastVideoTelemetryTime == 0 || afterRender - m_LastVideoTelemetryTime >= 1000)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "PLANK A/V video clock: media=%lld render=%u queue=%u renderer=%u",

@@ -129,6 +129,12 @@ public:
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) = 0;
     virtual void renderFrame(AVFrame* frame) = 0;
 
+    // Called immediately after renderFrame() on the same thread. Renderers
+    // with nonblocking presentation report whether this frame was accepted;
+    // a deferred/occluded/failed attempt must not advance the video clock.
+    // Existing synchronous renderers retain their established behavior.
+    virtual bool lastRenderAccepted() const { return true; }
+
     // Qt owns presentation scheduling and reports completion separately from
     // submission. Do not place a second Pacer queue in front of that owner or
     // publish the A/V clock when a frame has merely been queued.
