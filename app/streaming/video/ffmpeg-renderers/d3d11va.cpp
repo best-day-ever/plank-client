@@ -599,6 +599,7 @@ bool D3D11VARenderer::prepareDecoderContextInGetFormat(AVCodecContext *context, 
 
 void D3D11VARenderer::renderFrame(AVFrame* frame)
 {
+    m_LastPresentationAccepted = false;
     // Acquire the context lock for rendering to prevent concurrent
     // access from inside FFmpeg's decoding code
     lockContext(this);
@@ -619,20 +620,8 @@ void D3D11VARenderer::renderFrame(AVFrame* frame)
         renderOverlay((Overlay::OverlayType)i);
     }
 
-    UINT flags;
-
     if (m_AllowTearing) {
         SDL_assert(!m_DecoderParams.enableVsync);
-
-        // If tearing is allowed, use DXGI_PRESENT_ALLOW_TEARING with syncInterval 0.
-        // It is not valid to use any other syncInterval values in tearing mode.
-        flags = DXGI_PRESENT_ALLOW_TEARING;
-    }
-    else {
-        // Otherwise, we'll submit as fast as possible and DWM will discard excess
-        // frames for us. If frame pacing is also enabled or we're in full-screen,
-        // our Vsync source will keep us in sync with VBlank.
-        flags = 0;
     }
 
     HRESULT hr;
@@ -660,21 +649,25 @@ void D3D11VARenderer::renderFrame(AVFrame* frame)
         m_LastColorTrc = frame->color_trc;
     }
 
-    // Present according to the decoder parameters
-    hr = m_SwapChain->Present(0, flags);
+    // Serialize DXGI with the shared immediate context. DO_NOT_WAIT avoids
+    // retaining that lock while DXGI waits for swap-chain capacity. A busy or
+    // occluded window simply drops this presentation; the next frame retries.
+    const auto presentation = m_Presentation.submit(m_AllowTearing,
+        [this](UINT interval, UINT flags) { return m_SwapChain->Present(interval, flags); });
+    m_LastPresentationAccepted = presentation == DxgiPresentation::Accepted;
 
     // Release the context lock
     unlockContext(this);
 
-    if (FAILED(hr)) {
+    if (presentation == DxgiPresentation::RequestReset) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "IDXGISwapChain::Present() failed: %x",
-                     hr);
+                     m_Presentation.lastResult());
 
         // The card may have been removed or crashed. Reset the decoder.
         SDL_Event event;
         event.type = SDL_EVENT_RENDER_DEVICE_RESET;
-        SDL_PushEvent(&event);
+        if (SDL_PushEvent(&event)) m_Presentation.resetQueued();
         return;
     }
 }

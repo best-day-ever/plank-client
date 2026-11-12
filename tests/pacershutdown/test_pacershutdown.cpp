@@ -7,6 +7,7 @@
 
 #include "streaming/streamutils.h"
 #include "streaming/avsynccontroller.h"
+#include "streaming/videopipelineprogress.h"
 #include "streaming/video/ffmpeg-renderers/pacer/pacer.h"
 
 // The only platform query in Pacer::initialize(). No display server is needed.
@@ -71,8 +72,10 @@ public:
         cleanupThread = SDL_GetCurrentThreadID();
         ++cleanups;
     }
+    bool lastRenderAccepted() const override { return accepted; }
 
     bool threaded = true, blockWait = false, blockRender = false;
+    bool accepted = true;
     bool consumeFrame = false;
     int64_t movedPts = AV_NOPTS_VALUE;
     int renders = 0, cleanups = 0; // Read only after the worker is joined.
@@ -114,6 +117,7 @@ private slots:
         SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_ERROR);
     }
     void cleanupTestCase() { SDL_Quit(); }
+    void init() { PlankVideoPipeline::reset(); }
     void uninitializedCleanup();
     void mainThreadCleanup();
     void videoClockSurvivesRenderer_data();
@@ -124,6 +128,11 @@ private slots:
     void waitBoundary_data();
     void waitBoundary();
     void asyncVsyncShutdown();
+    void releaseCallbacksOutsideQueueLock_data();
+    void releaseCallbacksOutsideQueueLock();
+    void stoppedPacerRejectsSubmission();
+    void deferredPresentationPreservesVideoClock_data();
+    void deferredPresentationPreservesVideoClock();
 
 private:
     static void waitForStop(Pacer* pacer) {
@@ -262,6 +271,9 @@ void TestPacerShutdown::stopDuringRender()
     QVERIFY(pacer->initialize(nullptr, 60, false));
     pacer->submitFrame(frameWithReleaseCounter(releases));
     acquire(renderer.renderEntered);
+    QCOMPARE(PlankVideoPipeline::read(PlankVideoPipeline::renderOperation, SDL_GetTicks()).stage,
+             PlankVideoPipeline::Stage::RenderFrame);
+    QCOMPARE(PlankVideoPipeline::rendererReturns.load(), uint64_t(0));
     pacer->submitFrame(frameWithReleaseCounter(releases));
     Pacer* stopping = pacer.release();
     std::thread shutdown([&] { delete stopping; });
@@ -269,6 +281,7 @@ void TestPacerShutdown::stopDuringRender()
     renderer.renderRelease.release();
     shutdown.join();
     QCOMPARE(renderer.renders, 1);
+    QCOMPARE(PlankVideoPipeline::rendererReturns.load(), uint64_t(1));
     QCOMPARE(renderer.cleanups, 1);
     QCOMPARE(renderer.cleanupThread, renderer.renderThread);
     QCOMPARE(releases.load(), 2);
@@ -349,6 +362,118 @@ void TestPacerShutdown::asyncVsyncShutdown()
         pacer.reset();
         QCOMPARE(renderer.cleanups, 1);
     }
+}
+
+void TestPacerShutdown::releaseCallbacksOutsideQueueLock_data()
+{
+    QTest::addColumn<bool>("pacing");
+    QTest::newRow("render-queue") << false;
+    QTest::newRow("pacing-queue") << true;
+}
+
+void TestPacerShutdown::releaseCallbacksOutsideQueueLock()
+{
+    QFETCH(bool, pacing);
+    VIDEO_STATS stats {};
+    Renderer renderer;
+    renderer.threaded = false;
+    QSemaphore entered;
+    struct Releases { QMutex* queue = nullptr; int count = 0; bool locked = false; } releases;
+    Pacer pacer(&renderer, &stats);
+    QVERIFY(pacer.initialize(nullptr, 60, false));
+    if (pacing) pacer.m_VsyncSource = new AsyncVsync(entered);
+    releases.queue = &pacer.m_FrameQueueLock;
+    for (int i = 0; i < 5; ++i) {
+        AVFrame* frame = av_frame_alloc();
+        QVERIFY(frame);
+        frame->buf[0] = av_buffer_create(static_cast<uint8_t*>(av_malloc(1)), 1,
+            [](void* opaque, uint8_t* data) {
+                auto& state = *static_cast<Releases*>(opaque);
+                ++state.count;
+                // Hardware buffer release may need a device lock also used by
+                // a decoder submitting to this queue. Check actual lock scope.
+                if (state.queue->tryLock()) state.queue->unlock();
+                else state.locked = true;
+                av_free(data);
+            }, &releases, 0);
+        QVERIFY(frame->buf[0]);
+        frame->pkt_dts = SDL_GetTicks();
+        pacer.submitFrame(frame);
+    }
+    QCOMPARE(releases.count, 1); // Overflow retains the bounded four frames.
+    QCOMPARE(stats.queueOverflowDroppedFrames, uint32_t(1));
+    QVERIFY(!releases.locked);
+    pacer.discardQueuedFrames();
+    QCOMPARE(releases.count, 5);
+    QVERIFY(!releases.locked);
+    QVERIFY(pacer.m_RenderQueue.isEmpty());
+    QVERIFY(pacer.m_PacingQueue.isEmpty());
+    SDL_FlushEvent(SDL_EVENT_USER);
+}
+
+void TestPacerShutdown::stoppedPacerRejectsSubmission()
+{
+    VIDEO_STATS stats {};
+    Renderer renderer;
+    renderer.threaded = false;
+    Pacer pacer(&renderer, &stats);
+    QVERIFY(pacer.initialize(nullptr, 60, false));
+    std::atomic<int> releases {0};
+    pacer.m_Stopping = true;
+    pacer.submitFrame(frameWithReleaseCounter(releases));
+    QCOMPARE(releases.load(), 1);
+    QVERIFY(pacer.m_RenderQueue.isEmpty());
+    QVERIFY(pacer.m_PacingQueue.isEmpty());
+}
+
+void TestPacerShutdown::deferredPresentationPreservesVideoClock_data()
+{
+    QTest::addColumn<bool>("previousClock");
+    QTest::newRow("first-frame-deferred") << false;
+    QTest::newRow("later-frame-deferred") << true;
+}
+
+void TestPacerShutdown::deferredPresentationPreservesVideoClock()
+{
+    QFETCH(bool, previousClock);
+    VIDEO_STATS stats {};
+    Renderer renderer;
+    renderer.threaded = false;
+    renderer.accepted = false;
+    std::atomic<int> releases {0};
+    PlankAvSync::resetVideoClock();
+    if (previousClock) PlankAvSync::publishVideoClock(1234, SDL_GetTicks());
+    const auto before = PlankAvSync::readVideoClock();
+    {
+        Pacer pacer(&renderer, &stats);
+        QVERIFY(pacer.initialize(nullptr, 60, false));
+        AVFrame* frame = frameWithReleaseCounter(releases);
+        frame->pts = 5678;
+        pacer.submitFrame(frame);
+        pacer.renderOnMainThread();
+        const auto deferred = PlankAvSync::readVideoClock();
+        QCOMPARE(renderer.renders, 1);
+        QCOMPARE(stats.renderedFrames, uint32_t(0));
+        QCOMPARE(deferred.valid, before.valid);
+        QCOMPARE(deferred.mediaTimeMs, before.mediaTimeMs);
+        QCOMPARE(deferred.presentationTicks, before.presentationTicks);
+        QCOMPARE(releases.load(), 1);
+
+        // A later accepted frame resumes normal accounting without requiring
+        // a decoder reset or retaining the rejected frame's buffers.
+        renderer.accepted = true;
+        frame = frameWithReleaseCounter(releases);
+        frame->pts = 6789;
+        pacer.submitFrame(frame);
+        pacer.renderOnMainThread();
+        QCOMPARE(stats.renderedFrames, uint32_t(1));
+        const auto accepted = PlankAvSync::readVideoClock();
+        QVERIFY(accepted.valid);
+        QCOMPARE(accepted.mediaTimeMs, int64_t(6789));
+        QCOMPARE(releases.load(), 2);
+    }
+    PlankAvSync::resetVideoClock();
+    SDL_FlushEvent(SDL_EVENT_USER);
 }
 
 QTEST_GUILESS_MAIN(TestPacerShutdown)

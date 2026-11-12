@@ -64,6 +64,28 @@ private slots:
         d.tryUpload(); QTRY_VERIFY(done.size()>=3); QCOMPARE(calls.load(),0);
         QCOMPARE(QDir(dir.path()).entryList({"*.json"},QDir::Files).size(),1);
     }
+    void completionPublishesOwnerStateBeforeObserversRun() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path());
+        std::atomic_int completed{0}, uploads{0};
+        std::atomic_bool wrongThread{false};
+        d.setAccount("account",[&](const auto&,const auto&) { ++uploads; return 202; });
+        connect(&d,&BetaDiagnostics::workFinished,&d,[&] {
+            if (QThread::currentThread() != d.thread()) {
+                wrongThread = true;
+                return; // Never call the collector from an invalid thread.
+            }
+            // Preparation and final checkpoint have both completed. The
+            // observer must be able to start the next operation immediately,
+            // without waiting for the separate 15-second idle-upload timer.
+            if (++completed == 2) d.tryUpload();
+        },Qt::DirectConnection);
+        d.begin(); d.finish();
+        QTRY_VERIFY(wrongThread.load() || completed.load() >= 3);
+        QVERIFY(!wrongThread.load());
+        QCOMPARE(completed.load(),3);
+        QCOMPARE(uploads.load(),1);
+        QVERIFY(QDir(dir.path()).entryList({"*.json"},QDir::Files).isEmpty());
+    }
     void checkpointSurvivesInterruptedProcess() {
         QTemporaryDir dir;
         { BetaDiagnostics d(dir.path()); QSignalSpy done(&d,&BetaDiagnostics::workFinished); d.setAccount("account",[](const auto&,const auto&) { return 503; }); d.begin(); QTRY_VERIFY(done.size()>=1); }
@@ -133,6 +155,30 @@ private slots:
         QTemporaryDir dir; BetaDiagnostics d(dir.path()); d.setAccount("account",[](const auto&,const auto&) { return 503; }); d.begin();
         QBENCHMARK { d.sample(120.0f,150.0f,10,2,3); }
         d.finish();
+    }
+    void stallReportsRequireObservedStatisticsForThisConnection() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path()); QSignalSpy done(&d,&BetaDiagnostics::workFinished);
+        d.setAccount("account",[](const auto&,const auto&) { return 503; });
+        d.begin(); d.recordEvent("connected");
+        d.sample(0,0,12,2,60000); // Received first frame; no decode statistics yet.
+        d.sample(0,0,12,2,14000); // A slow first decoder initialization is not this event.
+        d.sample(60,50,12,2,3);   // Actual progress arms steady-state detection.
+        d.sample(60,50,12,2,14000);
+        d.sample(60,50,12,2,19000); // Same stall, not another event.
+        d.recordEvent("connected"); // Reconnect must establish its own progress.
+        d.sample(60,50,12,2,24000);
+        d.sample(60,50,12,2,3);
+        d.sample(60,50,12,60000,14000); // Silence is not a processing stall.
+        d.sample(60,50,12,2,14000);
+        d.finish(); QTRY_VERIFY(done.size()>=2);
+        const auto files=QDir(dir.path()).entryList({"*.json"},QDir::Files); QCOMPARE(files.size(),1);
+        QFile file(QDir(dir.path()).filePath(files[0])); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto report=QJsonDocument::fromJson(file.readAll()).object().value("report").toObject();
+        int stalls=0;
+        for (const auto event : report.value("events").toArray()) {
+            if (event.toObject().value("kind").toString()=="suspected_stall") ++stalls;
+        }
+        QCOMPARE(stalls,2);
     }
 };
 QTEST_MAIN(BetaDiagnosticsTest)

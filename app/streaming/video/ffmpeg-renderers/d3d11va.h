@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer.h"
+#include "dxgipresentation.h"
 
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
@@ -21,6 +22,7 @@ public:
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override;
     virtual bool prepareDecoderContextInGetFormat(AVCodecContext* context, AVPixelFormat pixelFormat) override;
     virtual void renderFrame(AVFrame* frame) override;
+    virtual bool lastRenderAccepted() const override { return m_LastPresentationAccepted; }
     virtual void notifyOverlayUpdated(Overlay::OverlayType) override;
     virtual int getRendererAttributes() override;
     virtual int getDecoderCapabilities() override;
@@ -80,6 +82,8 @@ private:
     AVColorTransferCharacteristic m_LastColorTrc;
 
     bool m_AllowTearing;
+    DxgiPresentation m_Presentation;
+    bool m_LastPresentationAccepted = false;
 
     std::array<Microsoft::WRL::ComPtr<ID3D11PixelShader>, PixelShaders::_COUNT> m_VideoPixelShaders;
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_VideoVertexBuffer;
