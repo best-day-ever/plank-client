@@ -2900,35 +2900,20 @@ void Session::collapseToSingleWindow()
                 "PLANK presentation collapsed to one scaled window after a screen change");
 }
 
-namespace {
-
-// What the presentation depends on: which monitors, where, at which size.
-QString presentedDisplaySignature(const QVector<NvClientDisplay>& displays)
-{
-    QStringList parts;
-    for (const NvClientDisplay& display : displays) {
-        parts.append(QStringLiteral("%1@%2,%3,%4x%5/%6x%7").arg(display.key)
-                     .arg(display.bounds.x()).arg(display.bounds.y())
-                     .arg(display.bounds.width()).arg(display.bounds.height())
-                     .arg(display.backingSize.width()).arg(display.backingSize.height()));
-    }
-    return parts.join(QLatin1Char(';'));
-}
-
-}
-
 void Session::handleClientDisplaysChanged()
 {
     if (isCollaborator()) return;
     const QVector<NvClientDisplay> probed = probeClientDisplays();
     m_ClientDisplayProbe = probed;
     const QString fingerprint = ClientDisplayProbe::fingerprint(probed);
-    const QString signature = presentedDisplaySignature(probed);
-    if (signature == m_PresentedDisplaySignature) {
+    const bool changed = m_ClientDisplayChange.observe(probed);
+    QSettings settings;
+    const bool prompt = m_ClientDisplayChange.shouldPrompt(settings);
+    if (!prompt && m_PlankToolbar) m_PlankToolbar->hideScreensPrompt();
+    if (!changed) {
         // A mode or position notification that changed nothing we present.
         return;
     }
-    m_PresentedDisplaySignature = signature;
     // A window whose display went away shows nothing useful; one window,
     // scaled, until the user decides.
     collapseToSingleWindow();
@@ -2950,10 +2935,25 @@ void Session::handleClientDisplaysChanged()
     if (!followsClient || !m_PlankToolbar) {
         return;
     }
+    if (m_ClientDisplayChange.matchesApplied() && m_DisplayPlan.ok) {
+        // A transient change returned to the still-running Host layout.
+        // Restore only our presentation; no Host reconnect or modeset is needed.
+        applyArrangementPresentation();
+        applyPendingPresentation(false);
+        return;
+    }
+    if (!prompt) return;
     m_PlankToolbar->showScreensPrompt(
                 fingerprint == m_PresentedDisplayFingerprint ?
                     tr("Screens rearranged: %1").arg(ClientDisplayProbe::label(probed)) :
                     tr("Screens changed: %1").arg(ClientDisplayProbe::label(probed)));
+}
+
+void Session::keepDisplayLayout()
+{
+    m_ClientDisplayChange.keep();
+    m_PlankToolbar->hideScreensPrompt();
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: keeping the current layout");
 }
 
 bool Session::requestDisplayLayoutApply()
@@ -2992,7 +2992,7 @@ void Session::applyDisplayLayout()
     SDL_PushEvent(&event);
 }
 
-void Session::applyPendingPresentation()
+void Session::applyPendingPresentation(bool newLayout)
 {
     if (!m_PresentationChangePending.exchange(false) || m_Window == nullptr) {
         return;
@@ -3030,7 +3030,8 @@ void Session::applyPendingPresentation()
     setPresentationWindowsFullscreen(m_PresentationFullscreen);
     const QVector<NvClientDisplay> presented = m_ClientDisplayProbe;
     m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
-    m_PresentedDisplaySignature = presentedDisplaySignature(presented);
+    if (newLayout) m_ClientDisplayChange.applied(presented);
+    if (m_PlankToolbar) m_PlankToolbar->hideScreensPrompt();
     SDL_Event resetEvent = {};
     resetEvent.type = SDL_EVENT_RENDER_DEVICE_RESET;
     SDL_PushEvent(&resetEvent);
@@ -5817,7 +5818,7 @@ void Session::execInternal()
     {
         const QVector<NvClientDisplay> presented = m_ClientDisplayProbe;
         m_PresentedDisplayFingerprint = ClientDisplayProbe::fingerprint(presented);
-        m_PresentedDisplaySignature = presentedDisplaySignature(presented);
+        m_ClientDisplayChange.applied(presented);
     }
 
     QImage iconImage(":/res/plank-logo.png");
@@ -6138,8 +6139,7 @@ void Session::execInternal()
             } else if (action == PlankToolbar::Action::ApplyScreens) {
                 requestDisplayLayoutApply();
             } else if (action == PlankToolbar::Action::KeepScreens) {
-                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: keeping the current layout");
-                m_PlankToolbar->hideScreensPrompt();
+                keepDisplayLayout();
             } else if (action == PlankToolbar::Action::SetUpScreens) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: display setup requested");
                 emit displaySetupRequested();
@@ -6814,8 +6814,7 @@ void Session::execInternal()
                     break;
                 }
                 if (action == PlankToolbar::Action::KeepScreens) {
-                    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "PLANK screens changed: keeping the current layout");
-                    m_PlankToolbar->hideScreensPrompt();
+                    keepDisplayLayout();
                     break;
                 }
                 if (action == PlankToolbar::Action::SetUpScreens) {

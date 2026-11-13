@@ -6,6 +6,25 @@
 
 namespace PlankToolbarLogic {
 
+// Informational screen notices share ordinary toolbar visibility. Only an
+// explicit pin or an active control interaction may hold the toolbar open.
+class AutoHideTimer
+{
+public:
+    void restart(uint64_t now, bool pinned)
+    {
+        m_Deadline = pinned ? 0 : now + 5000;
+    }
+    void pause() { m_Deadline = 0; }
+    bool expired(uint64_t now, bool pinned, bool interacting) const
+    {
+        return !pinned && !interacting && m_Deadline != 0 && now >= m_Deadline;
+    }
+
+private:
+    uint64_t m_Deadline = 0;
+};
+
 inline float resolvePixelDensity(float reportedDensity,
                                  int logicalWidth,
                                  int logicalHeight,

@@ -7,6 +7,7 @@
 #include "outputtopology.h"
 #include "guidisplaysnapshot.h"
 #include "streaming/plankpresentation.h"
+#include "streaming/clientdisplaychange.h"
 #include "streaming/sessionguidispatch.h"
 
 #include <QJsonArray>
@@ -93,6 +94,10 @@ class TestDisplayPlanner : public QObject
     Q_OBJECT
 
 private slots:
+    void screenNoticeHonoursAskPreference();
+    void screenNoticeClearsOnReturnToAppliedLayout();
+    void screenNoticeRemembersKeepUntilApply();
+    void screenNoticeIgnoresDuplicateAndIrrelevantNotifications();
     void sessionSnapshotPreservesProfilesAndRefreshes();
     void sessionSnapshotCancellationWakesWaiter();
     void guiDispatchProcessesSetupAndApply();
@@ -147,6 +152,89 @@ private slots:
     void backingPreviewUsesTheHost();
     void arrangeInvariants();
 };
+
+
+void TestDisplayPlanner::screenNoticeHonoursAskPreference()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+    ClientDisplayChange state;
+    auto displays = QVector<NvClientDisplay> {macBook14()};
+    state.applied(displays);
+    QVERIFY(!state.shouldPrompt(settings));
+    displays.append(mac(QStringLiteral("uuid:external"), QRect(1512, 0, 1920, 1080), QSize(3840, 2160)));
+    QVERIFY(state.observe(displays));
+    QVERIFY(state.shouldPrompt(settings));
+    DisplayProfile::setAskOnChange(settings, false);
+    QVERIFY(!state.shouldPrompt(settings));
+    DisplayProfile::setAskOnChange(settings, true);
+    QVERIFY(state.shouldPrompt(settings));
+}
+
+void TestDisplayPlanner::screenNoticeClearsOnReturnToAppliedLayout()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+    ClientDisplayChange state;
+    const QVector<NvClientDisplay> applied {macBook14(),
+        mac(QStringLiteral("uuid:external"), QRect(1512, 0, 1920, 1080), QSize(3840, 2160))};
+    state.applied(applied);
+    auto changed = applied;
+    changed[1].bounds.moveLeft(1600);
+    QVERIFY(state.observe(changed));
+    QVERIFY(state.shouldPrompt(settings));
+    QVERIFY(!state.matchesApplied());
+    QVERIFY(state.observe(applied));
+    QVERIFY(state.matchesApplied()); // The existing plan can restore client windows without a Host apply.
+    QVERIFY(!state.shouldPrompt(settings));
+}
+
+void TestDisplayPlanner::screenNoticeRemembersKeepUntilApply()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+    ClientDisplayChange state;
+    const QVector<NvClientDisplay> applied {macBook14()};
+    auto changed = applied;
+    changed[0].backingSize = QSize(3600, 2338);
+    state.applied(applied);
+    QVERIFY(state.observe(changed));
+    QVERIFY(state.shouldPrompt(settings));
+    state.keep();
+    QVERIFY(!state.shouldPrompt(settings));
+    // Returning to an already dismissed arrangement cannot reopen its notice.
+    QVERIFY(state.observe(applied));
+    QVERIFY(state.observe(changed));
+    QVERIFY(!state.shouldPrompt(settings));
+    auto different = changed;
+    different[0].bounds.moveLeft(100);
+    QVERIFY(state.observe(different));
+    QVERIFY(state.shouldPrompt(settings));
+    // A successful apply starts a new baseline and clears session dismissals.
+    state.applied(different);
+    QVERIFY(!state.shouldPrompt(settings));
+    QVERIFY(state.observe(changed));
+    QVERIFY(state.shouldPrompt(settings));
+}
+
+void TestDisplayPlanner::screenNoticeIgnoresDuplicateAndIrrelevantNotifications()
+{
+    QTemporaryDir dir;
+    QSettings settings(dir.filePath(QStringLiteral("settings.ini")), QSettings::IniFormat);
+    ClientDisplayChange state;
+    QVector<NvClientDisplay> displays {macBook14(),
+        mac(QStringLiteral("uuid:external"), QRect(1512, 0, 1920, 1080), QSize(3840, 2160))};
+    state.applied(displays);
+    std::reverse(displays.begin(), displays.end());
+    displays[0].refreshMillihz = 59940;
+    displays[0].name = QStringLiteral("Renamed screen");
+    QVERIFY(!state.observe(displays));
+    QVERIFY(!state.shouldPrompt(settings));
+    displays[0].bounds.moveLeft(1600);
+    QVERIFY(state.observe(displays));
+    QVERIFY(state.shouldPrompt(settings));
+    QVERIFY(!state.observe(displays)); // Same pending notice does not reveal the toolbar again.
+}
 
 void TestDisplayPlanner::monitorKeysPreferTheUuid()
 {

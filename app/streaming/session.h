@@ -16,6 +16,7 @@
 #include <mutex>
 #include <string>
 #include "plankcallbacktarget.h"
+#include "clientdisplaychange.h"
 #include <thread>
 
 #include <Limelight.h>
@@ -408,9 +409,10 @@ private:
     void destroySecondaryWindows();
     // Client monitors changed during the stream: back to one window and ask.
     void handleClientDisplaysChanged();
+    void keepDisplayLayout();
     void collapseToSingleWindow();
     bool requestDisplayLayoutApply();
-    void applyPendingPresentation();
+    void applyPendingPresentation(bool newLayout = true);
 
     // Display arrangement (0x8000000) for Match client: plans the client's
     // monitors with the display profile and the host's capabilities.
@@ -624,7 +626,7 @@ private:
     // "Screens changed": settle, collapse, ask, and apply on request.
     Uint64 m_ClientDisplayChangeDeadline = 0;
     QString m_PresentedDisplayFingerprint;
-    QString m_PresentedDisplaySignature;
+    ClientDisplayChange m_ClientDisplayChange;
     std::atomic_bool m_DisplayReconfigureRequested {false};
     SDL_DisplayID m_TargetDisplayId = 0;
     bool m_MultiDisplayPresentationAvailable = false;

@@ -34,7 +34,6 @@ constexpr int NewConnectionWidth = 105;
 constexpr int FileStatusHeight = 28;
 constexpr int EdgeRevealHeight = 3;
 constexpr Uint32 EdgeActivationDelayMs = 1000;
-constexpr Uint32 AutoHideDelayMs = 5000;
 constexpr Uint32 BitrateSettleDelayMs = 250;
 constexpr Uint32 BitrateAcknowledgementRetryMs = 1000;
 constexpr Uint32 RedrawIntervalMs = 200;
@@ -133,7 +132,6 @@ PlankToolbar::PlankToolbar(
       m_LastDrawnVideoMbps(-1.0f),
       m_LastDrawnPacketLossPercent(-2.0f),
       m_LastDrawnNetworkRttMs(0),
-      m_HideDeadline(0),
       m_LastBitrateSendTime(0),
       m_LastBitrateChangeTime(0),
       m_LastToolbarMoveDrawTime(0),
@@ -260,10 +258,10 @@ PlankToolbar::Action PlankToolbar::update(
     }
 
     // A stationary pointer over the toolbar is idle too. Only an active
-    // button sequence, drag, or unanswered screen prompt keeps it open.
-    if (m_Visible && !m_Pinned && !m_ButtonRouter.hasLocalButtons() &&
-            !m_DraggingToolbar && !m_DraggingSlider && !m_ScreensPromptVisible &&
-            m_HideDeadline != 0 && now >= m_HideDeadline) {
+    // button sequence or drag keeps it open. A screen notice remains available
+    // on the next reveal, but must not pin the toolbar over the desktop.
+    if (m_Visible && m_AutoHideTimer.expired(now, m_Pinned,
+            m_ButtonRouter.hasLocalButtons() || m_DraggingToolbar || m_DraggingSlider)) {
         hide();
     }
 
@@ -338,7 +336,6 @@ void PlankToolbar::showScreensPrompt(const QString& text)
     m_ScreensPromptText = text;
     m_ScreensPromptVisible = true;
     show(SDL_GetTicks());
-    m_HideDeadline = 0;
 }
 
 void PlankToolbar::hideScreensPrompt()
@@ -598,7 +595,7 @@ PlankToolbar::Action PlankToolbar::handlePointerButton(
 
     m_PointerInside = pointerInside;
     if (event.down) {
-        m_HideDeadline = 0;
+        m_AutoHideTimer.pause();
     } else {
         restartAutoHideTimer(now);
     }
@@ -759,8 +756,7 @@ void PlankToolbar::toggleFromShortcut(Uint64 now)
 
 void PlankToolbar::restartAutoHideTimer(Uint64 now)
 {
-    m_HideDeadline = m_Pinned || m_ScreensPromptVisible ?
-                0 : now + AutoHideDelayMs;
+    m_AutoHideTimer.restart(now, m_Pinned);
 }
 
 void PlankToolbar::hide()
@@ -769,7 +765,7 @@ void PlankToolbar::hide()
     m_Visible = false;
     m_EdgeHoverStartTime = 0;
     m_PointerInside = false;
-    m_HideDeadline = 0;
+    m_AutoHideTimer.pause();
     if (m_WaylandToolbar) {
         m_WaylandToolbar->setVisible(false);
     } else {

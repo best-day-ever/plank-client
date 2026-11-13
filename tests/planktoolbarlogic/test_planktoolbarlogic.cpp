@@ -12,6 +12,8 @@ class TestPlankToolbarLogic : public QObject
     Q_OBJECT
 
 private slots:
+    void autoHidesIdleNoticesAfterFiveSeconds();
+    void preservesExplicitPinAndActiveControls();
     void preservesCenteredAndDraggedPositions();
     void resolvesReportedAndDerivedDensity();
     void alignsLogicalHitRectWithPhysicalSurface_data();
@@ -32,6 +34,34 @@ private slots:
     void formatsSharedNetworkRtt();
     void sizesEncoderSegmentWithoutMovingSlider();
 };
+
+
+void TestPlankToolbarLogic::autoHidesIdleNoticesAfterFiveSeconds()
+{
+    PlankToolbarLogic::AutoHideTimer timer;
+    QVERIFY(!timer.expired(10000, false, false));
+    timer.restart(10000, false); // Revealing a screen notice uses this same timer.
+    QVERIFY(!timer.expired(14999, false, false));
+    QVERIFY(timer.expired(15000, false, false));
+    timer.restart(14000, false); // Local pointer activity extends the deadline.
+    QVERIFY(!timer.expired(15000, false, false));
+    QVERIFY(timer.expired(19000, false, false));
+}
+
+void TestPlankToolbarLogic::preservesExplicitPinAndActiveControls()
+{
+    PlankToolbarLogic::AutoHideTimer timer;
+    timer.restart(100, true);
+    QVERIFY(!timer.expired(100000, true, false));
+    timer.restart(200, false);
+    QVERIFY(!timer.expired(6000, true, false));
+    QVERIFY(!timer.expired(6000, false, true));
+    QVERIFY(timer.expired(6000, false, false));
+    timer.pause(); // Button-down or hiding suspends the timer until restart.
+    QVERIFY(!timer.expired(100000, false, false));
+    timer.restart(100000, false);
+    QVERIFY(timer.expired(105000, false, false));
+}
 
 void TestPlankToolbarLogic::preservesCenteredAndDraggedPositions()
 {
