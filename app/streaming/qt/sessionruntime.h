@@ -57,6 +57,7 @@ private:
     void selectFullscreenDisplays(bool span, QtPlatformSessionShell* source);
     void showPresentationWindows();
     void minimize();
+    void toggleImmersiveMouse(QtPlatformSessionShell* source = nullptr);
 
     Session* const m_Session;
     QPointer<QWindow> m_Launcher;
@@ -65,6 +66,8 @@ private:
     std::unique_ptr<QtVideoPresenter> m_Presenter;
     std::unique_ptr<QtDecodedVideoRendererFactory> m_Factory;
     std::unique_ptr<QtSessionInput> m_Input;
+    QPointer<QtPlatformSessionShell> m_PointerWindow;
+    QPointer<QtPlatformSessionShell> m_PointerCandidateWindow;
 #ifdef Q_OS_LINUX
     std::unique_ptr<QtWaylandSessionGuard> m_WindowGuard;
 #endif

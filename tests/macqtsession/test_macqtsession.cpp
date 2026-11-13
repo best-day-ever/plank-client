@@ -57,6 +57,30 @@ private slots:
             Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier), int(Qt::Key_Q));
         // Ordinary Command-Q belongs to the remote app, not local disconnect.
         QCOMPARE(qtSessionShortcut(12, Qt::Key_Q, Qt::MetaModifier), 0);
+        QCOMPARE(qtSessionShortcut(46, Qt::Key_M,
+            Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier), int(Qt::Key_M));
+    }
+    void immersivePointerRoutesButtonsAndRejectsPreReleaseMotion()
+    {
+        QWindow host; host.resize(1280, 900);
+        Control control(&host); QtSessionWindow scene(&host, &control);
+        scene.resize(host.size()); scene.setRemoteInputEnabled(true);
+        scene.setPresentation({QSize(1280,900), QRectF(0,0,1280,900),
+            QRectF(0,0,1280,900), QSize(1280,900), host.size()});
+        scene.setImmersiveMouse(true, true); scene.setPointerCaptured(true);
+        QSignalSpy buttons(&scene, &QtSessionWindow::remoteButton);
+        pointer(scene, QEvent::MouseButtonPress, {5,5}, Qt::LeftButton);
+        pointer(scene, QEvent::MouseButtonRelease, {5,5}, Qt::LeftButton);
+        QCOMPARE(buttons.size(), 2); // Frozen cursor over the toolbar still controls the Host.
+        scene.setPointerCaptured(false);
+        scene.discardPointerMotionBefore(100);
+        QSignalSpy motion(&scene, &QtSessionWindow::remoteMotion);
+        QMouseEvent old(QEvent::MouseMove, {400,400}, {400,400}, {}, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        old.setTimestamp(99); QCoreApplication::sendEvent(&scene,&old);
+        QCOMPARE(motion.size(),0);
+        QMouseEvent current(QEvent::MouseMove, {410,410}, {410,410}, {}, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        current.setTimestamp(101); QCoreApplication::sendEvent(&scene,&current);
+        QCOMPARE(motion.size(),1);
     }
     void redirectedSceneKeepsControlsAndRemoteInputSeparate()
     {

@@ -3,6 +3,7 @@
         <file>SessionSurface.qml</file>
         <file>icons/pin.svg</file>
         <file>icons/pin-off.svg</file>
+        <file>icons/mouse.svg</file>
         <file>icons/fullscreen-enter.svg</file>
         <file>icons/fullscreen-exit.svg</file>
         <file>icons/display-menu.svg</file>

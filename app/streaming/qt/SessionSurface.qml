@@ -55,6 +55,19 @@ Item {
     }
 
     // Own the compact control's geometry instead of inheriting Material's
+    Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 20
+        visible: sessionWindow.immersiveMouse && !sessionWindow.waiting
+        text: qsTr("Immersive mouse · Ctrl+Alt+Shift+M to release")
+        color: "#f1f2f5"
+        font.pixelSize: 14
+        style: Text.Outline
+        styleColor: "#111111"
+    }
+
+    // Own the compact control's geometry instead of inheriting Material's
     // text-button padding/insets, which can squeeze the icon to a few pixels.
     // Qt's button template still owns activation, hover and accessibility.
     component ToolButton: T.Button {
@@ -69,7 +82,7 @@ Item {
         Accessible.name: ToolTip.text
         background: Rectangle {
             radius: 4
-            color: control.down ? "#525862" : control.hovered ? "#444a53" : "transparent"
+            color: control.checked ? "#275f8f" : control.down ? "#525862" : control.hovered ? "#444a53" : "transparent"
         }
         contentItem: ToolbarIcon {
             objectName: control.iconName
@@ -164,6 +177,19 @@ Item {
                 iconSource: sessionWindow.pinned ? "icons/pin.svg" : "icons/pin-off.svg"
                 ToolTip.text: sessionWindow.pinned ? "Unpin toolbar" : "Pin toolbar"
                 onClicked: sessionWindow.pinned = !sessionWindow.pinned
+            }
+            ToolButton {
+                objectName: "immersiveMouseButton"
+                iconName: "immersiveMouseIcon"
+                iconSource: "icons/mouse.svg"
+                checkable: true
+                checked: sessionWindow.immersiveMouse
+                enabled: sessionWindow.immersiveMouseAvailable
+                Accessible.name: qsTr("Immersive mouse mode")
+                ToolTip.text: sessionWindow.immersiveMouse ?
+                    qsTr("Release immersive mouse — Ctrl+Alt+Shift+M") :
+                    qsTr("Capture mouse for 3D applications and games — Ctrl+Alt+Shift+M")
+                onClicked: sessionWindow.toggleImmersiveMouse()
             }
             StatReadout {
                 objectName: "fpsStat"

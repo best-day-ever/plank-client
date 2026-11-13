@@ -153,7 +153,7 @@ void QtSessionWindow::updateTabletCursor()
 {
     if (!m_TabletCursor) return;
     QPointF point;
-    const bool visible = m_RemoteInputEnabled && !m_Waiting && !m_DisplayMenuOpen && m_TabletActive && !m_EmbeddedCursor &&
+    const bool visible = m_RemoteInputEnabled && !m_Waiting && !m_DisplayMenuOpen && (m_TabletActive || m_PointerCaptured) && !m_EmbeddedCursor &&
         m_HostCursorVisible && m_HostPositionValid && !m_CursorImage.isNull() &&
         m_Geometry.fromStream(m_HostCursorPosition, point);
     m_TabletCursor->setVisible(visible);
@@ -309,7 +309,7 @@ void QtSessionWindow::updateCursor()
     QPointF ignored;
     const bool local = !m_RemoteInputEnabled || m_Waiting || m_DisplayMenuOpen ||
         (!m_TabletActive && (localPointer(m_Pointer) || !m_Geometry.toStream(m_Pointer, ignored)));
-    const auto cursor = local ? QCursor(Qt::ArrowCursor) :
+    const auto cursor = m_PointerCaptured ? QCursor(Qt::BlankCursor) : local ? QCursor(Qt::ArrowCursor) :
         (m_TabletActive || m_EmbeddedCursor || !m_HostCursorVisible) ? QCursor(Qt::BlankCursor) : m_RemoteCursor;
     setCursor(cursor);
     if (m_Redirected) controlWindow()->setCursor(cursor);
@@ -339,6 +339,15 @@ bool QtSessionWindow::event(QEvent* event)
 void QtSessionWindow::mouseMoveEvent(QMouseEvent* event)
 {
     if (event->source() != Qt::MouseEventNotSynthesized) { event->accept(); return; }
+    if (m_PointerTimestampBoundary && event->timestamp() <= m_PointerTimestampBoundary) {
+        event->accept(); return;
+    }
+    if (m_ReanchorPending) {
+        m_ReanchorPending = false;
+        if ((event->position() - m_ReanchorPosition).manhattanLength() <= 1) {
+            observePointer(event->position()); event->accept(); return;
+        }
+    }
     observePointer(event->position());
     QPointF position;
     if (m_RemoteInputEnabled && !m_Waiting && !localPointer(event->position()) &&
@@ -351,9 +360,23 @@ void QtSessionWindow::mouseMoveEvent(QMouseEvent* event)
     QQuickWindow::mouseMoveEvent(event);
 }
 
+bool QtSessionWindow::reanchorPointer(QPointF framePosition)
+{
+    QPointF logical;
+    if (!m_Geometry.fromStream(framePosition, logical)) return false;
+    m_ReanchorPosition = logical.toPoint(); m_ReanchorPending = true;
+    QCursor::setPos(controlWindow()->mapToGlobal(logical.toPoint()));
+    return true;
+}
+
 void QtSessionWindow::mousePressEvent(QMouseEvent* event)
 {
     if (event->source() != Qt::MouseEventNotSynthesized) { event->accept(); return; }
+    if (m_PointerCaptured && m_RemoteInputEnabled && !m_Waiting) {
+        m_RemoteButtons |= event->button();
+        emit remoteButton(event->button(), true, m_LastRemotePosition);
+        event->accept(); return;
+    }
     observePointer(event->position());
     QPointF position;
     if (!m_RemoteInputEnabled && !m_Waiting && !localPointer(event->position()) &&
@@ -382,7 +405,7 @@ void QtSessionWindow::mouseDoubleClickEvent(QMouseEvent* event)
     if (event->source() != Qt::MouseEventNotSynthesized) { event->accept(); return; }
     // A double-click is also the second physical down, not a separate remote
     // command. Local controls still receive their ordinary Qt double-click.
-    if (!localPointer(event->position()) && m_RemoteInputEnabled && !m_Waiting) {
+    if ((m_PointerCaptured || !localPointer(event->position())) && m_RemoteInputEnabled && !m_Waiting) {
         mousePressEvent(event);
     } else {
         QQuickWindow::mouseDoubleClickEvent(event);
@@ -395,7 +418,7 @@ void QtSessionWindow::mouseReleaseEvent(QMouseEvent* event)
     observePointer(event->position());
     if (m_RemoteButtons.testFlag(event->button())) {
         QPointF position = m_LastRemotePosition;
-        mapPointer(event->position(), position, true);
+        if (!m_PointerCaptured) mapPointer(event->position(), position, true);
         m_RemoteButtons &= ~event->button();
         m_LastRemotePosition = position;
         emit remoteButton(event->button(), false, position);
@@ -417,6 +440,10 @@ void QtSessionWindow::mouseReleaseEvent(QMouseEvent* event)
 
 void QtSessionWindow::wheelEvent(QWheelEvent* event)
 {
+    if (m_PointerCaptured && m_RemoteInputEnabled && !m_Waiting) {
+        emit remoteWheel(m_LastRemotePosition, event->angleDelta(), event->pixelDelta(), event->inverted());
+        event->accept(); return;
+    }
     observePointer(event->position());
     QPointF position;
     if (m_RemoteInputEnabled && !m_Waiting && !localPointer(event->position()) &&

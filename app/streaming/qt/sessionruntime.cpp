@@ -6,6 +6,7 @@
 #include "../../backend/nvhttp.h"
 #include "../audio/microphone.h"
 #include "../camera/camera.h"
+#include <plank_transport_pointer.h>
 #ifdef Q_OS_MACOS
 #include "../../macapplication.h"
 #include "../macclipboardsync.h"
@@ -13,6 +14,7 @@
 #endif
 
 #include <QEvent>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QScopedValueRollback>
@@ -50,6 +52,34 @@ QtSessionRuntime::QtSessionRuntime(Session* session) : QObject(session), m_Sessi
         for (auto& shell : m_Windows) shell->surface().setDisplayMode(false, false);
     });
     connect(m_Input.get(), &QtSessionInput::shortcutRequested, this, &QtSessionRuntime::handleShortcut);
+    connect(m_Input.get(), &QtSessionInput::pointerCaptureFailed, this, [this](const QString& reason) {
+        emit m_Session->displayLaunchError(reason); stop();
+    });
+    connect(m_Input.get(), &QtSessionInput::pointerCaptureNotice, this, [this](const QString& reason) {
+        m_DisplayNotice = reason; m_DisplayNoticeDeadline = SDL_GetTicks() + 5000;
+        setStatus(QString());
+    });
+#ifdef Q_OS_MACOS
+    m_Input->setPointerCaptureHooks([this] {
+        if (m_PointerWindow) return m_PointerWindow->beginPointerCapture();
+        if (!m_PointerCandidateWindow || !m_PointerCandidateWindow->beginPointerCapture()) return false;
+        m_PointerWindow = m_PointerCandidateWindow;
+        return true;
+    }, [this](QPointF point, bool reanchor) {
+        if (m_PointerWindow) m_PointerWindow->finishPointerCapture({}, false);
+        m_PointerWindow = nullptr;
+        if (reanchor && QGuiApplication::applicationState() == Qt::ApplicationActive) {
+            for (auto& shell : m_Windows) if (shell->surface().reanchorPointer(point)) break;
+        }
+    });
+    connect(m_Input.get(), &QtSessionInput::pointerCaptureChanged, this, [this](bool active) {
+        for (auto& shell : m_Windows) shell->surface().setPointerCaptured(active);
+    });
+    connect(m_Input.get(), &QtSessionInput::immersiveMouseChanged, this, [this](bool enabled) {
+        for (auto& shell : m_Windows)
+            shell->surface().setImmersiveMouse(enabled, shell->surface().immersiveMouseAvailable());
+    });
+#endif
     connect(session, &Session::qtStatisticsUpdated, this, [this](const QString& text) {
         for (auto& shell : m_Windows) shell->surface().setStatisticsText(text);
     });
@@ -229,7 +259,17 @@ void QtSessionRuntime::start(QWindow* launcher)
         });
         connect(&surface, &QtSessionWindow::physicalMouseActivity, m_Input.get(), &QtSessionInput::activateMouse);
         connect(&surface, &QtSessionWindow::remoteMotion, m_Input.get(), &QtSessionInput::mouseMotion);
-        connect(&surface, &QtSessionWindow::remoteButton, m_Input.get(), &QtSessionInput::mouseButton);
+        connect(&surface, &QtSessionWindow::remoteButton, this,
+                [this](int button, bool down, QPointF position) {
+            m_Input->mouseButton(button, down, position);
+        });
+        connect(&surface, &QtSessionWindow::immersiveMouseRequested, this,
+                [this, window = shell.get()] { toggleImmersiveMouse(window); });
+#ifdef Q_OS_MACOS
+        connect(shell.get(), &QtMetalSessionShell::pointerDelta, m_Input.get(), &QtSessionInput::mouseDelta);
+        connect(shell.get(), &QtMetalSessionShell::pointerCaptureLost, m_Input.get(), &QtSessionInput::releaseAll);
+        connect(shell.get(), &QtMetalSessionShell::tabletPointerInput, m_Input.get(), &QtSessionInput::cancelPointerCapture);
+#endif
         connect(&surface, &QtSessionWindow::remoteWheel, m_Input.get(), &QtSessionInput::wheel);
         connect(&surface, &QtSessionWindow::remoteKey, m_Input.get(), &QtSessionInput::key);
 #ifdef Q_OS_MACOS
@@ -539,6 +579,11 @@ void QtSessionRuntime::setStreaming(QSize size)
     if (!m_DisplayNotice.isEmpty() && !m_DisplayNoticeDeadline)
         m_DisplayNoticeDeadline = SDL_GetTicks() + 12000;
     m_Input->setStreamSize(size);
+#ifdef Q_OS_MACOS
+    m_Input->setPointerCaptureSupported((m_Session->m_PlankLaunchFeatureFlags & PLANK_POINTER_CAPTURE_FEATURE) != 0);
+    for (auto& shell : m_Windows) shell->surface().setImmersiveMouse(m_Input->immersiveMouse(),
+        (m_Session->m_PlankLaunchFeatureFlags & PLANK_POINTER_CAPTURE_FEATURE) != 0);
+#endif
     m_Streaming = true;
     m_ReconnectNoticeDeadline = 0;
     updateGeometry();
@@ -553,6 +598,7 @@ void QtSessionRuntime::setStreaming(QSize size)
 void QtSessionRuntime::updateGeometry()
 {
     if (m_ChangingPresentation || !m_Presenter || m_Windows.empty() || !m_StreamSize.isValid()) return;
+    m_Input->releaseAll();
     QScopedValueRollback<bool> updating(m_ChangingPresentation, true);
     const bool fullscreen = m_Windows.front()->windowState() == Qt::WindowFullScreen;
     const bool multi = fullscreen && m_SpanDisplays && m_Windows.size() > 1;
@@ -625,6 +671,9 @@ void QtSessionRuntime::setInputEnabled(bool enabled)
 
 void QtSessionRuntime::updateFocus()
 {
+#ifdef Q_OS_MACOS
+    if (m_PointerWindow && !m_PointerWindow->ownsKeyboard()) m_Input->releaseAll();
+#endif
     auto* focused = QGuiApplication::focusWindow();
     bool active = false;
     for (const auto& shell : m_Windows)
@@ -739,8 +788,28 @@ void QtSessionRuntime::handleShortcut(int key)
             StreamingPreferences::CSK_ALWAYS : StreamingPreferences::CSK_OFF;
         updateFocus(); break;
     case Qt::Key_L: m_ConfinePointer = !m_ConfinePointer; updateFocus(); break;
+    case Qt::Key_M: toggleImmersiveMouse(); break;
     default: break;
     }
+}
+
+void QtSessionRuntime::toggleImmersiveMouse(QtPlatformSessionShell* source)
+{
+#ifdef Q_OS_MACOS
+    if (!m_Streaming || m_Stop.load()) return;
+    if (!source) {
+        for (auto& shell : m_Windows) if (shell->ownsKeyboard()) { source = shell.get(); break; }
+    }
+    if (!source || !source->surface().immersiveMouseAvailable()) return;
+    if (!m_Input->immersiveMouse()) m_PointerCandidateWindow = source;
+    QPointF anchor = source->surface().presentation().sourcePixels.center();
+    const auto& geometry = source->surface().presentation();
+    QPointF local = source->mapFromGlobal(QCursor::pos());
+    geometry.toStream(local, anchor); // Toolbar activation keeps a bounded fallback.
+    m_Input->setImmersiveMouse(!m_Input->immersiveMouse(), anchor);
+#else
+    Q_UNUSED(source);
+#endif
 }
 
 void QtSessionRuntime::tick()

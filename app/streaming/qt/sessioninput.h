@@ -7,6 +7,7 @@
 #include <QMap>
 #include <QPointF>
 #include <QSet>
+#include <QTimer>
 #include <atomic>
 #include <condition_variable>
 #include <thread>
@@ -38,6 +39,16 @@ public:
     void handleRawHidControl(const unsigned char* data, unsigned int length);
     void handleCursorShape(const unsigned char* data, unsigned int length);
     void handleCursorPosition(const unsigned char* data, unsigned int length);
+    void handlePointerCapture(const unsigned char* data, unsigned int length);
+    void setPointerCaptureSupported(bool supported) { m_PointerCaptureSupported = supported; }
+    bool immersiveMouse() const { return m_ImmersiveMouse; }
+    void setImmersiveMouse(bool enabled, QPointF anchor = {});
+    void setPointerCaptureHooks(std::function<bool()> begin,
+                               std::function<void(QPointF, bool)> finish) {
+        m_BeginPointerCapture = std::move(begin); m_FinishPointerCapture = std::move(finish);
+    }
+    void mouseDelta(QPointF frameDelta);
+    void cancelPointerCapture();
 
     void setStreamSize(QSize size);
     void setEnabled(bool enabled);
@@ -62,6 +73,10 @@ signals:
     void cursorPosition(QPointF position);
     void tabletActive(bool active);
     void shortcutRequested(int key);
+    void pointerCaptureChanged(bool active);
+    void immersiveMouseChanged(bool enabled);
+    void pointerCaptureFailed(QString reason);
+    void pointerCaptureNotice(QString reason);
 
 private:
     enum class TabletState { Streaming, Reconnecting, Stopped };
@@ -72,6 +87,19 @@ private:
     bool sendPosition(QPointF position, bool onlyIfChanged = false);
     void consumeShape();
     void consumePosition();
+    bool beginPointerCapture(QPointF anchor);
+    bool sendPointerCapture(unsigned char operation, QPointF value = {});
+    void finishPointerCapture(QPointF position);
+    void pointerFailure();
+    bool beforeTabletPointerInput();
+    struct DeferredPointer {
+        enum Kind { Motion, Button, Wheel, Key } kind;
+        QPointF delta;
+        int button = 0; bool down = false;
+        QPoint angle, pixel; bool inverted = false;
+        quint32 scan = 0; int key = 0; Qt::KeyboardModifiers modifiers;
+    };
+    void deferPointer(DeferredPointer event);
 
     PlankRemoteCursor m_Cursor;
     PlankCallbackTarget<QtRawWacomInput> m_RawControl;
@@ -81,6 +109,19 @@ private:
     // A zero size invalidates it after focus, transport or tablet ownership changes.
     QPoint m_LastPosition;
     std::uint64_t m_LastPositionSize = 0;
+    enum class PointerState { Idle, Captured, Ending };
+    PointerState m_PointerState = PointerState::Idle;
+    bool m_PointerCaptureSupported = false;
+    bool m_ImmersiveMouse = false;
+    bool m_NativePointerCapture = false;
+    std::atomic_bool m_PublishedPointerCapture{false};
+    std::shared_ptr<std::mutex> m_PointerWireMutex = std::make_shared<std::mutex>();
+    std::uint64_t m_PointerEpoch = 0, m_PointerSequence = 0;
+    QSize m_PointerSize;
+    QList<DeferredPointer> m_DeferredPointer;
+    QTimer m_PointerDeadline;
+    std::function<bool()> m_BeginPointerCapture;
+    std::function<void(QPointF, bool)> m_FinishPointerCapture;
     QMap<quint32, QtRemoteKey> m_Keys;
     QSet<int> m_Buttons;
     QSet<quint32> m_ShortcutKeys;
