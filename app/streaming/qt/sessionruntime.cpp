@@ -94,6 +94,7 @@ bool QtSessionRuntime::snapshotDisplays()
 {
     const auto screens = QGuiApplication::screens();
     auto& session = *m_Session;
+    session.diagnosticPhase(SessionDiagnostics::Phase::CreatingWindow);
     session.m_ClientDisplays.clear();
     session.m_TargetDisplayId = 0;
     ClientDisplays::Selection selection;
@@ -207,6 +208,8 @@ void QtSessionRuntime::start(QWindow* launcher)
         shell->prepareForSession(desktop, m_Fullscreen && (primary || m_SpanDisplays));
         if (m_Stop.load()) return;
         auto& surface = shell->surface();
+        shell->installEventFilter(this);
+        surface.installEventFilter(this);
         surface.setDisplayMode(canSpan, m_SpanDisplays);
         surface.setLiveSession(true);
         surface.setStatusText(tr("Connecting to workstation…"));
@@ -259,7 +262,10 @@ void QtSessionRuntime::start(QWindow* launcher)
         connect(&surface, &QtSessionWindow::newConnectionRequested, this, [this] {
             m_Session->openNewConnection();
         });
-        connect(&surface, &QtSessionWindow::disconnectRequested, this, &QtSessionRuntime::stop);
+        connect(&surface, &QtSessionWindow::disconnectRequested, this, [this] {
+            m_Session->m_Diagnostics.end(SessionDiagnostics::End::Toolbar);
+            stop();
+        });
         connect(&surface, &QtSessionWindow::fullscreenRequested, this, &QtSessionRuntime::toggleFullscreen);
         connect(&surface, &QtSessionWindow::fullscreenDisplaysRequested, this, [this, owner = shell.get()](bool span) {
             selectFullscreenDisplays(span, owner);
@@ -297,6 +303,8 @@ void QtSessionRuntime::start(QWindow* launcher)
     connect(m_Presenter.get(), &QtVideoPresenter::presentationFailed, this, [this](const QString& reason) {
         emit m_Session->displayLaunchError(reason); stop();
     });
+    m_Session->m_Diagnostics.windowCreated();
+    m_Session->publishDiagnosticLifecycle();
     showPresentationWindows();
     m_Tick.start();
 #ifdef Q_OS_LINUX
@@ -308,6 +316,14 @@ void QtSessionRuntime::start(QWindow* launcher)
 
 bool QtSessionRuntime::eventFilter(QObject* object, QEvent* event)
 {
+    if (event->type() == QEvent::Close) {
+        for (const auto& shell : m_Windows) {
+            if (object == shell.get() || object == &shell->surface()) {
+                m_Session->m_Diagnostics.end(SessionDiagnostics::End::WindowClose);
+                break;
+            }
+        }
+    }
 #ifdef Q_OS_MACOS
     if (event->type() == QEvent::TabletLeaveProximity)
         for (auto& shell : m_Windows) shell->surface().cancelPen();
@@ -315,6 +331,7 @@ bool QtSessionRuntime::eventFilter(QObject* object, QEvent* event)
 #ifdef Q_OS_LINUX
     if (object == QCoreApplication::instance() && event->type() == QEvent::Quit && !m_Finished) {
         m_ExitApplication = true;
+        m_Session->m_Diagnostics.end(SessionDiagnostics::End::ApplicationExit);
         stop();
         return true;
     }
@@ -364,12 +381,18 @@ bool QtSessionRuntime::resetDecoder()
     s.m_VideoDecoder = nullptr;
     SDL_UnlockSpinlock(&s.m_DecoderLock);
     if (m_Stop.load()) return false;
+    s.diagnosticPhase(SessionDiagnostics::Phase::CreatingDecoder);
     IVideoDecoder* decoder = nullptr;
     const bool ready = Session::chooseDecoder(DecoderSelectionMode::PreferExactHardwareThenSoftware,
         nullptr, s.m_ActiveVideoFormat, s.m_ActiveVideoWidth, s.m_ActiveVideoHeight,
         s.m_ActiveVideoFrameRate, true, false, decoder, s.isIdentityGbrEnabledForFormat(s.m_ActiveVideoFormat),
         s.decoderCaptureSource(), s.decoderEncoderBackend(), m_Factory.get());
-    if (!ready || m_Stop.load()) { delete decoder; return false; }
+    if (!ready || m_Stop.load()) {
+        if (!ready) s.m_Diagnostics.end(SessionDiagnostics::End::DecoderFailed);
+        delete decoder; return false;
+    }
+    s.m_Diagnostics.decoderReady();
+    s.publishDiagnosticLifecycle();
     SDL_LockSpinlock(&s.m_DecoderLock);
     s.m_VideoDecoder = decoder;
     SDL_UnlockSpinlock(&s.m_DecoderLock);
@@ -389,9 +412,11 @@ void QtSessionRuntime::workerMain()
     m_OwnsSession = true;
     Session::s_ActiveSession = &s;
     s.m_QtInputCallbacks.publish(m_Input.get());
+    s.diagnosticPhase(SessionDiagnostics::Phase::Initializing);
     bool ready = !m_Stop.load() && s.initialize(m_Factory.get()) && !m_Stop.load();
     if (ready) {
         m_Input->setStreamSize(QSize(s.m_StreamConfig.width, s.m_StreamConfig.height));
+        s.diagnosticPhase(SessionDiagnostics::Phase::Negotiating);
         ready = s.startConnectionAsync() && !m_Stop.load();
     }
     if (ready) {
@@ -502,6 +527,7 @@ void QtSessionRuntime::finishWorker()
     // Do not access this after readyForDeletion: QML may collect Session.
     if (m_ExitApplication) QTimer::singleShot(0, QCoreApplication::instance(), &QCoreApplication::quit);
     const QPointer<Session> session(m_Session);
+    session->publishDiagnosticLifecycle(true);
     emit session->sessionFinished();
     if (session) emit session->readyForDeletion();
 }
@@ -695,7 +721,9 @@ void QtSessionRuntime::handleShortcut(int key)
     if (m_Windows.empty()) return;
     auto& surface = m_Windows.front()->surface();
     switch (key) {
-    case Qt::Key_Q: stop(); break;
+    case Qt::Key_Q:
+        m_Session->m_Diagnostics.end(SessionDiagnostics::End::Hotkey);
+        stop(); break;
     case Qt::Key_Z: m_InputGrabbed = !m_InputGrabbed; setInputEnabled(m_Streaming && m_InputGrabbed); break;
     case Qt::Key_X: surface.toggleFullscreen(); break;
     case Qt::Key_S:
@@ -728,6 +756,7 @@ void QtSessionRuntime::tick()
     if (m_ReconnectNoticeDeadline && SDL_GetTicks() >= m_ReconnectNoticeDeadline) {
         m_ReconnectNoticeDeadline = 0;
         if (m_Session->m_Preferences->plankUnreachableAction == StreamingPreferences::PLANK_UNREACHABLE_DISCONNECT) {
+            m_Session->m_Diagnostics.end(SessionDiagnostics::End::ReconnectTimeout);
             stop();
             return;
         } else {

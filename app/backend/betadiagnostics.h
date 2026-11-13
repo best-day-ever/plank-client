@@ -29,6 +29,7 @@ public:
     void finish();
     // Coalesced per-session checkpoints; both memory and disk queues are bounded.
     void setStreamParameters(const QJsonObject& parameters);
+    void setLifecycle(const QJsonObject& lifecycle);
     void checkpoint();
     void tryUpload();
     static QJsonArray displays();
@@ -46,7 +47,7 @@ private:
     QString m_Directory, m_Identity;
     Sender m_Sender;
     bool m_Enabled = true, m_Active = false, m_Busy = false, m_Failed = false, m_StallReported = false;
-    bool m_StatisticsObserved = false;
+    bool m_StatisticsObserved = false, m_RendererProgressObserved = false;
     struct PendingWrite { QJsonObject envelope; std::shared_ptr<QLockFile> lock; };
     QJsonObject m_Report;
     QList<PendingWrite> m_Pending;

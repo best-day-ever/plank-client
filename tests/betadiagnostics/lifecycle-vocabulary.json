@@ -1,0 +1,33 @@
+{
+  "phases": [
+    "prepared",
+    "initializing",
+    "negotiating",
+    "transport_ready",
+    "creating_window",
+    "window_created",
+    "creating_decoder",
+    "decoder_ready"
+  ],
+  "termination_reasons": [
+    "unknown",
+    "initialization_failed",
+    "startup_failed",
+    "cancelled",
+    "window_creation_failed",
+    "decoder_failed",
+    "display_failed",
+    "quit_event",
+    "window_close",
+    "hotkey",
+    "toolbar",
+    "application_exit",
+    "thread_interrupted",
+    "connection_terminated",
+    "session_taken_over",
+    "reconnect_failed",
+    "reconnect_timeout",
+    "session_destroyed",
+    "frame_format_changed"
+  ]
+}

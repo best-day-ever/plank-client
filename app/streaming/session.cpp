@@ -166,6 +166,7 @@ void Session::clStageFailed(int stage, int errorCode)
         return;
     }
 
+    s_ActiveSession->m_Diagnostics.end(SessionDiagnostics::End::StartupFailed, errorCode);
     QString failingEndpoint;
     if (stage == STAGE_SESSION_NEGOTIATION || stage == STAGE_CONTROL_STREAM_START) {
         failingEndpoint = QStringLiteral("UDP %1").arg(
@@ -182,6 +183,7 @@ void Session::clConnectionTerminated(int errorCode)
     if (s_ActiveSession != nullptr && errorCode != 0) emit s_ActiveSession->diagnosticConnectionLost(errorCode);
     if (static_cast<std::uint32_t>(errorCode) ==
             PLANK_TRANSPORT_TERMINATION_SESSION_TAKEN_OVER) {
+        s_ActiveSession->m_Diagnostics.end(SessionDiagnostics::End::SessionTakenOver, errorCode);
         s_ActiveSession->m_CanReconnect.store(false);
         s_ActiveSession->m_ReconnectCancelled.store(true);
         s_ActiveSession->m_UnexpectedTermination = false;
@@ -219,6 +221,7 @@ void Session::clConnectionTerminated(int errorCode)
         return;
     }
 
+    s_ActiveSession->m_Diagnostics.end(SessionDiagnostics::End::ConnectionTerminated, errorCode);
     // Display the termination dialog if this was not intended
     switch (errorCode) {
     case ML_ERROR_GRACEFUL_TERMINATION:
@@ -275,8 +278,10 @@ void Session::openNewConnection()
     }
 }
 
-void Session::requestSessionQuit()
+void Session::requestSessionQuit(SessionDiagnostics::End reason)
 {
+    if (s_ActiveSession && reason != SessionDiagnostics::End::Unknown)
+        s_ActiveSession->m_Diagnostics.end(reason);
     if (s_ActiveSession && s_ActiveSession->m_RendererFactory) {
         emit s_ActiveSession->qtQuitRequested();
         return;
@@ -840,6 +845,9 @@ Session::Session(NvComputer* computer, NvApp& app,
       m_CurrentVideoMbps(0.0f),
       m_CurrentNetworkRttMs(0)
 {
+    connect(this, &Session::displayLaunchError, this, [this] {
+        m_Diagnostics.end(SessionDiagnostics::End::DisplayFailed);
+    }, Qt::DirectConnection);
     if (m_Computer->plankAuthentication) {
         if (m_ComputerManager != nullptr) {
             m_ComputerManager->takePlankReconnectCredentials(
@@ -865,8 +873,21 @@ Session::Session(NvComputer* computer, NvApp& app,
     }
 }
 
+void Session::diagnosticPhase(SessionDiagnostics::Phase phase)
+{
+    m_Diagnostics.phase(phase);
+    publishDiagnosticLifecycle();
+}
+
+void Session::publishDiagnosticLifecycle(bool final)
+{
+    emit diagnosticLifecycle(m_Diagnostics.snapshot(), final);
+}
+
 Session::~Session()
 {
+    m_Diagnostics.end(SessionDiagnostics::End::SessionDestroyed);
+    publishDiagnosticLifecycle(true);
     stopPlankTransportDataPlane();
     clearPlankReconnectCredentials();
 }
@@ -1408,6 +1429,7 @@ void Session::plankTransportVideoReceiveLoop()
             continue;
         }
 
+        m_Diagnostics.videoReceived();
         m_LastPlankVideoReceived.store(SDL_GetTicks());
         frameFlow.record(ClientFrameFlowTrace::Receive,
                          (info.pts / 90000) * 1000000 + (info.pts % 90000) * 1000000 / 90000,
@@ -2266,6 +2288,9 @@ private:
 
     void run() override
     {
+        // Snapshot before sessionFinished, on the same emitter thread, so a
+        // queued GUI receiver cannot finalize/upload before the terminal cause.
+        m_Session->publishDiagnosticLifecycle(true);
 #ifdef Q_OS_MACOS
         if (!m_Session->m_ApplicationExitRequested.load())
 #endif
@@ -4581,12 +4606,14 @@ bool Session::startConnectionAsync(bool reconnecting,
     emit diagnosticStreamParameters(QJsonObject{{"profile",int(m_PlankVideoProfile)},
         {"capture",int(m_PlankCaptureSource)},{"width",m_StreamConfig.width},
         {"height",m_StreamConfig.height},{"fps",m_StreamConfig.fps},{"bitrate_kbps",m_StreamConfig.bitrate}});
+    diagnosticPhase(SessionDiagnostics::Phase::TransportReady);
     emit connectionStarted();
     return true;
 }
 
 void Session::cancelConnectionStart()
 {
+    m_Diagnostics.end(SessionDiagnostics::End::Cancelled);
     m_ConnectionStartCancelled.store(true);
     m_ActiveSessionTakeoverDecision.store(-1);
 }
@@ -5444,6 +5471,7 @@ void Session::exec(QWindow* qtWindow)
     const auto exitConnection = connect(application, &MacApplication::exitRequested,
                                        this, [this] {
         m_ApplicationExitRequested.store(true);
+        m_Diagnostics.end(SessionDiagnostics::End::ApplicationExit);
         cancelConnectionStart();
         m_ReconnectCancelled.store(true);
         m_CanReconnect.store(false);
@@ -5547,12 +5575,16 @@ void Session::execInternal()
     //
     // NB: This initializes the SDL video subsystem, so it must be
     // called on the main thread.
+    diagnosticPhase(SessionDiagnostics::Phase::Initializing);
     const bool initialized = initialize();
     if (!initialized || QThread::currentThread()->isInterruptionRequested()
 #ifdef Q_OS_MACOS
             || m_ApplicationExitRequested.load()
 #endif
             ) {
+        m_Diagnostics.end(initialized ? SessionDiagnostics::End::ThreadInterrupted :
+                          SessionDiagnostics::End::InitializationFailed);
+        publishDiagnosticLifecycle(true);
         if (initialized) {
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
         }
@@ -5580,6 +5612,7 @@ void Session::execInternal()
     m_InputCallbacks.publish(m_InputHandler);
 
     m_ConnectionStartCancelled.store(QThread::currentThread()->isInterruptionRequested());
+    diagnosticPhase(SessionDiagnostics::Phase::Negotiating);
     AsyncConnectionStartThread asyncConnThread(this);
     if (!m_ThreadedExec) {
         // Kick off the async connection thread while we sit here and pump the event loop
@@ -5609,6 +5642,7 @@ void Session::execInternal()
 
     // If the connection failed, clean up and abort the connection.
     if (!m_AsyncConnectionSuccess) {
+        m_Diagnostics.end(SessionDiagnostics::End::StartupFailed);
         destroyInputHandler();
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
@@ -5688,6 +5722,7 @@ void Session::execInternal()
     std::string windowName = QString(m_Computer->name + " - BDE fernweh").toStdString();
 #endif
 
+    diagnosticPhase(SessionDiagnostics::Phase::CreatingWindow);
     m_Window = SDL_CreateWindow(windowName.c_str(),
                                 width,
                                 height,
@@ -5706,6 +5741,7 @@ void Session::execInternal()
                          "SDL_CreateWindow() failed: %s",
                          SDL_GetError());
 
+            m_Diagnostics.end(SessionDiagnostics::End::WindowCreationFailed);
             destroyInputHandler();
             SDL_QuitSubSystem(SDL_INIT_VIDEO);
             QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
@@ -5713,11 +5749,14 @@ void Session::execInternal()
         }
     }
 
+    m_Diagnostics.windowCreated();
+    publishDiagnosticLifecycle();
     SDL_SetWindowPosition(m_Window, x, y);
 
     if ((isCollaborator() && !createCollaborationWindows()) ||
             (!isCollaborator() && m_UseMultiDisplayPresentation &&
              !createSecondaryWindows(defaultWindowFlags, windowName))) {
+        m_Diagnostics.end(SessionDiagnostics::End::WindowCreationFailed);
         SDL_DestroyWindow(m_Window);
         m_Window = nullptr;
         destroyInputHandler();
@@ -5999,15 +6038,20 @@ void Session::execInternal()
     for (;;) {
         // Qt's cancel/quit must survive a full SDL queue. The queued quit
         // event is just a wakeup; interruption is the durable exit request.
-        if (QThread::currentThread()->isInterruptionRequested()) goto DispatchDeferredCleanup;
+        if (QThread::currentThread()->isInterruptionRequested()) {
+            m_Diagnostics.end(SessionDiagnostics::End::ThreadInterrupted);
+            goto DispatchDeferredCleanup;
+        }
         const auto localHotkey = m_InputHandler->takeSessionHotkey();
         if (localHotkey == PlankSessionHotkeys::Disconnect) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved local disconnect hotkey");
+            m_Diagnostics.end(SessionDiagnostics::End::Hotkey);
             goto DispatchDeferredCleanup;
         }
         if (localHotkey == PlankSessionHotkeys::ToggleToolbar) togglePlankToolbar();
 #ifdef Q_OS_MACOS
         if (m_ApplicationExitRequested.load()) {
+            m_Diagnostics.end(SessionDiagnostics::End::ApplicationExit);
             goto DispatchDeferredCleanup;
         }
 #endif
@@ -6070,6 +6114,7 @@ void Session::execInternal()
             if (action == PlankToolbar::Action::Disconnect) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK toolbar disconnect requested");
+                m_Diagnostics.end(SessionDiagnostics::End::Toolbar);
                 goto DispatchDeferredCleanup;
             }
             if (action == PlankToolbar::Action::KeepWaiting) {
@@ -6127,6 +6172,7 @@ void Session::execInternal()
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "PLANK host remained unreachable for %d seconds; disconnecting automatically",
                             m_Preferences->plankUnreachableTimeoutSeconds);
+                m_Diagnostics.end(SessionDiagnostics::End::ReconnectTimeout);
                 goto DispatchDeferredCleanup;
             }
 
@@ -6159,13 +6205,18 @@ void Session::execInternal()
 
 #ifdef Q_OS_MACOS
         if (m_ApplicationExitRequested.load()) {
+            m_Diagnostics.end(SessionDiagnostics::End::ApplicationExit);
             goto DispatchDeferredCleanup;
         }
 #endif
-        if (QThread::currentThread()->isInterruptionRequested()) goto DispatchDeferredCleanup;
+        if (QThread::currentThread()->isInterruptionRequested()) {
+            m_Diagnostics.end(SessionDiagnostics::End::ThreadInterrupted);
+            goto DispatchDeferredCleanup;
+        }
         const auto nativeHotkey = m_InputHandler->takeSessionHotkey();
         if (nativeHotkey == PlankSessionHotkeys::Disconnect) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Reserved native disconnect hotkey");
+            m_Diagnostics.end(SessionDiagnostics::End::Hotkey);
             goto DispatchDeferredCleanup;
         }
         if (nativeHotkey == PlankSessionHotkeys::ToggleToolbar) togglePlankToolbar();
@@ -6176,6 +6227,7 @@ void Session::execInternal()
                 windowForEvent(event.window.windowID) != nullptr)) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Stream window close requested; disconnecting session");
+            m_Diagnostics.end(SessionDiagnostics::End::WindowClose);
             goto DispatchDeferredCleanup;
         }
         const bool reconnectCompletion =
@@ -6222,6 +6274,7 @@ void Session::execInternal()
                     if (action == PlankToolbar::Action::Disconnect) {
                         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                     "PLANK toolbar disconnect requested during reconnect");
+                        m_Diagnostics.end(SessionDiagnostics::End::Toolbar);
                         goto DispatchDeferredCleanup;
                     }
                     if (action == PlankToolbar::Action::ToggleFullscreen) {
@@ -6286,6 +6339,7 @@ void Session::execInternal()
         case SDL_EVENT_QUIT:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Quit event received");
+            m_Diagnostics.end(SessionDiagnostics::End::QuitEvent);
             goto DispatchDeferredCleanup;
 
         case SDL_EVENT_USER:
@@ -6299,6 +6353,7 @@ void Session::execInternal()
             case SDL_CODE_PLANK_RECONNECT:
                 if (reconnectThread != nullptr ||
                         !beginPlankReconnect(reconnectState)) {
+                    m_Diagnostics.end(SessionDiagnostics::End::ReconnectFailed);
                     emit displayLaunchError(
                                 tr("The workstation desktop changed, but the client could not start reconnecting."));
                     goto DispatchDeferredCleanup;
@@ -6326,6 +6381,7 @@ void Session::execInternal()
                 }
                 if (!finishPlankReconnect(
                             reconnectSucceeded, reconnectState)) {
+                    m_Diagnostics.end(SessionDiagnostics::End::ReconnectFailed);
                     emit displayLaunchError(
                                 tr("The workstation desktop changed, but the client could not reconnect."));
                     goto DispatchDeferredCleanup;
@@ -6567,6 +6623,7 @@ void Session::execInternal()
                             event.type);
             }
 
+            diagnosticPhase(SessionDiagnostics::Phase::CreatingDecoder);
             SDL_LockSpinlock(&m_DecoderLock);
 
             // Destroy the old decoder
@@ -6615,9 +6672,13 @@ void Session::execInternal()
                     SDL_UnlockSpinlock(&m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");
+                    m_Diagnostics.end(SessionDiagnostics::End::DecoderFailed);
                     emit displayLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
                     goto DispatchDeferredCleanup;
                 }
+
+                m_Diagnostics.decoderReady();
+                publishDiagnosticLifecycle();
 
                 // Input maps against what this renderer actually letterboxes
                 // against: the live drawable, or the layout it copied.
@@ -6732,6 +6793,7 @@ void Session::execInternal()
                 if (action == PlankToolbar::Action::Disconnect) {
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "PLANK toolbar disconnect requested");
+                    m_Diagnostics.end(SessionDiagnostics::End::Toolbar);
                     goto DispatchDeferredCleanup;
                 }
                 if (action == PlankToolbar::Action::ToggleFullscreen) {

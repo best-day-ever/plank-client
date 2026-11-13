@@ -124,7 +124,7 @@ QJsonObject BetaDiagnostics::report(const QString& id, const QJsonArray& display
 void BetaDiagnostics::begin() {
     m_Cancel->store(true); // Cancels any idle upload before stream preparation.
     m_Active = true; m_Failed = false; m_StallReported = false;
-    m_StatisticsObserved = false;
+    m_StatisticsObserved = false; m_RendererProgressObserved = false;
     if (!m_Enabled || m_Identity.isEmpty() || !m_Sender) return;
     m_Report = report(QUuid::createUuid().toString(QUuid::Id128), displays());
     m_ActiveLock = std::make_shared<QLockFile>(QDir(m_Directory).filePath(m_Report.value("report_id").toString()+".lock"));
@@ -157,18 +157,50 @@ void BetaDiagnostics::sample(float fps, float videoMbps, quint32 rttMs, quint32 
     // Statistics do not exist during negotiation/decoder initialization. A
     // first frame followed by a stale uptime-derived age is not a steady-state
     // stall. Arm only after this connection has actually produced statistics.
-    if (receivedAgeMs < 5000 && statisticsAgeMs < 5000) m_StatisticsObserved = true;
+    if (receivedAgeMs < 5000 && statisticsAgeMs < 5000) {
+        m_StatisticsObserved = true;
+        m_RendererProgressObserved = true;
+    }
     const bool stalled = m_StatisticsObserved && receivedAgeMs < 5000 && statisticsAgeMs > 10000;
     if (stalled && !m_StallReported) recordEvent("suspected_stall");
     m_StallReported = stalled;
 }
 QJsonObject BetaDiagnostics::snapshot() const {
     auto report = m_Report;
+    if (report.contains("lifecycle")) {
+        auto lifecycle = report.value("lifecycle").toObject();
+        lifecycle.insert("renderer_progress", m_RendererProgressObserved);
+        report.insert("lifecycle", lifecycle);
+    }
     report.insert("duration_ms",qMin(m_Elapsed.elapsed(),qint64(7*86400*1000)));
     return {{"identity",m_Identity},{"report",report}};
 }
 void BetaDiagnostics::setStreamParameters(const QJsonObject& parameters) {
     if (!m_Report.isEmpty()) m_Report.insert("stream",parameters);
+}
+void BetaDiagnostics::setLifecycle(const QJsonObject& lifecycle) {
+    if (m_Report.isEmpty()) return;
+    static const QStringList phases {"prepared", "initializing", "negotiating", "transport_ready",
+        "creating_window", "window_created", "creating_decoder", "decoder_ready"};
+    static const QStringList reasons {"unknown", "initialization_failed", "startup_failed", "cancelled",
+        "window_creation_failed", "decoder_failed", "display_failed", "quit_event", "window_close",
+        "hotkey", "toolbar", "application_exit", "thread_interrupted", "connection_terminated",
+        "session_taken_over", "reconnect_failed", "reconnect_timeout", "session_destroyed", "frame_format_changed"};
+    if (!phases.contains(lifecycle.value("phase").toString()) ||
+        !reasons.contains(lifecycle.value("termination_reason").toString())) return;
+    m_RendererProgressObserved |= lifecycle.value("renderer_progress").toBool();
+    // Reconstruct the envelope rather than accepting arbitrary extra fields.
+    QJsonObject safe {{"phase", lifecycle.value("phase").toString()},
+        {"termination_reason", lifecycle.value("termination_reason").toString()},
+        {"error_code", lifecycle.value("error_code").toInt()},
+        {"window_created", lifecycle.value("window_created").toBool()},
+        {"decoder_ready", lifecycle.value("decoder_ready").toBool()},
+        {"video_received", lifecycle.value("video_received").toBool()}};
+    m_Report.insert("lifecycle", safe);
+    const QString reason = safe.value("termination_reason").toString();
+    if (reason.endsWith("_failed") || (reason == "connection_terminated" && safe.value("error_code").toInt() != 0) || reason == "reconnect_timeout" || reason == "frame_format_changed" || reason == "session_destroyed")
+        m_Failed = true;
+    checkpoint();
 }
 void BetaDiagnostics::checkpoint() {
     if (!m_Enabled || m_Report.isEmpty()) return;

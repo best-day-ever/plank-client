@@ -1991,7 +1991,7 @@ void FFmpegVideoDecoder::decoderThreadProc()
                         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                      "Stream changed its negotiated profile/chroma/color format; disconnecting");
                         SDL_SetAtomicInt(&m_DecoderThreadShouldQuit, 1);
-                        Session::requestSessionQuit();
+                        Session::requestSessionQuit(SessionDiagnostics::End::FrameFormatChanged);
                         av_frame_free(&frame);
                         return;
                     }

@@ -1309,6 +1309,14 @@ void RemoteBroker::attachKeepaliveSession(Session* session)
             });
         }
     };
+    connect(session, &Session::diagnosticLifecycle, this,
+            [this, session, stopForSession](const QJsonObject& state, bool final) {
+        if (m_KeepaliveOwner != session) return;
+        m_Diagnostics->setLifecycle(state);
+        // This also covers destruction before the public sessionFinished
+        // signal, while QPointer still identifies the prepared session.
+        if (final) stopForSession();
+    });
     connect(session, &Session::sessionFinished, this, stopForSession);
     connect(session, &QObject::destroyed, this, stopForSession);
 }

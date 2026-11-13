@@ -1,4 +1,5 @@
 #include "backend/betadiagnostics.h"
+#include "streaming/sessiondiagnostics.h"
 #include <QtTest>
 #include <QTemporaryDir>
 #include <QSettings>
@@ -149,6 +150,100 @@ private slots:
         for (const auto& name : files) {
             QFile f(QDir(dir.path()).filePath(name)); QVERIFY(f.open(QIODevice::ReadOnly));
             QCOMPARE(QJsonDocument::fromJson(f.readAll()).object().value("report").toObject().value("outcome").toString(),QString("completed"));
+        }
+    }
+    void startupTerminationSurvivesIdleUpload() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path());
+        QSignalSpy done(&d,&BetaDiagnostics::workFinished);
+        QJsonObject delivered;
+        d.setAccount("account",[&](const auto& report,const auto&) { delivered=report; return 202; });
+        SessionDiagnostics state;
+        d.begin();
+        state.phase(SessionDiagnostics::Phase::TransportReady);
+        d.recordEvent("connected");
+        state.phase(SessionDiagnostics::Phase::CreatingWindow);
+        state.end(SessionDiagnostics::End::WindowCreationFailed, -7);
+        // Cleanup must not mask the original failure or its numeric error.
+        state.end(SessionDiagnostics::End::ConnectionTerminated, 0);
+        d.setLifecycle(state.snapshot()); d.finish();
+        QTRY_VERIFY(done.size()>=2);
+        d.tryUpload(); QTRY_VERIFY(done.size()>=3);
+        QCOMPARE(delivered.value("outcome").toString(),QString("failed"));
+        const auto lifecycle=delivered.value("lifecycle").toObject();
+        QCOMPARE(lifecycle.value("phase").toString(),QString("creating_window"));
+        QCOMPARE(lifecycle.value("termination_reason").toString(),QString("window_creation_failed"));
+        QCOMPARE(lifecycle.value("error_code").toInt(),-7);
+        QVERIFY(!lifecycle.value("window_created").toBool());
+        QVERIFY(!lifecycle.value("decoder_ready").toBool());
+        QVERIFY(!lifecycle.value("renderer_progress").toBool());
+    }
+    void quitEventAfterOneFrameDoesNotClaimRendererProgress() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path());
+        QSignalSpy done(&d,&BetaDiagnostics::workFinished); QJsonObject delivered;
+        d.setAccount("account",[&](const auto& report,const auto&) { delivered=report; return 202; });
+        SessionDiagnostics state; d.begin(); d.recordEvent("connected");
+        state.windowCreated(); state.videoReceived();
+        state.end(SessionDiagnostics::End::QuitEvent);
+        state.end(SessionDiagnostics::End::SessionDestroyed);
+        d.setLifecycle(state.snapshot()); d.finish(); QTRY_VERIFY(done.size()>=2);
+        d.tryUpload(); QTRY_VERIFY(done.size()>=3);
+        const auto lifecycle=delivered.value("lifecycle").toObject();
+        QCOMPARE(lifecycle.value("termination_reason").toString(),QString("quit_event"));
+        QVERIFY(lifecycle.value("window_created").toBool());
+        QVERIFY(lifecycle.value("video_received").toBool());
+        QVERIFY(!lifecycle.value("decoder_ready").toBool());
+        QVERIFY(!lifecycle.value("renderer_progress").toBool());
+    }
+    void lifecycleCheckpointAndReconnectPreserveObservedProgress() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path()); QSignalSpy done(&d,&BetaDiagnostics::workFinished);
+        d.setAccount("account",[](const auto&,const auto&) { return 503; });
+        SessionDiagnostics state; d.begin(); state.windowCreated(); state.decoderReady(); state.videoReceived();
+        d.sample(60,50,10,2,3); d.recordEvent("connected"); // A later reconnect resets stall detection only.
+        state.end(SessionDiagnostics::End::Toolbar); d.setLifecycle(state.snapshot());
+        d.finish(); QTRY_VERIFY(done.size()>=2);
+        const auto files=QDir(dir.path()).entryList({"*.json"},QDir::Files); QCOMPARE(files.size(),1);
+        QFile file(QDir(dir.path()).filePath(files[0])); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto report=QJsonDocument::fromJson(file.readAll()).object().value("report").toObject();
+        const auto lifecycle=report.value("lifecycle").toObject();
+        QVERIFY(lifecycle.value("decoder_ready").toBool()); QVERIFY(lifecycle.value("renderer_progress").toBool());
+        QCOMPARE(lifecycle.value("termination_reason").toString(),QString("toolbar"));
+        QCOMPARE(report.value("outcome").toString(),QString("completed"));
+    }
+    void lifecycleRejectsFreeTextAndStripsUnknownFields() {
+        QTemporaryDir dir; BetaDiagnostics d(dir.path()); QSignalSpy done(&d,&BetaDiagnostics::workFinished);
+        QJsonObject delivered; d.setAccount("account",[&](const auto& report,const auto&) { delivered=report; return 202; });
+        d.begin(); SessionDiagnostics state; auto snapshot=state.snapshot();
+        snapshot.insert("message","credential=must-stay-local"); d.setLifecycle(snapshot);
+        snapshot.insert("termination_reason","credential=must-stay-local"); d.setLifecycle(snapshot);
+        d.finish(); QTRY_VERIFY(done.size()>=2); d.tryUpload(); QTRY_VERIFY(done.size()>=3);
+        const auto lifecycle=delivered.value("lifecycle").toObject();
+        QCOMPARE(lifecycle.value("termination_reason").toString(),QString("unknown"));
+        QVERIFY(!QJsonDocument(delivered).toJson().contains("must-stay-local"));
+    }
+    void allLifecycleVocabularyIsAccepted() {
+        QFile fixture(QFINDTESTDATA("lifecycle-vocabulary.json")); QVERIFY(fixture.open(QIODevice::ReadOnly));
+        const auto vocabulary=QJsonDocument::fromJson(fixture.readAll()).object();
+        const auto phases=vocabulary.value("phases").toArray();
+        const auto reasons=vocabulary.value("termination_reasons").toArray();
+        QCOMPARE(phases.size(),int(SessionDiagnostics::Phase::DecoderReady)+1);
+        QCOMPARE(reasons.size(),int(SessionDiagnostics::End::FrameFormatChanged)+1);
+        // Production enum values flow through the real collector and disk queue.
+        for (int reason=0;reason<=int(SessionDiagnostics::End::FrameFormatChanged);++reason) {
+            QTemporaryDir dir; BetaDiagnostics d(dir.path()); QSignalSpy done(&d,&BetaDiagnostics::workFinished);
+            d.setAccount("account",[](const auto&,const auto&) { return 503; }); d.begin();
+            for (int phase=0;phase<=int(SessionDiagnostics::Phase::DecoderReady);++phase) {
+                SessionDiagnostics state; state.phase(SessionDiagnostics::Phase(phase));
+                state.end(SessionDiagnostics::End(reason));
+                const auto snapshot=state.snapshot();
+                QCOMPARE(snapshot.value("phase"),phases[phase]);
+                QCOMPARE(snapshot.value("termination_reason"),reasons[reason]);
+                d.setLifecycle(snapshot);
+            }
+            d.finish(); QTRY_VERIFY(done.size()>=2);
+            const auto files=QDir(dir.path()).entryList({"*.json"},QDir::Files); QCOMPARE(files.size(),1);
+            QFile file(QDir(dir.path()).filePath(files[0])); QVERIFY(file.open(QIODevice::ReadOnly));
+            const auto report=QJsonDocument::fromJson(file.readAll()).object().value("report").toObject();
+            QVERIFY(report.value("lifecycle").toObject().contains("termination_reason"));
         }
     }
     void collectorCost() {

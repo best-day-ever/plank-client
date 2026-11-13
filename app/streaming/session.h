@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include "sessiondiagnostics.h"
 
 #include <QSemaphore>
 #include <QSize>
@@ -202,12 +203,13 @@ public:
     static void notifyDecodedFrameSize(int width, int height);
     // Worker-to-UI requests. The Linux Qt owner receives queued
     // signals; ordinary sessions keep their existing SDL event dispatch.
-    static void requestSessionQuit();
+    static void requestSessionQuit(SessionDiagnostics::End reason = SessionDiagnostics::End::Unknown);
     static void requestDecoderReset();
     bool usesQtPresentation() const { return m_RendererFactory != nullptr; }
 
     void updateRenderedStats(float fps, float videoMbps)
     {
+        if (fps > 0) m_Diagnostics.rendererProgress();
         m_CurrentRenderedFps.store(fps, std::memory_order_relaxed);
         m_CurrentVideoMbps.store(videoMbps, std::memory_order_relaxed);
         m_LastDiagnosticStats.store(SDL_GetTicks(), std::memory_order_relaxed);
@@ -253,6 +255,7 @@ signals:
     void connectionStarted();
     void diagnosticConnectionLost(int code);
     void diagnosticStreamParameters(QJsonObject parameters);
+    void diagnosticLifecycle(QJsonObject lifecycle, bool final);
 
     void sessionCleanupWaitChanged(bool waiting, QString text);
 
@@ -278,6 +281,9 @@ private:
 #ifdef Q_OS_MACOS
     std::atomic_bool m_ApplicationExitRequested{false};
 #endif
+    SessionDiagnostics m_Diagnostics;
+    void diagnosticPhase(SessionDiagnostics::Phase phase);
+    void publishDiagnosticLifecycle(bool final = false);
     void execInternal();
 
     bool initialize(IFFmpegRendererFactory* presenter = nullptr);
