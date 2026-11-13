@@ -387,6 +387,7 @@ HEADERS += \
     streaming/plankpresentation.h \
     streaming/planktoolbar.h \
     streaming/planktoolbarlogic.h \
+    streaming/clientdisplaychange.h \
     streaming/planktoolbarstats.h \
     streaming/plankreconnectpolicy.h \
     streaming/audio/renderers/renderer.h \

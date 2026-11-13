@@ -55,7 +55,7 @@ public:
     void showReconnectPrompt(int unreachableSeconds);
     void hideReconnectPrompt();
     // "Screens changed — [Apply layout] [Keep] [Set up…]" under the toolbar,
-    // shown (and kept visible) until answered or hidden.
+    // retained until answered, but auto-hidden with the rest of the toolbar.
     void showScreensPrompt(const QString& text);
     void hideScreensPrompt();
     bool screensPromptVisible() const { return m_ScreensPromptVisible; }
@@ -190,7 +190,7 @@ private:
     float m_LastDrawnVideoMbps;
     float m_LastDrawnPacketLossPercent;
     std::uint32_t m_LastDrawnNetworkRttMs;
-    Uint64 m_HideDeadline;
+    PlankToolbarLogic::AutoHideTimer m_AutoHideTimer;
     Uint64 m_LastBitrateSendTime;
     Uint64 m_LastBitrateChangeTime;
     Uint64 m_LastToolbarMoveDrawTime;
