@@ -341,19 +341,28 @@ void ConnectivityTest::windowsProbeDeadlineAndCancellation()
     settings.hosts = {"192.0.2.1"};
     settings.timeoutMs = 100;
     bool slow = true;
-    Monitor monitor(settings, nullptr, [&slow](const QString&, int) {
+    const auto factory = [&slow](const QString&, int) {
         auto command = stub(0, slow ? 60000 : 0, {}, "Reply from 192.0.2.1: time<1ms TTL=128\r\n");
         command.requiresWindowsEchoReply = true;
         return command;
-    });
+    };
+    Monitor deadlineMonitor(settings, nullptr, factory);
     int heartbeat = 0;
     QTimer timer;
     connect(&timer, &QTimer::timeout, this, [&heartbeat] { ++heartbeat; });
     timer.start(10);
-    monitor.start();
-    QTRY_COMPARE_WITH_TIMEOUT(monitor.state(), Monitor::NoResponse, 2500);
+    deadlineMonitor.start();
+    QTRY_COMPARE_WITH_TIMEOUT(deadlineMonitor.state(), Monitor::NoResponse, 2500);
     QVERIFY(heartbeat >= 3);
-    QTRY_VERIFY(monitor.findChildren<QProcess*>().isEmpty());
+    QTRY_VERIFY(deadlineMonitor.findChildren<QProcess*>().isEmpty());
+    deadlineMonitor.stop();
+
+    // The forced-timeout assertion above retains its 100 ms deadline. The
+    // success/cancel/reopen path launches another complete Qt test process;
+    // Windows DLL/antivirus startup can exceed 100 ms before the stub runs.
+    // Use the normal one-second budget for that independent contract.
+    settings.timeoutMs = 1000;
+    Monitor monitor(settings, nullptr, factory);
     monitor.refreshSummary();
     monitor.cancelSummary();
     slow = false;
