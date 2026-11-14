@@ -1,4 +1,5 @@
 #include "metalsessionshell.h"
+#include "macpointerinput.h"
 
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
@@ -13,6 +14,7 @@
 #include <QScreen>
 #include <QSGRendererInterface>
 #include <QThread>
+#include <QCursor>
 #include <condition_variable>
 #include <mutex>
 
@@ -62,6 +64,9 @@ struct QtMetalSessionShell::Rendering
     id<MTLCommandQueue> queue = nil;
     CAMetalLayer* layer = nil;
     id willEnterFullscreen = nil, didExitFullscreen = nil;
+    id pointerMonitor = nil;
+    bool pointerCaptured = false;
+    NSTimeInterval pointerDropBefore = 0;
     NSRect normalFrame = NSZeroRect;
     IOPMAssertionID idleAssertion = kIOPMNullAssertionID;
     std::mutex mutex;
@@ -213,10 +218,73 @@ QtMetalSessionShell::QtMetalSessionShell()
 
 QtMetalSessionShell::~QtMetalSessionShell()
 {
+    finishPointerCapture({}, false);
+    if (m_Rendering->pointerMonitor) {
+        [NSEvent removeMonitor:m_Rendering->pointerMonitor];
+        [m_Rendering->pointerMonitor release]; m_Rendering->pointerMonitor = nil;
+    }
     // Runtime retires this asynchronously before destroying the GUI scene.
     Q_ASSERT(renderingStopped());
     m_Surface->removeEventFilter(this);
     m_Surface.reset();
+}
+
+bool QtMetalSessionShell::beginPointerCapture()
+{
+    auto& r = *m_Rendering;
+    if (!ownsKeyboard()) return false;
+    if (r.pointerCaptured) return true;
+    NSWindow* window = ((NSView*)winId()).window;
+    if (!window || !window.keyWindow || !NSApp.active || !surface().presentation().valid()) return false;
+    auto* owner = this;
+    if (!r.pointerMonitor) r.pointerMonitor = [[NSEvent addLocalMonitorForEventsMatchingMask:
+        NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged | NSEventMaskRightMouseDragged |
+        NSEventMaskOtherMouseDragged | NSEventMaskTabletPoint handler:^NSEvent* (NSEvent* event) {
+            NSWindow* native = ((NSView*)owner->winId()).window;
+            const bool tablet = qtMacPointerIsTablet(event);
+            if (!owner->m_Rendering->pointerCaptured)
+                return qtMacDiscardStalePointer(event, native, owner->m_Rendering->pointerDropBefore) ? nil : event;
+            if (!owner->ownsKeyboard() || event.window != native) {
+                owner->finishPointerCapture({}, false);
+                emit owner->pointerCaptureLost();
+                return event;
+            }
+            if (tablet) {
+                owner->finishPointerCapture({}, false);
+                emit owner->tabletPointerInput();
+                return event;
+            }
+            const auto& g = owner->surface().presentation();
+            QPointF delta;
+            if (!qtMacUnacceleratedPointerDelta(event, g, delta)) {
+                owner->finishPointerCapture({}, false);
+                emit owner->pointerCaptureLost();
+                return event;
+            }
+            // Unassociated movement continues beyond physical display edges.
+            emit owner->pointerDelta(delta);
+            return nil;
+        }] retain];
+    if (!r.pointerMonitor) return false;
+    if (CGAssociateMouseAndMouseCursorPosition(false) != kCGErrorSuccess) {
+        [NSEvent removeMonitor:r.pointerMonitor]; [r.pointerMonitor release]; r.pointerMonitor = nil;
+        return false;
+    }
+    r.pointerCaptured = true;
+    return true;
+}
+
+void QtMetalSessionShell::finishPointerCapture(QPointF framePosition, bool reanchor)
+{
+    auto& r = *m_Rendering;
+    if (!r.pointerCaptured && !r.pointerMonitor) return;
+    r.pointerCaptured = false;
+    r.pointerDropBefore = NSProcessInfo.processInfo.systemUptime;
+    surface().discardPointerMotionBefore(quint64(r.pointerDropBefore * 1000));
+    CGAssociateMouseAndMouseCursorPosition(true);
+    QPointF logical;
+    if (reanchor && NSApp.active && surface().presentation().fromStream(framePosition, logical))
+        QCursor::setPos(mapToGlobal(logical.toPoint()));
 }
 
 QSize QtMetalSessionShell::defaultWindowedSize(QSize available, QSize desktop)

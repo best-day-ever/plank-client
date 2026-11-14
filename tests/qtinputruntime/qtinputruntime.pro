@@ -3,6 +3,11 @@ QT -= widgets
 TEMPLATE = app
 CONFIG += console testcase c++17
 INCLUDEPATH += ../../moonlight-common-c/moonlight-common-c/src
+INCLUDEPATH += ../../../../protocol/plank-transport/include
 SOURCES += test_qtinputruntime.cpp ../../app/streaming/qt/sessioninput.cpp
 HEADERS += ../../app/streaming/qt/sessioninput.h
 LIBS += -pthread
+macx {
+    CONFIG += link_pkgconfig
+    PKGCONFIG += sdl3
+}

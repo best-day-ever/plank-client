@@ -1671,6 +1671,13 @@ void Session::plankTransportDataReceiveLoop()
             LiNotifyPlankCursorPosition(
                         event.payload, event.payload_size);
             break;
+        case PLANK_TRANSPORT_EVENT_POINTER_CAPTURE:
+#ifdef PLANK_QT_SESSION
+            m_QtInputCallbacks.invoke([&](QtSessionInput& input) {
+                input.handlePointerCapture(event.payload, event.payload_size);
+            });
+#endif
+            break;
         case PLANK_TRANSPORT_EVENT_CLIPBOARD_OFFER:
             if (event.payload_size < sizeof(PLANK_CLIPBOARD_WIRE_HEADER) ||
                     event.payload_size > sizeof(PLANK_CLIPBOARD_WIRE_HEADER) +

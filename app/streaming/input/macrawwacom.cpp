@@ -121,14 +121,17 @@ int MacRawWacomInput::supportedTabletPresence()
 class MacRawWacomInput::Impl : public std::enable_shared_from_this<Impl>
 {
     struct ActivityGuard {
-        explicit ActivityGuard(std::function<void()> callback) : callback(std::move(callback)) {}
+        ActivityGuard(std::function<void()> callback, std::function<bool()> barrier, std::function<void()> after)
+            : callback(std::move(callback)), beforePointerInput(std::move(barrier)), afterPointerInput(std::move(after)) {}
         std::mutex mutex;
         bool enabled = true;
         std::function<void()> callback;
+        std::function<bool()> beforePointerInput;
+        std::function<void()> afterPointerInput;
     };
 public:
-    explicit Impl(std::function<void()> activity)
-        : activity(std::make_shared<ActivityGuard>(std::move(activity)))
+    Impl(std::function<void()> activity, std::function<bool()> beforePointerInput, std::function<void()> afterPointerInput)
+        : activity(std::make_shared<ActivityGuard>(std::move(activity), std::move(beforePointerInput), std::move(afterPointerInput)))
     {}
     void start()
     {
@@ -145,6 +148,8 @@ public:
             std::lock_guard<std::mutex> lock(activity->mutex);
             activity->enabled = false;
             activity->callback = nullptr;
+            activity->beforePointerInput = nullptr;
+            activity->afterPointerInput = nullptr;
         }
         const bool released = barrier(lifecycle.stop());
         shutdownRequested = true;
@@ -239,11 +244,22 @@ private:
             self.ioFailed = true; return;
         }
         if (!self.attached || !self.lifecycle.canForward()) return;
-        if (!self.send(PLANK_RAW_HID_INPUT, interface.index, ++self.sequence, bytes, size)) {
+        const bool pointerInput = reportId < interface.activityReports.size() && interface.activityReports[reportId];
+        std::function<void()> afterPointerInput;
+        if (pointerInput) {
+            std::lock_guard<std::mutex> lock(self.activity->mutex);
+            if (self.activity->enabled && self.activity->beforePointerInput && !self.activity->beforePointerInput()) {
+                self.ioFailed = true; return;
+            }
+            if (self.activity->enabled) afterPointerInput = self.activity->afterPointerInput;
+        }
+        const bool sent = self.send(PLANK_RAW_HID_INPUT, interface.index, ++self.sequence, bytes, size);
+        if (afterPointerInput) afterPointerInput();
+        if (!sent) {
             self.ioFailed = true; return;
         }
         // Battery/status packets must not reclaim the cursor from a real mouse.
-        if (reportId < interface.activityReports.size() && interface.activityReports[reportId]) {
+        if (pointerInput) {
             std::lock_guard<std::mutex> lock(self.activity->mutex);
             if (self.activity->enabled && self.activity->callback) self.activity->callback();
         }
@@ -527,8 +543,9 @@ private:
     }
 };
 
-MacRawWacomInput::MacRawWacomInput(std::function<void()> activity)
-    : m_Impl(std::make_shared<Impl>(std::move(activity))) { m_Impl->start(); }
+MacRawWacomInput::MacRawWacomInput(std::function<void()> activity, std::function<bool()> beforePointerInput,
+                                 std::function<void()> afterPointerInput)
+    : m_Impl(std::make_shared<Impl>(std::move(activity), std::move(beforePointerInput), std::move(afterPointerInput))) { m_Impl->start(); }
 MacRawWacomInput::~MacRawWacomInput() { m_Impl->shutdown(); }
 void MacRawWacomInput::setActive(bool active) { m_Impl->setActive(active); }
 void MacRawWacomInput::beginReconnect() { m_Impl->beginReconnect(); }

@@ -88,6 +88,7 @@ struct NvOutputTopology
     static const int WorkerInstanceFeature = 0x40000;
     static const int VirtualPrimaryConnectorFeature = 0x10000000;
     static const int CollaborationFeature = 0x20000000;
+    static const int PointerCaptureFeature = 0x40000000;
     // Fixed capture description only. Not part of the Linux launch feature
     // mask: parsing this does not grant input, layout changes or media launch.
     static const int FixedCaptureFeature = 0x80000;
@@ -147,7 +148,7 @@ struct NvOutputTopology
                                              NotchSafeLaptopModesFeature |
                                              DisplayArrangementFeature |
                                              VirtualPrimaryConnectorFeature |
-                                             CollaborationFeature;
+                                             CollaborationFeature | PointerCaptureFeature;
     static const char* NativeScalingMode;
     static const char* ScaledSpanMode;
     static const char* MatchClientHostLayout;

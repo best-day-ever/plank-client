@@ -37,6 +37,8 @@ class QtSessionWindow : public QQuickWindow
     Q_PROPERTY(QVariantMap telemetry READ telemetry WRITE setTelemetry NOTIFY telemetryChanged)
     Q_PROPERTY(QString statisticsText READ statisticsText WRITE setStatisticsText NOTIFY statisticsChanged)
     Q_PROPERTY(bool statisticsVisible READ statisticsVisible WRITE setStatisticsVisible NOTIFY statisticsChanged)
+    Q_PROPERTY(bool immersiveMouse READ immersiveMouse NOTIFY immersiveMouseChanged)
+    Q_PROPERTY(bool immersiveMouseAvailable READ immersiveMouseAvailable NOTIFY immersiveMouseChanged)
 public:
     explicit QtSessionWindow(QWindow* parent = nullptr, QQuickRenderControl* renderControl = nullptr);
     ~QtSessionWindow() override;
@@ -73,6 +75,19 @@ public:
     void setHostCursorPosition(QPointF position);
     void setTabletActive(bool active);
     void setEmbeddedCursor(bool embedded);
+    void setPointerCaptured(bool captured) {
+        m_PointerCaptured = captured;
+        if (captured) setToolbarVisible(false); else if (m_Pinned) setToolbarVisible(true);
+        updateCursor();
+    }
+    bool immersiveMouse() const { return m_ImmersiveMouse; }
+    bool immersiveMouseAvailable() const { return m_ImmersiveMouseAvailable; }
+    void setImmersiveMouse(bool enabled, bool available) {
+        m_ImmersiveMouse = enabled; m_ImmersiveMouseAvailable = available; emit immersiveMouseChanged();
+    }
+    Q_INVOKABLE void toggleImmersiveMouse() { emit immersiveMouseRequested(); }
+    void discardPointerMotionBefore(quint64 timestamp) { m_PointerTimestampBoundary = timestamp; }
+    bool reanchorPointer(QPointF framePosition);
 
     void setPresentation(const QtSessionGeometry& geometry);
     const QtSessionGeometry& presentation() const { return m_Geometry; }
@@ -126,6 +141,8 @@ signals:
     void remoteKey(quint32 scanCode, int key, bool down, bool repeat, Qt::KeyboardModifiers modifiers);
     void remotePen(QPointF position, float pressure, float rotation, int xTilt, int yTilt, bool eraser, int buttons);
     void remotePenCancelled();
+    void immersiveMouseRequested();
+    void immersiveMouseChanged();
     void bitrateRequested(int kbps);
     void disconnectRequested();
 
@@ -200,6 +217,11 @@ private:
     bool m_HostCursorVisible = true;
     bool m_TabletActive = false;
     bool m_EmbeddedCursor = false;
+    bool m_PointerCaptured = false;
+    bool m_ReanchorPending = false;
+    QPointF m_ReanchorPosition;
+    quint64 m_PointerTimestampBoundary = 0;
+    bool m_ImmersiveMouse = false, m_ImmersiveMouseAvailable = false;
 #ifdef Q_OS_MACOS
     bool m_RemotePenDown = false;
 #endif

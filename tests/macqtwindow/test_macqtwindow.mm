@@ -1,6 +1,7 @@
 // Runs only on a disposable hosted builder. No network, audio, input injection
 // or permission requests. Exercises the actual Cocoa window/render worker.
 #include "metalsessionshell.h"
+#include "macpointerinput.h"
 #include "metalvideonode.h"
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -79,6 +80,27 @@ class MacQtWindowTest final : public QObject
 {
     Q_OBJECT
 private slots:
+    void immersivePointerUsesUnacceleratedFieldsAndPreservesQueuedTabletRelease()
+    {
+        CGEventRef raw = CGEventCreateMouseEvent(nullptr, kCGEventLeftMouseDragged, CGPointMake(900,700), kCGMouseButtonLeft);
+        QVERIFY(raw);
+        CGEventSetDoubleValueField(raw, kCGMouseEventDeltaX, 100);
+        CGEventSetDoubleValueField(raw, kCGMouseEventDeltaY, 200);
+        CGEventSetIntegerValueField(raw, kCGEventUnacceleratedPointerMovementX, 3);
+        CGEventSetIntegerValueField(raw, kCGEventUnacceleratedPointerMovementY, -5);
+        NSEvent* mouse = [NSEvent eventWithCGEvent:raw];
+        QtSessionGeometry g{QSize(3840,2160), QRectF(0,0,3840,2160),
+            QRectF(0,0,1920,1080), QSize(1920,1080), QSize(960,540)};
+        QPointF delta;
+        QVERIFY(qtMacUnacceleratedPointerDelta(mouse,g,delta));
+        QCOMPARE(delta,QPointF(12,-20));
+        QVERIFY(qtMacDiscardStalePointer(mouse, mouse.window, mouse.timestamp + 1));
+        CGEventSetIntegerValueField(raw, kCGMouseEventSubtype, kCGEventMouseSubtypeTabletPoint);
+        NSEvent* tablet = [NSEvent eventWithCGEvent:raw];
+        QVERIFY(qtMacPointerIsTablet(tablet));
+        QVERIFY(!qtMacDiscardStalePointer(tablet, tablet.window, tablet.timestamp + 1));
+        CFRelease(raw);
+    }
     void nativeWindowResizeHideAndShutdown()
     {
         QVERIFY(QGuiApplication::platformName() == QStringLiteral("cocoa"));

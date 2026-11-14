@@ -20,10 +20,15 @@ public:
     bool renderingStopped() const;
     bool ownsKeyboard() const;
     void setKeepAwake(bool enabled);
+    bool beginPointerCapture();
+    void finishPointerCapture(QPointF framePosition, bool reanchor);
 
 signals:
     void renderingFailed(QString reason);
     void renderingFinished();
+    void pointerDelta(QPointF frameDelta);
+    void pointerCaptureLost();
+    void tabletPointerInput();
 
 protected:
     bool event(QEvent* event) override;

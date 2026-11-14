@@ -253,8 +253,16 @@ void TestOutputTopology::launchCapabilitiesUseAuthenticatedTopology()
     topology.schemaVersion = 0;
     QCOMPARE(topology.launchFeatureFlags(publicFlags),
              publicFlags & NvOutputTopology::SupportedFeatureFlags);
-    QCOMPARE(topology.launchFeatureFlags(publicFlags | 0x40000000),
+    const int unsupportedFlags = ~NvOutputTopology::SupportedFeatureFlags & 0x7fffffff;
+    QVERIFY(unsupportedFlags != 0);
+    QCOMPARE(topology.launchFeatureFlags(publicFlags | unsupportedFlags),
              publicFlags & NvOutputTopology::SupportedFeatureFlags);
+    topology.schemaVersion = NvOutputTopology::ProtocolVersion;
+    topology.featureFlags = publicFlags;
+    QVERIFY(!(topology.launchFeatureFlags(publicFlags | NvOutputTopology::PointerCaptureFeature) &
+              NvOutputTopology::PointerCaptureFeature));
+    topology.featureFlags |= NvOutputTopology::PointerCaptureFeature;
+    QVERIFY(topology.launchFeatureFlags(publicFlags) & NvOutputTopology::PointerCaptureFeature);
 }
 
 void TestOutputTopology::matchesMacClientCanvas()
